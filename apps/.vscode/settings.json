@@ -1,0 +1,24 @@
+{
+  "files.associations": {
+    "string.h": "c",
+    "syscall.h": "c",
+    "tcc.h": "c",
+    "config.h": "c",
+    "stdbool.h": "c",
+    "strings.h": "c",
+    "ctypes.h": "c",
+    "*.tcc": "c",
+    "chrono": "c",
+    "cmath": "c",
+    "numeric": "c",
+    "ratio": "c",
+    "cinttypes": "c",
+    "cstdlib": "c",
+    "math.h": "c",
+    "stdio.h": "c",
+    "stdlib.h": "c",
+    "cctype": "c",
+    "cstdio": "c",
+    "time.h": "c"
+  }
+}

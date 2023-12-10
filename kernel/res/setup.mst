@@ -1,0 +1,30 @@
+"step" = [{
+	"files" = ["dosldr.bin","kernel.bin","autoexec.bat","boot.bin","boot_pfs.bin","psh.bin",{
+		"dir" = "other"
+	},"other/uname.bin","other/font.bin","other/HZK16"]
+	"next" = {
+		"state" = "Install apps"
+		"info" = "System has been installed, copy apps?"
+		"disk_name" = "Disk2"
+	}
+}, {
+	"files" = [{
+		"dir" = "bin"
+	},"bin/aigobang.bin","bin/lua.bin","bin/snake.bin","bin/randnum.bin","bin/bf.bin","bin/copy.bin","bin/basic.bin","bin/cale.bin","bin/bitz.bin","bin/editor.bin","bin/calc.bin","editor.mst"]
+	"next" = {
+		"state" = "Install apps"
+		"info" = "Install extra apps?"
+		"disk_name" = "Disk3"
+	}
+},{
+	"files" = ["bin/minizip.bin","bin/miniunz.bin","bin/image.bin","bin/c4.bin","bin/lox.bin","bin/Maze.bin","bin/clock.bin","bin/luac.bin"]
+	"next" = {
+		"state" = "Copy resource"
+		"info" = "Copy resource?"
+		"disk_name" = "res"
+	}
+},{
+	"files" = [{
+		"dir" = "res"
+	},"res/hello.nas","res/coin.wav","res/test.wav","res/desktop.jpg","res/huaji.jpg","res/load.jpg","res/io.bas","res/shot.png","res/shot1.png","res/test.htm","res/test1.htm","res/yee.bmp","res/fib.lua","res/guess.lua","res/gobang.lua","res/bainian.lua","res/student.lua","res/asm.lua","res/chinese.txt","res/bf.txt","res/c4.c"]
+}]

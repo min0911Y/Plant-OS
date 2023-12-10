@@ -1,0 +1,31 @@
+megs: 128
+romimage: file=./BIOS-bochs-latest
+vgaromimage: file=./VGABIOS-lgpl-latest
+vga: extension=vbe, update_freq=15
+floppya: 1_44="img/Powerint_DOS_386.img", status=inserted
+#ata0-master: type=disk, mode=flat, path=10M.sample, cylinders=306, heads=4, spt=17
+#ata0-slave: type=cdrom, path=D:, status=inserted
+#boot: cdrom, floppy, disk,network
+ata0: enabled=true, ioaddr1=0x1f0, ioaddr2=0x3f0, irq=14
+ata0-master: type=disk, path="./img/Disk2.img", mode=flat
+ata0-slave: type=disk, path="./img/Disk3.img", mode=flat
+ata1: enabled=true, ioaddr1=0x170, ioaddr2=0x370, irq=15
+ata1-master: type=disk, path="./img/tcc.img", mode=flat
+ata1-slave: type=disk, path="./img/res.img", mode=flat
+ata2: enabled=false
+ata3: enabled=false
+boot: a
+#log: bochsout.txt
+mouse: enabled=0
+cpu: ips=15000000
+pci: enabled=1, chipset=i440fx
+magic_break: enabled=1
+display_library: x
+keyboard: type=mf, serial_delay=200, paste_delay=100000
+keyboard:  keymap=/usr/share/bochs/keymaps/x11-pc-us.map
+keyboard: user_shortcut=ctrl-alt
+display_library: x, options="gui_debug"
+com1: enabled=true, mode=file, dev=serial.txt
+com2: enabled=false
+com3: enabled=false
+com4: enabled=false
