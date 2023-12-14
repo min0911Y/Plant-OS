@@ -108,11 +108,17 @@ typedef struct {
   void *data;
   unsigned int size;
   int from_tid;
+  int flag1;
+  int flag2;
 } IPCMessage;
-
+// lock.c
+typedef int lock_t;
+#define LOCK_UNLOCKED 0
+#define LOCK_LOCKED 1
 typedef struct  { // IPC头（在TASK结构体中的头）
   int now;
   IPCMessage messages[MAX_IPC_MESSAGE];
+  lock_t l;
 } IPC_Header;
 // struct THREAD {
 //   struct TASK *father;
@@ -1100,4 +1106,5 @@ typedef struct {
   unsigned int size; // 大小
   char DriveName[50];
 } vdisk;
+
 #endif

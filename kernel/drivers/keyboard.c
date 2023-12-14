@@ -65,7 +65,7 @@ int getch() {
 }
 int input_char_inSM() {
   int i;
-  struct TASK *task = current_task();
+  mtask *task = current_task();
   while (1) {
     if ((fifo8_status(task_get_key_fifo(current_task())) == 0) ||
         (current_task()->TTY != now_tty() &&
@@ -124,7 +124,6 @@ int sc2a(int sc) {
 
 void inthandler21(int *esp) {
   // 键盘中断处理函数
-  io_cli();
   unsigned char data, s[4];
   io_out8(PIC0_OCW2, 0x61);
   data = io_in8(PORT_KEYDAT); // 从键盘IO口读取扫描码
@@ -132,8 +131,6 @@ void inthandler21(int *esp) {
   //  特殊键处理
   if (data == 0xe0) {
     e0_flag = 0x80;
-
-    io_sti();
     return;
   }
   if (e0_flag) {
@@ -146,13 +143,11 @@ void inthandler21(int *esp) {
   }
   if (data == 0x3a) { // Caps Lock按下
     caps_lock = caps_lock ^ 1;
-    io_sti();
     return;
   }
   if (data == 0xaa || data == 0xb6) { // Shift松开
     shift = 0;
   }
-  io_sti();
   // 快捷键处理
   // if (data == 0x3b && !shift) {
   //   // 仅仅按下F1
@@ -189,8 +184,6 @@ void inthandler21(int *esp) {
         get_task(i)->keyboard_release(data, i); // 处理松开键
       }
     }
-
-    io_sti();
     return;
   }
   for (int i = 0; i < 255; i++) {
@@ -210,16 +203,15 @@ void inthandler21(int *esp) {
     // 按下键通常处理
     mtask *task = get_task(i); // 每个进程都处理一遍
     if (task->state != RUNNING || task->fifosleep) {
-      if(task->state == WAITING && task->waittid == -1) {
+      if (task->state == WAITING && task->waittid == -1) {
         goto THROUGH;
       }
       // 如果进程正在休眠或被锁了
       continue;
     }
     // 一般进程
-THROUGH:
+  THROUGH:
     fifo8_put(task_get_key_fifo(task), data + e0_flag);
   }
-  io_sti();
   return;
 }

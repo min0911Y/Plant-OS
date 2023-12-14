@@ -189,7 +189,6 @@ void page2tpo(int page, int *t, int *p) {
 }
 void tpo2page(int *page, int t, int p) { *page = (t * 1024) + p; }
 void *page_malloc_one_no_mark() {
-  irq_mask_set(0);
   int i;
   for (i = 0; i != 1024 * 1024; i++) {
     if (pages[i].flag == 0) {
@@ -199,11 +198,9 @@ void *page_malloc_one_no_mark() {
       pages[i].flag = 1;
       pages[i].task_id = 0;
       pages[i].count++;
-      irq_mask_clear(0);
       return (void *)addr;
     }
   }
-  irq_mask_clear(0);
   return NULL;
 }
 void *page_malloc_one() {
@@ -310,14 +307,12 @@ void *page_malloc(int size) {
   return addr;
 }
 void page_free(void *p, int size) {
-  irq_mask_set(0);
   int n = ((size - 1) / (4 * 1024)) + 1;
   p = (int)p & 0xfffff000;
   for (int i = 0; i < n; i++) {
     page_free_one((void *)p);
     p += 0x1000;
   }
-  irq_mask_clear(0);
 }
 void *get_phy_address_for_line_address(void *line) {
   int t, p;

@@ -248,11 +248,6 @@ int get_ipc_message(void *data, int from_tid);
 int get_ipc_message_by_name(void *data, char *tname);
 int ipc_message_status();
 unsigned int ipc_message_len(int from_tid);
-int send_ipc_message_by_tid(int to_tid,        // 收信人
-                            int y_tid,         // 发信人
-                            void *data,        // 数据
-                            unsigned int size, // 大小
-                            char type /* 类型 */);
 bool have_msg();
 int get_msg_all(void *data);
 // arg.c
@@ -268,8 +263,8 @@ void md5s(char *hexbuf, int read_len, char *result);
 void md5f(char *filename, unsigned char *result);
 // lock.c
 bool cas(int *ptr, int old, int New);
-void lock();
-void unlock();
+void lock(lock_t *key);
+void unlock(lock_t *key);
 // mount.c
 int mount(char *fileName);
 void unmount(char drive);

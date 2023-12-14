@@ -12,7 +12,7 @@ GLOBAL timer_alloc,timer_settime,timer_out,timer_free,clock,start_keyboard_messa
 GLOBAL haveMsg,PhyMemGetByte,GetMessageAll,PhyMemSetByte,format,api_heapsize,api_current_drive
 GLOBAL get_hour_hex,get_min_hex,get_sec_hex,get_day_of_month,get_day_of_week,get_mon_hex,get_year,AddThread,init_float
 GLOBAL TaskLock,TaskUnlock,SubThread,set_mode,VBEDraw_Px,VBEGet_Px,VBEGetBuffer,VBESetBuffer,roll,VBEDraw_Box,listfile
-GLOBAL vfs_check_mount,vfs_mount,vfs_change_disk,vfs_delfile,vfs_change_path,tty_start_cur_moving,tty_stop_cur_moving,vfs_unmount_disk
+GLOBAL vfs_check_mount,vfs_mount,vfs_change_disk,vfs_delfile,vfs_change_path,tty_start_cur_moving,tty_stop_cur_moving,vfs_unmount_disk,logk
 GLOBAL tty_get_xsize,tty_get_ysize,api_rename
 [SECTION .text]
 putch:
@@ -1090,6 +1090,15 @@ api_rename:
 	mov eax,0x47
 	int 0x36
 	pop ecx
+	pop ebx
+	pop eax
+	ret
+logk:
+	push eax
+	push ebx
+	mov eax,0x48
+	mov ebx,[esp+4+8]
+	int 0x36
 	pop ebx
 	pop eax
 	ret

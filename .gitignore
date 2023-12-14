@@ -5,6 +5,7 @@ kernel/img/*
 Loader/out/*
 !Loader/out/.gitkeep
 apps/out/*
+apps/doomgeneric/*.o
 !apps/out/.gitkeep
 kernel/*.img
 c.py

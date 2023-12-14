@@ -4308,6 +4308,17 @@ int printf(const char *format, ...) {
 
   return rv;
 }
+int logkf(const char *format, ...) {
+  va_list ap;
+  int rv;
+  char buf[5000];
+  va_start(ap, format);
+  rv = vsnprintf(buf, ~(size_t)0, format, ap);
+  logk(buf);
+  va_end(ap);
+
+  return rv;
+}
 void F2S(double d, char *str, int l) {}
 char *strchr(const char *s, int c) {
   char *p = s;

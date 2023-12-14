@@ -4,23 +4,20 @@
  * @date 2022-6-8
  */
 #include <dos.h>
-static unsigned int lock_flag = 0;
 bool cas(int *ptr, int old, int New) {
-  io_cli();
   int old_value = *ptr;
   if (old_value == old) {
     *ptr = New;
-    io_sti();
     return true;
   }
-  io_sti();
   return false;
 }
-void lock() {
-  while (!cas((int *)&lock_flag, 0, 1))
+void lock(lock_t *key) {
+  while (!cas((int *)key, LOCK_UNLOCKED, LOCK_LOCKED))
     ;
 }
-void unlock() {
-  while (!cas((int *)&lock_flag, 1, 0))
+void unlock(lock_t *key) {
+  if(*key == LOCK_UNLOCKED) return;
+  while (!cas((int *)key, LOCK_LOCKED, LOCK_UNLOCKED))
     ;
 }

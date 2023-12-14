@@ -174,7 +174,6 @@ set_plane() 修改了 GC4 和 SEQ2，因此也保存它们 */
 void set_palette(int start, int end, unsigned char *rgb) {
   int i, eflags;
   eflags = io_load_eflags();
-  io_cli();
   io_out8(0x03c8, start);
   for (i = start; i <= end; i++) {
     io_out8(0x03c9, rgb[0] / 4);

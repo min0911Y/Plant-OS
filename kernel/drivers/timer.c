@@ -30,17 +30,14 @@ void init_pit(void) {
 }
 
 struct TIMER *timer_alloc(void) {
-  io_cli();
   int i;
   for (i = 0; i < MAX_TIMER; i++) {
     if (timerctl.timers0[i].flags == 0) {
       timerctl.timers0[i].flags = TIMER_FLAGS_ALLOC;
       timerctl.timers0[i].waiter = NULL;
-      io_sti();
       return &timerctl.timers0[i];
     }
   }
-  io_sti();
   return 0; /* 没找到 */
 }
 
@@ -62,7 +59,6 @@ void timer_settime(struct TIMER *timer, unsigned int timeout) {
   timer->timeout = timeout + timerctl.count;
   timer->flags = TIMER_FLAGS_USING;
   e = io_load_eflags();
-  io_cli();
   t = timerctl.t0;
   if (timer->timeout <= t->timeout) {
     /* 插入最前面的情况 */
@@ -110,8 +106,6 @@ static uint32_t count = 0;
 uint64_t global_time = 0;
 void inthandler20(int cs, int *esp) {
  // logk("*");
-  io_sti();
-  irq_mask_clear(0);
   // printk("CS:EIP=%04x:%08x\n",current_task()->tss.cs,esp[-10]);
   extern mtask *current;
   if(global_time + 1 == 0) {

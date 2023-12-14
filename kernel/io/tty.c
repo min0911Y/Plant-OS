@@ -1,7 +1,10 @@
 #include <dos.h>
 struct List *tty_list;
 struct tty *tty_default;
+void mtask_stop();
+void mtask_start();
 static void tty_print(struct tty *res, const char *string) {
+  mtask_stop();
   for (int i = 0; i < strlen(string); i++) {
     if (res->y == res->ysize && res->x >= res->xsize) {
       res->screen_ne(res);
@@ -13,20 +16,25 @@ static void tty_print(struct tty *res, const char *string) {
       res->putchar(res, string[i]);
     }
   }
+  mtask_start();
 }
 static void tty_gotoxy(struct tty *res, int x, int y) {
   if (x >= 0 && y >= 0) {
     int x2 = x;
     int y2 = y;
     if (x <= res->xsize - 1 && y <= res->ysize - 1) {
+      mtask_stop();
       res->MoveCursor(res, x, y);
+      mtask_start();
       return;
     }
     if (x <= res->xsize - 1) {
+      mtask_stop();
       for (int i = 0; i < y - res->ysize + 1; i++) {
         res->screen_ne(res);
       }
       res->MoveCursor(res, x, res->ysize - 1);
+      mtask_start();
       return;
     }
     if (x > res->xsize - 1) {

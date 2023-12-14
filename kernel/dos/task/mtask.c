@@ -7,6 +7,7 @@ mtask m[255];
 struct TSS32 tss;
 mtask *idle_task;
 mtask *current = NULL;
+char mtask_stop_flag = 0;
 unsigned get_cr3() { asm volatile("movl %cr3, %eax\n"); }
 void set_cr3(uint32_t pde) { asm volatile("movl %%eax, %%cr3\n" ::"a"(pde)); }
 static void init_task() {
@@ -37,10 +38,18 @@ static void init_task() {
     m[i].pde = 0;
     m[i].Pkeyfifo = NULL;
     m[i].Ukeyfifo = NULL;
+    m[i].ipc_header.l = LOCK_UNLOCKED;
+    m[i].ipc_header.now = 0;
+    for (int k = 0; k < MAX_IPC_MESSAGE; k++) {
+      m[i].ipc_header.messages[k].from_tid = -1;
+      m[i].ipc_header.messages[k].flag1 = 0;
+      m[i].ipc_header.messages[k].flag2 = 0;
+    }
   }
 }
 fpu_t public_fpu;
 void task_next() {
+  if(mtask_stop_flag) return;
   if (current->running < current->timeout - 1 && current->state == RUNNING) {
     current->running++;
     return; // 不需要调度，当前时间片仍然属于你
@@ -55,12 +64,13 @@ void task_next() {
     if (p->state != RUNNING) // RUNNING
     {
       if (p->state == WAITING) {
-        if(p->ready) {
+        if (p->ready) {
           p->ready = 0;
           p->state = RUNNING;
           goto OK;
         }
-        if(p->waittid == -1) continue;
+        if (p->waittid == -1)
+          continue;
         if (m[p->waittid].state == EMPTY || m[p->waittid].ptid != p->tid) {
           p->state = RUNNING;
           p->waittid = -1;
@@ -69,23 +79,23 @@ void task_next() {
       }
       continue;
     }
-OK:
-    if(!next || p->jiffies < next->jiffies || p->urgent)
+  OK:
+    if (!next || p->jiffies < next->jiffies || p->urgent)
       next = p;
   }
-  if(next->user_mode == 1) {
+  if (next->user_mode == 1) {
     tss.esp0 = next->top;
   }
   if (next == NULL) {
     next = idle_task;
   }
-  if(next->urgent) {
+  if (next->urgent) {
     next->urgent = 0;
   }
   int current_fpu_flag = current->fpu_flag;
   fpu_t *current_fpu = &(current->fpu);
   set_cr0(get_cr0() & ~(CR0_EM | CR0_TS));
-  if(current_fpu && current_fpu_flag)
+  if (current_fpu && current_fpu_flag)
     asm volatile("fnsave (%%eax) \n" ::"a"(current_fpu));
   next->jiffies = global_time;
   fpu_disable();     // 禁用fpu 如果使用FPU就会调用ERROR7
@@ -220,12 +230,12 @@ void task_kill(unsigned tid) {
 
   free_pde(m[tid].pde);
   gc(tid); // 释放内存
-  if(m[tid].Pkeyfifo) {
-    page_free(m[tid].Pkeyfifo->buf,4096);
+  if (m[tid].Pkeyfifo) {
+    page_free(m[tid].Pkeyfifo->buf, 4096);
     free(m[tid].Pkeyfifo);
   }
   if (m[tid].Ukeyfifo) {
-    page_free(m[tid].Ukeyfifo->buf,4096);
+    page_free(m[tid].Ukeyfifo->buf, 4096);
     free(m[tid].Ukeyfifo);
   }
   io_cli();
@@ -246,7 +256,14 @@ void task_kill(unsigned tid) {
   m[tid].running = 0;
   m[tid].ready = 0;
   m[tid].pde = 0;
-  if(m[tid].ptid != -1 && m[m[tid].ptid].waittid == tid) {
+  m[tid].ipc_header.now = 0;
+  m[tid].ipc_header.l = LOCK_UNLOCKED;
+  for (int k = 0; k < MAX_IPC_MESSAGE; k++) {
+    m[tid].ipc_header.messages[k].from_tid = -1;
+    m[tid].ipc_header.messages[k].flag1 = 0;
+    m[tid].ipc_header.messages[k].flag2 = 0;
+  }
+  if (m[tid].ptid != -1 && m[m[tid].ptid].waittid == tid) {
     m[m[tid].ptid].state = RUNNING;
   }
   m[tid].ptid = -1;
@@ -257,7 +274,7 @@ mtask *current_task() { return current; }
 int into_mtask() {
   init_task();
   set_cr0(get_cr0() & ~(CR0_EM | CR0_TS));
-  asm volatile ("fninit");
+  asm volatile("fninit");
   asm volatile("fnsave (%%eax) \n" ::"a"(&public_fpu));
   fpu_disable();
   struct SEGMENT_DESCRIPTOR *gdt = (struct SEGMENT_DESCRIPTOR *)ADR_GDT;
@@ -274,9 +291,7 @@ void task_set_fifo(mtask *task, struct FIFO8 *kfifo, struct FIFO8 *mfifo) {
   task->keyfifo = kfifo;
   task->mousefifo = mfifo;
 }
-struct FIFO8 *task_get_key_fifo(mtask *task) {
-  return task->keyfifo;
-}
+struct FIFO8 *task_get_key_fifo(mtask *task) { return task->keyfifo; }
 void task_sleep(mtask *task) {
   task->state = SLEEPING;
   task->fifosleep = 1;
@@ -290,9 +305,7 @@ void task_run(mtask *task) {
   task->urgent = 1;
 }
 void task_fifo_sleep(mtask *task) { task->fifosleep = 1; }
-struct FIFO8 *task_get_mouse_fifo(mtask *task) {
-  return task->mousefifo;
-}
+struct FIFO8 *task_get_mouse_fifo(mtask *task) { return task->mousefifo; }
 void task_lock() {
   if (current_task()->ptid == -1) {
     for (int i = 0; i < 255; i++) {
@@ -360,6 +373,12 @@ void waittid(uint32_t tid) {
   if (t->ptid != current_task()->tid)
     return;
   current_task()->waittid = tid;
-  while(t->state != EMPTY && t->ptid == current_task()->tid) 
+  while (t->state != EMPTY && t->ptid == current_task()->tid)
     task_fall_blocked(WAITING);
+}
+void mtask_stop() {
+  mtask_stop_flag = 1;
+}
+void mtask_start() {
+  mtask_stop_flag = 0;
 }

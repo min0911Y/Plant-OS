@@ -107,6 +107,8 @@ void tty_stop_cur_moving();
 void vfs_unmount_disk(uint8_t drive);
 void api_rename(char *f1,char *f2);
 void exit();
+void logk(char *s);
+int logkf(const char *format, ...);
 #ifdef __cplusplus
 }
 #endif

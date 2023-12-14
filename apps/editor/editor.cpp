@@ -10,7 +10,7 @@ int mLine(char *buffer, int len);
 #define T_DrawBox(x, y, w, h, c) Text_Draw_Box((y), (x), (h) + y, (w) + x, (c))
 extern "C" int tty_get_xsize();
 extern "C" int tty_get_ysize();
-int max_line,max_char_a_line;
+int max_line, max_char_a_line;
 #define MAX_LINE max_line
 #define MAX_CHAR_A_LINE max_char_a_line
 // Editor处理超过最大行的文件的方式：
@@ -21,7 +21,7 @@ int max_line,max_char_a_line;
 struct Camera {
   int y;                          // 摄像机高度
   int curser_pos_x, curser_pos_y; // 光标位置
-  int index;                      //光标指向位置的index
+  int index;                      // 光标指向位置的index
   char *buffer;                   // 缓冲区
   int array_len;                  // 缓冲区长度（已malloc） =>
                  // 如果字符数量超过这个数，就会调用realloc
@@ -38,7 +38,7 @@ struct Char {
 };
 struct Line {
   int line_flag;   // 是不是回车敲出的行
-  Char *line;   // 一整行
+  Char *line;      // 一整行
   int len;         // 这个行有几个字符
   int start_index; // 行首索引
 };
@@ -57,6 +57,7 @@ struct km_style {
   char *key;
   int color;
 };
+
 void strtoupper(char *str) {
   while (*str != '\0') {
     if (*str >= 'a' && *str <= 'z') {
@@ -69,7 +70,7 @@ void get_next(char *T, int next[]) {
   int strs_len = strlen(T);
   int i = 0, j = -1;
   next[0] = -1;
-  while (i < strs_len) { //遍历
+  while (i < strs_len) { // 遍历
     if (j == -1 || T[i] == T[j]) {
       i++;
       j++;
@@ -109,7 +110,7 @@ int kmp(char *str_main, char *str_branch) {
     /*此时说明在主串中找到了子串*/
     return i - str_branch_len;
   } else {
-    return -1; //没有找到的话返回-1
+    return -1; // 没有找到的话返回-1
   }
 }
 void convert(char *str) {
@@ -251,10 +252,13 @@ void putSpace(int x, int y, int w, int h) {
 }
 // 显示状态栏
 void setState(char *msg) {
-  putSpace(0, MAX_LINE, MAX_CHAR_A_LINE, 1);        // 先清空最下面那行
-  goto_xy(0, MAX_LINE);                // 然后控制光标到那边
-  print(msg);                          // 然后咱们把信息打印出来
-  T_DrawBox(0, MAX_LINE, MAX_CHAR_A_LINE, 1, 0x70); // 染色染一下
+  short bx, by;
+  unsigned cons = get_cons_color();
+  set_cons_color(0x70);
+  putSpace(0, MAX_LINE, MAX_CHAR_A_LINE, 1); // 先清空最下面那行
+  goto_xy(0, MAX_LINE);                      // 然后控制光标到那边
+  print(msg); // 然后咱们把信息打印出来
+  set_cons_color(cons);
 }
 // 插入一个字符
 void insert_char(char *str, int pos, char ch, Camera *c) {
@@ -374,7 +378,7 @@ class parse {
 public:
   parse(Camera *c) { // 构造函数，初始化了Line缓冲区和各个变量
     this->l = (Line *)malloc(sizeof(Line) * MAX_LINE);
-    for(int i = 0;i<MAX_LINE;i++) {
+    for (int i = 0; i < MAX_LINE; i++) {
       this->l[i].line = (Char *)malloc(sizeof(Char) * MAX_CHAR_A_LINE);
     }
     camera = c;
@@ -410,13 +414,13 @@ public:
     clean(); // 清空布局
     /* 这n个变量有的有用有的没有用，我一一来解释一下 */
     /*
-      l ----- 没用，历史残留，不做解释，有用到也是废话工程
-      sc ----- 记录当前行的字符数量
-      f  ---- 没用
-      nl ---- 行，用于定位现在解析到第几行
-      len ---- 当前行的长度
-      sl ---- 没用
-      i ---- 索引
+      l -----> 没用，历史残留，不做解释，有用到也是废话工程
+      sc -----> 记录当前行的字符数量
+      f  ----> 没用
+      nl ----> 行，用于定位现在解析到第几行
+      len ----> 当前行的长度
+      sl ----> 没用
+      i ----> 索引
     */
     int l = 0;
     int sc = 0;
@@ -445,7 +449,8 @@ public:
       if (sc == 0) {                                // sl == 0 处于行开头
         this->l[nl].start_index = i;                // 设置行开始的index
       }
-      if (camera->buffer[i] == '\n' || sc == MAX_CHAR_A_LINE) { // 是否需要进行换行？
+      if (camera->buffer[i] == '\n' ||
+          sc == MAX_CHAR_A_LINE) { // 是否需要进行换行？
         this->l[nl].line_flag =
             1; // 此行不是空白行（即有东西记录，如字符、换行符等）
         this->l[nl].len = len; // 设置长度
@@ -462,7 +467,9 @@ public:
         len++;
         // 如果满MAX_CHAR_A_LINE个字符，就在这里换行
         if (sc == MAX_CHAR_A_LINE) {
-          if (i + 1 < camera->len && camera->buffer[i + 1] == '\n') { // 后面还有东西，说明不是一个超过屏幕长度的行
+          if (i + 1 < camera->len &&
+              camera->buffer[i + 1] ==
+                  '\n') { // 后面还有东西，说明不是一个超过屏幕长度的行
             i++;
           }
           this->l[nl].len = MAX_CHAR_A_LINE; // 设置长度
@@ -518,22 +525,62 @@ class render {
   parse *p;
   Camera *camera;
   char *filename;
+  char **buffer_screen;
+  int buf_x, buf_y;
 
 public:
   render(char *buffer, Camera *c, parse *_p, char *fm) {
     this->buf0 = (char *)malloc(MAX_CHAR_A_LINE);
     this->buf1 = (char *)malloc(MAX_CHAR_A_LINE + 1);
+    buffer_screen = (char **)malloc(MAX_LINE * sizeof(char **));
+    for (int i = 0; i < MAX_LINE; i++) {
+      buffer_screen[i] = (char *)malloc(MAX_CHAR_A_LINE);
+      //logkf("%08x\n",buffer_screen[i]);
+    }
+    r_clean();
+    r_check();
     buf = buffer;
     p = _p;
     camera = c;
     filename = fm;
+    buf_x = 0;
+    buf_y = 0;
+  }
+  void r_putch(int ch) {
+    short bx, by;
+    int r = get_xy();
+    bx = r >> 16;
+    by = r & 0x0000ffff;
+    if (buffer_screen[by][bx] != ch) {
+      buffer_screen[by][bx] = ch;
+      putch(ch);
+    } else {
+      goto_xy(bx + 1, by);
+    }
+  }
+  void r_clean() {
+    for (int i = 0; i < MAX_LINE; i++) {
+      for (int j = 0; j < MAX_CHAR_A_LINE; j++) {
+        buffer_screen[i][j] = ' ';
+      }
+    }
+  }
+  void r_check() {
+    for (int i = 0; i < MAX_LINE; i++) {
+      for (int j = 0; j < MAX_CHAR_A_LINE; j++) {
+        if(buffer_screen[i][j] != ' ') {
+          printf("error\n");
+          for(;;);
+        }
+      }
+    }
   }
   void showAll() {
     Line *l = p->getBuf();
     char buf[90];
+    tty_stop_cur_moving();
     goto_xy(0, 0);
     for (int i = 0; i < MAX_LINE; i++) {
-      tty_stop_cur_moving();
       goto_xy(0, i);
       int fg = 0;
       int fg1 = 0;
@@ -541,7 +588,7 @@ public:
       int b = 0;
       char *end;
       for (int j = 0, l1 = 0; j < MAX_CHAR_A_LINE; j++) {
-        printf("%c", l[i].line[j].ch == '\0' ? ' ' : l[i].line[j].ch);
+        r_putch(l[i].line[j].ch == '\0' ? ' ' : l[i].line[j].ch);
         if (mst_obj == nullptr) {
           continue;
         }
@@ -561,8 +608,9 @@ public:
           continue;
         }
         if (fg) {
-          T_DrawBox(j, i, 1, 1,
-                    MST_space_get_integer(MST_get_var("color", comment_config)));
+          T_DrawBox(
+              j, i, 1, 1,
+              MST_space_get_integer(MST_get_var("color", comment_config)));
           continue;
         }
         if (number) {
@@ -639,10 +687,10 @@ public:
       buf[0] = 0;
     }
     /* 通过一个MAX_CHAR_A_LINE个空格的字符串，往里面写，让格式不会乱套 */
-    memset(buf1,0,MAX_CHAR_A_LINE+1);
-    memset(buf1,' ',MAX_CHAR_A_LINE);
+    memset(buf1, 0, MAX_CHAR_A_LINE + 1);
+    memset(buf1, ' ', MAX_CHAR_A_LINE);
     char buf2[5];
-    memset(buf0,0,MAX_CHAR_A_LINE);
+    memset(buf0, 0, MAX_CHAR_A_LINE);
 #if VIEW_LINE
 
     sprintf(buf0, "COL %d ROW %d/%d      %s | Text", camera->index,
@@ -661,14 +709,16 @@ public:
       buf1[i] = buf0[i];
     }
     for (int i = 0; i < strlen(buf2); i++) {
-      buf1[MAX_CHAR_A_LINE-5 + i] = buf2[i];
+      buf1[MAX_CHAR_A_LINE - 5 + i] = buf2[i];
     }
     setState(buf1);
     goto_xy(camera->curser_pos_x, camera->curser_pos_y);
     tty_start_cur_moving();
+    // r_clean();
   }
+
 private:
-  char *buf0,*buf1;
+  char *buf0, *buf1;
 };
 // 暂时没用，这里不写说明
 bool Need_Sroll(Line *l) {
@@ -1123,12 +1173,13 @@ public:
         r->showAll();
         if (strncmp("to ", buf, 3) == 0) {
           n->To(strtol(buf + 3, nullptr, 10));
+          clear();
+          r->r_clean();
         } else {
           setState("Bad Command!");
           getch();
         }
-      }
-      else if (ch == -1) {
+      } else if (ch == -1) {
         n->up();
       } else if (ch == -2) {
         n->down();

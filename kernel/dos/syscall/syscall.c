@@ -544,6 +544,8 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
     reg[EAX] = task->TTY->ysize;
   } else if (eax == 0x47) {
     vfs_renamefile(ebx, ecx);
+  } else if (eax == 0x48) {
+    logk(ebx);
   }
   return;
 }

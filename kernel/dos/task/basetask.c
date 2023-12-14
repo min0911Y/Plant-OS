@@ -34,6 +34,7 @@ void init() {
     init_card();
   }
   running_mode = POWERINTDOS;
+  //SwitchToHighTextMode();
   FILE *fp = fopen("/other/font.bin", "r");
   ascfont = fp->buffer;
   fp = fopen("/other/hzk16", "r");
@@ -42,14 +43,15 @@ void init() {
   extern struct tty *tty_default;
   tty_set(current_task(), tty_default);
   clear();
-
+  lock_t l = LOCK_UNLOCKED;
+  //logk("lock\n");
   shell_data = (char *)page_malloc(vfs_filesize("psh.bin"));
   vfs_readfile("psh.bin", shell_data);
   os_execute_no_ret("psh.bin", "psh.bin");
 
   page_free(current_task()->top - 64 * 1024, 64 * 1024);
   page_free(current_task()->nfs, sizeof(vfs_t));
-  
+
   task_kill(current_task()->tid);
   for (;;)
     ;

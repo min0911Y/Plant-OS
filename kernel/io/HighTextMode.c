@@ -28,7 +28,6 @@ static void put_sht(struct SHEET* sht, int x, int y, int l) {
 }
 void clear_HighTextMode(struct tty* res) {
   //高分辨率模式的清屏
-  io_cli();
   struct SHEET* sht = (struct SHEET*)res->vram;
   for (int i = 0; i != (res->xsize * 8 * res->ysize * 16); i++) {
     sht->buf[i] = color_table[res->color >> 4];
@@ -37,11 +36,9 @@ void clear_HighTextMode(struct tty* res) {
   res->x = 0;
   res->y = 0;
   res->MoveCursor(res, res->x, res->y);
-  io_sti();
 }
 void screen_ne_HighTextMode(struct tty* res) {
   //高分辨率模式下的屏幕滚动(向下,每次移动一行(8*16))
-  io_cli();
   struct SHEET* sht = (struct SHEET*)res->vram;
   memcpy((void*)sht->buf,
          (void*)sht->buf + res->xsize * 8 * 16 * sizeof(color_t),
@@ -55,7 +52,6 @@ void screen_ne_HighTextMode(struct tty* res) {
   res->y = res->ysize - 1;
   res->Raw_y++;
   res->MoveCursor(res, res->x, res->y);
-  io_sti();
 }
 void putchar_HighTextMode(struct tty* res, int c) {
   struct SHEET* sht = (struct SHEET*)res->vram;
@@ -150,7 +146,6 @@ void Draw_Box_HighTextMode(struct tty* res,
                            int x1,
                            int y1,
                            unsigned char color) {
-  io_cli();
   struct SHEET* sht = (struct SHEET*)res->vram;
   for (int i = y * 16; i <= y1 * 16; i++) {
     for (int j = x * 8; j <= x1 * 8; j++) {
@@ -162,7 +157,6 @@ void Draw_Box_HighTextMode(struct tty* res,
     }
   }
   sheet_refresh(sht, x * 8, y * 16, x1 * 8, y1 * 16);
-  io_sti();
 }
 /*void Gar_Test_Task() {
   char fifo_buf[128];
@@ -189,8 +183,8 @@ void Draw_Box_HighTextMode(struct tty* res,
   }
 }*/
 void SwitchToHighTextMode() {
-  if (set_mode(1920,1080, 32) != 0) {
-    printk("Can't enable 640x400x32 VBE mode.\n\n");
+  if (set_mode(1024,768, 32) != 0) {
+    printk("Can't enable 1024x768x32 VBE mode.\n\n");
     return;
   }
   struct VBEINFO* vinfo = (struct VBEINFO*)VBEINFO_ADDRESS;

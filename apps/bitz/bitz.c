@@ -5,14 +5,11 @@ int flag_m = 0;
 int m_tid;
 void a() {
   while(1) {
-    int len = MessageLength(m_tid);
-    if (len == -1) continue;
-    printf("A message from the main thread has been received length is %d\n",len);
-    char *dat = (char *)malloc(len+1);
+    char *dat = (char *)malloc(13);
     GetMessage(dat,m_tid);
-    dat[len] = 0;
-    printf("---- the main thread said %s\n",dat);
+    dat[13] = 0;
     flag_m = 1;
+    free(dat);
     //GetMessage
   }
 }
@@ -22,13 +19,16 @@ int main(int argc, char** argv) {
     return 0;
   }
   Bitz(argv[1]);
-  // start_keyboard_message();
+  // int tid = AddThread("",a,(unsigned int)malloc(4096)+4096);
+  // m_tid = NowTaskID();
+  // int j = 0;
   // while(1) {
-  //   if(key_up_status()) {
-  //     printf("key_up %08x\n",get_key_up());
-  //   } else if(key_press_status()) {
-  //     printf("key_press %08x\n",get_key_press());
-  //   }
+  //   flag_m = 0;
+  //   SendMessage(tid,(void *)"hello, world",12);
+  //   while(!flag_m);
+  //   goto_xy(0,0);
+  //   printf("[main thread %d] the message has been received\n",j++);
+    
   // }
   return 0;
 }
