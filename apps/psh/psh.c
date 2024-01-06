@@ -1,6 +1,124 @@
 #include <stdio.h>
 #include <string.h>
 #include <syscall.h>
+#include <mst.h>
+char *_path;
+MST_Object* env;
+void env_init(void) {
+  if (filesize("/env.cfg") == -1) {
+    mkfile("/env.cfg");
+  }
+  char* buff = (char*)malloc(filesize("/env.cfg") + 1);
+  api_ReadFile("/env.cfg", buff);
+  env = MST_init(buff);
+  if (env->err) {
+    MST_free(env);
+    env = NULL;
+    sleep(500);
+  }
+  free(buff);
+}
+void env_write(char* name, char* val) {
+  if (MST_get_var(name, MST_get_root_space(env)) == NULL) {
+    MST_add_var_to_space(env, MST_get_root_space(env),
+                         MST_var_make_string(name, val));
+  } else {
+    MST_change_var_for_name(env, MST_var_make_string(name, val), name,
+                            MST_get_root_space(env));
+  }
+}
+char* env_read(char* name) {
+  if (MST_get_var(name, MST_get_root_space(env)) == NULL) {
+    return NULL;
+  } else {
+    MST_get_string_in_space(env,name,MST_get_root_space(env));
+  }
+}
+void env_save() {
+  char path[12];
+  sprintf(path, "%c:/env.cfg", api_current_drive());
+  if (filesize(path) == -1) {
+    return;
+  }
+  char* s = MST_build_to_string(env);
+  Edit_File(path, s, strlen(s), 0);
+  free(s);
+}
+void env_reload() {
+  MST_free(env);
+  env_init();
+}
+//首先 我们要解析环境变量的字符串
+//环境变量的字符串是以分号分隔的
+void Path_GetPath(int count, char* ptr, char* PATH_ADDR) {
+  // count 获取第几个环境变量？
+  // ptr   储存在哪里？
+  // PATH_ADDR 环境变量的信息在哪里？
+  // 我们要解析环境变量的字符串
+  int str_base = 0;
+  for (int i = 0, j = 0;; i++) {
+    if (PATH_ADDR[i] == ';') {
+      ++j;
+    }
+    if (j == count) {
+      str_base = i;
+      break;
+    }
+    if (i >= strlen(PATH_ADDR)) {
+      // 没找到
+      return;
+    }
+  }
+  if (PATH_ADDR[str_base] == ';') {
+    str_base++;
+  }
+  // 找到了
+  // copy
+  int i;
+  for (i = 0; PATH_ADDR[str_base + i] != ';'; i++) {
+    ptr[i] = PATH_ADDR[str_base + i];
+  }
+  ptr[i] = '\0';
+}
+int Path_GetPathCount(char* PATH_ADDR) {
+  int count = 0;
+  for (int i = 0; i < strlen(PATH_ADDR); i++) {
+    if (PATH_ADDR[i] == ';') {
+      count++;
+    }
+  }
+  return count;
+}
+static void GetFullPath(char* result, char* name, char* dictpath) {
+  strcpy(result, dictpath);
+  strcat(result, "\\");
+  strcat(result, name);
+}
+bool Path_Find_File(char* fileName, char* PATH_ADDR) {
+  char path_result1[100];
+  char path_result2[100];
+  for (int i = 0; i < Path_GetPathCount(PATH_ADDR); i++) {
+    Path_GetPath(i, path_result1, PATH_ADDR);
+    GetFullPath(path_result2, fileName, path_result1);
+    int size = filesize(path_result2);
+    if (size != -1) {
+      return true;
+    }
+  }
+  return false;
+}
+void Path_Find_FileName(char* Result, char* fileName, char* PATH_ADDR) {
+  char path_result1[100];
+  char path_result2[100];
+  for (int i = 0; i < Path_GetPathCount(PATH_ADDR); i++) {
+    Path_GetPath(i, path_result1, PATH_ADDR);
+    GetFullPath(path_result2, fileName, path_result1);
+    int size = filesize(path_result2);
+    if (size != -1) {
+      strcpy(Result, path_result2);
+    }
+  }
+}
 unsigned div_round_up(unsigned num, unsigned size) {
   return (num + size - 1) / size;
 }
@@ -25,10 +143,18 @@ int cmd_app(char *cmdline) {
     s[i] = cmdline[i] == ' ' ? '\0' : cmdline[i];
   }
   if (filesize(s) == -1) {
-    free(s);
-    return 0;
+	if (!Path_Find_File(s, _path)) {
+      free(s);
+      return 0;
+	} else {
+	  char *s1 = (char *)malloc(strlen(s) + 1024);
+	  Path_Find_FileName(s1, s, _path);
+	  exec(s1, cmdline);
+	  free(s1);
+	}
+  } else {
+    exec(s, cmdline);
   }
-  exec(s, cmdline);
   free(s);
   printf("\n");
   return 1;
@@ -135,6 +261,12 @@ int main(int argc, char **argv) {
     }
     run(argv[2]);
     return 0;
+  }
+  env_init();
+  retry:
+  if (!(_path = env_read("path"))) {
+    env_write("path", "");
+    goto retry;
   }
   shell();
 }

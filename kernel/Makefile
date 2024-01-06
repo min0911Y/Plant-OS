@@ -38,7 +38,7 @@ OBJS_BOOTPACK = $(OUTPATH)kernelc.o $(OUTPATH)screen.o $(OUTPATH)command.o $(OUT
 				$(OUTPATH)dhcp.o $(OUTPATH)tcp.o $(OUTPATH)chat.o $(OUTPATH)dns.o $(OUTPATH)socket.o $(OUTPATH)bit.o \
 				$(OUTPATH)http.o $(OUTPATH)ftp.o $(OUTPATH)linux_style_file.o $(OUTPATH)netgobang.o $(OUTPATH)ide.o \
 				$(OUTPATH)net_syscall.o $(OUTPATH)ntp.o $(OUTPATH)vdisk.o $(OUTPATH)rootfs.o $(OUTPATH)mount.o $(OUTPATH)mtask.o $(OUTPATH)basetask.o $(OUTPATH)execute.o\
-				$(OUTPATH)network.o $(OUTPATH)rtl8139.o $(OUTPATH)vfs.o $(OUTPATH)build.o $(OUTPATH)mst.o $(OUTPATH)str.o $(OUTPATH)pfs.o
+				$(OUTPATH)network.o $(OUTPATH)rtl8139.o $(OUTPATH)vfs.o $(OUTPATH)build.o $(OUTPATH)mst.o $(OUTPATH)str.o $(OUTPATH)pfs.o $(OUTPATH)signal.o
 
 # 默认动作
 
@@ -95,6 +95,7 @@ Mimg : $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $(OUTPATH)
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(OUTPATH)kernel.bin ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(RESPATH)autoexec.bat ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(RESPATH)env.cfg ::
+		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(RESPATH)sys.cfg ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(OUTPATH)boot.bin ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(OUTPATH)boot32.bin ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(OUTPATH)boot_pfs.bin ::
@@ -131,9 +132,9 @@ Mimg : $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $(OUTPATH)
 		mcopy -i $(IMGPATH)Disk3.img $(APPSOUTPATH)image.bin ::/bin
 		mcopy -i $(IMGPATH)Disk3.img $(APPSOUTPATH)c4.bin ::/bin
 		mcopy -i $(IMGPATH)Disk3.img $(APPSOUTPATH)lox.bin ::/bin
-		mcopy -i $(IMGPATH)Disk3.img $(APPSOUTPATH)Maze.bin ::/bin
 		mcopy -i $(IMGPATH)Disk3.img $(APPSOUTPATH)clock.bin ::/bin
 		mcopy -i $(IMGPATH)Disk3.img $(APPSOUTPATH)luac.bin ::/bin
+		mcopy -i $(IMGPATH)Disk3.img $(APPSOUTPATH)mmake.bin ::/bin
 
 		mmd -i $(IMGPATH)res.img res
 		mcopy -i $(IMGPATH)res.img $(RESPATH)hello.nas ::/res

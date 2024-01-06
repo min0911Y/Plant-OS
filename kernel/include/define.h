@@ -112,7 +112,11 @@ typedef struct {
   int flag2;
 } IPCMessage;
 // lock.c
-typedef int lock_t;
+typedef struct {
+  mtask *owner;
+  unsigned value;
+  mtask *waiter;
+} lock_t;
 #define LOCK_UNLOCKED 0
 #define LOCK_LOCKED 1
 typedef struct  { // IPC头（在TASK结构体中的头）
@@ -197,7 +201,7 @@ typedef struct {
   uint32_t eip;
 } stack_frame;
 enum STATE {
-  EMPTY,RUNNING,WAITING,SLEEPING
+  EMPTY,RUNNING,WAITING,SLEEPING,WILL_EMPTY,READY
 };
 typedef struct mtask {
   stack_frame *esp;
@@ -235,6 +239,9 @@ typedef struct mtask {
   IPC_Header ipc_header;
   uint32_t waittid;
   int ready; // 如果为waiting 则无视wating
+  int sigint_up;
+  unsigned signal;
+  unsigned handler[30];
 } _packed mtask;
 typedef struct intr_frame_t {
   unsigned edi;
@@ -1106,5 +1113,7 @@ typedef struct {
   unsigned int size; // 大小
   char DriveName[50];
 } vdisk;
-
+// signal
+#define SIGINT 0
+#define SIGMASK(n) 1 << n
 #endif

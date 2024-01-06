@@ -3,6 +3,7 @@
 #define DIDX(addr) (((unsigned)addr >> 22) & 0x3ff) // 获取 addr 的页目录索引
 #define TIDX(addr) (((unsigned)addr >> 12) & 0x3ff) // 获取 addr 的页表索引
 #define PAGE(idx) ((unsigned)idx << 12) // 获取页索引 idx 对应的页开始的位置
+
 extern struct PAGE_INFO *pages;
 void kbd_press(uint8_t dat, uint32_t task) {
   fifo8_put(get_task(task)->Pkeyfifo, dat);
@@ -24,6 +25,10 @@ void user_thread_into(unsigned eip, unsigned esp) {
   task_to_user_mode(eip, esp);
   for (;;) {
   }
+}
+
+void test(unsigned int b) {
+  return;
 }
 void *malloc_app_heap(void *alloc_addr, uint32_t ds_base, uint32_t size) {
   memory *mem = (memory *)alloc_addr;
@@ -67,9 +72,10 @@ void free_app_heap(void *alloc_addr, uint32_t ds_base, void *p) {
   return;
 }
 enum { EDI, ESI, EBP, ESP, EBX, EDX, ECX, EAX };
-void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
-                  int eax) {
+void inthandler36(int edi, int esi, int ebp, int esp, int ebx,
+                  int edx, int ecx, int eax) {
   // PowerintDOS API
+  io_sti();
   mtask *task = current_task();
   int ds_base = 0;
   void *alloc_addr = task->alloc_addr;
@@ -132,7 +138,6 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
       mouse_ready(&mdec);
       for (;;) {
         if (fifo8_status(task_get_mouse_fifo(task)) == 0) {
-          io_stihlt();
         } else {
           i = fifo8_get(task_get_mouse_fifo(task));
           if (mouse_decode(&mdec, i) != 0) {
@@ -196,6 +201,8 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
       task->mx = mx1;
       task->my = my1;
     }
+  } else if (eax == 0x10) { // mouse_support
+    reg[EAX] = running_mode == POWERINTDOS;
   } else if (eax == 0x16) {
     if (ebx == 0x01) {
       reg[EDX] = getch();
@@ -208,7 +215,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
     logk("--------------------------------\n");
     logk("c: %08x\n", task->pde);
     command_run((char *)(edx + ds_base));
-    asm("xchg %bx,%bx");
+    // asm("xchg %bx,%bx");
     logk("n: %08x\n", task->pde);
     logk("--------------------------------\n");
   } else if (eax == 0x1a) {
@@ -269,11 +276,32 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
   } else if (eax == 0x1d) {
     reg[EAX] = kbhit();
   } else if (eax == 0x1e) {
+    // intr_frame_t *i = current_task()->top - sizeof(intr_frame_t);
+    // intr_frame1_t *frame = (unsigned *)(i->esp - sizeof(intr_frame1_t));
+    // frame->edi = i->edi;
+    // frame->esi = i->esi;
+    // frame->ebp = i->ebp;
+    // frame->esp_dummy = i->esp_dummy;
+    // frame->ebx = i->ebx;
+    // frame->ecx = i->ecx;
+    // frame->edx = i->edx;
+    // frame->eax = i->eax;
+    // frame->gs = i->gs;
+    // frame->fs = i->fs;
+    // frame->es = i->es;
+    // frame->ds = i->ds;
+    // logk("%08x\n", i->eip);
+    // frame->eip = i->eip;
+    // frame->eip1 = return_to_app;
+    // i->eip = test;
+    // i->esp = frame;
+    // return;
+    // for (;;)
+    //   ;
     if (!(*(unsigned char *)(0xf0000000))) {
       logk("here\n");
       while (FindForCount(1, vfs_now->path) != NULL) {
-        page_free(FindForCount(vfs_now->path->ctl->all, vfs_now->path)->val,
-                  255);
+        free(FindForCount(vfs_now->path->ctl->all, vfs_now->path)->val);
         DeleteVal(vfs_now->path->ctl->all, vfs_now->path);
         extern mtask *mouse_use_task;
         if (mouse_use_task == task) {
@@ -282,11 +310,12 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
       }
       DeleteList(vfs_now->path);
       free(vfs_now->cache);
-      page_free((void *)vfs_now, sizeof(vfs_t));
+      free((void *)vfs_now);
     } else {
       get_task(task->ptid)->nfs = task->nfs;
     }
     //  for(;;);
+    asm volatile("nop");
     task_kill(task->tid);
     for (;;)
       ;
@@ -311,7 +340,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
       }
     }
   } else if (eax == 0x22) {
-    //任务API
+    // 任务API
     if (ebx == 0x03) {
       //   task->forever = 1;
     } else if (ebx == 0x04) {
@@ -369,14 +398,12 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
   } else if (eax == 0x24) {
     // 计时器API
     if (ebx == 0x00) {
-      io_cli();
       task->timer = timer_alloc();
       task->timer->fifo = (struct FIFO8 *)page_malloc(sizeof(struct FIFO8));
       task->timer->fifo->buf =
           (unsigned char *)page_malloc(50 * sizeof(unsigned char));
       fifo8_init(task->timer->fifo, 50, task->timer->fifo->buf);
       timer_init(task->timer, task->timer->fifo, 1);
-      io_sti();
     } else if (ebx == 0x01) {
       timer_settime(task->timer, ecx);
     } else if (ebx == 0x02) {
@@ -546,6 +573,8 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
     vfs_renamefile(ebx, ecx);
   } else if (eax == 0x48) {
     logk(ebx);
+  } else if (eax == 0x49) {
+    set_signal_handler(ebx,ecx);
   }
   return;
 }

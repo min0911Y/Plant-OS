@@ -180,10 +180,10 @@ int abs(int n) {
 }
 
 void command_run(char *cmdline) {
-  char *line = (char *)page_malloc(strlen(cmdline) + 100);
+  char *line = (char *)malloc(strlen(cmdline) + 100);
   sprintf(line,"pfs.bin -c \"%s\"",cmdline);
   os_execute_shell(line);
-  page_free(line,strlen(cmdline) + 100);
+  free(line);
   //   //命令解析器
   //   uint32_t addr;
   //   uint8_t c;

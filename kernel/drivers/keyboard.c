@@ -3,7 +3,7 @@
 #define KEYSTA_SEND_NOTREADY 0x02
 #define KEYCMD_WRITE_MODE 0x60
 #define KBC_MODE 0x47
-static int caps_lock, shift, e0_flag = 0;
+static int caps_lock, shift, e0_flag = 0, ctrl = 0;
 char keytable[0x54] = { // 按下Shift
     0,    0x01, '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_',  '+',
     '\b', '\t', 'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '{',  '}',
@@ -67,18 +67,11 @@ int input_char_inSM() {
   int i;
   mtask *task = current_task();
   while (1) {
-    if ((fifo8_status(task_get_key_fifo(current_task())) == 0) ||
-        (current_task()->TTY != now_tty() &&
-         current_task()->TTY->using1 == 1)) {
+    if ((fifo8_status(task_get_key_fifo(task)) == 0)) {
       // 不返回扫描码的情况
       // 1.没有输入
       // 2.窗口未处于顶端
       // 3.正在运行的控制台并不是函数发起的控制台（TTY）
-      if (fifo8_status(task_get_key_fifo(current_task())) != 0) {
-        fifo8_get(task_get_key_fifo(
-            current_task())); // tnnd 都到这里了还想走？给你拦截了
-      }
-      io_stihlt();
     } else {
       // 返回扫描码
       i = fifo8_get(
@@ -127,7 +120,6 @@ void inthandler21(int *esp) {
   unsigned char data, s[4];
   io_out8(PIC0_OCW2, 0x61);
   data = io_in8(PORT_KEYDAT); // 从键盘IO口读取扫描码
-  // printk("%02x\n", data);
   //  特殊键处理
   if (data == 0xe0) {
     e0_flag = 0x80;
@@ -141,6 +133,9 @@ void inthandler21(int *esp) {
   if (data == 0x2a || data == 0x36) { // Shift按下
     shift = 1;
   }
+  if (data == 0x1d) { // Shift按下
+    ctrl = 1;
+  }
   if (data == 0x3a) { // Caps Lock按下
     caps_lock = caps_lock ^ 1;
     return;
@@ -148,18 +143,21 @@ void inthandler21(int *esp) {
   if (data == 0xaa || data == 0xb6) { // Shift松开
     shift = 0;
   }
+  if (data == 0x9d) { // Shift按下
+    ctrl = 0;
+  }
   // 快捷键处理
-  // if (data == 0x3b && !shift) {
-  //   // 仅仅按下F1
-  //   // for (int i = 1; get_task(i) != 0; i++) {
-  //   //   if (get_task(i)->TTY == now_tty() && get_task(i)->app == 1) {
-  //   //     // 找到现在运行的程序（掌握TTY屏幕主导权 & 是程序）
-  //   //     KILLAPP0(0xff, i);  // 0xff是快捷键结束程序的便条
-  //   //     return;
-  //   //   }
-  //   // }
-  //   // io_sti();
-  //   return;
+  if (data == 0x2e && ctrl) {
+    for (int i = 0; i < 255; i++) {
+      if (!get_task(i)) {
+        continue;
+      }
+      if(get_task(i)->sigint_up) {
+        get_task(i)->signal |= SIGMASK(SIGINT);
+      }
+    }
+    return;
+  }
   // } else if (data >= 0x3b && data <= 0x47 && shift) {
   //   // 按下F1 ~ F12 & Shift
   //   // if (running_mode == POWERINTDOS) {
@@ -211,6 +209,7 @@ void inthandler21(int *esp) {
     }
     // 一般进程
   THROUGH:
+    //    logk("send\n");
     fifo8_put(task_get_key_fifo(task), data + e0_flag);
   }
   return;

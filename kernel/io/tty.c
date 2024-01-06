@@ -4,19 +4,13 @@ struct tty *tty_default;
 void mtask_stop();
 void mtask_start();
 static void tty_print(struct tty *res, const char *string) {
-  mtask_stop();
   for (int i = 0; i < strlen(string); i++) {
     if (res->y == res->ysize && res->x >= res->xsize) {
       res->screen_ne(res);
     }
-    if (GetCHorEN(&string[i]) == 1) {
-      res->putchar(res, *(short *)&string[i]);
-      i++;
-    } else {
-      res->putchar(res, string[i]);
-    }
+    res->putchar(res, ((unsigned char *)string)[i]);
+    
   }
-  mtask_start();
 }
 static void tty_gotoxy(struct tty *res, int x, int y) {
   if (x >= 0 && y >= 0) {

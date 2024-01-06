@@ -80,7 +80,7 @@ void timer_settime(struct TIMER *timer, unsigned int timeout) {
     }
   }
 }
-
+void usleep(uint64_t nano);
 void sleep(unsigned long long s) {
   struct TIMER *timer;
   timer = timer_alloc();
@@ -105,8 +105,9 @@ int g = 0;
 static uint32_t count = 0;
 uint64_t global_time = 0;
 void inthandler20(int cs, int *esp) {
- // logk("*");
+   //logk("*");
   // printk("CS:EIP=%04x:%08x\n",current_task()->tss.cs,esp[-10]);
+  io_out8(PIC0_OCW2, 0x60); /* 把IRQ-00接收信号结束的信息通知给PIC */
   extern mtask *current;
   if(global_time + 1 == 0) {
     logk("reset\n");
@@ -117,13 +118,10 @@ void inthandler20(int cs, int *esp) {
     global_time = 0;
   }
   global_time++;
-  io_out8(PIC0_OCW2, 0x60); /* 把IRQ-00接收信号结束的信息通知给PIC */
   struct TIMER *timer;
 
   timerctl.count++;
-  if (timerctl.next > timerctl.count) {
-    goto D;
-  }
+
   timer = timerctl.t0; /* 首先把最前面的地址赋给timer */
   char ts = 0;
   for (;;) {
@@ -133,16 +131,15 @@ void inthandler20(int cs, int *esp) {
     }
     /* 超时 */
     timer->flags = TIMER_FLAGS_ALLOC;
-    timer->waiter->state = RUNNING;
-    timer->waiter->ready = 1;
+    task_run(timer->waiter);
     fifo8_put(timer->fifo, timer->data);
     timer = timer->next; /* 将下一个定时器的地址赋给timer*/
   }
   timerctl.t0 = timer;
   timerctl.next = timer->timeout;
-D:
+
   if (current) {
-    io_sti();
+    asm volatile ("sti");
     task_next();
   }
   // extern struct TIMER *mt_timer1, *mt_timer2, *mt_timer3;

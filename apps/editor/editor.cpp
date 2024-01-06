@@ -514,12 +514,15 @@ private:
     }
   }
 };
+// render 类：将Parse类处理好的信息显示到屏幕上，我称之为渲染
 class render {
   /*
     buf ---- 文件缓冲区
     c ---- 基结构体
     p ---- parse类，用于处理布局
     filename --- 文件名称
+    buffer_screen ---- 用于记录当前屏幕已经被显示的字符
+    buf_x/y ---- not used
   */
   char *buf;
   parse *p;
@@ -530,15 +533,16 @@ class render {
 
 public:
   render(char *buffer, Camera *c, parse *_p, char *fm) {
+    // 用来处理下面的状态栏显示的文字
     this->buf0 = (char *)malloc(MAX_CHAR_A_LINE);
     this->buf1 = (char *)malloc(MAX_CHAR_A_LINE + 1);
+    // 分配MAX_LINE x MAX_CHAR_A_LINE的二维数组
     buffer_screen = (char **)malloc(MAX_LINE * sizeof(char **));
     for (int i = 0; i < MAX_LINE; i++) {
       buffer_screen[i] = (char *)malloc(MAX_CHAR_A_LINE);
-      //logkf("%08x\n",buffer_screen[i]);
     }
-    r_clean();
-    r_check();
+    r_clean(); // 清空
+    r_check(); // check一下，确保都到位了（有时候会出现写了但没写上去的情况，这里检查一下，实际上不检查也可以）
     buf = buffer;
     p = _p;
     camera = c;
@@ -547,14 +551,15 @@ public:
     buf_y = 0;
   }
   void r_putch(int ch) {
+    // 获取当前光标的xy,那么我们就不用再去记录光标的位置了
     short bx, by;
     int r = get_xy();
     bx = r >> 16;
     by = r & 0x0000ffff;
-    if (buffer_screen[by][bx] != ch) {
-      buffer_screen[by][bx] = ch;
+    if (buffer_screen[by][bx] != ch) { // 如果说不一样？
+      buffer_screen[by][bx] = ch; // 那就重新设置一下 然后覆盖输出
       putch(ch);
-    } else {
+    } else { // 一样的话还管啥啊
       goto_xy(bx + 1, by);
     }
   }
@@ -568,9 +573,10 @@ public:
   void r_check() {
     for (int i = 0; i < MAX_LINE; i++) {
       for (int j = 0; j < MAX_CHAR_A_LINE; j++) {
-        if(buffer_screen[i][j] != ' ') {
+        if (buffer_screen[i][j] != ' ') {
           printf("error\n");
-          for(;;);
+          for (;;)
+            ;
         }
       }
     }
@@ -1138,15 +1144,22 @@ public:
     stack += 16 * 1024;
     unsigned int *s = (unsigned int *)(stack);
     *s = (unsigned int)this;
-    AddThread("mouse", (unsigned int)&m_thread, (unsigned int)stack - 4);
+    if (mouse_support())
+      AddThread("mouse", (unsigned int)&m_thread, (unsigned int)stack - 4);
     r->showAll();
     int times = 0;
+    int tap = 0;
+    int flag = 0;
     for (;;) {
       int ch = getch();
       if (ch == 0) {
         continue;
       }
       if (ch == '\n') {
+        if(!flag)
+          for(tap = 0;tap<MAX_CHAR_A_LINE;tap++) {
+            if(l[c->curser_pos_y].line[tap].ch != ' ') break;
+          }
         n->Insert('\n');
         n->down();
         // l = prse->getBuf();
@@ -1154,7 +1167,11 @@ public:
           c->curser_pos_x = 0;
           c->index = l[c->curser_pos_y].line[0].index; // Holy Fuck
         }
-
+        if(!flag)
+          for (int i = 0; i < tap; i++) {
+            n->Insert(' ');
+            n->right(0);
+          }
       } else if (ch == '\b') {
         if (c->y + c->curser_pos_x + c->curser_pos_y != 0) {
           n->left();
@@ -1175,7 +1192,12 @@ public:
           n->To(strtol(buf + 3, nullptr, 10));
           clear();
           r->r_clean();
-        } else {
+        } else if(strcmp("stap",buf) == 0) {
+          flag = !flag;
+          clear();
+          r->r_clean();
+        } 
+        else {
           setState("Bad Command!");
           getch();
         }

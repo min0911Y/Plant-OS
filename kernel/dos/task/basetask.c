@@ -11,11 +11,8 @@ void init() {
   
   PCI_ADDR_BASE = (unsigned int)page_malloc(1 * 1024 * 1024);
   init_PCI(PCI_ADDR_BASE);
-  current_task()->alloc_addr = page_malloc(512 * 1024);
-  current_task()->alloc_size = 512 * 1024;
-  current_task()->mm =
-      memory_init(current_task()->alloc_addr, current_task()->alloc_size);
   init_floppy();
+  
   init_devfs();
   ide_initialize(0x1F0, 0x3F6, 0x170, 0x376, 0x000);
   init_palette();
@@ -28,13 +25,24 @@ void init() {
     printk("WARNING: you haven't set the network value in env.cfg, system will "
            "set a default value(disable)\n");
     env_write("network", "disable");
+    env_save();
+  }
+  if (env_read("video_mode" == NULL)) {
+    env_write("video_mode","TEXTMODE");
+    env_save();
   }
   if (strcmp(env_read("network"), "enable") == 0) {
     logk("init card\n");
     init_card();
   }
-  running_mode = POWERINTDOS;
-  //SwitchToHighTextMode();
+  if(strcmp("HIGHTEXTMODE",env_read("video_mode")) == 0) {
+    running_mode = HIGHTEXTMODE;
+    SwitchToHighTextMode();
+  } else {
+    running_mode = POWERINTDOS;
+  }
+
+  
   FILE *fp = fopen("/other/font.bin", "r");
   ascfont = fp->buffer;
   fp = fopen("/other/hzk16", "r");
@@ -43,9 +51,10 @@ void init() {
   extern struct tty *tty_default;
   tty_set(current_task(), tty_default);
   clear();
-  lock_t l = LOCK_UNLOCKED;
-  //logk("lock\n");
   shell_data = (char *)page_malloc(vfs_filesize("psh.bin"));
+  
+
+
   vfs_readfile("psh.bin", shell_data);
   os_execute_no_ret("psh.bin", "psh.bin");
 

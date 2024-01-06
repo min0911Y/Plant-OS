@@ -212,7 +212,7 @@ void hpet_initialize() {
   logk("hpet period: 0x%016x\n", hpetPeriod);
 
   hpetInfo->generalConfiguration |= 1;  //  启用hpet
-
+  
   // Logger::log(Logger::INFO, "hpet successfully enabled");
 }
 uint64_t nanoTime() {

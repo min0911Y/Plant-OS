@@ -3,7 +3,7 @@ out_path_src := ../../obj/
 incpath_src := ../../include/
 TOOLPATH := ../../../tools/
 MAKE     := $(TOOLPATH)make.exe -r
-obj_dos := $(out_path_src)ipc.o $(out_path_src)lock.o $(out_path_src)mtask.o $(out_path_src)basetask.o $(out_path_src)execute.o
+obj_dos := $(out_path_src)ipc.o $(out_path_src)lock.o $(out_path_src)mtask.o $(out_path_src)basetask.o $(out_path_src)execute.o $(out_path_src)signal.o
 default : $(obj_dos)
 	
 $(out_path_src)%.o : %.c Makefile

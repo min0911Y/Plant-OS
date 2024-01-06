@@ -80,8 +80,9 @@ void file_loadfile(int clustno, int size, char *buf, int *fat, vfs_t *vfs) {
   if (!size) {
     return;
   }
-  void *img = page_malloc(((size - 1) / get_dm(vfs).ClustnoBytes + 1) *
-                          get_dm(vfs).ClustnoBytes);
+  int s = ((size - 1) / get_dm(vfs).ClustnoBytes + 1) *
+                          get_dm(vfs).ClustnoBytes;
+  void *img = malloc(s);
   for (int i = 0; i != (size - 1) / get_dm(vfs).ClustnoBytes + 1; i++) {
     uint32_t sec = (get_dm(vfs).FileDataAddress +
                     (clustno - 2) * get_dm(vfs).ClustnoBytes) /
@@ -91,8 +92,7 @@ void file_loadfile(int clustno, int size, char *buf, int *fat, vfs_t *vfs) {
     clustno = fat[clustno];
   }
   memcpy((void *)buf, img, size);
-  page_free(img, ((size - 1) / get_dm(vfs).SectorBytes + 1) *
-                     get_dm(vfs).SectorBytes);
+  free(img);
   return;
 }
 void file_savefile(int clustno, int size, char *buf, int *fat,
@@ -135,7 +135,7 @@ void file_savefile(int clustno, int size, char *buf, int *fat,
     alloc_size = (clustall + 1) * get_dm(vfs).ClustnoBytes;
     // 这里不分配Fat的原因是要清空更改后多余的数据
   }
-  void *img = page_malloc(alloc_size);
+  void *img = malloc(alloc_size);
   clean((char *)img, alloc_size);
   memcpy(img, buf, size); // 把要写入的数据复制到新请求的内存地址
   for (int i = 0; i != (alloc_size / get_dm(vfs).ClustnoBytes); i++) {
@@ -146,7 +146,7 @@ void file_savefile(int clustno, int size, char *buf, int *fat,
                img + i * get_dm(vfs).ClustnoBytes, vfs->disk_number);
     clustno = fat[clustno];
   }
-  page_free(img, alloc_size);
+  free(img);
   if (size <
       clustall *
           get_dm(vfs).ClustnoBytes) { // 新大小 < (旧大小 / 簇大小) * 簇大小
@@ -313,7 +313,7 @@ struct FAT_FILEINFO *Get_File_Address(char *path1, vfs_t *vfs) {
   // TODO: Modifly it
   struct FAT_FILEINFO *bmpDict = get_now_dir(vfs);
   int drive_number = vfs->disk_number;
-  char *path = (char *)page_malloc(strlen(path1) + 1);
+  char *path = (char *)malloc(strlen(path1) + 1);
   char *bmp = path;
   strcpy(path, path1);
   strtoupper(path);
@@ -330,7 +330,7 @@ struct FAT_FILEINFO *Get_File_Address(char *path1, vfs_t *vfs) {
       }
     }
   }
-  char *temp_name = (char *)page_malloc(128);
+  char *temp_name = (char *)malloc(128);
   struct FAT_FILEINFO *finfo = get_dm(vfs).root_directory;
   int i = 0;
   while (1) {
@@ -346,14 +346,14 @@ struct FAT_FILEINFO *Get_File_Address(char *path1, vfs_t *vfs) {
     finfo = dict_search(temp_name, bmpDict, get_directory_max(bmpDict, vfs));
     if (finfo == 0) {
       if (path[i] != '\0') {
-        page_free((void *)temp_name, 128);
-        page_free((void *)bmp, strlen(path1) + 1);
+        free((void *)temp_name);
+        free((void *)bmp);
         return 0;
       }
       finfo = file_search(temp_name, bmpDict, get_directory_max(bmpDict, vfs));
       if (finfo == 0) {
-        page_free((void *)temp_name, 128);
-        page_free((void *)bmp, strlen(path1) + 1);
+        free((void *)temp_name);
+        free((void *)bmp);
         return 0;
       } else {
         goto END;
@@ -379,15 +379,15 @@ struct FAT_FILEINFO *Get_File_Address(char *path1, vfs_t *vfs) {
     }
   }
 END:
-  page_free((void *)temp_name, 128);
-  page_free((void *)bmp, strlen(path1) + 1);
+  free((void *)temp_name);
+  free((void *)bmp);
   return finfo;
 }
 struct FAT_FILEINFO *Get_dictaddr(char *path1, vfs_t *vfs) {
   // TODO: Modifly it
   struct FAT_FILEINFO *bmpDict = get_now_dir(vfs);
   int drive_number = vfs->disk_number;
-  char *path = (char *)page_malloc(strlen(path1) + 1);
+  char *path = (char *)malloc(strlen(path1) + 1);
   char *bmp = path;
   strcpy(path, path1);
   strtoupper(path);
@@ -404,7 +404,7 @@ struct FAT_FILEINFO *Get_dictaddr(char *path1, vfs_t *vfs) {
       }
     }
   }
-  char *temp_name = (char *)page_malloc(128);
+  char *temp_name = (char *)malloc(128);
   struct FAT_FILEINFO *finfo;
   int i = 0;
   while (1) {
@@ -447,8 +447,8 @@ struct FAT_FILEINFO *Get_dictaddr(char *path1, vfs_t *vfs) {
     }
   }
 END:
-  page_free((void *)temp_name, 128);
-  page_free((void *)bmp, strlen(path1) + 1);
+  free((void *)temp_name);
+  free((void *)bmp);
   return bmpDict;
 }
 int mkdir(char *dictname, int last_clust, vfs_t *vfs) {
@@ -535,7 +535,7 @@ int mkdir(char *dictname, int last_clust, vfs_t *vfs) {
                get_clustno(model[2].clustno_high, model[2].clustno_low), 1,
                vfs);
 
-  void *directory_alloc = page_malloc(get_dm(vfs).ClustnoBytes);
+  void *directory_alloc = malloc(get_dm(vfs).ClustnoBytes);
   Disk_Read((get_dm(vfs).FileDataAddress +
              (get_clustno(finfo->clustno_high, finfo->clustno_low) - 2) *
                  get_dm(vfs).ClustnoBytes) /
@@ -763,7 +763,7 @@ int changedict(char *dictname, vfs_t *vfs) {
 
   if (strcmp(dictname, "/") == 0) {
     while (vfs->path->ctl->all != 0) {
-      page_free(FindForCount(vfs->path->ctl->all, vfs->path)->val, 255);
+      free(FindForCount(vfs->path->ctl->all, vfs->path)->val);
       DeleteVal(vfs->path->ctl->all, vfs->path);
     }
     get_now_dir(vfs) = get_dm(vfs).root_directory;
@@ -779,7 +779,7 @@ int changedict(char *dictname, vfs_t *vfs) {
   if (get_clustno(finfo->clustno_high, finfo->clustno_low) == 0) {
     //根目录
     while (vfs->path->ctl->all != 0) {
-      page_free(FindForCount(vfs->path->ctl->all, vfs->path)->val, 255);
+      free(FindForCount(vfs->path->ctl->all, vfs->path)->val);
       DeleteVal(vfs->path->ctl->all, vfs->path);
     }
     get_now_dir(vfs) = get_dm(vfs).root_directory;
@@ -789,13 +789,13 @@ int changedict(char *dictname, vfs_t *vfs) {
   //.不进行处理
   //其他按照下面的方式处理
   if (strcmp(dictname, "..") != 0 && strcmp(dictname, ".") != 0) {
-    char *dict = page_malloc(255);
+    char *dict = malloc(255);
     strcpy(dict, dictname);
     AddVal(dict, vfs->path);
   }
 
   if (strcmp(dictname, "..") == 0) {
-    page_free(FindForCount(vfs->path->ctl->all, vfs->path)->val, 255);
+    free(FindForCount(vfs->path->ctl->all, vfs->path)->val);
     DeleteVal(vfs->path->ctl->all, vfs->path);
   }
   for (int count = 1;
@@ -847,22 +847,22 @@ int format(char drive) {
   if (fp == 0 || fp_32 == 0) {
     return 0;
   }
-  void *read_in = page_malloc(512);
+  void *read_in = malloc(512);
   if (!(drive - 'A')) {
     fread(read_in, fp->fileSize, 1, fp);
     write_floppy_for_ths(0, 0, 1, read_in, 1);
-    unsigned int *fat = (unsigned int *)page_malloc(9 * 512);
+    unsigned int *fat = (unsigned int *)malloc(9 * 512);
     fat[0] = 0x00fffff0;
     write_floppy_for_ths(0, 0, 2, (unsigned char *)fat, 9);
     write_floppy_for_ths(0, 0, 11, (unsigned char *)fat, 9);
-    page_free((void *)fat, 9 * 512);
-    void *null_sec = page_malloc(512);
+    free((void *)fat);
+    void *null_sec = malloc(512);
     for (int i = 0; i < 224 * 32 / 512; i++) {
       int t, h, s;
       block2hts(19 + i, &t, &h, &s);
       write_floppy_for_ths(t, h, s, null_sec, 1);
     }
-    page_free(null_sec, 512);
+    free(null_sec);
   } else if (drive != 'B') {
     if (!DiskReady(drive)) {
       return 0;
@@ -885,17 +885,17 @@ int format(char drive) {
       memcpy((void *)&((unsigned char *)read_in)[BS_VolLab],
              (void *)"POWERINTDOS", 11);
       Disk_Write(0, 1, read_in, drive);
-      unsigned int *fat = (unsigned int *)page_malloc(fatsz * 512);
+      unsigned int *fat = (unsigned int *)malloc(fatsz * 512);
       fat[0] = 0x00fffff0;
       Disk_Write(1, fatsz, (void *)fat, drive);
       Disk_Write(1 + fatsz, fatsz, (void *)fat, drive);
-      page_free((void *)fat, fatsz * 512);
-      void *null_sec = page_malloc(512);
+      free((void *)fat);
+      void *null_sec = malloc(512);
       clean((char *)null_sec, 512);
       for (int i = 0; i != 224 * 32 / 512; i++) {
         Disk_Write(1 + fatsz * 2 + i, 1, null_sec, drive);
       }
-      page_free(null_sec, 512);
+      free(null_sec);
       // page_free((void*)info, 256 * sizeof(short));
     } else if (disk_Size(drive) > 2097152 &&
                disk_Size(drive) <= 2147483648) { // 2MB~2GB fat16
@@ -926,18 +926,18 @@ int format(char drive) {
       memcpy((void *)&((unsigned char *)read_in)[BS_VolLab],
              (void *)"POWERINTDOS", 11);
       Disk_Write(0, 1, read_in, drive);
-      unsigned short *fat = (unsigned short *)page_malloc(fatsz * 512);
+      unsigned short *fat = (unsigned short *)malloc(fatsz * 512);
       fat[0] = 0xfff0;
       fat[1] = 0xffff;
       Disk_Write(1, fatsz, (void *)fat, drive);
       Disk_Write(1 + fatsz, fatsz, (void *)fat, drive);
-      page_free((void *)fat, fatsz * 512);
-      void *null_sec = page_malloc(512);
+      free((void *)fat);
+      void *null_sec = malloc(512);
       clean((char *)null_sec, 512);
       for (int i = 0; i < 14 * clustno_size / 512; i++) {
         Disk_Write(1 + fatsz * 2 + i, 1, null_sec, drive);
       }
-      page_free(null_sec, 512);
+      free(null_sec);
     } else if (disk_Size(drive) > 2147483648) { // 2GB以上 fat32
       fread(read_in, fp_32->fileSize, 1, fp_32);
       unsigned int clustno_size =
@@ -974,20 +974,20 @@ int format(char drive) {
       memcpy((void *)&((unsigned char *)read_in)[BS_VolLab + BPB_Fat32ExtByts],
              (void *)"POWERINTDOS", 11);
       Disk_Write(0, 1, read_in, drive);
-      unsigned int *fat = (unsigned int *)page_malloc(fatsz * 512);
+      unsigned int *fat = (unsigned int *)malloc(fatsz * 512);
       fat[0] = 0xffffff0;
       fat[1] = 0xfffffff;
       fat[2] = 0xfffffff;
       Disk_Write(1, fatsz, (void *)fat, drive);
       Disk_Write(1 + fatsz, fatsz, (void *)fat, drive);
-      page_free((void *)fat, fatsz * 512);
-      void *null_sec = page_malloc(512);
+      free((void *)fat);
+      void *null_sec = malloc(512);
       clean((char *)null_sec, 512);
       Disk_Write(1 + fatsz * 2, 1, null_sec, drive);
-      page_free(null_sec, 512);
+      free(null_sec);
     }
   }
-  page_free(read_in, 512);
+  free(read_in);
   fclose(fp);
   fclose(fp_32);
   return 1;
@@ -1012,7 +1012,7 @@ int attrib(char *filename, ftype type, struct vfs_t *vfs) {
 }
 void fat_InitFS(struct vfs_t *vfs, uint8_t disk_number) {
   vfs->cache = malloc(sizeof(fat_cache));
-  void *boot_sector = page_malloc(512);
+  void *boot_sector = malloc(512);
   Disk_Read(0, 1, boot_sector, disk_number);
 
   if (memcmp(boot_sector + BS_FileSysType, "FAT12   ", 8) == 0) {
@@ -1140,7 +1140,7 @@ void fat_InitFS(struct vfs_t *vfs, uint8_t disk_number) {
       }
     }
   }
-  page_free(boot_sector, 512);
+  free(boot_sector);
 }
 void Fat_CopyCache(struct vfs_t *dest, struct vfs_t *src) {
   dest->cache = malloc(sizeof(fat_cache));

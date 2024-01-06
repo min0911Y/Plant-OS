@@ -39,6 +39,7 @@ void Main() {
 
   main(get_argc(buf), argv);
   exit();
+  while(1);
 }
 void __main() {
   //莫名其妙的错误

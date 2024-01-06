@@ -13,7 +13,7 @@ GLOBAL haveMsg,PhyMemGetByte,GetMessageAll,PhyMemSetByte,format,api_heapsize,api
 GLOBAL get_hour_hex,get_min_hex,get_sec_hex,get_day_of_month,get_day_of_week,get_mon_hex,get_year,AddThread,init_float
 GLOBAL TaskLock,TaskUnlock,SubThread,set_mode,VBEDraw_Px,VBEGet_Px,VBEGetBuffer,VBESetBuffer,roll,VBEDraw_Box,listfile
 GLOBAL vfs_check_mount,vfs_mount,vfs_change_disk,vfs_delfile,vfs_change_path,tty_start_cur_moving,tty_stop_cur_moving,vfs_unmount_disk,logk
-GLOBAL tty_get_xsize,tty_get_ysize,api_rename
+GLOBAL tty_get_xsize,tty_get_ysize,api_rename,mouse_support,signal
 [SECTION .text]
 putch:
 push	edx
@@ -60,7 +60,10 @@ pop	esi
 pop	edx
 pop	ecx
 ret
-
+mouse_support:
+  mov eax,0x10
+  int 0x36
+  ret
 get_xy:
 push	edx
 push	ecx
@@ -556,7 +559,8 @@ NowTaskID:
 _exit:
 	mov	eax,0x1e
 	int 36h
-	jmp	$
+	ret
+	;jmp	$
 
 timer_alloc:
 	push	eax
@@ -1101,4 +1105,16 @@ logk:
 	int 0x36
 	pop ebx
 	pop eax
+	ret
+signal:
+	push ebx
+	push ecx
+	push eax
+	mov eax,0x49
+	mov ebx,[esp+4+12]
+	mov ecx,[esp+8+12]
+	int 0x36
+	pop eax
+	pop ecx
+	pop ebx
 	ret

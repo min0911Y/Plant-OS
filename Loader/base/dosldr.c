@@ -27,7 +27,7 @@ uint32_t load_elf(Elf32_Ehdr* hdr) {
 void DOSLDR_MAIN() {
   struct MEMMAN *memman = MEMMAN_ADDR;
   unsigned int memtotal;
-  memtotal = memtest(0x00400000, 0xbfffffff);
+  memtotal = 128*1024*1024;
   memman_init(memman);
   memman_free(memman, 0x00600000, memtotal - 0x00600000);
   //asm("mov $0x00650000,%esp");

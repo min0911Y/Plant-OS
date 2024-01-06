@@ -1,4 +1,4 @@
-megs: 128
+megs: 2048
 romimage: file=./BIOS-bochs-latest
 vgaromimage: file=./VGABIOS-lgpl-latest
 vga: extension=vbe, update_freq=15

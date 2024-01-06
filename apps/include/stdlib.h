@@ -19,6 +19,7 @@ char *getenv(char *name);
 float strtof(const char * nptr, char ** endptr);
 long long strtoll(const char * nptr, char ** endptr, int base);
 unsigned long long strtoull(const char * nptr, char ** endptr, int base);
+double strtod(const char *nptr, char **endptr);
 int atoi(const char * nptr);
 int abs(int a);
 double atof(const char *s);

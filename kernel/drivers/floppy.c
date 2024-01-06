@@ -106,8 +106,6 @@ void flint(int* esp) {
   floppy_int_count =
       1;  // 设置中断计数器为1，代表中断已经发生（或者是系统已经收到了中断）
   io_out8(0x20, 0x20);  // 发送EOI信号，告诉PIC，我们已经处理完了这个中断
-  waiter->state = RUNNING;
-  waiter->ready = 1;
   task_run(waiter);
 }
 void set_waiter(mtask *t) {

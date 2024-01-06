@@ -14,13 +14,13 @@ typedef struct int4 int4;
 struct SHTCTL* shtctl_init(vram_t* vram, int xsize, int ysize) {
   struct SHTCTL* ctl;
   int i;
-  ctl = (struct SHTCTL*)page_malloc(sizeof(struct SHTCTL));
+  ctl = (struct SHTCTL*)malloc(sizeof(struct SHTCTL));
   if (ctl == 0) {
     goto err;
   }
-  ctl->map = (unsigned char*)page_malloc(xsize * ysize);
+  ctl->map = (unsigned char*)malloc(xsize * ysize);
   if (ctl->map == 0) {
-    page_free((void *)ctl, sizeof(struct SHTCTL));
+    free((void *)ctl);
     goto err;
   }
   ctl->vram = vram;
@@ -38,9 +38,9 @@ err:
 void ctl_free(struct SHTCTL* ctl) {
   if (ctl != 0) {
     if (ctl->map != 0) {
-      page_free((void *)ctl->map, ctl->xsize * ctl->ysize);
+      free((void *)ctl->map);
     }
-    page_free((void *)ctl, sizeof(struct SHTCTL));
+    free((void *)ctl);
   }
 }
 struct SHEET* sheet_alloc(struct SHTCTL* ctl) {

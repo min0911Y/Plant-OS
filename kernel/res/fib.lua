@@ -4,5 +4,5 @@ function fib(n)
   end
   return fib(n-1)+fib(n-2)
 end
-
+print("ÖĞÎÄ²âÊÔ")
 print(fib(tonumber(input())))

@@ -252,9 +252,15 @@ int main() {
   Set_Loading(0);
   setState("Config --- Create env.cfg");
   mkfile("env.cfg");
-  Set_Loading(50);
+  Set_Loading(25);
   setState("Config --- Write env.cfg");
   Edit_File("env.cfg", "\"path\" = \"C:\\bin;C:;\"", 22, 0);
+  Set_Loading(50);
+  setState("Config --- Create sys.cfg");
+  mkfile("sys.cfg");
+  Set_Loading(75);
+  setState("Config --- Write sys.cfg");
+  Edit_File("sys.cfg", "\"network\" = \"enable\"\n\"video_mode\" = \"HIGHTEXTMODE\"", 52, 0);
   Set_Loading(100);
   OKMsg("Press Enter to Reboot Your computer.");
   system("reboot");

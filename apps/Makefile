@@ -37,6 +37,7 @@ default : Makefile
 	make -r -C doomcpy
 	make -r -C minizip
 	make -r -C duktape
+	make -r -C mmake
 clean :
 	rm libs/*
 	rm out/*

@@ -8,7 +8,7 @@ section .data
 		GLOBAL ASM_call
 		GLOBAL	load_cr0, store_cr0,memtest_sub,farjmp,farcall,start_app
 		GLOBAL load_tr
-		GLOBAL get_eip
+		GLOBAL get_eip,return_to_app,do_init_seg_register
 str: db 'Yun Xing Ni Ma De Kernel Xiang Si Shi Bu Shi',0
 section .text
 %define ADR_BOTPAK 							   0x0
@@ -380,5 +380,19 @@ task_start:
 	pop edi
 	pop ebp
 	ret
+return_to_app:
+  popa
+  pop gs
+  pop fs
+  pop es
+  pop ds
+  ret
+do_init_seg_register:
+  pusha
+  mov ax,1*8
+  mov gs,ax
+  mov fs,ax
+  popa
+  ret
 [SECTION .data]
 testsize:	dd	0

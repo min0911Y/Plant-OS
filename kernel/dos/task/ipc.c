@@ -31,6 +31,7 @@ int send_ipc_message(int to_tid, void *data, unsigned int size, char type) {
   } else {
     ipc_msg->flag2 = 0;
   }
+  ipc->now++;
   unlock(&(get_task(to_tid)->ipc_header.l));
   if (type == synchronous) {
     while (ipc_msg->flag1)
@@ -49,6 +50,10 @@ int send_ipc_message_by_name(char *tname, void *data, unsigned int size,
 
 int get_ipc_message(void *data, int from_tid) {
   lock(&(current_task()->ipc_header.l));
+  if (current_task()->ipc_header.now == 0) {
+    unlock(&(current_task()->ipc_header.l));
+    return -1;
+  }
   IPC_Header *ipc = &(current_task()->ipc_header);
   IPCMessage *ipc_msg = NULL;
   for (int i = 0; i < MAX_IPC_MESSAGE; i++) {
@@ -63,9 +68,8 @@ int get_ipc_message(void *data, int from_tid) {
   memcpy(data, ipc_msg->data, ipc_msg->size);
   page_free(ipc_msg->data, ipc_msg->size);
   ipc_msg->flag1 = 0;
+  ipc->now--;
   unlock(&(current_task()->ipc_header.l));
-  while (ipc_msg->flag2)
-    ;
   return 0;
 }
 int get_ipc_message_by_name(void *data, char *tname) {
@@ -75,6 +79,10 @@ int get_ipc_message_by_name(void *data, char *tname) {
 int ipc_message_status() { return 1; }
 unsigned int ipc_message_len(int from_tid) {
   lock(&(current_task()->ipc_header.l));
+  if (current_task()->ipc_header.now == 0) {
+    unlock(&(current_task()->ipc_header.l));
+    return -1;
+  }
   IPC_Header *ipc = &(current_task()->ipc_header);
   IPCMessage *ipc_msg = NULL;
   for (int i = 0; i < MAX_IPC_MESSAGE; i++) {

@@ -13,6 +13,7 @@ extern "C" {
 int GetMouse_x(int mouse);
 int GetMouse_y(int mouse);
 int GetMouse_btn(int mouse);
+int mouse_support();
 #ifdef __cplusplus
 }
 #endif

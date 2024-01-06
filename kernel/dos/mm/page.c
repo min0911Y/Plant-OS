@@ -104,8 +104,6 @@ void page_set_attr(unsigned pde, unsigned page, unsigned attr) {
   flush_tlb(page);
 }
 void page_link_pde(unsigned addr, unsigned pde) {
-  // logk("%08x\n",addr);
-  io_cli();
   unsigned pde_backup = current_task()->pde;
   current_task()->pde = PDE_ADDRESS;
   set_cr3(PDE_ADDRESS);
@@ -132,7 +130,6 @@ void page_link_pde(unsigned addr, unsigned pde) {
   flush_tlb(addr);
   current_task()->pde = pde_backup;
   set_cr3(pde_backup);
-  io_sti();
 }
 void page_link(unsigned addr) { page_link_pde(addr, current_task()->pde); }
 void copy_from_phy_to_line(unsigned phy, unsigned line, unsigned pde,
@@ -326,7 +323,6 @@ void set_phy_address_for_line_address(void *line, void *phy) {
 }
 // 映射地址
 void page_map(void *target, void *start, void *end) {
-  io_cli();
   target = (void *)((int)target & 0xfffff000);
   start = (void *)((int)start & 0xfffff000);
   end = (void *)((int)end & 0xfffff000);
@@ -343,7 +339,6 @@ void page_map(void *target, void *start, void *end) {
     set_phy_address_for_line_address((void *)((uint32_t)start + i * 4 * 1024),
                                      (void *)tmp);
   }
-  io_sti();
 }
 void change_page_task_id(int task_id, void *p, unsigned int size) {
   int page = get_page_from_line_address((int)p);
@@ -365,7 +360,7 @@ void showPage() {
 }
 unsigned int get_cr2() {
   unsigned r;
-  asm volatile("xchg %bx,%bx");
+  //asm volatile("xchg %bx,%bx");
   asm volatile("mov %%cr2,%0" : "=r"(r));
   return r;
 }

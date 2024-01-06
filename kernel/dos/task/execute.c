@@ -5,7 +5,8 @@ extern struct TSS32 tss;
 void task_app(char *filename) {
   while (!current_task()->line)
     ;
-
+  logk("%08x\n",current_task()->top);
+  
   char *kfifo = (char *)page_malloc_one();
   char *mfifo = (char *)page_malloc_one();
   char *kbuf = (char *)page_malloc_one();
@@ -61,9 +62,8 @@ void task_to_user_mode_shell() {
   iframe->esp = NULL; // 设置用户态堆栈
   char *p = shell_data;
   if (!elf32Validate(p)) {
-    page_free(iframe->esp - 512 * 1024, 512 * 1024);
     while (FindForCount(1, vfs_now->path) != NULL) {
-      page_free(FindForCount(vfs_now->path->ctl->all, vfs_now->path)->val, 255);
+      free(FindForCount(vfs_now->path->ctl->all, vfs_now->path)->val);
       DeleteVal(vfs_now->path->ctl->all, vfs_now->path);
       extern mtask *mouse_use_task;
       if (mouse_use_task == current_task()) {
@@ -72,7 +72,7 @@ void task_to_user_mode_shell() {
     }
     DeleteList(vfs_now->path);
     free(vfs_now->cache);
-    page_free((void *)vfs_now, sizeof(vfs_t));
+    free((void *)vfs_now);
     task_kill(current_task()->tid);
     for (;;)
       ;
@@ -95,7 +95,9 @@ void task_to_user_mode_shell() {
   tss.esp0 = current_task()->top;
   change_page_task_id(current_task()->tid, iframe->esp - 512 * 1024,
                       512 * 1024);
+  
   asm volatile("movl %0, %%esp\n"
+                "xchg %%bx,%%bx\n"
                "popa\n"
                "pop %%gs\n"
                "pop %%fs\n"
@@ -129,13 +131,13 @@ void task_to_user_mode_elf(char *filename) {
   iframe->cs = GET_SEL(4 * 8, SA_RPL3);
   iframe->eflags = (0 << 12 | 0b10 | 1 << 9);
   iframe->esp = NULL; // 设置用户态堆栈
+  tss.eflags =0x202;
   char *p = page_malloc(vfs_filesize(filename));
   vfs_readfile(filename, p);
   if (!elf32Validate(p)) {
-    page_free(iframe->esp - 512 * 1024, 512 * 1024);
-    page_free(p, vfs_filesize(filename));
+    page_free(p,vfs_filesize(filename));
     while (FindForCount(1, vfs_now->path) != NULL) {
-      page_free(FindForCount(vfs_now->path->ctl->all, vfs_now->path)->val, 255);
+      free(FindForCount(vfs_now->path->ctl->all, vfs_now->path)->val);
       DeleteVal(vfs_now->path->ctl->all, vfs_now->path);
       extern mtask *mouse_use_task;
       if (mouse_use_task == current_task()) {
@@ -144,7 +146,7 @@ void task_to_user_mode_elf(char *filename) {
     }
     DeleteList(vfs_now->path);
     free(vfs_now->cache);
-    page_free((void *)vfs_now, sizeof(vfs_t));
+    free((void *)vfs_now);
     task_kill(current_task()->tid);
     for (;;)
       ;
@@ -166,11 +168,13 @@ void task_to_user_mode_elf(char *filename) {
   // logk("value = %08x\n",*(unsigned int *)(0xb5000000));
   current_task()->alloc_addr = alloc_addr;
   iframe->eip = load_elf(p);
+  logk("eip = %08x\n",&(iframe->eip));
   current_task()->user_mode = 1;
   tss.esp0 = current_task()->top;
   change_page_task_id(current_task()->tid, p, vfs_filesize(filename));
   change_page_task_id(current_task()->tid, iframe->esp - 512 * 1024,
                       512 * 1024);
+  logk("%d\n",get_interrupt_state());
   asm volatile("movl %0, %%esp\n"
                "popa\n"
                "pop %%gs\n"
@@ -187,10 +191,11 @@ void os_execute(char *filename, char *line) {
   extern int init_ok_flag;
   unsigned int *stack =
       (unsigned int *)(page_malloc(64 * 1024) + 64 * 1024 - 4);
-  char *fm = (char *)page_malloc(strlen(filename) + 1);
+  char *fm = (char *)malloc(strlen(filename) + 1);
   strcpy(fm, filename);
   *stack = (unsigned int)(fm);
   init_ok_flag = 0;
+  
   mtask *t = create_task(task_app, (unsigned)stack - 4, 1, 1);
   vfs_change_disk_for_task(current_task()->nfs->drive, t);
   List *l;
@@ -202,20 +207,24 @@ void os_execute(char *filename, char *line) {
   }
   init_ok_flag = 1;
   t->ptid = current_task()->tid;
+  int old = current_task()->sigint_up;
+  current_task()->sigint_up = 0;
+  t->sigint_up = 1;
   struct tty *tty_backup = current_task()->TTY;
   t->TTY = current_task()->TTY;
   current_task()->TTY = NULL;
-  char *p1 = page_malloc(strlen(line) + 1);
+  char *p1 = malloc(strlen(line) + 1);
   strcpy(p1, line);
   int o = current_task()->fifosleep;
   current_task()->fifosleep = 1;
   t->line = p1;
+  
   waittid(t->tid);
   current_task()->fifosleep = o;
   stack = ((unsigned)stack + 4 - 64 * 1024);
   page_free(stack, 64 * 1024);
-  page_free(p1, strlen(p1) + 1);
-  page_free(fm, strlen(fm) + 1);
+  free(p1);
+  free(fm);
   current_task()->TTY = tty_backup;
   if (backup) {
     mouse_ready(&mdec);
@@ -223,6 +232,7 @@ void os_execute(char *filename, char *line) {
   } else {
     mouse_sleep(&mdec);
   }
+  current_task()->sigint_up = old;
 }
 void os_execute_shell(char *line) {
   extern int init_ok_flag;
@@ -230,12 +240,15 @@ void os_execute_shell(char *line) {
   init_ok_flag = 0;
   mtask *t = create_task(task_shell, (unsigned)stack, 1, 1);
   t->nfs = current_task()->nfs;
+  int old = current_task()->sigint_up;
+  current_task()->sigint_up = 0;
+  t->sigint_up = 1;
   init_ok_flag = 1;
   t->ptid = current_task()->tid;
   struct tty *tty_backup = current_task()->TTY;
   t->TTY = current_task()->TTY;
   current_task()->TTY = NULL;
-  char *p1 = page_malloc(strlen(line) + 1);
+  char *p1 = malloc(strlen(line) + 1);
   strcpy(p1, line);
   int o = current_task()->fifosleep;
   current_task()->fifosleep = 1;
@@ -245,8 +258,9 @@ void os_execute_shell(char *line) {
   current_task()->fifosleep = o;
   stack = ((unsigned)stack - 64 * 1024);
   page_free(stack, 64 * 1024);
-  page_free(p1, strlen(p1) + 1);
+  free(p1);
   current_task()->TTY = tty_backup;
+  current_task()->sigint_up = old;
 }
 void os_execute_no_ret(char *filename, char *line) {
   unsigned int *stack =

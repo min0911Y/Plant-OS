@@ -57,6 +57,7 @@ uint32_t get_father_tid(mtask *t);
 void waittid(uint32_t tid);
 void task_fall_blocked(enum STATE state);
 void task_run(mtask *task);
+void mtask_run_now(mtask *obj);
 // page.c
 void C_init_page();
 void pf_set(unsigned int memsize);
@@ -66,6 +67,7 @@ void page2tpo(int page, int *t, int *p);
 void tpo2page(int *page, int t, int p);
 void *page_malloc_one();
 void *page_malloc_one_count_from_4gb();
+void *page_malloc_one_no_mark();
 int get_pageinpte_address(int t, int p);
 void page_free_one(void *p);
 int find_kpage(int line, int n);
@@ -265,7 +267,10 @@ void md5f(char *filename, unsigned char *result);
 bool cas(int *ptr, int old, int New);
 void lock(lock_t *key);
 void unlock(lock_t *key);
+void lock_init(lock_t *l);
 // mount.c
 int mount(char *fileName);
 void unmount(char drive);
+// signal.c
+void set_signal_handler(unsigned sig,unsigned handler);
 #endif

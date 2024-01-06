@@ -389,10 +389,10 @@ memory *memory_init(uint32_t start, uint32_t size) {
   mem_free(mem, (void *)start, size);
   return mem;
 }
-
+extern memory *public_heap;
 void *malloc(int size) {
   void *p;
-  p = page_malloc(size + sizeof(int));
+  p = mem_alloc(public_heap,size + sizeof(int));
   if (p == NULL)
     return NULL;
   *(int *)p = size;
@@ -402,7 +402,7 @@ void free(void *p) {
   if (p == NULL)
     return;
   int size = *(int *)(p-sizeof(int));
-  page_free((char *)p - sizeof(int), size + sizeof(int));
+  mem_free(public_heap,(char *)p - sizeof(int), size + sizeof(int));
 }
 void *realloc(void *ptr, uint32_t size) {
   void *new = malloc(size);

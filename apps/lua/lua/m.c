@@ -132,8 +132,17 @@ static lua_State *globalL = NULL;
 
 static const char *progname = LUA_PROGNAME;
 
+static void lstop (lua_State *L, lua_Debug *ar) {
+  (void)ar;  /* unused arg. */
+  lua_sethook(L, NULL, 0, 0);  /* reset hook */
+  luaL_error(L, "interrupted!");
+}
 
-
+static void laction (int i) {
+  int flag = LUA_MASKCALL | LUA_MASKRET | LUA_MASKLINE | LUA_MASKCOUNT;
+  signal(i, 0); /* if another SIGINT happens, terminate process */
+  lua_sethook(globalL, lstop, flag, 1);
+}
 
 
 static void print_usage (const char *badoption) {
@@ -212,7 +221,9 @@ static int docall (lua_State *L, int narg, int nres) {
   lua_pushcfunction(L, msghandler);  /* push message handler */
   lua_insert(L, base);  /* put it under function and args */
   globalL = L;  /* to be available to 'laction' */
+  signal(0, laction);  /* set C-signal handler */
   status = lua_pcall(L, narg, nres, base);
+  signal(0, 0); /* reset C-signal handler */
   lua_remove(L, base);  /* remove message handler from the stack */
   return status;
 }
@@ -418,7 +429,17 @@ static int runargs (lua_State *L, char **argv, int n) {
 
 
 static int handle_luainit (lua_State *L) {
-  
+  const char *name = "=" LUA_INITVARVERSION;
+  const char *init = getenv(name + 1);
+  if (init == NULL) {
+    name = "=" LUA_INIT_VAR;
+    init = getenv(name + 1);  /* try alternative name */
+  }
+  if (init == NULL) return LUA_OK;
+  else if (init[0] == '@')
+    return dofile(L, init+1);
+  else
+    return dostring(L, init, name);
 }
 
 
