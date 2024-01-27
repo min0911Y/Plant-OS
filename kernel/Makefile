@@ -66,6 +66,7 @@ $(OUTPATH)kernel.bin : $(OBJS_BOOTPACK) Makefile
 	ld -m elf_i386 -static -Ttext 0x280000 -e KernelMain $(OBJS_BOOTPACK) -o $(OUTPATH)kernel.bin
 
 make_img:
+	mkdir -p img
 	qemu-img create $(IMGPATH)Powerint_DOS_386.img 1474560
 	qemu-img create $(IMGPATH)Disk2.img 1474560
 	qemu-img create $(IMGPATH)Disk3.img 1474560
@@ -75,6 +76,7 @@ make_img:
 	qemu-img create $(IMGPATH)ndisasm.img 1474560
 	qemu-img create $(IMGPATH)doom1.img 1474560
 	qemu-img create $(IMGPATH)doom2.img 1474560
+	qemu-img create disk.img 14745600
 	mformat -f 1440 -B $(OUTPATH)boot.bin -i $(IMGPATH)Powerint_DOS_386.img
 	mformat -f 1440 -B $(OUTPATH)boot.bin -i $(IMGPATH)Disk2.img
 	mformat -f 1440 -B $(OUTPATH)boot.bin -i $(IMGPATH)Disk3.img

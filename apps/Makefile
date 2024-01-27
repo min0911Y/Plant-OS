@@ -35,6 +35,7 @@ default : Makefile
 	make -r -C psh
 	make -r -C tccinst
 	make -r -C doomcpy
+	make -r -C doomgeneric
 	make -r -C minizip
 	make -r -C duktape
 	make -r -C mmake
