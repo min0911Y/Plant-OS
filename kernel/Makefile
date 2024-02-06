@@ -76,7 +76,7 @@ make_img:
 	qemu-img create $(IMGPATH)ndisasm.img 1474560
 	qemu-img create $(IMGPATH)doom1.img 1474560
 	qemu-img create $(IMGPATH)doom2.img 1474560
-	qemu-img create disk.img 14745600
+	qemu-img create disk.img 128M
 	mformat -f 1440 -B $(OUTPATH)boot.bin -i $(IMGPATH)Powerint_DOS_386.img
 	mformat -f 1440 -B $(OUTPATH)boot.bin -i $(IMGPATH)Disk2.img
 	mformat -f 1440 -B $(OUTPATH)boot.bin -i $(IMGPATH)Disk3.img
@@ -212,7 +212,7 @@ img_run :
 	$(MAKE) -C $(NETPATH)
 	$(MAKE) -C $(MSTPATH)
 	$(MAKE) Mimg
-	qemu-system-i386 -serial stdio -device sb16 -device floppy -fda ./img/Powerint_DOS_386.img -hda disk.img -hdb ./img/Disk2.img -hdc ./img/Disk3.img -hdd ./img/res.img -boot a -m 4096
+	qemu-system-x86_64 -serial stdio -device sb16 -device floppy -fda ./img/Powerint_DOS_386.img -hda disk.img -hdb ./img/Disk2.img -hdc ./img/Disk3.img -hdd ./img/res.img -boot a -m 4096
 full :
 	$(MAKE) -C $(DOSPATH)
 	$(MAKE) -C $(IOPATH)

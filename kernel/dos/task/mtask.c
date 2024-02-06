@@ -401,8 +401,10 @@ uint32_t get_father_tid(mtask *t) {
   return get_father_tid(get_task(t->ptid));
 }
 void task_fall_blocked(enum STATE state) {
-  if (current_task()->ready == 1)
+  if (current_task()->ready == 1) {
+    current_task()->ready = 0;
     return;
+  }
   current_task()->state = state;
   current_task()->ready = 0;
   task_next();

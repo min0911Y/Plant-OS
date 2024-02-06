@@ -527,9 +527,10 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx,
     unsigned page_len = div_round_up(ebx, 0x1000);
     unsigned start_addr =
         ((task->alloc_addr + task->alloc_size - 1) & 0xfffff000);
-    for (int i = 0; i < page_len; i++) {
-      page_link(start_addr + (i + 1) * 0x1000);
-    }
+    page_links(start_addr+0x1000,page_len);
+    // for (int i = 0; i < page_len; i++) {
+    //   page_link(start_addr + (i + 1) * 0x1000);
+    // }
     task->alloc_size += ebx;
   } else if (eax == 0x36) {
     char *s = env_read(ebx + ds_base);

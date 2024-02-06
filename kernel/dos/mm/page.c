@@ -131,6 +131,58 @@ void page_link_pde(unsigned addr, unsigned pde) {
   current_task()->pde = pde_backup;
   set_cr3(pde_backup);
 }
+void page_link_pde_paddr(unsigned addr, unsigned pde,unsigned paddr1,unsigned paddr2) {
+  unsigned pde_backup = current_task()->pde;
+  current_task()->pde = PDE_ADDRESS;
+  set_cr3(PDE_ADDRESS);
+  unsigned t, p;
+  t = DIDX(addr);
+  p = (addr >> 12) & 0x3ff;
+  unsigned *pte = (unsigned int *)((pde + t * 4));
+  // logk("*pte = %08x\n",*pte);
+  if (pages[IDX(*pte)].count > 1) {
+    pages[IDX(*pte)].count--;
+  }
+  uint32_t old = *pte & 0xfffff000;
+  *pte = paddr1;
+  memcpy(*pte, old, 0x1000);
+  *pte |= 7;
+  unsigned *physics = (unsigned *)((*pte & 0xfffff000) + p * 4);
+  // logk("*pte = %08x\n",*physics);
+  if (pages[IDX(*physics)].count > 1) {
+    pages[IDX(*physics)].count--;
+  }
+  *physics = paddr2;
+  *physics |= 7;
+  flush_tlb(pte);
+  flush_tlb(addr);
+  current_task()->pde = pde_backup;
+  set_cr3(pde_backup);
+}
+void page_links_pde(unsigned start,unsigned numbers,unsigned pde) {
+  int i = 0;
+  int times = 0;
+  unsigned a[2];
+  int j = 0;
+  for (i = IDX(memsize) - 1; i >= 0 && times < numbers; i--) {
+    if (pages[i].flag == 0 && pages[i].count == 0) {
+      unsigned int addr = PAGE(i);
+      pages[i].flag = 1;
+      pages[i].task_id = get_tid(current_task());
+      pages[i].count++;
+      a[j++] = addr;
+    }
+    if(j == 2) {
+      page_link_pde_paddr(start,pde,a[0],a[1]);
+      times++;
+      start+=0x1000;
+      j = 0;
+    }
+  }
+}
+void page_links(unsigned start,unsigned numbers) {
+  page_links_pde(start,numbers,current_task()->pde);
+}
 void page_link(unsigned addr) { page_link_pde(addr, current_task()->pde); }
 void copy_from_phy_to_line(unsigned phy, unsigned line, unsigned pde,
                            unsigned size) {

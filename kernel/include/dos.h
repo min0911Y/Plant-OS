@@ -89,6 +89,7 @@ uint32_t page_get_attr_pde(unsigned vaddr,unsigned pde);
 void set_line_address(unsigned val,unsigned line,unsigned pde,unsigned size);
 void page_link_pde(unsigned addr,unsigned pde);
 uint32_t page_get_phy_pde(unsigned vaddr,unsigned pde);
+void page_links(unsigned start,unsigned numbers);
 // nasmfunc.asm
 void int32(unsigned char intnum, regs16_t *regs);
 void floppy_int(void);
