@@ -109,6 +109,7 @@ void api_rename(char *f1,char *f2);
 void exit();
 void logk(char *s);
 int logkf(const char *format, ...);
+int fork();
 #ifdef __cplusplus
 }
 #endif

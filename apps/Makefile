@@ -8,7 +8,7 @@ default : Makefile
 	make -r -C calc
 	make -r -C aigobang
 	make -r -C randnum
-	make -r -C cale
+	make -r -C cal
 	make -r -C pfn
 	make -r -C sort
 	make -r -C copy

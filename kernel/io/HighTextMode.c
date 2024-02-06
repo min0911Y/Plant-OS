@@ -284,7 +284,7 @@ void SwitchToHighTextMode() {
   t1 = AddTask("t1", 1, 2 * 8, (int)Gar_Test_Task, 1 * 8, 1 * 8,
                stack + 64 * 1024);*/
 
-  cursor = create_task(cur_service, (unsigned)page_malloc_one_no_mark() + 4096,
+  cursor = create_task(cur_service, (unsigned)0,
                        1, 1);
   struct tty *tty_h = tty_alloc((void *)sht_scr, vinfo->xsize / 8,
                                 vinfo->ysize / 16, putchar_HighTextMode,

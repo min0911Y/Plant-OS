@@ -2,9 +2,9 @@ LIBS_PATH := ../libs
 INCLUDE_PATH := ../include
 include ../defs.mk
 NASM = nasm
-OBJS_PACK = ../out/cale.obj
+OBJS_PACK = ../out/cal.obj
 default : $(OBJS_PACK)
-	$(LINK) $(OBJS_PACK) $(BASIC_LIB_C) -o ../out/cale.bin
+	$(LINK) $(OBJS_PACK) $(BASIC_LIB_C) -o ../out/cal.bin
 ../out/%.obj : %.c Makefile
 	$(C) -c $*.c -o ../out/$*.obj
 ../out/%.obj : %.cpp Makefile

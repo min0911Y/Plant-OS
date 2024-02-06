@@ -138,7 +138,9 @@ mtask *create_task(unsigned eip, unsigned esp, unsigned ticks, unsigned floor) {
   if (!t) {
     return NULL;
   }
-  t->esp = esp - sizeof(stack_frame); // switch用到的栈帧
+  unsigned esp_alloced = page_malloc(64*1024)+64*1024;
+  change_page_task_id(t->tid,esp_alloced-64*1024,64*1024);
+  t->esp = esp_alloced - sizeof(stack_frame); // switch用到的栈帧
   t->esp->eip = eip;                  // 设置跳转地址
   t->user_mode = 0;                   // 设置是否是user_mode
   if (current == NULL) {              // 还没启用多任务
@@ -146,7 +148,7 @@ mtask *create_task(unsigned eip, unsigned esp, unsigned ticks, unsigned floor) {
   } else {
     t->pde = pde_clone(current_task()->pde); // 启用了就复制一个
   }
-  t->top = esp; // r0的esp
+  t->top = esp_alloced; // r0的esp
   t->floor = floor;
   t->running = 0;
   t->timeout = ticks;
@@ -313,8 +315,8 @@ int into_mtask() {
   tss.ss0 = 1 * 8;
   set_segmdesc(gdt + 103, 103, &tss, AR_TSS32);
   load_tr(103 * 8);
-  idle_task = create_task(idle, page_malloc(64 * 1024) + 64 * 1024, 1, 3);
-  create_task(init, page_malloc(64 * 1024) + 64 * 1024, 5, 1);
+  idle_task = create_task(idle, 0, 1, 3);
+  create_task(init, 0, 5, 1);
   set_cr0(get_cr0() | CR0_EM | CR0_TS | CR0_NE);
   task_start(&(m[0]));
 }
@@ -418,3 +420,96 @@ void waittid(uint32_t tid) {
 void mtask_stop() { mtask_stop_flag = 1; }
 void mtask_start() { mtask_stop_flag = 0; }
 void mtask_run_now(mtask *obj) { next_set = obj; }
+void copy_vfs(mtask *src,mtask *dest) {
+  vfs_change_disk_for_task(src->nfs->drive, dest);
+  List *l;
+  char *path;
+  for (int i = 1; FindForCount(i, src->nfs->path) != NULL; i++) {
+    l = FindForCount(i, src->nfs->path);
+    path = (char *)l->val;
+    dest->nfs->cd(dest->nfs, path);
+  }
+}
+mtask * mtask_get_free() {
+  mtask *t = NULL;
+  for (int i = 0; i < 255; i++) {
+    if (m[i].state == EMPTY || m[i].state == WILL_EMPTY ||
+        m[i].state == READY) {
+      logk("f:%d\n",i);
+      t = &(m[i]);
+      logk("%d\n",t->tid);
+      break;
+    }
+  }
+  return t;
+}
+// THE FUNCTION CAN ONLY BE CALLED IN USER MODE!!!!
+void interrput_exit();
+void roc() {
+  logk("ROCT\n");
+  for(;;);
+}
+static void build_fork_stack(mtask *task) {
+  unsigned addr = task->top;
+  addr -= sizeof(intr_frame_t);
+  intr_frame_t *iframe = (intr_frame_t *)addr;
+  iframe->eax = 0;
+  logk("iframe = %08x\n",iframe->eip);
+  addr -= sizeof(stack_frame);
+  stack_frame *sframe = (stack_frame *)addr;
+  sframe->ebp = 0x114514;
+  sframe->ebx = 0x114514;
+  sframe->ecx = 0x114514;
+  sframe->edx = 0x114514;
+  sframe->eip = interrput_exit;
+
+  task->esp = sframe;
+}
+int task_fork() {
+  mtask *m = mtask_get_free();
+  if(!m) {
+    return -1;
+  }
+  logk("get free %08x\n",m);
+  logk("current = %08x\n",get_tid(current_task()));
+  bool state = interrupt_disable();
+  int tid = 0;
+  tid = m->tid;
+  memcpy(m,current_task(),sizeof(mtask));
+  unsigned stack = page_malloc(64*1024);
+  change_page_task_id(tid,stack,64*1024);
+  unsigned int off = m->top-(unsigned)m->esp;
+  memcpy(stack,m->top-64*1024,64*1024);
+  logk("s = %08x \n",m->top-64*1024);
+  m->top = stack+=64*1024;
+  stack+=64*1024;
+  stack-=off;
+  m->esp = stack;
+  m->nfs = NULL;
+  if(current_task()->Pkeyfifo) {
+    m->Pkeyfifo = malloc(sizeof(struct FIFO8));
+    memcpy(m->Pkeyfifo,current_task()->Pkeyfifo,sizeof(struct FIFO8));
+    m->Pkeyfifo->buf = page_malloc(4096);
+    memcpy(m->Pkeyfifo->buf,current_task()->Pkeyfifo->buf,4096);
+  }
+  if(current_task()->Ukeyfifo) {
+    m->Ukeyfifo = malloc(sizeof(struct FIFO8));
+    memcpy(m->Ukeyfifo,current_task()->Ukeyfifo,sizeof(struct FIFO8));
+    m->Ukeyfifo->buf = page_malloc(4096);
+    memcpy(m->Ukeyfifo->buf,current_task()->Ukeyfifo->buf,4096);
+  }
+  logk("copy vfs\n");
+  copy_vfs(current_task(),m);
+  m->pde = pde_clone(current_task()->pde);
+  m->running = 0;
+  m->jiffies = 0;
+  m->state = RUNNING;
+  m->ptid = get_tid(current_task());
+  m->tid = tid;
+  logk("m->tid = %d\n",m->tid);
+  tid = m->tid;
+  logk("BUILD FORK STACK\n");
+  build_fork_stack(m);
+  set_interrupt_state(state);
+  return tid;
+}

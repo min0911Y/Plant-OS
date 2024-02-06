@@ -216,6 +216,22 @@ void *page_malloc_one() {
 
   return NULL;
 }
+void *page_malloc_one_mark(unsigned tid) {
+  int i;
+  for (i = 0; i != 1024 * 1024; i++) {
+    if (pages[i].flag == 0) {
+      int t, p;
+      page2tpo(i, &t, &p);
+      unsigned int addr = get_line_address(t, p, 0);
+      pages[i].flag = 1;
+      pages[i].task_id = tid;
+      pages[i].count++;
+      return (void *)addr;
+    }
+  }
+
+  return NULL;
+}
 void *page_malloc_one_count_from_4gb() {
   int i = 0;
   for (i = IDX(memsize) - 1; i >= 0; i--) {

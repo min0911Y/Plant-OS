@@ -21,6 +21,15 @@ void test_signal() {
   exit();
 }
 int main(int argc, char **argv) {
+  if(fork()) {
+    while(1)
+      printf("PARENT\n");
+  } else {
+    while(1)
+      printf("SON\n");
+    for(;;);
+  }
+  return 0;
   signal(0,test_signal);
   // for(int i = 0;;i++) {
   // }

@@ -11,9 +11,15 @@ void kbd_press(uint8_t dat, uint32_t task) {
 void kbd_up(uint8_t dat, uint32_t task) {
   fifo8_put(get_task(task)->Ukeyfifo, dat);
 }
-void user_thread_into(unsigned eip, unsigned esp) {
+void user_thread_into() {
   while (!current_task()->line)
     ; // 等待配置
+  unsigned *r = current_task()->line;
+  unsigned eip;
+  unsigned esp;
+  eip = r[1];
+  esp = r[0];
+  page_free_one(r);
   char *kfifo = (char *)page_malloc_one();
   char *mfifo = (char *)page_malloc_one();
   char *kbuf = (char *)page_malloc_one();
@@ -358,12 +364,12 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx,
     } else if (ebx == 0x0a) {
       extern int init_ok_flag;
       init_ok_flag = 0;
-      unsigned int *stack = page_malloc_one() + 0x1000;
-      stack--;
-      *stack = (unsigned int)(esi);
-      stack--;
-      *stack = (unsigned int)(edx);
-      mtask *t = create_task(user_thread_into, (unsigned)stack - 4, 1, 1);
+      // unsigned int *stack = page_malloc_one() + 0x1000;
+      // stack--;
+      // *stack = (unsigned int)(esi);
+      // stack--;
+      // *stack = (unsigned int)(edx);
+      mtask *t = create_task(user_thread_into, (unsigned)0, 1, 1);
       init_ok_flag = 1;
       t->alloc_addr = task->alloc_addr;
       t->alloc_size = task->alloc_size;
@@ -380,7 +386,10 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx,
         }
         // pages[IDX(*pde_entry)].count--;
       }
-      t->line = (char *)1;
+      unsigned *r = page_malloc_one_no_mark();
+      r[0] = esi;
+      r[1] = edx;
+      t->line = (char *)r;
       reg[EAX] = t->tid;
     } else if (ebx == 0x0b) {
       task_lock();
@@ -575,6 +584,8 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx,
     logk(ebx);
   } else if (eax == 0x49) {
     set_signal_handler(ebx,ecx);
+  } else if (eax == 0x4a) {
+    reg[EAX] = task_fork();
   }
   return;
 }

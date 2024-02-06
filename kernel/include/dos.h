@@ -58,6 +58,7 @@ void waittid(uint32_t tid);
 void task_fall_blocked(enum STATE state);
 void task_run(mtask *task);
 void mtask_run_now(mtask *obj);
+int task_fork();
 // page.c
 void C_init_page();
 void pf_set(unsigned int memsize);
@@ -68,6 +69,7 @@ void tpo2page(int *page, int t, int p);
 void *page_malloc_one();
 void *page_malloc_one_count_from_4gb();
 void *page_malloc_one_no_mark();
+void *page_malloc_one_mark(unsigned tid);
 int get_pageinpte_address(int t, int p);
 void page_free_one(void *p);
 int find_kpage(int line, int n);

@@ -113,7 +113,9 @@
         "features.h": "c",
         "limits.h": "c",
         "format": "c",
-        "span": "c"
+        "span": "c",
+        "stack": "c",
+        "locale": "c"
     },
     "cSpell.words": [],
     "C_Cpp.codeAnalysis.clangTidy.checks.disabled": [

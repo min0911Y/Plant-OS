@@ -2,9 +2,14 @@
 #include <dos.h>
 extern char *shell_data;
 extern struct TSS32 tss;
-void task_app(char *filename) {
+void task_app() {
+  char *filename;
   while (!current_task()->line)
     ;
+  unsigned *r = current_task()->line;
+  filename = r[0];
+  current_task()->line = r[1];
+  page_free_one(r);
   logk("%08x\n",current_task()->top);
   
   char *kfifo = (char *)page_malloc_one();
@@ -189,14 +194,11 @@ void os_execute(char *filename, char *line) {
   extern mtask *mouse_use_task;
   mtask *backup = mouse_use_task;
   extern int init_ok_flag;
-  unsigned int *stack =
-      (unsigned int *)(page_malloc(64 * 1024) + 64 * 1024 - 4);
   char *fm = (char *)malloc(strlen(filename) + 1);
   strcpy(fm, filename);
-  *stack = (unsigned int)(fm);
   init_ok_flag = 0;
   
-  mtask *t = create_task(task_app, (unsigned)stack - 4, 1, 1);
+  mtask *t = create_task(task_app, 0, 1, 1);
   vfs_change_disk_for_task(current_task()->nfs->drive, t);
   List *l;
   char *path;
@@ -217,12 +219,14 @@ void os_execute(char *filename, char *line) {
   strcpy(p1, line);
   int o = current_task()->fifosleep;
   current_task()->fifosleep = 1;
-  t->line = p1;
+  unsigned *r = page_malloc_one_no_mark();
+  r[0] = fm;
+  r[1] = p1;
+  t->line = r;
   
   waittid(t->tid);
   current_task()->fifosleep = o;
-  stack = ((unsigned)stack + 4 - 64 * 1024);
-  page_free(stack, 64 * 1024);
+
   free(p1);
   free(fm);
   current_task()->TTY = tty_backup;
@@ -236,9 +240,8 @@ void os_execute(char *filename, char *line) {
 }
 void os_execute_shell(char *line) {
   extern int init_ok_flag;
-  unsigned int *stack = (unsigned int *)(page_malloc(64 * 1024) + 64 * 1024);
   init_ok_flag = 0;
-  mtask *t = create_task(task_shell, (unsigned)stack, 1, 1);
+  mtask *t = create_task(task_shell, 0, 1, 1);
   t->nfs = current_task()->nfs;
   int old = current_task()->sigint_up;
   current_task()->sigint_up = 0;
@@ -256,19 +259,17 @@ void os_execute_shell(char *line) {
  // io_sti();
   waittid(t->tid);
   current_task()->fifosleep = o;
-  stack = ((unsigned)stack - 64 * 1024);
-  page_free(stack, 64 * 1024);
   free(p1);
   current_task()->TTY = tty_backup;
   current_task()->sigint_up = old;
 }
 void os_execute_no_ret(char *filename, char *line) {
-  unsigned int *stack =
-      (unsigned int *)(page_malloc(64 * 1024) + 64 * 1024 - 4);
-  *stack = (unsigned int)(filename);
-  mtask *t = create_task(task_app, (unsigned)stack - 4, 1, 1);
+  mtask *t = create_task(task_app, 0, 1, 1);
   struct tty *tty_backup = current_task()->TTY;
   t->TTY = current_task()->TTY;
   current_task()->TTY = NULL;
-  t->line = line;
+  unsigned *r = page_malloc_one_no_mark();
+  r[0] = filename;
+  r[1] = line;
+  t->line = r;
 }

@@ -121,7 +121,7 @@ Mimg : $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $(OUTPATH)
 		mcopy -i $(IMGPATH)Disk2.img $(APPSOUTPATH)bf.bin ::/bin
 		mcopy -i $(IMGPATH)Disk2.img $(APPSOUTPATH)copy.bin ::/bin
 		mcopy -i $(IMGPATH)Disk2.img $(APPSOUTPATH)basic.bin ::/bin
-		mcopy -i $(IMGPATH)Disk2.img $(APPSOUTPATH)cale.bin ::/bin
+		mcopy -i $(IMGPATH)Disk2.img $(APPSOUTPATH)cal.bin ::/bin
 		mcopy -i $(IMGPATH)Disk2.img $(APPSOUTPATH)bitz.bin ::/bin
 		mcopy -i $(IMGPATH)Disk2.img $(APPSOUTPATH)editor.bin ::/bin
 		mcopy -i $(IMGPATH)Disk2.img $(APPSOUTPATH)calc.bin ::/bin
@@ -212,7 +212,7 @@ img_run :
 	$(MAKE) -C $(NETPATH)
 	$(MAKE) -C $(MSTPATH)
 	$(MAKE) Mimg
-	qemu-system-i386 -net nic,model=pcnet -net user -serial stdio -device sb16 -device floppy -fda ./img/Powerint_DOS_386.img -hda disk.img -hdb ./img/Disk2.img -hdc ./img/Disk3.img -hdd ./img/res.img -boot a -m 4096 -enable-kvm
+	qemu-system-i386 -serial stdio -device sb16 -device floppy -fda ./img/Powerint_DOS_386.img -hda disk.img -hdb ./img/Disk2.img -hdc ./img/Disk3.img -hdd ./img/res.img -boot a -m 4096
 full :
 	$(MAKE) -C $(DOSPATH)
 	$(MAKE) -C $(IOPATH)

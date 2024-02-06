@@ -2,7 +2,7 @@
 section .data
 GLOBAL	asm_inthandler21, asm_inthandler20
 EXTERN	inthandler21,inthandler20,inthandler36,inthandler2c,signal_deal
-GLOBAL	asm_inthandler36,asm_inthandler2c,floppy_int
+GLOBAL	asm_inthandler36,asm_inthandler2c,floppy_int,interrput_exit
 section .text
 global null_inthandler
 %define PDE_ADDRESS 0x400000
@@ -289,3 +289,10 @@ asm_inthandler2c:
   pop es
   pop ds
 	IRETD
+interrput_exit:
+  popa
+  pop gs
+  pop fs
+  pop es
+  pop ds
+  IRETD

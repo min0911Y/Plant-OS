@@ -10,7 +10,7 @@
 }, {
 	"files" = [{
 		"dir" = "bin"
-	},"bin/aigobang.bin","bin/lua.bin","bin/snake.bin","bin/randnum.bin","bin/bf.bin","bin/copy.bin","bin/basic.bin","bin/cale.bin","bin/bitz.bin","bin/editor.bin","bin/calc.bin","editor.mst"]
+	},"bin/aigobang.bin","bin/lua.bin","bin/snake.bin","bin/randnum.bin","bin/bf.bin","bin/copy.bin","bin/basic.bin","bin/cal.bin","bin/bitz.bin","bin/editor.bin","bin/calc.bin","editor.mst"]
 	"next" = {
 		"state" = "Install apps"
 		"info" = "Install extra apps?"

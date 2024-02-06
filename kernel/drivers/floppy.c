@@ -58,20 +58,23 @@ unsigned long tbaddr = 0x80000L; /* 位于1M以下的轨道缓冲器的物理地
 void sendbyte(int byte);
 int getbyte();
 
-static void Read(char drive,
-                 unsigned char* buffer,
-                 unsigned int number,
+#define SECTORS_ONCE 4
+static void Read(char drive, unsigned char *buffer, unsigned int number,
                  unsigned int lba) {
   floppy_use = current_task();
-  fdc_rw(lba, buffer, 1, number);
+  for (int i = 0; i < number; i += SECTORS_ONCE) {
+    int sectors = ((number - i) >= SECTORS_ONCE) ? SECTORS_ONCE : (number - i);
+    fdc_rw(lba+i, buffer+i*512, 1, sectors);
+  }
   floppy_use = NULL;
 }
-static void Write(char drive,
-                  unsigned char* buffer,
-                  unsigned int number,
+static void Write(char drive, unsigned char *buffer, unsigned int number,
                   unsigned int lba) {
   floppy_use = current_task();
-  fdc_rw(lba, buffer, 0, number);
+  for (int i = 0; i < number; i += SECTORS_ONCE) {
+    int sectors = ((number - i) >= SECTORS_ONCE) ? SECTORS_ONCE : (number - i);
+    fdc_rw(lba+i, buffer+i*512, 0, sectors);
+  }
   floppy_use = NULL;
 }
 void init_floppy() {

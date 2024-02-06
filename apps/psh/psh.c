@@ -95,8 +95,8 @@ static void GetFullPath(char* result, char* name, char* dictpath) {
   strcat(result, name);
 }
 bool Path_Find_File(char* fileName, char* PATH_ADDR) {
-  char path_result1[100];
-  char path_result2[100];
+  char path_result1[255];
+  char path_result2[255];
   for (int i = 0; i < Path_GetPathCount(PATH_ADDR); i++) {
     Path_GetPath(i, path_result1, PATH_ADDR);
     GetFullPath(path_result2, fileName, path_result1);
@@ -108,8 +108,8 @@ bool Path_Find_File(char* fileName, char* PATH_ADDR) {
   return false;
 }
 void Path_Find_FileName(char* Result, char* fileName, char* PATH_ADDR) {
-  char path_result1[100];
-  char path_result2[100];
+  char path_result1[255];
+  char path_result2[255];
   for (int i = 0; i < Path_GetPathCount(PATH_ADDR); i++) {
     Path_GetPath(i, path_result1, PATH_ADDR);
     GetFullPath(path_result2, fileName, path_result1);
@@ -137,31 +137,45 @@ void dir_deal() {
   printf("\n");
   free(f);
 }
-int cmd_app(char *cmdline) {
-  char *s = (char *)malloc(strlen(cmdline) + 1);
+int cmd_app(char *cmdline,int *ok) {
+  int result = 0;
+  int flag = 0;
+  char *s = (char *)malloc(strlen(cmdline) + 10);
   for (int i = 0; i <= strlen(cmdline); i++) {
     s[i] = cmdline[i] == ' ' ? '\0' : cmdline[i];
   }
+RETRY:
   if (filesize(s) == -1) {
-	if (!Path_Find_File(s, _path)) {
-      free(s);
-      return 0;
-	} else {
-	  char *s1 = (char *)malloc(strlen(s) + 1024);
-	  Path_Find_FileName(s1, s, _path);
-	  exec(s1, cmdline);
-	  free(s1);
-	}
+    if (!Path_Find_File(s, _path)) {
+        *ok = 0;
+    } else {
+      char *s1 = (char *)malloc(strlen(s) + 1024);
+      Path_Find_FileName(s1, s, _path);
+      result = 0;
+      exec(s1, cmdline);
+      free(s1);
+      *ok = 1;
+    }
   } else {
+    result = 0;
     exec(s, cmdline);
+    *ok = 1;
   }
+  if(flag == 0 && *ok == 0)
+    goto S;
   free(s);
-  printf("\n");
-  return 1;
+  if(*ok)
+    printf("\n");
+  return result;
+S:
+  strcat(s,".bin");
+  flag = 1;
+  goto RETRY;
 }
-void run(char *line) {
+int run(char *line) {
+  int result = 0;
   if (strlen(line) == 0) {
-    return;
+    return 1;
   }
   if (strcmp("cls", line) == 0) {
     clear();
@@ -190,7 +204,7 @@ void run(char *line) {
     if (filesize(s) == -1) {
       printf("File not find.\n");
       free(s);
-      return;
+      return 1;
     }
     char *p = (char *)malloc(filesize(s));
     api_ReadFile(s, p);
@@ -238,9 +252,15 @@ void run(char *line) {
     } else {
       vfs_change_disk(line[0]);
     }
-  } else if (!cmd_app(line)) {
-    printf("bad command!\n");
+  } else{
+    int ok;
+    result = cmd_app(line,&ok);
+    if(ok == 0) {
+      printf("bad command!\n");
+      return 1;
+    }
   }
+  return result;
 }
 void shell() {
   printf("Plant OS 0.8a\n");
@@ -259,8 +279,7 @@ int main(int argc, char **argv) {
       printf("fatal error.\n");
       return 1;
     }
-    run(argv[2]);
-    return 0;
+    return run(argv[2]);
   }
   env_init();
   retry:

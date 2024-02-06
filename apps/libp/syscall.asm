@@ -13,7 +13,7 @@ GLOBAL haveMsg,PhyMemGetByte,GetMessageAll,PhyMemSetByte,format,api_heapsize,api
 GLOBAL get_hour_hex,get_min_hex,get_sec_hex,get_day_of_month,get_day_of_week,get_mon_hex,get_year,AddThread,init_float
 GLOBAL TaskLock,TaskUnlock,SubThread,set_mode,VBEDraw_Px,VBEGet_Px,VBEGetBuffer,VBESetBuffer,roll,VBEDraw_Box,listfile
 GLOBAL vfs_check_mount,vfs_mount,vfs_change_disk,vfs_delfile,vfs_change_path,tty_start_cur_moving,tty_stop_cur_moving,vfs_unmount_disk,logk
-GLOBAL tty_get_xsize,tty_get_ysize,api_rename,mouse_support,signal
+GLOBAL tty_get_xsize,tty_get_ysize,api_rename,mouse_support,signal,fork
 [SECTION .text]
 putch:
 push	edx
@@ -1117,4 +1117,8 @@ signal:
 	pop eax
 	pop ecx
 	pop ebx
+	ret
+fork:
+	mov eax,0x4a
+	int 0x36
 	ret
