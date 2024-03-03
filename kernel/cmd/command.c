@@ -23,13 +23,13 @@ extern struct ide_device {
   unsigned char Model[41];     // Model in string.
 } ide_devices[4];
 unsigned char *ramdisk;
-typedef struct BaseAddressRegister {
+typedef struct base_address_register {
   int prefetchable;
   uint8_t *address;
   uint32_t size;
   int type;
-} BaseAddressRegister;
-BaseAddressRegister GetBaseAddressRegister(uint8_t bus, uint8_t device,
+} base_address_register;
+base_address_register get_base_address_register(uint8_t bus, uint8_t device,
                                            uint8_t function, uint8_t bar);
 /* vdisk的RW测试函数 */
 void TestRead(char drive, unsigned char *buffer, unsigned int number,
@@ -179,11 +179,12 @@ int abs(int n) {
   }
 }
 
-void command_run(char *cmdline) {
+int command_run(char *cmdline) {
   char *line = (char *)malloc(strlen(cmdline) + 100);
   sprintf(line,"pfs.bin -c \"%s\"",cmdline);
-  os_execute_shell(line);
+  int status = os_execute_shell(line);
   free(line);
+  return status;
   //   //命令解析器
   //   uint32_t addr;
   //   uint8_t c;
@@ -271,7 +272,7 @@ void command_run(char *cmdline) {
   //     printk("looking for %02x %02x %02x\n", bus, slot, func);
   //     for (int i = 0; i < 6; i++) {
   //       printk("BAR%d:%08x ", i,
-  //              GetBaseAddressRegister(bus, slot, func, i).address);
+  //              get_base_address_register(bus, slot, func, i).address);
   //     }
   //     printk("\n");
   //   } else if (strincmp("CDISK ", cmdline, 6) == 0) {
@@ -909,7 +910,7 @@ void pci_list() {
   //输出PCI表的内容
   for (int line = 0;; pci_drive += 0x110 + 4, line++) {
     if (pci_drive[0] == 0xff)
-      PCI_ClassCode_Print((struct PCI_CONFIG_SPACE_PUCLIC *)(pci_drive + 12));
+      PCI_ClassCode_Print((struct pci_config_space_public *)(pci_drive + 12));
     else
       break;
   }
@@ -1011,7 +1012,7 @@ void mem() {
   int free = 0;
   for (int i = 0; i != 1024 * 768; i++) {
     extern struct PAGE_INFO *pages;
-    if (pages[i].flag == 0)
+    if (pages[i].count == 0)
       free++;
   }
   printk("free vpages:%d free kpages:%d\nfree:%dKB\n", free,

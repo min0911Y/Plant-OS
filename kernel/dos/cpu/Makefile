@@ -3,7 +3,7 @@ out_path_src := ../../obj/
 incpath_src := ../../include/
 TOOLPATH := ../../../tools/
 MAKE     := $(TOOLPATH)make.exe -r
-obj_dos := $(out_path_src)gdtidt.o
+obj_dos := $(out_path_src)gdtidt.o $(out_path_src)farcall.o
 default : $(obj_dos)
 	
 $(out_path_src)%.o : %.c Makefile

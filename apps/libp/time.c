@@ -13,7 +13,7 @@ void UnTimeStamp(uint32_t timestamp, uint32_t *year, uint32_t *month,
                  uint32_t *day, uint32_t *hour, uint32_t *min, uint32_t *sec,
                  uint32_t *yday, uint32_t *mday, uint32_t *wday) {
   timestamp += 28800;
-  uint32_t y = 1900;
+  uint32_t y = 1970;
   for (;; y++) {
     if ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0) {
       timestamp -= LEAP_YEAR_SEC;
@@ -64,10 +64,10 @@ void UnTimeStamp(uint32_t timestamp, uint32_t *year, uint32_t *month,
 
   // 计算一个月中的第几天
   *mday = *day;
-  int totalDays = *yday - 1; // 一年中的第几天，从0开始计数
-  int startYear = 1900;
-  int startWeekday = 1; // 1900年1月1日是星期一
-  for (int year1 = startYear; year1 < *year; year1++) {
+  int totalDays = *yday; // 一年中的第几天，从0开始计数
+  int startYear = 1970;
+  int startWeekday = 1; // 1970年1月1日是星期一
+  for (int year1 = startYear; year1 <= *year; year1++) {
     if ((year1 % 4 == 0 && year1 % 100 != 0) || year1 % 400 == 0) {
       totalDays += 366; // 闰年有366天
     } else {
@@ -86,13 +86,13 @@ struct tm *localtime(time_t *t1) {
   UnTimeStamp(t, &(tm_->tm_year), &(tm_->tm_mon), &(tm_->tm_mday),
               &(tm_->tm_hour), &(tm_->tm_min), &(tm_->tm_sec), &(tm_->tm_yday),
               &(tm_->tm_mday),&(tm_->tm_wday));
-  tm_->tm_year -= 1900;
+  tm_->tm_year -= 1970;
   tm_->tm_mon--;
   return tm_;
 }
 
 void clock_gettime(int *sec1, int *usec1) {
-  int b = clock();
+  int b = clock() * 10;
   *sec1 = b / 1000;
   *usec1 = (b % 1000) * 1000;
 }

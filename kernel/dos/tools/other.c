@@ -15,15 +15,9 @@ uint32_t get_cr0() {
 }
 
 // 设置 cr0 寄存器，参数是页目录的地址
-void set_cr0(uint32_t cr0) {
-  asm volatile("movl %%eax, %%cr0\n" ::"a"(cr0));
-}
-void SwitchPublic() {
-  public_catch = 1;
-}
-void SwitchPrivate() {
-  public_catch = 0;
-}
+void set_cr0(uint32_t cr0) { asm volatile("movl %%eax, %%cr0\n" ::"a"(cr0)); }
+void SwitchPublic() { public_catch = 1; }
+void SwitchPrivate() { public_catch = 0; }
 void disableExp() {
   if (public_catch) {
     DisableExpFlag = 1;
@@ -62,47 +56,44 @@ void SetCatchEip(uint32_t eip) {
   }
 }
 void print_32bits_ascil(unsigned int n);
-//保护模式调用BIOS中断的驱动
-void INT(unsigned char intnum, regs16_t* regs) {
-  irq_mask_set(0);
-  extern unsigned char* IVT;
-  struct SEGMENT_DESCRIPTOR* gdt = (struct SEGMENT_DESCRIPTOR*)ADR_GDT;
-  set_segmdesc(gdt + 1000, 0xffffffff, 0, AR_CODE32_ER);  // CODE32
-  set_segmdesc(gdt + 1001, 0xfffff, 0, AR_CODE16_ER);     // CODE16
-  set_segmdesc(gdt + 1002, 0xfffff, 0, AR_DATA16_RW);     // DATA16
+// 保护模式调用BIOS中断的驱动
+void INT(unsigned char intnum, regs16_t *regs) {
+  extern unsigned char *IVT;
+  struct SEGMENT_DESCRIPTOR *gdt = (struct SEGMENT_DESCRIPTOR *)ADR_GDT;
+ // logk("%08x\n",current_task()->pde);
+  set_segmdesc(gdt + 1000, 0xffffffff, 0, AR_CODE32_ER); // CODE32
+  set_segmdesc(gdt + 1001, 0xfffff, 0, AR_CODE16_ER);    // CODE16
+  set_segmdesc(gdt + 1002, 0xfffff, 0, AR_DATA16_RW);    // DATA16
   memcpy(0, IVT, 0x400);
   int32(intnum, regs);
-  set_segmdesc(gdt + 1000, 0, 0, 0);  // 临时GDT清零
+  set_segmdesc(gdt + 1000, 0, 0, 0); // 临时GDT清零
   set_segmdesc(gdt + 1001, 0, 0, 0);
   set_segmdesc(gdt + 1002, 0, 0, 0);
+  
   set_cr3(current_task()->pde);
-  irq_mask_clear(0);
   io_sti();
 }
-void insert_char(char* str, int pos, char ch) {
+void insert_char(char *str, int pos, char ch) {
   int i;
   for (i = strlen(str); i >= pos; i--) {
     str[i + 1] = str[i];
   }
   str[pos] = ch;
 }
-void delete_char(char* str, int pos) {
+void delete_char(char *str, int pos) {
   int i;
   for (i = pos; i < strlen(str); i++) {
     str[i] = str[i + 1];
   }
 }
-mtask* last_fpu_task = NULL;
-void fpu_disable() {
-  set_cr0(get_cr0() | (CR0_EM | CR0_TS));
-}
-void fpu_enable(mtask* task) {
+mtask *last_fpu_task = NULL;
+void fpu_disable() { set_cr0(get_cr0() | (CR0_EM | CR0_TS)); }
+void fpu_enable(mtask *task) {
   set_cr0(get_cr0() & ~(CR0_EM | CR0_TS));
   if (!task->fpu_flag) {
-    asm volatile(
-        "fnclex \n"
-        "fninit \n");
-    memset(&task->fpu,0,sizeof(fpu_t));
+    asm volatile("fnclex \n"
+                 "fninit \n");
+    memset(&task->fpu, 0, sizeof(fpu_t));
     logk("FPU create state for task 0x%08x\n", task);
   } else {
     asm volatile("frstor (%%eax) \n" ::"a"(&(task->fpu)));
@@ -110,7 +101,7 @@ void fpu_enable(mtask* task) {
   task->fpu_flag = 1;
 }
 void ERROR0(uint32_t eip) {
-  uint32_t* esp = &eip;
+  uint32_t *esp = &eip;
   ERROR(0, "#DE");
   if (public_catch) {
     *esp = CatchEIP;
@@ -119,7 +110,7 @@ void ERROR0(uint32_t eip) {
   }
 }
 void ERROR1(uint32_t eip) {
-  uint32_t* esp = &eip;
+  uint32_t *esp = &eip;
   ERROR(1, "#DB");
   if (public_catch) {
     *esp = CatchEIP;
@@ -128,7 +119,7 @@ void ERROR1(uint32_t eip) {
   }
 }
 void ERROR3(uint32_t eip) {
-  uint32_t* esp = &eip;
+  uint32_t *esp = &eip;
   ERROR(3, "#BP");
   if (public_catch) {
     *esp = CatchEIP;
@@ -137,7 +128,7 @@ void ERROR3(uint32_t eip) {
   }
 }
 void ERROR4(uint32_t eip) {
-  uint32_t* esp = &eip;
+  uint32_t *esp = &eip;
   ERROR(4, "#OF");
   if (public_catch) {
     *esp = CatchEIP;
@@ -146,7 +137,7 @@ void ERROR4(uint32_t eip) {
   }
 }
 void ERROR5(uint32_t eip) {
-  uint32_t* esp = &eip;
+  uint32_t *esp = &eip;
   ERROR(5, "#BR");
   if (public_catch) {
     *esp = CatchEIP;
@@ -155,7 +146,7 @@ void ERROR5(uint32_t eip) {
   }
 }
 void ERROR6(uint32_t eip) {
-  uint32_t* esp = &eip;
+  uint32_t *esp = &eip;
   ERROR(6, "#UD");
   if (public_catch) {
     *esp = CatchEIP;
@@ -179,7 +170,7 @@ void ERROR7(uint32_t eip) {
   fpu_enable(current_task());
 }
 void ERROR8(uint32_t eip) {
-  uint32_t* esp = &eip;
+  uint32_t *esp = &eip;
   ERROR(8, "#DF");
   if (public_catch) {
     *esp = CatchEIP;
@@ -188,7 +179,7 @@ void ERROR8(uint32_t eip) {
   }
 }
 void ERROR9(uint32_t eip) {
-  uint32_t* esp = &eip;
+  uint32_t *esp = &eip;
   ERROR(9, "#MF");
   if (public_catch) {
     *esp = CatchEIP;
@@ -197,7 +188,7 @@ void ERROR9(uint32_t eip) {
   }
 }
 void ERROR10(uint32_t eip) {
-  uint32_t* esp = &eip;
+  uint32_t *esp = &eip;
   ERROR(10, "#TS");
   if (public_catch) {
     *esp = CatchEIP;
@@ -206,7 +197,7 @@ void ERROR10(uint32_t eip) {
   }
 }
 void ERROR11(uint32_t eip) {
-  uint32_t* esp = &eip;
+  uint32_t *esp = &eip;
   ERROR(11, "#NP");
   if (public_catch) {
     *esp = CatchEIP;
@@ -215,7 +206,7 @@ void ERROR11(uint32_t eip) {
   }
 }
 void ERROR12(uint32_t eip) {
-  uint32_t* esp = &eip;
+  uint32_t *esp = &eip;
   ERROR(12, "#SS");
   if (public_catch) {
     *esp = CatchEIP;
@@ -225,10 +216,11 @@ void ERROR12(uint32_t eip) {
 }
 void ERROR13(uint32_t eip) {
   printk("ERROR GP!!!!");
-  for(;;);
+  for (;;)
+    ;
 }
 void ERROR16(uint32_t eip) {
-  uint32_t* esp = &eip;
+  uint32_t *esp = &eip;
   ERROR(16, "#MF");
   if (public_catch) {
     *esp = CatchEIP;
@@ -237,7 +229,7 @@ void ERROR16(uint32_t eip) {
   }
 }
 void ERROR17(uint32_t eip) {
-  uint32_t* esp = &eip;
+  uint32_t *esp = &eip;
   ERROR(17, "#AC");
   if (public_catch) {
     *esp = CatchEIP;
@@ -246,7 +238,7 @@ void ERROR17(uint32_t eip) {
   }
 }
 void ERROR18(uint32_t eip) {
-  uint32_t* esp = &eip;
+  uint32_t *esp = &eip;
   ERROR(18, "#MC");
   if (public_catch) {
     *esp = CatchEIP;
@@ -255,7 +247,7 @@ void ERROR18(uint32_t eip) {
   }
 }
 void ERROR19(uint32_t eip) {
-  uint32_t* esp = &eip;
+  uint32_t *esp = &eip;
   ERROR(19, "#XF");
   if (public_catch) {
     *esp = CatchEIP;
@@ -263,14 +255,14 @@ void ERROR19(uint32_t eip) {
     *esp = current_task()->CatchEIP;
   }
 }
-void ERROR(int CODE, char* TIPS) {
+void ERROR(int CODE, char *TIPS) {
   if (public_catch) {
     flagOfexp = 1;
   } else {
     current_task()->flagOfexp = 1;
   }
   logk("DisableExpFlag = %d\n",
-         public_catch ? DisableExpFlag : current_task()->DisableExpFlag);
+       public_catch ? DisableExpFlag : current_task()->DisableExpFlag);
   if (public_catch) {
     if (DisableExpFlag) {
       return;
@@ -291,9 +283,9 @@ void ERROR(int CODE, char* TIPS) {
   int i, j;
   for (i = 0; i < 160; i++) {
     for (j = 0; j < 25; j++) {
-      //将屏幕背景色改为蓝底白字
+      // 将屏幕背景色改为蓝底白字
       if (i % 2 == 1) {
-        *(char*)(0xb8000 + j * 160 + i) = 0x1f;
+        *(char *)(0xb8000 + j * 160 + i) = 0x1f;
       }
     }
   }
@@ -309,16 +301,17 @@ void ERROR(int CODE, char* TIPS) {
   printk("Error Code:%08x\n", CODE);
   printk("Error Message:%s\n", TIPS);
 
- // printk("Task sel=%d\n", current_task()->sel);
+  // printk("Task sel=%d\n", current_task()->sel);
   io_cli();
   for (;;) {
   }
 }
 void KILLAPP(int eip, int ec) {
+  printk("KILL APP %08x %d\n",eip,ec);
   // while (FindForCount(1, vfs_now->path) != NULL) {
   //   // printk("%d\n",vfs_now->path->ctl->all);
-  //   page_free(FindForCount(vfs_now->path->ctl->all, vfs_now->path)->val, 255);
-  //   DeleteVal(vfs_now->path->ctl->all, vfs_now->path);
+  //   page_free(FindForCount(vfs_now->path->ctl->all, vfs_now->path)->val,
+  //   255); DeleteVal(vfs_now->path->ctl->all, vfs_now->path);
   // }
   // DeleteList(vfs_now->path);
   // page_free((void*)vfs_now, sizeof(vfs_t));
@@ -329,18 +322,19 @@ void KILLAPP(int eip, int ec) {
   // if (ec == 0xff) {  // 返回系统快捷键
   //   printk("\nSystem Protect:Break Key(F1).\n");
   // } else {
-  //   printk("\nSystem Protect:The program name:%s TASK ID:%d EC:%x EIP:%08x\n",
+  //   printk("\nSystem Protect:The program name:%s TASK ID:%d EC:%x
+  //   EIP:%08x\n",
   //          task->name, task->sel / 8 - 103, ec, eip);
   // }
-//  task_delete(task);
+  //  task_delete(task);
   for (;;)
     ;
 }
 void KILLAPP0(int ec, int tn) {
   // while (FindForCount(1, vfs_now->path) != NULL) {
   //   // printk("%d\n",vfs_now->path->ctl->all);
-  //   page_free(FindForCount(vfs_now->path->ctl->all, vfs_now->path)->val, 255);
-  //   DeleteVal(vfs_now->path->ctl->all, vfs_now->path);
+  //   page_free(FindForCount(vfs_now->path->ctl->all, vfs_now->path)->val,
+  //   255); DeleteVal(vfs_now->path->ctl->all, vfs_now->path);
   // }
   // DeleteList(vfs_now->path);
   // page_free((void*)vfs_now, sizeof(vfs_t));
@@ -382,7 +376,7 @@ void Print_Hex(unsigned x) {
 void Clear_A_Line() {
   // printk("\n");
 }
-void getCPUBrand(char* cBrand) {
+void getCPUBrand(char *cBrand) {
   print_32bits_ascil(get_cpu4(0x80000002));
   print_32bits_ascil(get_cpu5(0x80000002));
   print_32bits_ascil(get_cpu6(0x80000002));
@@ -415,7 +409,7 @@ char num2ascii(char c) {
   }
   return c;
 }
-void strtoupper(char* str) {
+void strtoupper(char *str) {
   while (*str != '\0') {
     if (*str >= 'a' && *str <= 'z') {
       *str -= 32;
@@ -423,8 +417,8 @@ void strtoupper(char* str) {
     str++;
   }
 }
-int GetCHorEN(unsigned char* str) {
-  //获取这个字符是中文全角还是英文半角
+int GetCHorEN(unsigned char *str) {
+  // 获取这个字符是中文全角还是英文半角
   if (str[0] > 0x80 && str[1] > 0x80) {
     return 1;
   } else if (str[0] > 0x80 && str[1] < 0x80) {
@@ -433,8 +427,8 @@ int GetCHorEN(unsigned char* str) {
     return 0;
   }
 }
-void clean(char* s, int len) {
-  //清理某个内存区域（全部置0）
+void clean(char *s, int len) {
+  // 清理某个内存区域（全部置0）
   int i;
   for (i = 0; i != len; i++) {
     s[i] = 0;

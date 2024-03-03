@@ -13,7 +13,7 @@ GLOBAL haveMsg,PhyMemGetByte,GetMessageAll,PhyMemSetByte,format,api_heapsize,api
 GLOBAL get_hour_hex,get_min_hex,get_sec_hex,get_day_of_month,get_day_of_week,get_mon_hex,get_year,AddThread,init_float
 GLOBAL TaskLock,TaskUnlock,SubThread,set_mode,VBEDraw_Px,VBEGet_Px,VBEGetBuffer,VBESetBuffer,roll,VBEDraw_Box,listfile
 GLOBAL vfs_check_mount,vfs_mount,vfs_change_disk,vfs_delfile,vfs_change_path,tty_start_cur_moving,tty_stop_cur_moving,vfs_unmount_disk,logk
-GLOBAL tty_get_xsize,tty_get_ysize,api_rename,mouse_support,signal,fork
+GLOBAL tty_get_xsize,tty_get_ysize,api_rename,mouse_support,signal,fork,waittid,do_test,mouse_enable,mouse_dat_status,mouse_dat_get
 [SECTION .text]
 putch:
 push	edx
@@ -255,11 +255,9 @@ pop	edx
 ret
 system:
 push edx
-push eax
 mov eax,0x19
-mov edx,[ss:esp+12]
+mov edx,[ss:esp+8]
 int 36h
-pop eax
 pop edx
 ret
 
@@ -558,6 +556,7 @@ NowTaskID:
 
 _exit:
 	mov	eax,0x1e
+	mov ebx,[esp + 4]
 	int 36h
 	ret
 	;jmp	$
@@ -993,16 +992,14 @@ api_current_drive:
 	int 0x36
 	ret
 exec:
-	push eax
 	push ebx
 	push ecx
 	mov eax,0x39
-	mov ebx,[esp + 4 + 12]
-	mov ecx,[esp + 8 + 12]
+	mov ebx,[esp + 4 + 8]
+	mov ecx,[esp + 8 + 8]
 	int 0x36
 	pop ecx
 	pop ebx
-	pop eax
 	ret
 clear:
 	push eax
@@ -1120,5 +1117,33 @@ signal:
 	ret
 fork:
 	mov eax,0x4a
+	int 0x36
+	ret
+waittid:
+	push ebx
+	mov eax,0x4b
+	mov ebx,[esp + 4 + 4]
+	int 0x36
+	pop ebx
+	ret
+do_test:
+	push ebx
+	mov eax,0x4c
+	mov ebx,[esp +4 +4] ; eip
+	int 0x36
+	pop ebx
+	ret
+mouse_enable:
+	push eax
+	mov eax,0x4d
+	int 0x36
+	pop eax
+	ret
+mouse_dat_status:
+	mov eax,0x4e
+	int 0x36
+	ret
+mouse_dat_get:
+	mov eax,0x4f
 	int 0x36
 	ret

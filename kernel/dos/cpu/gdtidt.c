@@ -45,6 +45,7 @@ void init_gdtidt(void) {
   set_segmdesc(gdt + 2, 0xffffffff, 0x00000000, AR_CODE32_ER); 
   set_segmdesc(gdt + 3, 0xffffffff, 0x00000000, AR_DATA32_RW | 3 << 5);
   set_segmdesc(gdt + 4, 0xffffffff, 0x00000000, AR_CODE32_ER | 3 << 5); 
+  set_segmdesc(gdt + 5, 0xffffffff, 0x70000000, AR_DATA32_RW | 3 << 5); 
   load_gdtr(LIMIT_GDT, ADR_GDT);  //加载GDT表
 
   /* IDT */

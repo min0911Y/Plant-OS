@@ -59,7 +59,7 @@ bool have_vdisk(char drive) {
   }
 }
 // 基于vdisk的通用读写
-#define SECTORS_ONCE 255
+#define SECTORS_ONCE 8
 void Disk_Read(unsigned int lba, unsigned int number, void *buffer,
                char drive) {
   if (have_vdisk(drive)) {

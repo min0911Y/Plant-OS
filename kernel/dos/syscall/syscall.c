@@ -3,7 +3,7 @@
 #define DIDX(addr) (((unsigned)addr >> 22) & 0x3ff) // 获取 addr 的页目录索引
 #define TIDX(addr) (((unsigned)addr >> 12) & 0x3ff) // 获取 addr 的页表索引
 #define PAGE(idx) ((unsigned)idx << 12) // 获取页索引 idx 对应的页开始的位置
-
+unsigned div_round_up(unsigned num, unsigned size);
 extern struct PAGE_INFO *pages;
 void kbd_press(uint8_t dat, uint32_t task) {
   fifo8_put(get_task(task)->Pkeyfifo, dat);
@@ -33,9 +33,7 @@ void user_thread_into() {
   }
 }
 
-void test(unsigned int b) {
-  return;
-}
+void test(unsigned int b) { return; }
 void *malloc_app_heap(void *alloc_addr, uint32_t ds_base, uint32_t size) {
   memory *mem = (memory *)alloc_addr;
   mem->freeinf = (freeinfo *)((char *)mem->freeinf + ds_base);
@@ -78,8 +76,8 @@ void free_app_heap(void *alloc_addr, uint32_t ds_base, void *p) {
   return;
 }
 enum { EDI, ESI, EBP, ESP, EBX, EDX, ECX, EAX };
-void inthandler36(int edi, int esi, int ebp, int esp, int ebx,
-                  int edx, int ecx, int eax) {
+void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
+                  int eax) {
   // PowerintDOS API
   io_sti();
   mtask *task = current_task();
@@ -220,7 +218,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx,
   } else if (eax == 0x19) {
     logk("--------------------------------\n");
     logk("c: %08x\n", task->pde);
-    command_run((char *)(edx + ds_base));
+    reg[EAX] = command_run((char *)(edx + ds_base));
     // asm("xchg %bx,%bx");
     logk("n: %08x\n", task->pde);
     logk("--------------------------------\n");
@@ -322,7 +320,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx,
     }
     //  for(;;);
     asm volatile("nop");
-    task_kill(task->tid);
+    task_exit(ebx);
     for (;;)
       ;
   } else if (eax == 0x20) {
@@ -333,7 +331,15 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx,
       } else if (ebx == 0x02) {
         reg[EAX] = check_vbe_mode(ecx, (struct VBEINFO *)VBEINFO_ADDRESS);
       } else if (ebx == 0x05) {
-        reg[EAX] = set_mode(ecx, edx, 32);
+        unsigned v = set_mode(ecx, edx, 32);
+        logk("reg[EAX] = %08x\n", v);
+        reg[EAX] = v;
+        unsigned count = div_round_up(ecx * edx * 4, 0x1000);
+        for (int i = 0; i < count; i++) {
+          logk("%08x\n", v + i * 0x1000);
+          page_set_physics_attr(v + i * 0x1000, v + i * 0x1000,
+                                7); // PG_P | PG_USU | PG_RWW
+        }
       }
     }
   } else if (eax == 0x21) {
@@ -376,16 +382,25 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx,
       t->TTY = current_task()->TTY;
       t->nfs = task->nfs;
       t->ptid = task->tid;
+      
       for (int i = DIDX(0x70000000) * 4; i < 0x1000; i += 4) {
         unsigned int *pde_entry = (unsigned int *)(current_task()->pde + i);
         unsigned p = *pde_entry & (0xfffff000);
         for (int j = 0; j < 0x1000; j += 4) {
           unsigned int *pte_entry = (unsigned int *)(p + j);
-          if (pages[IDX(*pte_entry)].count)
-            pages[IDX(*pte_entry)].count--;
+
+          if (pages[IDX(*pte_entry)].count == 2 ||
+              pages[IDX(*pte_entry)].count == 3) {
+            if (pages[IDX(*pte_entry)].count == 3) {
+              //logk("3 %08x\n", get_line_address(i / 4, j / 4, 0));
+            } else {
+              pages[IDX(*pte_entry)].count--;
+            }
+          }
         }
         // pages[IDX(*pde_entry)].count--;
       }
+      
       unsigned *r = page_malloc_one_no_mark();
       r[0] = esi;
       r[1] = edx;
@@ -499,10 +514,10 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx,
       SDraw_Box((vram_t *)vbe->vram, ebx, ecx, edx, esi, edi, vbe->xsize);
     }
   } else if (eax == 0x2d) {
-    reg[EAX] = ntp_time_stamp(get_year(), get_mon_hex(), get_day_of_month(),
-                              get_hour_hex(), get_min_hex(), get_sec_hex());
+    reg[EAX] = UTCTimeStamp(get_year(), get_mon_hex(), get_day_of_month(),
+                            get_hour_hex(), get_min_hex(), get_sec_hex());
   } else if (eax == 0x2e) {
-    reg[EAX] = timerctl.count;
+    reg[EAX] = timerctl.count * 10;
   } else if (eax == 0x2f) {
     task->fpu_flag = 0;
   } else if (eax == 0x30) {
@@ -527,11 +542,12 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx,
     unsigned page_len = div_round_up(ebx, 0x1000);
     unsigned start_addr =
         ((task->alloc_addr + task->alloc_size - 1) & 0xfffff000);
-    page_links(start_addr+0x1000,page_len);
+    page_links(start_addr + 0x1000, page_len);
     // for (int i = 0; i < page_len; i++) {
     //   page_link(start_addr + (i + 1) * 0x1000);
     // }
     task->alloc_size += ebx;
+    logk("ok\n");
   } else if (eax == 0x36) {
     char *s = env_read(ebx + ds_base);
     if (s) {
@@ -545,7 +561,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx,
   } else if (eax == 0x38) {
     reg[EAX] = task->nfs->drive;
   } else if (eax == 0x39) {
-    os_execute(ebx, ecx);
+    reg[EAX] = os_execute(ebx, ecx);
   } else if (eax == 0x3a) {
     clear();
   } else if (eax == 0x3b) {
@@ -560,7 +576,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx,
     extern struct PAGE_INFO *pages;
     uint32_t r = 0;
     for (int i = 0; i < div_round_up(memsize, 0x1000); i++) {
-      if (pages[i].flag == 1) {
+      if (pages[i].count) {
         r++;
       }
     }
@@ -584,9 +600,24 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx,
   } else if (eax == 0x48) {
     logk(ebx);
   } else if (eax == 0x49) {
-    set_signal_handler(ebx,ecx);
+    set_signal_handler(ebx, ecx);
   } else if (eax == 0x4a) {
     reg[EAX] = task_fork();
+  } else if (eax == 0x4b) {
+    reg[EAX] = waittid(ebx);
+  } else if (eax == 0x4c) {
+    extern unsigned m_eip, m_cr3;
+    m_eip = reg[EBX];
+    m_cr3 = current_task()->pde;
+  } else if (eax == 0x4d) {
+    mouse_ready(&mdec);
+  } else if (eax == 0x4e) {
+    unsigned i;
+    i = fifo8_status(task_get_mouse_fifo(task));
+
+    reg[EAX] = i;
+  } else if (eax == 0x4f) {
+    reg[EAX] = fifo8_get(task_get_mouse_fifo(task));
   }
   return;
 }

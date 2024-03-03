@@ -24,6 +24,7 @@ int atoi(const char * nptr);
 int abs(int a);
 double atof(const char *s);
 void atexit(void (*func)(void));
+void *calloc(size_t m, size_t n) ;
 #define EXIT_SUCCESS 0
 #define EXIT_FAILURE 1
 #ifdef __cplusplus

@@ -143,8 +143,7 @@ static int os_execute (lua_State *L) {
   const char *cmd = luaL_optstring(L, 1, NULL);
   int stat;
   errno = 0;
-  stat = 0;
-  system(cmd);
+  stat = system(cmd);
   if (cmd != NULL)
     return luaL_execresult(L, stat);
   else {
@@ -400,7 +399,7 @@ static int os_exit (lua_State *L) {
     status = (int)luaL_optinteger(L, 1, EXIT_SUCCESS);
   if (lua_toboolean(L, 2))
     lua_close(L);
-  if (L) exit();  /* 'if' to avoid warnings for unreachable 'return' */
+  if (L) exit(status);  /* 'if' to avoid warnings for unreachable 'return' */
   return 0;
 }
 

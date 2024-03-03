@@ -412,17 +412,10 @@ void *realloc(void *ptr, uint32_t size) {
   }
   return new;
 }
-// 基于堆栈的分配
+
 void *kmalloc(int size) {
   void *p;
-  if (current_task()->mm != NULL && size < 4 * 1024 - sizeof(int)) {
-    p = mem_alloc(current_task()->mm, size + sizeof(int));
-    if (current_task()->mm->memerrno != ERRNO_NOPE) {
-      p = NULL;
-    }
-  } else {
-    p = NULL;
-  }
+  p = page_malloc(size + sizeof(int));
   if (p == NULL)
     return NULL;
   *(int *)p = size;
@@ -431,16 +424,14 @@ void *kmalloc(int size) {
 void kfree(void *p) {
   if (p == NULL)
     return;
-  int size = *(int *)((char *)p - sizeof(int));
-  if (current_task()->mm != NULL && size < 4 * 1024 - sizeof(int)) {
-    mem_free(current_task()->mm, (char *)p - sizeof(int), size + sizeof(int));
-  }
+  int size = *(int *)(p-sizeof(int));
+  page_free((char *)p - sizeof(int), size + sizeof(int));
 }
 void* krealloc(void* ptr, uint32_t size) {
   void* new = kmalloc(size);
   if (ptr) {
     memcpy(new, ptr, *(int*)((int)ptr - 4));
-    free(ptr);
+    kfree(ptr);
   }
   return new;
 }

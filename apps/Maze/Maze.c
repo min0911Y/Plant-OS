@@ -105,7 +105,7 @@ bool IsKeyPressed(int nVirtKey) {
   return false;
 }
 
-#define TICK_LEN (20)
+#define TICK_LEN (2)
 #define INPUT_FR (60)
 #define INPUT_CNT (INPUT_FR / TICK_LEN)
 

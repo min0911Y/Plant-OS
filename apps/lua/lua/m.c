@@ -579,7 +579,7 @@ static int lua_gotoxy(lua_State* L) {
   return 0;
 }
 static int lua_exit(lua_State* L) {
-  exit();
+  exit(0);
   return 0;
 }
 static int lua_forever(lua_State* L) {
@@ -611,11 +611,9 @@ static void ThreadHandler(lua_State *L) {
   printf("%08x\n",L);
   for(;;);
 }
-static int lua_Addthread(lua_State *L) {
-  unsigned int *stack = (unsigned int *)(malloc(16*1024)+16*1024);
-  stack[-1] = 0x12345678;
-  AddThread ("Thread",ThreadHandler,(unsigned int)(stack) - 4);
-  return 0;
+static int lua_fork(lua_State *L) {
+  lua_pushinteger(L,fork());
+  return 1;
 }
 static int LChr(lua_State* L) {
   char result[2] = {lua_tointeger(L,1),0};
@@ -659,7 +657,7 @@ static const struct luaL_Reg os_lib[] = {{"exit", lua_exit},
                                          {"forever", lua_forever},
                                          {"GetIPCMessage", lua_ipcMessage}, // 传模式 1返回字符串 0就是int
                                          {"MessageLength", lua_MessageLength},
-                                         {"AddThread",lua_Addthread},
+                                         {"fork",lua_fork},
                                          {NULL, NULL}};
 /*
 ** Check whether 'status' signals a syntax error and the error
@@ -832,7 +830,7 @@ static int pmain (lua_State *L) {
   luaopen_base(L);
   luaL_setfuncs(L, my_lib_bsp, 0);
   luaL_requiref(L, "pio", open_io, 1);
-  //luaL_requiref(L, "os", open_os, 1);
+  luaL_requiref(L, "pl_api", open_os, 1);
   luaL_openlibs(L);  /* open standard libraries */
   createargtable(L, argv, argc, script);  /* create table 'arg' */
   lua_gc(L, LUA_GCGEN, 0, 0);  /* GC in generational mode */
@@ -932,13 +930,13 @@ static TString **tmname;
 static void fatal(const char* message)
 {
  fprintf(stderr,"%s: %s\n",progname,message);
- exit();
+ exit(1);
 }
 
 static void cannot(const char* what)
 {
  fprintf(stderr,"%s: cannot %s %s: %s\n",progname,what,output,strerror(errno));
- exit();
+ exit(1);
 }
 
 static void usage(const char* message)
@@ -958,7 +956,7 @@ static void usage(const char* message)
   "  --       stop handling options\n"
   "  -        stop handling options and process stdin\n"
   ,progname,Output);
- exit();
+ exit(1);
 }
 
 #define IS(s) (strcmp(argv[i],s)==0)
@@ -1006,7 +1004,7 @@ static int doargs(int argc, char* argv[])
  if (version)
  {
   printf("%s\n",LUA_COPYRIGHT);
-  if (version==argc-1) exit();
+  if (version==argc-1) exit(0);
  }
  return i;
 }

@@ -57,7 +57,7 @@ asm_error5:
 asm_error6:
 	cli
 	mov ecx,6
-	mov edx, dword [esp+4]
+	mov edx, dword [esp]
 	mov	ax,fs
 	cmp	ax,1*8	; 是不是在程序产生的
 	jne	KILLAPP1

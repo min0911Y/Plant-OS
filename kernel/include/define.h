@@ -47,8 +47,7 @@ extern struct TIMERCTL timerctl;
 extern unsigned int memsize;
 extern uint32_t running_mode;
 struct PAGE_INFO {
-  uint8_t flag : 1;
-  uint8_t task_id : 7;
+  uint8_t task_id;
   uint8_t count;
 } __attribute__((packed));
 
@@ -201,7 +200,7 @@ typedef struct {
   uint32_t eip;
 } stack_frame;
 enum STATE {
-  EMPTY,RUNNING,WAITING,SLEEPING,WILL_EMPTY,READY
+  EMPTY,RUNNING,WAITING,SLEEPING,WILL_EMPTY,READY,DIED
 };
 typedef struct mtask {
   stack_frame *esp;
@@ -240,6 +239,8 @@ typedef struct mtask {
   uint32_t waittid;
   int ready; // 如果为waiting 则无视wating
   int sigint_up;
+  uint8_t train; // 轮询
+  unsigned status;
   unsigned signal;
   unsigned handler[30];
 } _packed mtask;
@@ -270,10 +271,11 @@ typedef struct intr_frame_t {
 #define PG_P 1
 #define PG_USU 4
 #define PG_RWW 2
+#define PG_PCD 1 << 4
 #define PDE_ADDRESS 0x400000
-#define PTE_ADDRESS 0x401000
-#define PAGE_END 0x801000
-#define PAGE_MANNAGER 0x801000
+#define PTE_ADDRESS (PDE_ADDRESS+0x1000)
+#define PAGE_END (PTE_ADDRESS + 0x400000)
+#define PAGE_MANNAGER PAGE_END
 struct FIFO8 {
   unsigned char *buf;
   int p, q, size, free, flags;
@@ -625,7 +627,7 @@ struct MOUSE_DEC {
   int sleep;
   char roll;
 };
-struct PCI_CONFIG_SPACE_PUCLIC { //用64个字节描述
+struct pci_config_space_public {
   unsigned short VendorID;
   unsigned short DeviceID;
   unsigned short Command;
@@ -823,7 +825,7 @@ struct EthernetFrame_tail {
 // ARP
 #define ARP_PROTOCOL 0x0806
 #define MAX_ARP_TABLE 256
-#define ARP_WAITTIME 10
+#define ARP_WAITTIME 1
 struct ARPMessage {
   uint16_t hardwareType;
   uint16_t protocol;

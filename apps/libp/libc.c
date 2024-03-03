@@ -32,12 +32,12 @@ int strcmp(const char *s1, const char *s2) {
   }
   return *s1 - *s2;
 }
-char *strdup(const char *s)
-{
-	size_t l = strlen(s);
-	char *d = malloc(l+1);
-	if (!d) return NULL;
-	return memcpy(d, s, l+1);
+char *strdup(const char *s) {
+  size_t l = strlen(s);
+  char *d = malloc(l + 1);
+  if (!d)
+    return NULL;
+  return memcpy(d, s, l + 1);
 }
 // strcpy
 char *strcpy(char *dest, const char *src) {
@@ -303,34 +303,7 @@ void *memcpy(void *dest, const void *src, size_t n) {
     *d++ = *s++;
   return dest;
 }
-uint64_t __udivmoddi4(uint64_t num, uint64_t den, uint64_t *rem_p) {
-  uint64_t quot = 0, qbit = 1;
 
-  if (den == 0) {
-    __asm__ __volatile__("int $0");
-    return 0; /* If trap returns... */
-  }
-
-  /* Left-justify denominator and count shift */
-  while ((int64_t)den >= 0) {
-    den <<= 1;
-    qbit <<= 1;
-  }
-
-  while (qbit) {
-    if (den <= num) {
-      num -= den;
-      quot += qbit;
-    }
-    den >>= 1;
-    qbit >>= 1;
-  }
-
-  if (rem_p)
-    *rem_p = num;
-
-  return quot;
-}
 int putc(int ch, FILE *fp) { return fputc(ch, fp); }
 int strcasecmp(const char *_l, const char *_r) {
   const unsigned char *l = (void *)_l, *r = (void *)_r;
@@ -362,7 +335,7 @@ char *strsep(char **str, const char *sep) {
 #define ALIGN (sizeof(size_t) - 1)
 #define ONES ((size_t)-1 / UCHAR_MAX)
 #define HIGHS (ONES * (UCHAR_MAX / 2 + 1))
-#define HASZERO(x) ((x)-ONES & ~(x)&HIGHS)
+#define HASZERO(x) ((x)-ONES & ~(x) & HIGHS)
 size_t strlcpy(char *d, const char *s, size_t n) {
   char *d0 = d;
   size_t *wd;
@@ -1690,7 +1663,7 @@ void rename(char *filename1, char *filename2) {
   // char *s = (char *)malloc(strlen(filename1) + strlen(filename2) + 9);
   // sprintf(s, "rename %s %s", filename1, filename2);
   // system(s);
-  api_rename(filename1,filename2);
+  api_rename(filename1, filename2);
 }
 
 static char *aday[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
@@ -1769,7 +1742,7 @@ size_t strftime(char *s, size_t max, const char *fmt, const struct tm *t) {
 
       case 'c':
         strfmt(r, "%0 %0 %2 %2:%2:%2 %4", aday[t->tm_wday], amonth[t->tm_mon],
-               t->tm_mday, t->tm_hour, t->tm_min, t->tm_sec, t->tm_year + 1900);
+               t->tm_mday, t->tm_hour, t->tm_min, t->tm_sec, t->tm_year + 1970);
         break;
 
       case 'd':
@@ -1836,7 +1809,7 @@ size_t strftime(char *s, size_t max, const char *fmt, const struct tm *t) {
 
       case 'x':
         strfmt(r, "%3s %3s %2 %4", aday[t->tm_wday], amonth[t->tm_mon],
-               t->tm_mday, t->tm_year + 1900);
+               t->tm_mday, t->tm_year + 1970);
         break;
 
       case 'X':
@@ -1848,7 +1821,7 @@ size_t strftime(char *s, size_t max, const char *fmt, const struct tm *t) {
         break;
 
       case 'Y':
-        strfmt(r, "%4", t->tm_year + 1900);
+        strfmt(r, "%4", t->tm_year + 1970);
         break;
 
       case 'Z':
@@ -2252,24 +2225,24 @@ unsigned long long strtoull(const char *nptr, char **endptr, int base) {
 }
 int atoi(const char *nptr) { return (int)strtol(nptr, NULL, 10); }
 
-int _Znaj(uint32_t size) {
-  // printf("_Znaj:%d\n", size);
-  return malloc(size);
-}
-void _ZdaPv(void *ptr) {
-  // printf("_ZdaPv:%08x\n", ptr);
-  free(ptr);
-}
-//_ZdlPvj
-void _ZdlPvj(void *ptr, uint32_t size) {
-  // printf("_ZdlPvj %08x %d\n", ptr, size);
-  free(ptr);
-}
-//_Znwj
-void *_Znwj(uint32_t size) {
-  // printf("_Znwj:%d\n", size);
-  return malloc(size);
-}
+// int _Znaj(uint32_t size) {
+//   // printf("_Znaj:%d\n", size);
+//   return malloc(size);
+// }
+// void _ZdaPv(void *ptr) {
+//   // printf("_ZdaPv:%08x\n", ptr);
+//   free(ptr);
+// }
+// //_ZdlPvj
+// void _ZdlPvj(void *ptr, uint32_t size) {
+//   // printf("_ZdlPvj %08x %d\n", ptr, size);
+//   free(ptr);
+// }
+// //_Znwj
+// void *_Znwj(uint32_t size) {
+//   // printf("_Znwj:%d\n", size);
+//   return malloc(size);
+// }
 void *realloc(void *ptr, uint32_t size) {
   void *new = malloc(size);
   if (ptr) {
@@ -2752,34 +2725,7 @@ double fmod(double x, double y) {
   ux.i = uxi;
   return ux.f;
 }
-int64_t __divmoddi4(int64_t num, int64_t den, int64_t *rem_p) {
-  int64_t quot = 0, qbit = 1;
 
-  if (den == 0) {
-    __asm__ __volatile__("int $0");
-    return 0; /* If trap returns... */
-  }
-
-  /* Left-justify denominator and count shift */
-  while ((int64_t)den >= 0) {
-    den <<= 1;
-    qbit <<= 1;
-  }
-
-  while (qbit) {
-    if (den <= num) {
-      num -= den;
-      quot += qbit;
-    }
-    den >>= 1;
-    qbit >>= 1;
-  }
-
-  if (rem_p)
-    *rem_p = num;
-
-  return quot;
-}
 static const double ivln10hi =
                         4.34294481878168880939e-01, /* 0x3fdbcb7b, 0x15200000 */
     ivln10lo = 2.50829467116452752298e-11,          /* 0x3dbb9438, 0xca9aadd5 */
@@ -2987,7 +2933,7 @@ double strtod(const char *nptr, char **endptr) {
 
   return number;
 }
-void abort(void) { exit(); }
+void abort(void) { exit(-1); }
 
 const char *strstr(const char *p1, const char *p2) {
   char *s1 = (char *)p1;
@@ -4178,7 +4124,7 @@ int vsnprintf(char *buf, size_t n, const char *fmt, va_list ap) {
           slen = strlen(sarg);
           goto is_string;
 
-        is_string : {
+        is_string: {
           char sch;
           int i;
 
@@ -4900,8 +4846,8 @@ void init_mem() {
   //  printf("total size = %08x\n",total_size);
   flag = 1;
 }
-void *malloc(int size) {
 
+void *malloc(int size) {
   if (flag) {
     void *p = mem_alloc_nb(mm, size + sizeof(int), 16);
     *(int *)p = size;
@@ -4931,8 +4877,8 @@ int fseek(FILE *fp, int offset, int whence) {
   return 0;
 }
 long ftell(FILE *stream) { return stream->p; }
-#define CANREAD(flag) ((flag)&READ || (flag)&PLUS)
-#define CANWRITE(flag) ((flag)&WRITE || (flag)&PLUS || (flag)&APPEND)
+#define CANREAD(flag) ((flag) & READ || (flag) & PLUS)
+#define CANWRITE(flag) ((flag) & WRITE || (flag) & PLUS || (flag) & APPEND)
 FILE *fopen(char *filename, char *mode) {
   unsigned int flag = 0;
   FILE *fp = (FILE *)malloc(sizeof(FILE));
@@ -5112,7 +5058,8 @@ char *fgets(char *str, int n, FILE *stream) {
       scan(str, n);
       return str;
     } else {
-      for (int i = 0; i < n; i++) {
+      int i;
+      for (i = 0; i < n; i++) {
         unsigned int ch = fgetc(stream);
         if (ch == EOF) {
           if (i == 0) {
@@ -5122,10 +5069,13 @@ char *fgets(char *str, int n, FILE *stream) {
           }
         }
         if (ch == '\n') {
+          str[i] = ch;
+          i++;
           break;
         }
         str[i] = ch;
       }
+      str[i] = 0;
       return str;
     }
   }
@@ -5182,7 +5132,4 @@ int ungetc(int c, FILE *fp) {
     return c;
   }
 }
-double atof(const char *s)
-{
-	return strtod(s, 0);
-}
+double atof(const char *s) { return strtod(s, 0); }

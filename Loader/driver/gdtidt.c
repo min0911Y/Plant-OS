@@ -3,6 +3,7 @@
 //  Copyright (C) 2021-2022 zhouzhihao & min0911_
 //  ------------------------------------------------
 #include <dosldr.h>
+void null_inthandler();
 void set_segmdesc(struct SEGMENT_DESCRIPTOR *sd, unsigned int limit, int base,
                   int ar) {
   if (limit > 0xfffff) {
@@ -40,19 +41,22 @@ void init_gdtidt(void) {
   set_segmdesc(gdt + 1, 0xffffffff, 0x00000000, AR_DATA32_RW);
   set_segmdesc(gdt + 2, 0xffffffff, 0x00000000, AR_CODE32_ER);
   set_segmdesc(gdt + 4, 0xffffffff, 0x00000000, AR_CODE32_ER);
-  load_gdtr(LIMIT_GDT, ADR_GDT); //加载GDT表
+  load_gdtr(LIMIT_GDT, ADR_GDT); // 加载GDT表
 
   /* IDT */
   for (i = 0; i <= LIMIT_IDT / 8; i++) {
     set_gatedesc(idt + i, 0, 0, 0);
   }
-  load_idtr(LIMIT_IDT, ADR_IDT); //加载IDT表
+  load_idtr(LIMIT_IDT, ADR_IDT); // 加载IDT表
   /* IDT初始化*/
-
+  for (int i = 0; i < 0xff; i++) {
+    // 为了防止报#GP异常，将所有中断处理函数的地址设置为0
+    set_gatedesc(idt + i, (int)null_inthandler, 2 * 8, AR_INTGATE32);
+  }
   return;
 }
 // 注册中断处理函数
-void register_intr_handler(int num,int addr) {
+void register_intr_handler(int num, int addr) {
   struct GATE_DESCRIPTOR *idt = (struct GATE_DESCRIPTOR *)ADR_IDT;
   set_gatedesc(idt + num, addr, 2 * 8, AR_INTGATE32);
 }

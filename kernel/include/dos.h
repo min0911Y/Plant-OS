@@ -40,7 +40,9 @@ mtask *get_task(unsigned tid);
 mtask *create_task(unsigned eip, unsigned esp, unsigned ticks, unsigned floor);
 void task_to_user_mode_elf(char *filename);
 void task_kill(unsigned tid);
-void os_execute(char *filename,char *line);
+void task_exit(unsigned status);
+int os_execute(char *filename,char *line);
+int os_execute_shell(char *line);
 void idle();
 void init();
 extern uint64_t global_time;
@@ -54,7 +56,7 @@ void task_to_user_mode(unsigned eip,unsigned esp);
 void task_set_fifo(mtask *task, struct FIFO8 *kfifo, struct FIFO8 *mfifo);
 void os_execute_no_ret(char *filename, char *line);
 uint32_t get_father_tid(mtask *t);
-void waittid(uint32_t tid);
+int waittid(uint32_t tid);
 void task_fall_blocked(enum STATE state);
 void task_run(mtask *task);
 void mtask_run_now(mtask *obj);
@@ -276,4 +278,6 @@ int mount(char *fileName);
 void unmount(char drive);
 // signal.c
 void set_signal_handler(unsigned sig,unsigned handler);
+// farcall.c
+uint32_t call_across_page(uint32_t (*f)(void *arg),unsigned cr3,void *a);
 #endif

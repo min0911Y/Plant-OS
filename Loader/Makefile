@@ -9,7 +9,7 @@ DEL      = del
 
 OBJS_BOOTPACK = $(OUTPATH)8295a.o $(OUTPATH)asmfunc.obj $(OUTPATH)BasicVideo.o $(OUTPATH)cmos.o $(OUTPATH)dma.o $(OUTPATH)dosldr.o \
 			    $(OUTPATH)vdisk.o $(OUTPATH)fat.o $(OUTPATH)fdc.o $(OUTPATH)gdtidt.o $(OUTPATH)ide.o $(OUTPATH)libc.o $(OUTPATH)List.o \
-				$(OUTPATH)mm.o $(OUTPATH)vfs.o $(OUTPATH)other.o $(OUTPATH)pfs.o $(OUTPATH)str.o
+				$(OUTPATH)mm.o $(OUTPATH)vfs.o $(OUTPATH)other.o $(OUTPATH)pfs.o $(OUTPATH)str.o $(OUTPATH)ahci.o $(OUTPATH)pci.o
 
 default :
 	$(MAKE) -C $(DOSPATH)

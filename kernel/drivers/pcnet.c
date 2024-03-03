@@ -200,14 +200,14 @@ bool pcnet_find_card() {
 void init_pcnet_card() {
   // 允许PCNET网卡产生中断
   // 1.注册中断
-  set_handler(PCI_Get_Drive_IRQ_LINE(bus, dev, func),
+  set_handler(pci_get_drive_irq(bus, dev, func),
               (int)PCNET_ASM_INTHANDLER);
   // 2,写COMMAND和STATUS寄存器
-  uint32_t conf = PCI_READ_COMMAND_STATUS(bus, dev, func);
+  uint32_t conf = pci_read_command_status(bus, dev, func);
   conf &= 0xffff0000;  // 保留STATUS寄存器，清除COMMAND寄存器
   conf |= 0x7;         // 设置第0~2位（允许PCNET网卡产生中断
-  PCI_WRITE_COMMAND_STATUS(bus, dev, func, conf);
-  io_base = PCI_Get_PORT_Base(bus, dev, func);
+  pci_write_command_status(bus, dev, func, conf);
+  io_base = pci_get_port_base(bus, dev, func);
   init_Card_all();
 }
 
@@ -291,7 +291,7 @@ void PCNET_IRQ(int* esp) {
     logk("PCNET INIT DONE\n");
 
   // 通知PIC中断处理完毕
-  io_out8(PIC1_OCW2, (0x60 + PCI_Get_Drive_IRQ_LINE(bus, dev, func) - 0x8));
+  io_out8(PIC1_OCW2, (0x60 + pci_get_drive_irq(bus, dev, func) - 0x8));
   io_out8(PIC0_OCW2, 0x62);
   return;
 }

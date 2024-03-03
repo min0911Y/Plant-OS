@@ -9,9 +9,9 @@ void fpu_disable();
 extern int cg_flag0;
 extern struct TASK *c_task;
 void init_pit(void) {
-  io_out8(0x43, 0x36);
-  io_out8(0x40, 0xA1);
-  io_out8(0x40, 0x04);
+  io_out8(0x43, 0x34);
+  io_out8(0x40, 0x9c);
+  io_out8(0x40, 0x2e);
 
   int i;
   struct TIMER *t;
@@ -82,22 +82,7 @@ void timer_settime(struct TIMER *timer, unsigned int timeout) {
 }
 void usleep(uint64_t nano);
 void sleep(unsigned long long s) {
-  struct TIMER *timer;
-  timer = timer_alloc();
-  timer->waiter = current_task();
-  unsigned char buf[50];
-  struct FIFO8 fifo;
-  fifo8_init(&fifo, 50, buf);
-  timer_init(timer, &fifo, 1);
-  timer_settime(timer, s);
-  task_fall_blocked(WAITING);
-  for (;;) {
-    int i = fifo8_get(&fifo);
-    if (i == 1) {
-      timer_free(timer);
-      return;
-    }
-  }
+  usleep(s*1000000);
 }
 
 uint32_t mt2flag = 0;

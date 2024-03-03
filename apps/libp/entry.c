@@ -37,8 +37,7 @@ void Main() {
   //   printf("Get_Argc = %d\n",Get_Argc(buf));
   //   printf("buf = %s\n", buf);
 
-  main(get_argc(buf), argv);
-  exit();
+  exit(main(get_argc(buf), argv));
   while(1);
 }
 void __main() {

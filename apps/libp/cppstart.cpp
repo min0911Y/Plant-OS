@@ -37,8 +37,7 @@ extern "C" void Main()
   }
   init_float();
 
-  main(get_argc(buf), argv);
-  exit();
+  exit(main(get_argc(buf), argv));
 }
 extern "C" void __main()
 {
@@ -54,3 +53,22 @@ extern "C" void __cxa_pure_virtual()
     // Do nothing or print an error message.
 }
 
+void *operator new(size_t size)
+{
+    return malloc(size);
+}
+ 
+void *operator new[](size_t size)
+{
+    return malloc(size);
+}
+ 
+void operator delete(void *p)
+{
+    free(p);
+}
+ 
+void operator delete[](void *p)
+{
+    free(p);
+}

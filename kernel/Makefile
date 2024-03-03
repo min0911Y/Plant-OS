@@ -37,8 +37,8 @@ OBJS_BOOTPACK = $(OUTPATH)kernelc.o $(OUTPATH)screen.o $(OUTPATH)command.o $(OUT
 				$(OUTPATH)time.o $(OUTPATH)etherframe.o $(OUTPATH)arp.o $(OUTPATH)ipv4.o $(OUTPATH)icmp.o $(OUTPATH)udp.o \
 				$(OUTPATH)dhcp.o $(OUTPATH)tcp.o $(OUTPATH)chat.o $(OUTPATH)dns.o $(OUTPATH)socket.o $(OUTPATH)bit.o \
 				$(OUTPATH)http.o $(OUTPATH)ftp.o $(OUTPATH)linux_style_file.o $(OUTPATH)netgobang.o $(OUTPATH)ide.o \
-				$(OUTPATH)net_syscall.o $(OUTPATH)ntp.o $(OUTPATH)vdisk.o $(OUTPATH)rootfs.o $(OUTPATH)mount.o $(OUTPATH)mtask.o $(OUTPATH)basetask.o $(OUTPATH)execute.o\
-				$(OUTPATH)network.o $(OUTPATH)rtl8139.o $(OUTPATH)vfs.o $(OUTPATH)build.o $(OUTPATH)mst.o $(OUTPATH)str.o $(OUTPATH)pfs.o $(OUTPATH)signal.o
+				$(OUTPATH)net_syscall.o $(OUTPATH)ntp.o $(OUTPATH)vdisk.o $(OUTPATH)rootfs.o $(OUTPATH)mount.o $(OUTPATH)mtask.o $(OUTPATH)basetask.o $(OUTPATH)execute.o \
+				$(OUTPATH)network.o $(OUTPATH)rtl8139.o $(OUTPATH)vfs.o $(OUTPATH)build.o $(OUTPATH)mst.o $(OUTPATH)str.o $(OUTPATH)pfs.o $(OUTPATH)signal.o $(OUTPATH)rtc.o $(OUTPATH)ahci.o $(OUTPATH)farcall.o
 
 # 默认动作
 
@@ -77,6 +77,7 @@ make_img:
 	qemu-img create $(IMGPATH)doom1.img 1474560
 	qemu-img create $(IMGPATH)doom2.img 1474560
 	qemu-img create disk.img 128M
+	qemu-img create big_disk.img 128M
 	mformat -f 1440 -B $(OUTPATH)boot.bin -i $(IMGPATH)Powerint_DOS_386.img
 	mformat -f 1440 -B $(OUTPATH)boot.bin -i $(IMGPATH)Disk2.img
 	mformat -f 1440 -B $(OUTPATH)boot.bin -i $(IMGPATH)Disk3.img
@@ -87,12 +88,14 @@ make_img:
 	mformat -f 1440 -B $(OUTPATH)boot.bin -i $(IMGPATH)doom1.img
 	mformat -f 1440 -B $(OUTPATH)boot.bin -i $(IMGPATH)doom2.img
 	mformat -t 64 -h 64 -i ./disk.img
+	mformat -t 64 -h 64 -i ./big_disk.img
 Mimg : $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $(OUTPATH)boot32.bin Makefile
 	$(MAKE) make_img
 		mcopy -i ./disk.img $(BIDPATH)nasm.zip ::
 		mcopy -i ./disk.img $(APPSOUTPATH)duktape.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)doom.bin ::
 		mcopy -i ./disk.img $(RESPATH)doom1.wad ::
+		mcopy -i ./disk.img $(APPSOUTPATH)gui.bin ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(LOADERPATH)dosldr.bin ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(OUTPATH)kernel.bin ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(RESPATH)autoexec.bat ::
@@ -137,7 +140,7 @@ Mimg : $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $(OUTPATH)
 		mcopy -i $(IMGPATH)Disk3.img $(APPSOUTPATH)clock.bin ::/bin
 		mcopy -i $(IMGPATH)Disk3.img $(APPSOUTPATH)luac.bin ::/bin
 		mcopy -i $(IMGPATH)Disk3.img $(APPSOUTPATH)mmake.bin ::/bin
-
+		
 		mmd -i $(IMGPATH)res.img res
 		mcopy -i $(IMGPATH)res.img $(RESPATH)hello.nas ::/res
 		mcopy -i $(IMGPATH)res.img $(RESPATH)coin.wav ::/res
@@ -212,7 +215,9 @@ img_run :
 	$(MAKE) -C $(NETPATH)
 	$(MAKE) -C $(MSTPATH)
 	$(MAKE) Mimg
-	qemu-system-x86_64 -serial stdio -device sb16 -device floppy -fda ./img/Powerint_DOS_386.img -hda disk.img -hdb ./img/Disk2.img -hdc ./img/Disk3.img -hdd ./img/res.img -boot a -m 4096
+	qemu-system-x86_64 -net nic,model=pcnet -net user -serial stdio -device sb16 -device floppy -fda ./img/Powerint_DOS_386.img -hda ./img/Disk2.img -hdb ./img/Disk3.img -hdc ./img/res.img \
+	-drive file=disk.img,if=none,id=drive0 -device ahci,id=ahci -device ide-hd,drive=drive0,bus=ahci.0 -drive file=big_disk.img,if=none,id=drive1 -device ide-hd,drive=drive1,bus=ahci.1		\
+	 -boot a -m 4096
 full :
 	$(MAKE) -C $(DOSPATH)
 	$(MAKE) -C $(IOPATH)

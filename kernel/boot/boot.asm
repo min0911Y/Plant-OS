@@ -2,7 +2,7 @@
 ; Copyright (C) zhouzhihao 2020-2022
 bootseg		equ		7c0h
 dataseg		equ		1000h
-readsize	equ		184 		; DOSLDR.BIN的大小
+readsize	equ		200 		; DOSLDR.BIN的大小
 %define e_ident 0
 %define e_type 16
 %define e_machine 18

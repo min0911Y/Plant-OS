@@ -1,36 +1,99 @@
+#include <signal.h>
 #include <stdio.h>
 #include <string.h>
 #include <syscall.h>
-#include <signal.h>
+#include <fcntl.h>
 int flag_m = 0;
 int m_tid;
+void do_test(unsigned eip);
 void a() {
   while (1) {
     int len = MessageLength(m_tid);
-    if(len == -1) continue;
+    if (len == -1)
+      continue;
     char *dat = (char *)malloc(len);
     GetMessage(dat, m_tid);
     dat[13] = 0;
-    //printf("[Task a]Message has been recviced,\'%s\'\n",dat);
+    // printf("[Task a]Message has been recviced,\'%s\'\n",dat);
     flag_m = 1;
     free(dat);
   }
 }
 void test_signal() {
   printf("SIGINT!!!\n");
-  exit();
+  exit(0);
 }
+void c(void *data) {
+  printf("%08x\n",data);
+}
+char *s;
+int a111 = 0;
 int main(int argc, char **argv) {
-  if(fork()) {
-    while(1)
-      printf("PARENT\n");
+  asm volatile("ud2");
+  write((int)stdout,"hello",5);
+  return 0;
+  unsigned int *v = set_mode(1024,768);
+  logkf("%08x\n",v);
+  memset(v,0xff,1024*768*4);
+  for(;;);
+  return 0;
+  do_test(c);
+  for(;;);
+  return 0;
+  char *a[30000];
+  void *b1;
+  b1 = malloc(40);
+  free(b1);
+  printf("b = %p\n",b1);
+  for (int i = 0; i < 30000; i++) {
+    a[i] = malloc(10);
+  }
+  printf("free\n");
+  for (int i = 0; i < 30000; i++) {
+    free(a[i]);
+  }
+  b1 = malloc(40);
+  printf("b = %p\n",b1);
+  return 0;
+  int i;
+  if (i = fork()) {
+    printf("child task return %d\n", waittid(i));
   } else {
-    while(1)
-      printf("SON\n");
-    for(;;);
+    printf("CHILD\n");
+    exit(114514);
   }
   return 0;
-  signal(0,test_signal);
+  s = strdup("hello, world");
+  float b = 0;
+  if (fork()) {
+    printf("PARENT %s\n", s);
+    unsigned *r = malloc(16);
+    printf("malloced %08x\n", r);
+    r[0] = 114514;
+    while (1) {
+      b = b + 0.1;
+      printf("%d %f\n", r[0], b);
+    }
+    while (!a111)
+      ;
+    printf("A = 1!!!\n");
+    for (;;)
+      ;
+  } else {
+    printf("SON %s\n", s);
+    a111 = 1;
+    printf("a = %d\n", a111);
+    unsigned *r = malloc(16);
+    printf("malloced %08x\n", r);
+    while (1) {
+      b = b + 0.5;
+      r[0] = 3;
+    }
+    for (;;)
+      ;
+  }
+  return 0;
+  signal(0, test_signal);
   // for(int i = 0;;i++) {
   // }
   if (argc == 1) {

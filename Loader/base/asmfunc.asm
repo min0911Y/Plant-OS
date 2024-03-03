@@ -5,7 +5,7 @@
 		GLOBAL	io_load_eflags, io_store_eflags
 		GLOBAL	load_gdtr, load_idtr,loader_main
 		EXTERN DOSLDR_MAIN
-		GLOBAL	load_cr0, store_cr0,memtest_sub
+		GLOBAL	load_cr0, store_cr0,memtest_sub,null_inthandler
 		GLOBAL ASM_call
 [SECTION .text]
 %define ADR_BOTPAK 							   0x100000
@@ -151,7 +151,8 @@ mts_nomore:
 
 ASM_call:  ;移动光标
 ret
-
+null_inthandler:
+	iretd
 memcpy:
 	mov	eax,[esi]
 	mov	[edi],eax
@@ -160,6 +161,7 @@ memcpy:
 	dec	ecx
 	jnz	memcpy
 	ret
+
 global _IN
 _IN:
 	mov ebx,[esp+4]

@@ -702,14 +702,22 @@ public:
     sprintf(buf0, "COL %d ROW %d/%d      %s | Text", camera->index,
             camera->y + camera->curser_pos_y + 1, camera->ml + 1, filename);
 #else
-    sprintf(buf0, "COL %d ROW %d      %s | Text", camera->index,
+    sprintf(buf0, "COL %d LINE %d      %s | Text", camera->index,
             camera->y + camera->curser_pos_y + 1, filename);
 #endif
     if (camera->len != 0) {
-      sprintf(buf2, "%d%%",
-              (int)(((float)camera->index / (float)camera->len) * 100));
+      int d = (int)(((float)camera->index / (float)camera->len) * 100);
+      char *s;
+      if (d == 100) {
+        s = "";
+      } else if(d < 100 && d != 0) {
+        s = " ";
+      } else {
+        s = "  ";
+      }
+        sprintf(buf2, "%s%d%%", s,d);
     } else {
-      sprintf(buf2, "--%%");
+      sprintf(buf2, " --%%");
     }
     for (int i = 0; i < strlen(buf0); i++) {
       buf1[i] = buf0[i];
@@ -1156,9 +1164,10 @@ public:
         continue;
       }
       if (ch == '\n') {
-        if(!flag)
-          for(tap = 0;tap<MAX_CHAR_A_LINE;tap++) {
-            if(l[c->curser_pos_y].line[tap].ch != ' ') break;
+        if (!flag)
+          for (tap = 0; tap < MAX_CHAR_A_LINE; tap++) {
+            if (l[c->curser_pos_y].line[tap].ch != ' ')
+              break;
           }
         n->Insert('\n');
         n->down();
@@ -1167,7 +1176,7 @@ public:
           c->curser_pos_x = 0;
           c->index = l[c->curser_pos_y].line[0].index; // Holy Fuck
         }
-        if(!flag)
+        if (!flag)
           for (int i = 0; i < tap; i++) {
             n->Insert(' ');
             n->right(0);
@@ -1192,12 +1201,11 @@ public:
           n->To(strtol(buf + 3, nullptr, 10));
           clear();
           r->r_clean();
-        } else if(strcmp("stap",buf) == 0) {
+        } else if (strcmp("stap", buf) == 0) {
           flag = !flag;
           clear();
           r->r_clean();
-        } 
-        else {
+        } else {
           setState("Bad Command!");
           getch();
         }

@@ -121,7 +121,7 @@ RTL8139_ASM_INTHANDLER:
 	IRETD
 
 EXTERN sb16_handler
-GLOBAL asm_sb16_handler
+GLOBAL asm_sb16_handler,asm_rtc_handler
 asm_sb16_handler:
 	push ds
   push es
@@ -148,7 +148,7 @@ asm_sb16_handler:
   pop es
   pop ds
 	IRETD
-EXTERN ide_irq
+EXTERN ide_irq,rtc_irq
 GLOBAL asm_ide_irq
 asm_ide_irq:
 	push ds
@@ -177,6 +177,17 @@ asm_ide_irq:
   pop ds
 	IRETD
 asm_rtc_handler:
+	push ds
+  push es
+  push fs
+  push gs
+  pusha
+	call rtc_irq
+  popa
+  pop gs
+  pop fs
+  pop es
+  pop ds
 		IRETD
 global asm_net_api
 extern net_api
@@ -269,20 +280,7 @@ asm_inthandler2c:
   push fs
   push gs
   pusha
-	PUSH	ES
-	PUSH	DS
-	PUSHAD
-	MOV		EAX,ESP
-	PUSH	EAX
-	MOV		AX,SS
-	MOV		DS,AX
-	MOV		ES,AX
-	CALL	inthandler2c
-	POP		EAX
-	;call signal_deal
-	POPAD
-	POP		DS
-	POP		ES
+  CALL	inthandler2c
   popa
   pop gs
   pop fs

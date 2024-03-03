@@ -4,17 +4,19 @@
 #define TIDX(addr) (((unsigned)addr >> 12) & 0x3ff) // 获取 addr 的页表索引
 #define PAGE(idx) ((unsigned)idx << 12) // 获取页索引 idx 对应的页开始的位置
 void *page_malloc_one_no_mark();
+void flush_tlb(unsigned vaddr);
+unsigned div_round_up(unsigned num, unsigned size);
 struct PAGE_INFO *pages = (struct PAGE_INFO *)PAGE_MANNAGER;
 void init_pdepte(unsigned int pde_addr, unsigned pte_addr, unsigned page_end) {
 
   memset((void *)pde_addr, 0, page_end - pde_addr);
   // 这是初始化PDE 页目录
-  for (int addr = pde_addr, i = pte_addr | PG_P | PG_USU | PG_RWW;
+  for (int addr = pde_addr, i = pte_addr | PG_P | PG_RWW | PG_USU;
        addr != pte_addr; addr += 4, i += 0x1000) {
     *(int *)(addr) = i;
   }
   // 这是初始化PTE 页表
-  for (int addr = PTE_ADDRESS, i = PG_P | PG_USU | PG_RWW; addr != PAGE_END;
+  for (int addr = PTE_ADDRESS, i = PG_P | PG_RWW | PG_USU; addr != PAGE_END;
        addr += 4, i += 0x1000) {
     *(int *)(addr) = i;
   }
@@ -26,8 +28,7 @@ void init_page_manager(struct PAGE_INFO *pg) {
 void page_set_alloced(struct PAGE_INFO *pg, unsigned int start,
                       unsigned int end) {
   for (int i = IDX(start); i <= IDX(end); i++) {
-    pg[i].flag = 1;
-    pg[i].count = 0; // 设置占用，但是没有进程引用
+    pg[i].count++; // 设置占用，但是没有进程引用
   }
 }
 // 某些设计思路：
@@ -36,31 +37,35 @@ void page_set_alloced(struct PAGE_INFO *pg, unsigned int start,
 // 为了防止应用程序和操作系统抢占前0x70000000的内存，所以page_link和copy_on_write是从后往前分配的
 // OS应该是用不完0x70000000的，所以应用程序大概是可以用满2GB
 unsigned pde_clone(unsigned addr) {
+
   for (int i = DIDX(0x70000000) * 4; i < 0x1000; i += 4) {
     unsigned int *pde_entry = (unsigned int *)(addr + i);
     unsigned p = *pde_entry & (0xfffff000);
     for (int j = 0; j < 0x1000; j += 4) {
       unsigned int *pte_entry = (unsigned int *)(p + j);
 
-      if (pages[IDX(*pte_entry)].count) {
+      if (pages[IDX(*pte_entry)].count &&
+          (page_get_attr(get_line_address(i / 4, j / 4, 0)) & PG_USU)) {
         pages[IDX(*pte_entry)].count++;
       }
       *pte_entry &= ~PG_RWW;
     }
-    if (pages[IDX(*pde_entry)].count)
+    if (pages[IDX(*pde_entry)].count) {
       pages[IDX(*pde_entry)].count++;
+    }
     *pde_entry &= ~PG_RWW;
   }
-  unsigned result = page_malloc_one_no_mark();
-  memcpy(result, addr, 0x1000);
+  unsigned result = (unsigned)page_malloc_one_no_mark();
+  memcpy((void *)result, (void *)addr, 0x1000);
   flush_tlb(result);
   flush_tlb(addr);
+  set_cr3(addr);
+
   return result;
 }
 void pde_reset(unsigned addr) {
   for (int i = DIDX(0x70000000) * 4; i < 0x1000; i += 4) {
     unsigned int *pde_entry = (unsigned int *)(addr + i);
-    unsigned p = *pde_entry & (0xfffff000);
     *pde_entry |= PG_RWW;
   }
 }
@@ -74,36 +79,30 @@ void free_pde(unsigned addr) {
       unsigned int *pte_entry = (unsigned int *)(p + j);
       if (!(*pte_entry & PG_RWW)) {
         if (pages[IDX(*pte_entry)].count > 1) {
-          if(get_task(pages[IDX(*pte_entry)].task_id)->pde == addr) pages[IDX(*pte_entry)].task_id = 0; // 还有别人引用
+          if (get_task(pages[IDX(*pte_entry)].task_id)->pde == addr)
+            pages[IDX(*pte_entry)].task_id = 0; // 还有别人引用
           pages[IDX(*pte_entry)].count--;
         }
       }
     }
     if (!(*pde_entry & PG_RWW)) {
       if (pages[IDX(*pde_entry)].count > 1) {
-        if(get_task(pages[IDX(*pde_entry)].task_id)->pde == addr) pages[IDX(*pde_entry)].task_id = 0; // 还有别人引用
+        if (get_task(pages[IDX(*pde_entry)].task_id)->pde == addr)
+          pages[IDX(*pde_entry)].task_id = 0; // 还有别人引用
         pages[IDX(*pde_entry)].count--;
       }
     }
   }
   flush_tlb(addr);
-  page_free_one(addr);
+  page_free_one((void *)addr);
 }
 // 刷新虚拟地址 vaddr 的 块表 TLB
 void flush_tlb(unsigned vaddr) {
   asm volatile("invlpg (%0)" ::"r"(vaddr) : "memory");
 }
-void page_set_attr(unsigned pde, unsigned page, unsigned attr) {
-  unsigned t, p;
-  t = DIDX(page);
-  p = TIDX(page);
-  unsigned *pte = (unsigned int *)((pde + t * 4));
-  unsigned *physics = (unsigned *)((*pte & 0xfffff000) + p * 4);
-  *physics &= (0xfffff000);
-  *physics |= attr;
-  flush_tlb(page);
-}
+
 void page_link_pde(unsigned addr, unsigned pde) {
+
   unsigned pde_backup = current_task()->pde;
   current_task()->pde = PDE_ADDRESS;
   set_cr3(PDE_ADDRESS);
@@ -114,24 +113,28 @@ void page_link_pde(unsigned addr, unsigned pde) {
   // logk("*pte = %08x\n",*pte);
   if (pages[IDX(*pte)].count > 1) {
     pages[IDX(*pte)].count--;
+    uint32_t old = *pte & 0xfffff000;
+    *pte = (unsigned)page_malloc_one_count_from_4gb();
+    memcpy((void *)(*pte), (void *)old, 0x1000);
+    *pte |= 7;
+  } else {
+    *pte |= 7;
   }
-  uint32_t old = *pte & 0xfffff000;
-  *pte = page_malloc_one_count_from_4gb();
-  memcpy(*pte, old, 0x1000);
-  *pte |= 7;
+
   unsigned *physics = (unsigned *)((*pte & 0xfffff000) + p * 4);
   // logk("*pte = %08x\n",*physics);
   if (pages[IDX(*physics)].count > 1) {
     pages[IDX(*physics)].count--;
   }
-  *physics = page_malloc_one_count_from_4gb();
+  *physics = (unsigned)page_malloc_one_count_from_4gb();
   *physics |= 7;
-  flush_tlb(pte);
+  flush_tlb((unsigned)pte);
   flush_tlb(addr);
   current_task()->pde = pde_backup;
   set_cr3(pde_backup);
 }
-void page_link_pde_paddr(unsigned addr, unsigned pde,unsigned paddr1,unsigned paddr2) {
+void page_link_pde_paddr(unsigned addr, unsigned pde, unsigned *paddr1,
+                         unsigned paddr2) {
   unsigned pde_backup = current_task()->pde;
   current_task()->pde = PDE_ADDRESS;
   set_cr3(PDE_ADDRESS);
@@ -142,11 +145,15 @@ void page_link_pde_paddr(unsigned addr, unsigned pde,unsigned paddr1,unsigned pa
   // logk("*pte = %08x\n",*pte);
   if (pages[IDX(*pte)].count > 1) {
     pages[IDX(*pte)].count--;
+    uint32_t old = *pte & 0xfffff000;
+    *pte = *paddr1;
+    memcpy((void *)(*pte), (void *)old, 0x1000);
+    *pte |= 7;
+    *paddr1 = 0;
+  } else {
+    *pte |= 7;
   }
-  uint32_t old = *pte & 0xfffff000;
-  *pte = paddr1;
-  memcpy(*pte, old, 0x1000);
-  *pte |= 7;
+
   unsigned *physics = (unsigned *)((*pte & 0xfffff000) + p * 4);
   // logk("*pte = %08x\n",*physics);
   if (pages[IDX(*physics)].count > 1) {
@@ -154,41 +161,44 @@ void page_link_pde_paddr(unsigned addr, unsigned pde,unsigned paddr1,unsigned pa
   }
   *physics = paddr2;
   *physics |= 7;
-  flush_tlb(pte);
+  flush_tlb((unsigned)pte);
   flush_tlb(addr);
   current_task()->pde = pde_backup;
   set_cr3(pde_backup);
 }
-void page_links_pde(unsigned start,unsigned numbers,unsigned pde) {
+void page_links_pde(unsigned start, unsigned numbers, unsigned pde) {
   int i = 0;
   int times = 0;
   unsigned a[2];
   int j = 0;
   for (i = IDX(memsize) - 1; i >= 0 && times < numbers; i--) {
-    if (pages[i].flag == 0 && pages[i].count == 0) {
+    if (pages[i].count == 0) {
       unsigned int addr = PAGE(i);
-      pages[i].flag = 1;
       pages[i].task_id = get_tid(current_task());
       pages[i].count++;
       a[j++] = addr;
     }
-    if(j == 2) {
-      page_link_pde_paddr(start,pde,a[0],a[1]);
+    if (j == 2) {
+      page_link_pde_paddr(start, pde, &(a[0]), a[1]);
       times++;
-      start+=0x1000;
+      start += 0x1000;
       j = 0;
+      if (a[0] != 0) {
+        j = 1;
+      }
     }
   }
 }
-void page_links(unsigned start,unsigned numbers) {
-  page_links_pde(start,numbers,current_task()->pde);
+void page_links(unsigned start, unsigned numbers) {
+  page_links_pde(start, numbers, current_task()->pde);
 }
 void page_link(unsigned addr) { page_link_pde(addr, current_task()->pde); }
 void copy_from_phy_to_line(unsigned phy, unsigned line, unsigned pde,
                            unsigned size) {
   unsigned pg = div_round_up(size, 0x1000);
   for (int i = 0; i < pg; i++) {
-    memcpy(page_get_phy_pde(line, pde), phy, size >= 0x1000 ? 0x1000 : size);
+    memcpy((void *)page_get_phy_pde(line, pde), (void *)phy,
+           size >= 0x1000 ? 0x1000 : size);
     size -= 0x1000;
     line += 0x1000;
     phy += 0x1000;
@@ -198,7 +208,8 @@ void set_line_address(unsigned val, unsigned line, unsigned pde,
                       unsigned size) {
   unsigned pg = div_round_up(size, 0x1000);
   for (int i = 0; i < pg; i++) {
-    memset(page_get_phy_pde(line, pde), val, size >= 0x1000 ? 0x1000 : size);
+    memset((void *)page_get_phy_pde(line, pde), val,
+           size >= 0x1000 ? 0x1000 : size);
     size -= 0x1000;
     line += 0x1000;
   }
@@ -240,11 +251,10 @@ void tpo2page(int *page, int t, int p) { *page = (t * 1024) + p; }
 void *page_malloc_one_no_mark() {
   int i;
   for (i = 0; i != 1024 * 1024; i++) {
-    if (pages[i].flag == 0) {
+    if (pages[i].count == 0) {
       int t, p;
       page2tpo(i, &t, &p);
       unsigned int addr = get_line_address(t, p, 0);
-      pages[i].flag = 1;
       pages[i].task_id = 0;
       pages[i].count++;
       return (void *)addr;
@@ -255,11 +265,10 @@ void *page_malloc_one_no_mark() {
 void *page_malloc_one() {
   int i;
   for (i = 0; i != 1024 * 1024; i++) {
-    if (pages[i].flag == 0) {
+    if (pages[i].count == 0) {
       int t, p;
       page2tpo(i, &t, &p);
       unsigned int addr = get_line_address(t, p, 0);
-      pages[i].flag = 1;
       pages[i].task_id = get_tid(current_task());
       pages[i].count++;
       return (void *)addr;
@@ -271,11 +280,10 @@ void *page_malloc_one() {
 void *page_malloc_one_mark(unsigned tid) {
   int i;
   for (i = 0; i != 1024 * 1024; i++) {
-    if (pages[i].flag == 0) {
+    if (pages[i].count == 0) {
       int t, p;
       page2tpo(i, &t, &p);
       unsigned int addr = get_line_address(t, p, 0);
-      pages[i].flag = 1;
       pages[i].task_id = tid;
       pages[i].count++;
       return (void *)addr;
@@ -287,9 +295,8 @@ void *page_malloc_one_mark(unsigned tid) {
 void *page_malloc_one_count_from_4gb() {
   int i = 0;
   for (i = IDX(memsize) - 1; i >= 0; i--) {
-    if (pages[i].flag == 0 && pages[i].count == 0) {
+    if (pages[i].count == 0) {
       unsigned int addr = PAGE(i);
-      pages[i].flag = 1;
       pages[i].task_id = get_tid(current_task());
       pages[i].count++;
       return (void *)addr;
@@ -300,7 +307,7 @@ void *page_malloc_one_count_from_4gb() {
 void gc(unsigned tid) {
   int i;
   for (i = 0; i < 1024 * 1024; i++) {
-    if (pages[i].flag == 1 && pages[i].task_id == tid) {
+    if (pages[i].count && pages[i].task_id == tid) {
       if (pages[i].count > 1) {
         pages[i].count--;
         pages[i].task_id =
@@ -308,7 +315,7 @@ void gc(unsigned tid) {
         continue;
       }
       // logk("free %08x\n",PAGE(i));
-      page_free_one(PAGE(i));
+      page_free_one((void *)PAGE(i));
     }
   }
 }
@@ -328,7 +335,6 @@ void page_free_one(void *p) {
     pages[IDX(p)].count--;
     return;
   }
-  pages[IDX(p)].flag = 0;
   pages[IDX(p)].task_id = 0;
   pages[IDX(p)].count = 0;
 }
@@ -345,15 +351,14 @@ int find_kpage(int line, int n) {
   int free = 0;
   // 找一个连续的线性地址空间
   for (; line != 1024 * 1024; line++) {
-    if (pages[line].flag == 0) {
+    if (pages[line].count == 0) {
       free++;
     } else {
       free = 0;
     }
     if (free == n) {
       for (int j = line - n + 1; j != line + 1; j++) {
-        pages[j].flag = 1;
-        pages[j].task_id = 0x7f;
+        pages[j].task_id = 0;
         pages[j].count++;
       }
       line -= n - 1;
@@ -368,12 +373,12 @@ void *page_malloc(int size) {
   int t, p;
   page2tpo(i, &t, &p);
   clean((char *)get_line_address(t, p, 0), n * 4 * 1024);
-  unsigned addr = (void *)get_line_address(t, p, 0);
-  return addr;
+  unsigned addr = get_line_address(t, p, 0);
+  return (void *)addr;
 }
 void page_free(void *p, int size) {
   int n = ((size - 1) / (4 * 1024)) + 1;
-  p = (int)p & 0xfffff000;
+  p = (void *)((unsigned int)p & 0xfffff000);
   for (int i = 0; i < n; i++) {
     page_free_one((void *)p);
     p += 0x1000;
@@ -415,26 +420,26 @@ void change_page_task_id(int task_id, void *p, unsigned int size) {
   }
 }
 void showPage() {
-  uint32_t *pte = (uint32_t *)PTE_ADDRESS;
+  // uint32_t *pte = (uint32_t *)PTE_ADDRESS;
   // printk("size = %d", sizeof(struct PTE_page_table));
-  for (int i = 0; pte != (uint32_t *)PAGE_END; pte++, i++) {
-    printk("LINE ADDRESS: %08x PHY ADDRESS: %08x P=%d RW=%d US=%d USING=%d "
-           "TASK=%d\n",
-           i * 4096, (*pte >> 12) << 12, ((*pte) << 31) >> 31,
-           ((*pte) << 30) >> 31, ((*pte) << 29) >> 31, pages[i].flag,
-           pages[i].task_id);
-    //*pte &= 0xffffffff-1;
-  }
+  // for (int i = 0; pte != (uint32_t *)PAGE_END; pte++, i++) {
+  //   printk("LINE ADDRESS: %08x PHY ADDRESS: %08x P=%d RW=%d US=%d USING=%d "
+  //          "TASK=%d\n",
+  //          i * 4096, (*pte >> 12) << 12, ((*pte) << 31) >> 31,
+  //          ((*pte) << 30) >> 31, ((*pte) << 29) >> 31, pages[i].flag,
+  //          pages[i].task_id);
+  //*pte &= 0xffffffff-1;
+  //}
 }
 unsigned int get_cr2() {
   unsigned r;
-  //asm volatile("xchg %bx,%bx");
+  // asm volatile("xchg %bx,%bx");
   asm volatile("mov %%cr2,%0" : "=r"(r));
   return r;
 }
 uint32_t page_get_attr_pde(unsigned vaddr, unsigned pde) {
   pde += (unsigned)(DIDX(vaddr) * 4);
-  void *pte = (*(unsigned int *)pde & 0xfffff000);
+  void *pte = (void *)(*(unsigned int *)pde & 0xfffff000);
   pte += (unsigned)(TIDX(vaddr) * 4);
   return (*(unsigned int *)pte) & 0x00000fff;
 }
@@ -444,7 +449,7 @@ uint32_t page_get_attr(unsigned vaddr) {
 
 uint32_t page_get_phy_pde(unsigned vaddr, unsigned pde) {
   pde += (unsigned)(DIDX(vaddr) * 4);
-  void *pte = (*(unsigned int *)pde & 0xfffff000);
+  void *pte = (void *)(*(unsigned int *)pde & 0xfffff000);
   pte += (unsigned)(TIDX(vaddr) * 4);
   return (*(unsigned int *)pte) & 0xfffff000;
 }
@@ -452,9 +457,9 @@ uint32_t page_get_phy(unsigned vaddr) {
   return page_get_phy_pde(vaddr, current_task()->pde);
 }
 void copy_on_write(uint32_t vaddr) {
-  void *pd = current_task()->pde;
-  void *pde = pd + (unsigned)(DIDX(vaddr) * 4);
-  void *pde_phy = (*(unsigned int *)(pde)&0xfffff000);
+  void *pd = (void *)current_task()->pde;
+  void *pde = (void *)((unsigned)pd + (unsigned)(DIDX(vaddr) * 4));
+  void *pde_phy = (void *)(*(unsigned int *)(pde) & 0xfffff000);
 
   if (!(*(unsigned *)pde & PG_RWW)) {
     unsigned backup = *(unsigned int *)(pde);
@@ -462,19 +467,20 @@ void copy_on_write(uint32_t vaddr) {
       *(unsigned *)pde |= PG_RWW;
       goto PDE_FLUSH;
     }
-    *(unsigned int *)(pde) = page_malloc_one_count_from_4gb();
-    memcpy(*(unsigned int *)pde, pde_phy, 0x1000);
+    *(unsigned int *)(pde) = (unsigned)page_malloc_one_count_from_4gb();
+    memcpy((void *)(*(unsigned int *)pde), pde_phy, 0x1000);
     *(unsigned int *)(pde) |= (backup & 0x00000fff) | PG_RWW;
     pages[IDX(backup)].count--;
   PDE_FLUSH:
-    flush_tlb(pde);
+    flush_tlb(*(unsigned int *)(pde));
   }
-  void *pt = (*(unsigned int *)pde & 0xfffff000);
+  void *pt = (void *)(*(unsigned int *)pde & 0xfffff000);
   void *pte = pt + (unsigned)(TIDX(vaddr) * 4);
   if (!(*(unsigned *)pte & PG_RWW)) {
     if (pages[IDX(*(unsigned *)pte)].count < 2) {
       *(unsigned *)pte |= PG_RWW;
       goto FLUSH;
+    } else {
     }
     // 获取旧页信息
     unsigned int old_pte = *(unsigned int *)pte;
@@ -499,21 +505,40 @@ void copy_on_write(uint32_t vaddr) {
     pages[IDX(old_pte)].count--;
     *(unsigned int *)pte = new_pte;
   FLUSH:
-    flush_tlb(pte);
+    flush_tlb((unsigned)pte);
   }
-  for (int i = 0; i < 100; i++) {
-    flush_tlb(vaddr);
-  }
+  flush_tlb((unsigned)vaddr);
 }
 void page_set_physics_attr(uint32_t vaddr, void *paddr, uint32_t attr) {
-  void *pde = current_task()->pde;
-  pde += (unsigned)(DIDX(vaddr) * 4);
-  void *pte = (*(unsigned int *)pde & 0xfffff000);
-  pte += (unsigned)(TIDX(vaddr) * 4);
-  void *phy = (*(unsigned int *)pte & 0xfffff000);
-  *(unsigned int *)pte = paddr;
-  *(unsigned int *)pte |= attr;
-  flush_tlb(vaddr & 0xfffff000);
+  unsigned pde_backup = current_task()->pde;
+  current_task()->pde = PDE_ADDRESS;
+  set_cr3(PDE_ADDRESS);
+  unsigned t, p;
+  t = DIDX(vaddr);
+  p = (vaddr >> 12) & 0x3ff;
+  unsigned *pte = (unsigned int *)((pde_backup + t * 4));
+  // logk("*pte = %08x\n",*pte);
+  if (pages[IDX(*pte)].count > 1) {
+    pages[IDX(*pte)].count--;
+    uint32_t old = *pte & 0xfffff000;
+    *pte = (unsigned)page_malloc_one_count_from_4gb();
+    memcpy((void *)(*pte), (void *)old, 0x1000);
+    *pte |= 7;
+  } else {
+    *pte |= 7;
+  }
+
+  unsigned *physics = (unsigned *)((*pte & 0xfffff000) + p * 4);
+  // logk("*pte = %08x\n",*physics);
+  if (pages[IDX(*physics)].count > 1) {
+    pages[IDX(*physics)].count--;
+  }
+  *physics = paddr;
+  *physics |= attr;
+  flush_tlb((unsigned)pte);
+  flush_tlb(vaddr);
+  current_task()->pde = pde_backup;
+  set_cr3(pde_backup);
 }
 void PF(unsigned edi, unsigned esi, unsigned ebp, unsigned esp, unsigned ebx,
         unsigned edx, unsigned ecx, unsigned eax, unsigned gs, unsigned fs,
@@ -522,17 +547,36 @@ void PF(unsigned edi, unsigned esi, unsigned ebp, unsigned esp, unsigned ebx,
   unsigned pde = current_task()->pde;
   set_cr3(PDE_ADDRESS);
   void *line_address = (void *)get_cr2();
-  if (!(page_get_attr(line_address) & PG_P)) {
-    io_cli();
-    printk("Fatal error: Attempt to read/write a non-existent memory %08x at "
+  if (!(page_get_attr((unsigned)line_address) & PG_P) ||
+      (!(page_get_attr((unsigned)line_address) & PG_USU))) {
+
+    printk("Fatal error: Attempt to read/write a non-existent/kernel memory "
+           "%08x at "
            "%08x. System "
            "halt \n   --- at PF()",
            line_address, eip);
+    if (current_task()->user_mode) {
+      task_exit(-1);
+    }
+    io_cli();
     asm volatile("hlt");
     for (;;)
       ;
   }
-  copy_on_write(line_address);
+  copy_on_write((unsigned)line_address);
   set_cr3(pde);
   return;
+}
+
+void page_set_attr(unsigned start, unsigned end, unsigned attr, unsigned pde) {
+  int count = div_round_up(end - start, 0x1000);
+  for (int i = 0; i < count; i++) {
+    unsigned int *pde_entry =
+        (unsigned int *)(pde + DIDX(start + i * 0x1000) * 4);
+    unsigned p = *pde_entry & (0xfffff000);
+    unsigned int *pte_entry =
+        (unsigned int *)(p + TIDX(start + i * 0x1000) * 4);
+    *pte_entry |= attr;
+  }
+  set_cr3(pde);
 }

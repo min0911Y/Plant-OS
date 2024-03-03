@@ -1,14 +1,21 @@
+#include <arg.h>
+#include <mst.h>
 #include <stdio.h>
 #include <string.h>
 #include <syscall.h>
-#include <mst.h>
 char *_path;
-MST_Object* env;
-void env_init(void) {
+MST_Object *env;
+char *env_read(char *name);
+void env_write(char *name, char *val);
+void env_init(int m) {
   if (filesize("/env.cfg") == -1) {
+    if (m == 1) {
+      _path = "";
+      return;
+    }
     mkfile("/env.cfg");
   }
-  char* buff = (char*)malloc(filesize("/env.cfg") + 1);
+  char *buff = (char *)malloc(filesize("/env.cfg") + 1);
   api_ReadFile("/env.cfg", buff);
   env = MST_init(buff);
   if (env->err) {
@@ -17,8 +24,14 @@ void env_init(void) {
     sleep(500);
   }
   free(buff);
+
+retry:
+  if (!(_path = env_read("path"))) {
+    env_write("path", "");
+    goto retry;
+  }
 }
-void env_write(char* name, char* val) {
+void env_write(char *name, char *val) {
   if (MST_get_var(name, MST_get_root_space(env)) == NULL) {
     MST_add_var_to_space(env, MST_get_root_space(env),
                          MST_var_make_string(name, val));
@@ -27,11 +40,11 @@ void env_write(char* name, char* val) {
                             MST_get_root_space(env));
   }
 }
-char* env_read(char* name) {
+char *env_read(char *name) {
   if (MST_get_var(name, MST_get_root_space(env)) == NULL) {
     return NULL;
   } else {
-    MST_get_string_in_space(env,name,MST_get_root_space(env));
+    MST_get_string_in_space(env, name, MST_get_root_space(env));
   }
 }
 void env_save() {
@@ -40,17 +53,17 @@ void env_save() {
   if (filesize(path) == -1) {
     return;
   }
-  char* s = MST_build_to_string(env);
+  char *s = MST_build_to_string(env);
   Edit_File(path, s, strlen(s), 0);
   free(s);
 }
 void env_reload() {
   MST_free(env);
-  env_init();
+  env_init(0);
 }
-//首先 我们要解析环境变量的字符串
-//环境变量的字符串是以分号分隔的
-void Path_GetPath(int count, char* ptr, char* PATH_ADDR) {
+// 首先 我们要解析环境变量的字符串
+// 环境变量的字符串是以分号分隔的
+void Path_GetPath(int count, char *ptr, char *PATH_ADDR) {
   // count 获取第几个环境变量？
   // ptr   储存在哪里？
   // PATH_ADDR 环境变量的信息在哪里？
@@ -80,7 +93,7 @@ void Path_GetPath(int count, char* ptr, char* PATH_ADDR) {
   }
   ptr[i] = '\0';
 }
-int Path_GetPathCount(char* PATH_ADDR) {
+int Path_GetPathCount(char *PATH_ADDR) {
   int count = 0;
   for (int i = 0; i < strlen(PATH_ADDR); i++) {
     if (PATH_ADDR[i] == ';') {
@@ -89,12 +102,12 @@ int Path_GetPathCount(char* PATH_ADDR) {
   }
   return count;
 }
-static void GetFullPath(char* result, char* name, char* dictpath) {
+static void GetFullPath(char *result, char *name, char *dictpath) {
   strcpy(result, dictpath);
   strcat(result, "\\");
   strcat(result, name);
 }
-bool Path_Find_File(char* fileName, char* PATH_ADDR) {
+bool Path_Find_File(char *fileName, char *PATH_ADDR) {
   char path_result1[255];
   char path_result2[255];
   for (int i = 0; i < Path_GetPathCount(PATH_ADDR); i++) {
@@ -107,7 +120,7 @@ bool Path_Find_File(char* fileName, char* PATH_ADDR) {
   }
   return false;
 }
-void Path_Find_FileName(char* Result, char* fileName, char* PATH_ADDR) {
+void Path_Find_FileName(char *Result, char *fileName, char *PATH_ADDR) {
   char path_result1[255];
   char path_result2[255];
   for (int i = 0; i < Path_GetPathCount(PATH_ADDR); i++) {
@@ -137,7 +150,7 @@ void dir_deal() {
   printf("\n");
   free(f);
 }
-int cmd_app(char *cmdline,int *ok) {
+int cmd_app(char *cmdline, int *ok) {
   int result = 0;
   int flag = 0;
   char *s = (char *)malloc(strlen(cmdline) + 10);
@@ -147,28 +160,26 @@ int cmd_app(char *cmdline,int *ok) {
 RETRY:
   if (filesize(s) == -1) {
     if (!Path_Find_File(s, _path)) {
-        *ok = 0;
+      *ok = 0;
     } else {
       char *s1 = (char *)malloc(strlen(s) + 1024);
       Path_Find_FileName(s1, s, _path);
-      result = 0;
-      exec(s1, cmdline);
+      result = exec(s1, cmdline);
       free(s1);
       *ok = 1;
     }
   } else {
-    result = 0;
-    exec(s, cmdline);
+    result = exec(s, cmdline);
     *ok = 1;
   }
-  if(flag == 0 && *ok == 0)
+  if (flag == 0 && *ok == 0)
     goto S;
   free(s);
-  if(*ok)
+  if (*ok)
     printf("\n");
   return result;
 S:
-  strcat(s,".bin");
+  strcat(s, ".bin");
   flag = 1;
   goto RETRY;
 }
@@ -233,16 +244,27 @@ int run(char *line) {
         vfs_change_disk(line[5]);
       }
     }
-  } else if (strncmp("color ",line,6) == 0) {
-    int c = strtol(line+6,NULL,16);
-    T_DrawBox(0,0,tty_get_xsize(),tty_get_ysize(),c);
+  } else if (strncmp("color ", line, 6) == 0) {
+    int c = strtol(line + 6, NULL, 16);
+    T_DrawBox(0, 0, tty_get_xsize(), tty_get_ysize(), c);
     set_cons_color(c);
-  } else if (strncmp("mkdir ",line,6) == 0) {
-    if(!mkdir(line+6)) {
-      printf("Unable to create %s\n",line);
+  } else if (strncmp("mkdir ", line, 6) == 0) {
+    if (!mkdir(line + 6)) {
+      printf("Unable to create %s\n", line);
     }
-  }
-  else if (line[1] == ':' && line[2] == '\0') {
+  } else if (strncmp("format ", line, 7) == 0) {
+    if (get_argc(line) != 3) {
+      printf("format <drive> <fsname>\nfsname can be FAT and PFS\n");
+      return 1;
+    }
+    char *s = (char *)malloc(256);
+    char *s1 = (char *)malloc(256);
+    get_arg(s, line, 1);
+    get_arg(s1, line, 2);
+    format(s[0], s1);
+    free(s);
+    free(s1);
+  } else if (line[1] == ':' && line[2] == '\0') {
     if (!vfs_check_mount(line[0])) {
       if (!vfs_mount(line[0], line[0])) {
         printf("disk not ready!\n");
@@ -252,10 +274,10 @@ int run(char *line) {
     } else {
       vfs_change_disk(line[0]);
     }
-  } else{
+  } else {
     int ok;
-    result = cmd_app(line,&ok);
-    if(ok == 0) {
+    result = cmd_app(line, &ok);
+    if (ok == 0) {
       printf("bad command!\n");
       return 1;
     }
@@ -279,13 +301,9 @@ int main(int argc, char **argv) {
       printf("fatal error.\n");
       return 1;
     }
+    env_init(1);
     return run(argv[2]);
   }
-  env_init();
-  retry:
-  if (!(_path = env_read("path"))) {
-    env_write("path", "");
-    goto retry;
-  }
+  env_init(0);
   shell();
 }

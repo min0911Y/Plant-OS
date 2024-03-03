@@ -207,7 +207,7 @@ int main(int argc, char **argv) {
       Draw_UI();
     }
     if (exit_status) {
-      exit();
+      exit(0);
     }
   }
   tty_start_cur_moving();

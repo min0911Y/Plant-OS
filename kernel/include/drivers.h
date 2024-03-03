@@ -68,18 +68,20 @@ uint32_t read_pci(uint8_t bus, uint8_t device, uint8_t function,
                   uint8_t registeroffset);
 void write_pci(uint8_t bus, uint8_t device, uint8_t function,
                uint8_t registeroffset, uint32_t value);
-uint32_t PCI_READ_COMMAND_STATUS(uint8_t bus, uint8_t slot, uint8_t func);
-void PCI_WRITE_COMMAND_STATUS(uint8_t bus, uint8_t slot, uint8_t func,
+uint32_t pci_read_command_status(uint8_t bus, uint8_t slot, uint8_t func);
+void pci_write_command_status(uint8_t bus, uint8_t slot, uint8_t func,
                               uint32_t value);
-uint8_t PCI_Get_Drive_IRQ_LINE(uint8_t bus, uint8_t slot, uint8_t func);
-uint32_t PCI_Get_PORT_Base(uint8_t bus, uint8_t slot, uint8_t func);
+uint8_t pci_get_drive_irq(uint8_t bus, uint8_t slot, uint8_t func);
+uint32_t pci_get_port_base(uint8_t bus, uint8_t slot, uint8_t func);
 void PCI_GET_DEVICE(uint16_t vendor_id, uint16_t device_id, uint8_t *bus,
                     uint8_t *slot, uint8_t *func);
-void PCI_CONFIGADDRESS(unsigned int Bus, unsigned int f, unsigned int equipment,
+void pci_config(unsigned int Bus, unsigned int f, unsigned int equipment,
                        unsigned int adder);
+uint32_t read_bar_n(uint8_t bus, uint8_t device, uint8_t function,
+                    uint8_t bar_n);
 void init_PCI(unsigned int adder_Base);
 void PCI_ClassCode_Print(
-    struct PCI_CONFIG_SPACE_PUCLIC *pci_config_space_puclic);
+    struct pci_config_space_public *pci_config_space_puclic);
 // pic.c
 void init_pic(void);
 void send_eoi(int irq);
@@ -102,7 +104,7 @@ void *GetSVGACardMemAddress();
 char *GetSVGACharOEMString();
 VESAModeInfo *GetVESAModeInfo(int mode);
 void get_all_mode();
-int set_mode(int width, int height, int bpp);
+unsigned set_mode(int width, int height, int bpp);
 // vga.c
 void write_regs(unsigned char *regs);
 void SwitchTo320X200X256();

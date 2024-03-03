@@ -1,6 +1,8 @@
 // fat.c : fat文件系统的实现
 #include <dos.h>
 #include <fs.h>
+void *kmalloc(int size);
+void kfree(void *p);
 static inline int get_fat_date(unsigned short year, unsigned short month,
                                unsigned short day) {
   year -= 1980;
@@ -82,7 +84,7 @@ void file_loadfile(int clustno, int size, char *buf, int *fat, vfs_t *vfs) {
   }
   int s =
       ((size - 1) / get_dm(vfs).ClustnoBytes + 1) * get_dm(vfs).ClustnoBytes;
-  void *img = malloc(s);
+  void *img = kmalloc(s);
   int flag = 0, a, num = 0, sec_start = 0;
   for (int i = 0; i != (size - 1) / get_dm(vfs).ClustnoBytes + 1; i++) {
     uint32_t sec = (get_dm(vfs).FileDataAddress +
@@ -114,7 +116,7 @@ void file_loadfile(int clustno, int size, char *buf, int *fat, vfs_t *vfs) {
               img + sec_start * get_dm(vfs).ClustnoBytes, vfs->disk_number);
   }
   memcpy((void *)buf, img, size);
-  free(img);
+  kfree(img);
   return;
 }
 void file_savefile(int clustno, int size, char *buf, int *fat,
@@ -157,7 +159,7 @@ void file_savefile(int clustno, int size, char *buf, int *fat,
     alloc_size = (clustall + 1) * get_dm(vfs).ClustnoBytes;
     // 这里不分配Fat的原因是要清空更改后多余的数据
   }
-  void *img = malloc(alloc_size);
+  void *img = kmalloc(alloc_size);
   clean((char *)img, alloc_size);
   memcpy(img, buf, size); // 把要写入的数据复制到新请求的内存地址
   // for (int i = 0; i != (alloc_size / get_dm(vfs).ClustnoBytes); i++) {
@@ -181,7 +183,8 @@ void file_savefile(int clustno, int size, char *buf, int *fat,
         num++;
       } else {
         Disk_Write(a, num * get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes,
-                  img + sec_start * get_dm(vfs).ClustnoBytes, vfs->disk_number);
+                   img + sec_start * get_dm(vfs).ClustnoBytes,
+                   vfs->disk_number);
         sec_start += num;
         a = sec;
         num = 1;
@@ -196,9 +199,9 @@ void file_savefile(int clustno, int size, char *buf, int *fat,
   }
   if (num) {
     Disk_Write(a, num * get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes,
-              img + sec_start * get_dm(vfs).ClustnoBytes, vfs->disk_number);
+               img + sec_start * get_dm(vfs).ClustnoBytes, vfs->disk_number);
   }
-  free(img);
+  kfree(img);
   if (size <
       clustall *
           get_dm(vfs).ClustnoBytes) { // 新大小 < (旧大小 / 簇大小) * 簇大小

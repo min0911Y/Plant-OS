@@ -110,7 +110,7 @@ void DriveSemaphoreGive(unsigned int drive_code) {
   //        fifo8_status(&drive_fifo[drive_code]));
 }
 
-#define SECTORS_ONCE 255
+#define SECTORS_ONCE 8
 void Disk_Read(unsigned int lba, unsigned int number, void *buffer,
                char drive) {
   if (have_vdisk(drive)) {

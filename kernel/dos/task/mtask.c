@@ -40,6 +40,7 @@ static void init_task() {
     m[i].Pkeyfifo = NULL;
     m[i].Ukeyfifo = NULL;
     m[i].sigint_up = 0;
+    m[i].train = 0;
     lock_init(&(m[i].ipc_header.l));
     m[i].ipc_header.now = 0;
     for (int k = 0; k < MAX_IPC_MESSAGE; k++) {
@@ -53,6 +54,15 @@ static void init_task() {
   }
 }
 fpu_t public_fpu;
+bool task_check_train(mtask *task) {
+  if (!task) {
+    return false;
+  }
+  if (task->train == 1 && timerctl.count - task->jiffies >= 5) {
+    return true;
+  }
+  return false;
+}
 void task_next() {
   // io_sti();
   if (mtask_stop_flag && next_set == NULL)
@@ -101,7 +111,10 @@ void task_next() {
     }
   OK:
     if (!next || p->jiffies < next->jiffies || p->urgent)
-      next = p;
+      if ((!task_check_train(next)) ||
+          (task_check_train(next) && task_check_train(p))) {
+        next = p;
+      }
   }
 H:
   if (next->user_mode == 1) {
@@ -112,6 +125,9 @@ H:
   }
   if (next->urgent) {
     next->urgent = 0;
+  }
+  if (next->ready) {
+    next->ready = 0;
   }
   int current_fpu_flag = current->fpu_flag;
   fpu_t *current_fpu = &(current->fpu);
@@ -138,13 +154,13 @@ mtask *create_task(unsigned eip, unsigned esp, unsigned ticks, unsigned floor) {
   if (!t) {
     return NULL;
   }
-  unsigned esp_alloced = page_malloc(64*1024)+64*1024;
-  change_page_task_id(t->tid,esp_alloced-64*1024,64*1024);
+  unsigned esp_alloced = page_malloc(64 * 1024) + 64 * 1024;
+  change_page_task_id(t->tid, esp_alloced - 64 * 1024, 64 * 1024);
   t->esp = esp_alloced - sizeof(stack_frame); // switch用到的栈帧
-  t->esp->eip = eip;                  // 设置跳转地址
-  t->user_mode = 0;                   // 设置是否是user_mode
-  if (current == NULL) {              // 还没启用多任务
-    t->pde = PDE_ADDRESS;             // 所以先用预设好的页表
+  t->esp->eip = eip;                          // 设置跳转地址
+  t->user_mode = 0;                           // 设置是否是user_mode
+  if (current == NULL) {                      // 还没启用多任务
+    t->pde = PDE_ADDRESS;                     // 所以先用预设好的页表
   } else {
     t->pde = pde_clone(current_task()->pde); // 启用了就复制一个
   }
@@ -254,6 +270,9 @@ void task_kill(unsigned tid) {
     }
   }
   io_cli();
+  if(get_task(tid) == current_task()) {
+    set_cr3(PDE_ADDRESS);
+  }
   free_pde(m[tid].pde);
   gc(tid); // 释放内存
   if (m[tid].Pkeyfifo) {
@@ -283,6 +302,7 @@ void task_kill(unsigned tid) {
   m[tid].pde = 0;
   m[tid].ipc_header.now = 0;
   m[tid].sigint_up = 0;
+  m[tid].train = 0;
   lock_init(&(m[tid].ipc_header.l));
   for (int k = 0; k < MAX_IPC_MESSAGE; k++) {
     m[tid].ipc_header.messages[k].from_tid = -1;
@@ -409,20 +429,78 @@ void task_fall_blocked(enum STATE state) {
   current_task()->ready = 0;
   task_next();
 }
-void waittid(uint32_t tid) {
+void task_exit(unsigned status) {
+  unsigned tid = current_task()->tid;
+  io_cli();
+  set_cr3(PDE_ADDRESS);
+  free_pde(m[tid].pde);
+  gc(tid); // 释放内存
+  if (m[tid].Pkeyfifo) {
+    page_free(m[tid].Pkeyfifo->buf, 4096);
+    free(m[tid].Pkeyfifo);
+  }
+  if (m[tid].Ukeyfifo) {
+    page_free(m[tid].Ukeyfifo->buf, 4096);
+    free(m[tid].Ukeyfifo);
+  }
+  m[tid].urgent = 0;
+  m[tid].fpu_flag = 0;
+  m[tid].fifosleep = 0;
+  m[tid].mx = 0;
+  m[tid].my = 0;
+  m[tid].line = NULL;
+  m[tid].jiffies = 0;
+  m[tid].timer = NULL;
+  m[tid].nfs = NULL;
+  m[tid].mm = NULL;
+  m[tid].waittid = -1;
+  m[tid].state = DIED;
+  m[tid].alloc_addr = 0;
+  m[tid].alloc_size = 0;
+  m[tid].running = 0;
+  m[tid].ready = 0;
+  m[tid].pde = 0;
+  m[tid].ipc_header.now = 0;
+  m[tid].sigint_up = 0;
+  m[tid].train = 0;
+  m[tid].status = status;
+  lock_init(&(m[tid].ipc_header.l));
+  for (int k = 0; k < MAX_IPC_MESSAGE; k++) {
+    m[tid].ipc_header.messages[k].from_tid = -1;
+    m[tid].ipc_header.messages[k].flag1 = 0;
+    m[tid].ipc_header.messages[k].flag2 = 0;
+  }
+  for (int k = 0; k < 30; k++) {
+    m[tid].handler[k] = 0;
+  }
+  if (m[tid].ptid != -1 && m[m[tid].ptid].waittid == tid) {
+    task_run(&(m[m[tid].ptid]));
+  }
+
+  m[tid].ptid = -1;
+  io_sti();
+  for (;;)
+    ;
+}
+int waittid(uint32_t tid) {
   mtask *t = get_task(tid);
   if (!t)
     return;
   if (t->ptid != current_task()->tid)
     return;
   current_task()->waittid = tid;
-  while (t->state != EMPTY && t->ptid == current_task()->tid)
+  while (t->state != DIED && t->ptid == current_task()->tid) {
     task_fall_blocked(WAITING);
+  }
+  unsigned status = t->status;
+  logk("task exit with code %d\n",status);
+  t->state = EMPTY;
+  return status;
 }
 void mtask_stop() { mtask_stop_flag = 1; }
 void mtask_start() { mtask_stop_flag = 0; }
 void mtask_run_now(mtask *obj) { next_set = obj; }
-void copy_vfs(mtask *src,mtask *dest) {
+void copy_vfs(mtask *src, mtask *dest) {
   vfs_change_disk_for_task(src->nfs->drive, dest);
   List *l;
   char *path;
@@ -432,14 +510,14 @@ void copy_vfs(mtask *src,mtask *dest) {
     dest->nfs->cd(dest->nfs, path);
   }
 }
-mtask * mtask_get_free() {
+mtask *mtask_get_free() {
   mtask *t = NULL;
-  for (int i = 0; i < 255; i++) {
+  for (int i = 1; i < 255; i++) {
     if (m[i].state == EMPTY || m[i].state == WILL_EMPTY ||
         m[i].state == READY) {
-      logk("f:%d\n",i);
+      logk("f:%d\n", i);
       t = &(m[i]);
-      logk("%d\n",t->tid);
+      logk("%d\n", t->tid);
       break;
     }
   }
@@ -449,14 +527,15 @@ mtask * mtask_get_free() {
 void interrput_exit();
 void roc() {
   logk("ROCT\n");
-  for(;;);
+  for (;;)
+    ;
 }
 static void build_fork_stack(mtask *task) {
   unsigned addr = task->top;
   addr -= sizeof(intr_frame_t);
   intr_frame_t *iframe = (intr_frame_t *)addr;
   iframe->eax = 0;
-  logk("iframe = %08x\n",iframe->eip);
+  logk("iframe = %08x\n", iframe->eip);
   addr -= sizeof(stack_frame);
   stack_frame *sframe = (stack_frame *)addr;
   sframe->ebp = 0x114514;
@@ -469,46 +548,45 @@ static void build_fork_stack(mtask *task) {
 }
 int task_fork() {
   mtask *m = mtask_get_free();
-  if(!m) {
+  if (!m) {
     return -1;
   }
-  logk("get free %08x\n",m);
-  logk("current = %08x\n",get_tid(current_task()));
+  logk("get free %08x\n", m);
+  logk("current = %08x\n", get_tid(current_task()));
   bool state = interrupt_disable();
   int tid = 0;
   tid = m->tid;
-  memcpy(m,current_task(),sizeof(mtask));
-  unsigned stack = page_malloc(64*1024);
-  change_page_task_id(tid,stack,64*1024);
-  unsigned int off = m->top-(unsigned)m->esp;
-  memcpy(stack,m->top-64*1024,64*1024);
-  logk("s = %08x \n",m->top-64*1024);
-  m->top = stack+=64*1024;
-  stack+=64*1024;
-  stack-=off;
+  memcpy(m, current_task(), sizeof(mtask));
+  unsigned stack = page_malloc(64 * 1024);
+  change_page_task_id(tid, stack, 64 * 1024);
+  unsigned int off = m->top - (unsigned)m->esp;
+  memcpy(stack, m->top - 64 * 1024, 64 * 1024);
+  logk("s = %08x \n", m->top - 64 * 1024);
+  m->top = stack += 64 * 1024;
+  stack += 64 * 1024;
   m->esp = stack;
   m->nfs = NULL;
-  if(current_task()->Pkeyfifo) {
+  if (current_task()->Pkeyfifo) {
     m->Pkeyfifo = malloc(sizeof(struct FIFO8));
-    memcpy(m->Pkeyfifo,current_task()->Pkeyfifo,sizeof(struct FIFO8));
+    memcpy(m->Pkeyfifo, current_task()->Pkeyfifo, sizeof(struct FIFO8));
     m->Pkeyfifo->buf = page_malloc(4096);
-    memcpy(m->Pkeyfifo->buf,current_task()->Pkeyfifo->buf,4096);
+    memcpy(m->Pkeyfifo->buf, current_task()->Pkeyfifo->buf, 4096);
   }
-  if(current_task()->Ukeyfifo) {
+  if (current_task()->Ukeyfifo) {
     m->Ukeyfifo = malloc(sizeof(struct FIFO8));
-    memcpy(m->Ukeyfifo,current_task()->Ukeyfifo,sizeof(struct FIFO8));
+    memcpy(m->Ukeyfifo, current_task()->Ukeyfifo, sizeof(struct FIFO8));
     m->Ukeyfifo->buf = page_malloc(4096);
-    memcpy(m->Ukeyfifo->buf,current_task()->Ukeyfifo->buf,4096);
+    memcpy(m->Ukeyfifo->buf, current_task()->Ukeyfifo->buf, 4096);
   }
   logk("copy vfs\n");
-  copy_vfs(current_task(),m);
+  copy_vfs(current_task(), m);
   m->pde = pde_clone(current_task()->pde);
   m->running = 0;
   m->jiffies = 0;
   m->state = RUNNING;
   m->ptid = get_tid(current_task());
   m->tid = tid;
-  logk("m->tid = %d\n",m->tid);
+  logk("m->tid = %d\n", m->tid);
   tid = m->tid;
   logk("BUILD FORK STACK\n");
   build_fork_stack(m);

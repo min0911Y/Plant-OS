@@ -20,6 +20,17 @@
     "cctype": "c",
     "cstdio": "c",
     "time.h": "c",
-    "errno.h": "c"
+    "errno.h": "c",
+    "arg.h": "c",
+    "ostream": "cpp",
+    "locale.h": "c",
+    "xstring": "cpp",
+    "xlocinfo": "cpp",
+    "xutility": "cpp",
+    "istream": "cpp",
+    "initializer_list": "cpp",
+    "utility": "cpp",
+    "mst.h": "c",
+    "gui.h": "c"
   }
 }

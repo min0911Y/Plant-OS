@@ -334,7 +334,7 @@ accept(int token)
     DEBUG_PRINTF("Token not what was expected (expected %d, got %d)\n",
 		 token, tokenizer_token());
     tokenizer_error_print();
-    exit();
+    exit(1);
   }
   DEBUG_PRINTF("Expected %d, got it\n", token);
   tokenizer_next();
@@ -697,7 +697,7 @@ statement(void)
     break;
   default:
     DEBUG_PRINTF("ubasic.c: statement(): not implemented %d\n", token);
-    exit();
+    exit(1);
   }
 }
 /*---------------------------------------------------------------------------*/

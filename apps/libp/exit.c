@@ -14,11 +14,11 @@ void atexit(void (*func)(void)) {
   }
   e[exit_call_number++] = func;
 }
-void exit() {
+void exit(unsigned status) {
   TaskLock();
   for(int i = 0;i<exit_call_number;i++) {
     ((e[i]))();
   }
-  _exit();
+  _exit(status);
   TaskUnlock();
 }

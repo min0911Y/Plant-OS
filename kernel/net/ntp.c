@@ -40,7 +40,7 @@ uint32_t ntp_get_server_time(uint32_t NTPServerIP) {
   ntp->Root_Difference = 1 << 8;
   ntp->Transmission_Timestamp =
       swap32(ntp_time_stamp(get_year(), get_mon_hex(), get_day_of_month(),
-                          get_hour_hex(), get_min_hex(), get_sec_hex()));
+                            get_hour_hex(), get_min_hex(), get_sec_hex()));
   NTPTime = NULL;
   while (!NTPTime) {
     socket->Send(socket, (uint8_t *)ntp, sizeof(struct NTPMessage));
@@ -55,7 +55,7 @@ uint32_t ntp_get_server_time(uint32_t NTPServerIP) {
   return NTPTime;
 }
 uint32_t ntp_time_stamp(uint32_t year, uint32_t month, uint32_t day,
-                      uint32_t hour, uint32_t min, uint32_t sec) {
+                        uint32_t hour, uint32_t min, uint32_t sec) {
   uint32_t leap = 0;
   for (int y = 1900; y != year; y++) {
     if ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0) {
@@ -78,7 +78,25 @@ uint32_t ntp_time_stamp(uint32_t year, uint32_t month, uint32_t day,
 }
 uint32_t UTCTimeStamp(uint32_t year, uint32_t month, uint32_t day,
                       uint32_t hour, uint32_t min, uint32_t sec) {
-  return ntp_time_stamp(year, month, day, hour, min, sec) - JAN_1970;
+  uint32_t leap = 0;
+  for (int y = 1970; y != year; y++) {
+    if ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0) {
+      leap++;
+    }
+  }
+  uint32_t s = 0;
+  if ((year % 4 == 0 && year % 100 != 0) || year % 400 == 0) {
+    for (int i = 0; i != month - 1; i++) {
+      s += table2[i] * DAY_SEC;
+    }
+  } else {
+    for (int i = 0; i != month - 1; i++) {
+      s += table1[i] * DAY_SEC;
+    }
+  }
+  s += (day - 1) * DAY_SEC + hour * 60 * 60 + min * 60 + sec;
+  return leap * LEAP_YEAR_SEC + (year - 1970 - leap) * COMMON_YEAR_SEC + s -
+         28800;
 }
 void UnNTPTimeStamp(uint32_t timestamp, uint32_t *year, uint32_t *month,
                     uint32_t *day, uint32_t *hour, uint32_t *min,

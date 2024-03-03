@@ -57,7 +57,7 @@ void task_to_user_mode_shell() {
   iframe->ecx = 7;
   iframe->eax = 8;
 
-  iframe->gs = 0;
+  iframe->gs = GET_SEL(5 * 8, SA_RPL3);
   iframe->ds = GET_SEL(3 * 8, SA_RPL3);
   iframe->es = GET_SEL(3 * 8, SA_RPL3);
   iframe->fs = GET_SEL(3 * 8, SA_RPL3);
@@ -78,7 +78,7 @@ void task_to_user_mode_shell() {
     DeleteList(vfs_now->path);
     free(vfs_now->cache);
     free((void *)vfs_now);
-    task_kill(current_task()->tid);
+    task_exit(-1);
     for (;;)
       ;
   }
@@ -128,7 +128,7 @@ void task_to_user_mode_elf(char *filename) {
   iframe->ecx = 7;
   iframe->eax = 8;
 
-  iframe->gs = 0;
+  iframe->gs = GET_SEL(5 * 8, SA_RPL3);
   iframe->ds = GET_SEL(3 * 8, SA_RPL3);
   iframe->es = GET_SEL(3 * 8, SA_RPL3);
   iframe->fs = GET_SEL(3 * 8, SA_RPL3);
@@ -152,18 +152,18 @@ void task_to_user_mode_elf(char *filename) {
     DeleteList(vfs_now->path);
     free(vfs_now->cache);
     free((void *)vfs_now);
-    task_kill(current_task()->tid);
+    task_exit(-1);
     for (;;)
       ;
   }
   unsigned alloc_addr = (elf32_get_max_vaddr(p) & 0xfffff000) + 0x1000;
   unsigned pg = div_round_up(current_task()->alloc_size, 0x1000);
-  for (int i = 0; i < pg+128; i++) {
+  for (int i = 0; i < pg+128*4; i++) {
     //logk("link %08x\n",alloc_addr + i * 0x1000);
     page_link(alloc_addr + i * 0x1000);
   }
-  unsigned alloced_esp = alloc_addr + 128 * 0x1000;
-  alloc_addr += 128 * 0x1000;
+  unsigned alloced_esp = alloc_addr + 128 * 0x1000 * 4;
+  alloc_addr += 128 * 0x1000 * 4;
   iframe->esp = alloced_esp;
   if (current_task()->ptid != -1) {
     page_link(0xf0000000);
@@ -190,7 +190,7 @@ void task_to_user_mode_elf(char *filename) {
   for (;;)
     ;
 }
-void os_execute(char *filename, char *line) {
+int os_execute(char *filename, char *line) {
   extern mtask *mouse_use_task;
   mtask *backup = mouse_use_task;
   extern int init_ok_flag;
@@ -198,7 +198,9 @@ void os_execute(char *filename, char *line) {
   strcpy(fm, filename);
   init_ok_flag = 0;
   
-  mtask *t = create_task(task_app, 0, 1, 1);
+  mtask *t = create_task(task_app, 0, 5, 1);
+  // 轮询
+  t->train = 1;
   vfs_change_disk_for_task(current_task()->nfs->drive, t);
   List *l;
   char *path;
@@ -224,7 +226,7 @@ void os_execute(char *filename, char *line) {
   r[1] = p1;
   t->line = r;
   
-  waittid(t->tid);
+  unsigned status = waittid(t->tid);
   current_task()->fifosleep = o;
 
   free(p1);
@@ -237,12 +239,15 @@ void os_execute(char *filename, char *line) {
     mouse_sleep(&mdec);
   }
   current_task()->sigint_up = old;
+
+  return status;
 }
-void os_execute_shell(char *line) {
+int os_execute_shell(char *line) {
   extern int init_ok_flag;
   init_ok_flag = 0;
-  mtask *t = create_task(task_shell, 0, 1, 1);
+  mtask *t = create_task(task_shell, 0, 5, 1);
   t->nfs = current_task()->nfs;
+  t->train = 1;
   int old = current_task()->sigint_up;
   current_task()->sigint_up = 0;
   t->sigint_up = 1;
@@ -257,11 +262,12 @@ void os_execute_shell(char *line) {
   current_task()->fifosleep = 1;
   t->line = p1;
  // io_sti();
-  waittid(t->tid);
+  unsigned status = waittid(t->tid);
   current_task()->fifosleep = o;
   free(p1);
   current_task()->TTY = tty_backup;
   current_task()->sigint_up = old;
+  return status;
 }
 void os_execute_no_ret(char *filename, char *line) {
   mtask *t = create_task(task_app, 0, 1, 1);

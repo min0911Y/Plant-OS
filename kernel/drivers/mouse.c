@@ -43,8 +43,10 @@ byte mouse_read() {
   mouse_wait(0);
   return io_in8(0x60);
 }
+lock_t mouse_l;
 void mouse_reset() { mouse_write(0xff); }
 void enable_mouse(struct MOUSE_DEC *mdec) {
+  lock_init(&mouse_l);
   /* 激活鼠标 */
   wait_KBC_sendready();
   io_out8(PORT_KEYCMD, KEYCMD_SENDTO_MOUSE);
@@ -115,14 +117,19 @@ int mouse_decode(struct MOUSE_DEC *mdec, unsigned char dat) {
   return -1;
 }
 // int a = 1;
+unsigned m_cr3 = 0;
+unsigned m_eip = 0;
 void inthandler2c(int *esp) {
+  //logk("2c\n");
   unsigned char data;
   io_out8(PIC1_OCW2, 0x64);
   io_out8(PIC0_OCW2, 0x62);
   data = io_in8(PORT_KEYDAT);
   if (mouse_use_task != NULL || !mouse_use_task->fifosleep ||
       mouse_use_task->state == 1) {
+     //   logk("put %08x\n",task_get_mouse_fifo(mouse_use_task));
     fifo8_put(task_get_mouse_fifo(mouse_use_task), data);
+    mtask_run_now(mouse_use_task);
   }
   return;
 }

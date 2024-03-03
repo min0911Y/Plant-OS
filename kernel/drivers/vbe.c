@@ -8,7 +8,7 @@ typedef long jmp_buf[_NSETJMP];
 
 int setjmp(jmp_buf env);
 void longjmp(jmp_buf env, int val);
-int check_vbe_mode(int mode, struct VBEINFO* vinfo) {
+int check_vbe_mode(int mode, struct VBEINFO *vinfo) {
   regs16_t regs;
   regs.ax = 0x4f01;
   regs.cx = mode + 0x4000;
@@ -20,7 +20,7 @@ int check_vbe_mode(int mode, struct VBEINFO* vinfo) {
   return 0;
 }
 int SwitchVBEMode(int mode) {
-  struct VBEINFO* vinfo = VBEINFO_ADDRESS;
+  struct VBEINFO *vinfo = VBEINFO_ADDRESS;
   if (check_vbe_mode(mode, vinfo) != 0)
     return -1;
   regs16_t regs;
@@ -41,21 +41,21 @@ void SwitchTo320X200X256_BIOS() {
   regs.ax = 0x0013;
   INT(0x10, &regs);
 }
-void* GetSVGACardMemAddress() {
-  struct VBEINFO* vinfo = VBEINFO_ADDRESS;
-  return (void*)(vinfo->vram);
+void *GetSVGACardMemAddress() {
+  struct VBEINFO *vinfo = VBEINFO_ADDRESS;
+  return (void *)(vinfo->vram);
 }
-char* GetSVGACharOEMString() {
-  struct VBEINFO* vbeinfo = (struct VBEINFO*)VBEINFO_ADDRESS;
+char *GetSVGACharOEMString() {
+  struct VBEINFO *vbeinfo = (struct VBEINFO *)VBEINFO_ADDRESS;
   regs16_t r;
   r.ax = 0x4f00;
   r.es = 0x07e0;
   r.di = 0x0000;
   INT(0x10, &r);
-  VESAControllerInfo* info = (VESAControllerInfo*)VBEINFO_ADDRESS;
+  VESAControllerInfo *info = (VESAControllerInfo *)VBEINFO_ADDRESS;
   return rmfarptr2ptr(info->oemString);
 }
-VESAModeInfo* GetVESAModeInfo(int mode) {
+VESAModeInfo *GetVESAModeInfo(int mode) {
   regs16_t r;
   r.ax = 0x4f01;
   r.cx = mode + 0x4000;
@@ -64,7 +64,7 @@ VESAModeInfo* GetVESAModeInfo(int mode) {
   INT(0x10, &r);
   if (r.ax != 0x004f)
     return NULL;
-  return (VESAModeInfo*)(0x7000);
+  return (VESAModeInfo *)(0x7000);
 }
 void _get_all_mode() {
   // 获取所有支持的模式
@@ -74,14 +74,14 @@ void _get_all_mode() {
   regs.es = 0x07e0;
   regs.di = 0x0000;
   INT(0x10, &regs);
-  VESAControllerInfo* vbe = (struct VESAControllerInfo*)VBEINFO_ADDRESS;
-  unsigned short* mode = (unsigned short*)rmfarptr2ptr(vbe->videoModes);
+  VESAControllerInfo *vbe = (struct VESAControllerInfo *)VBEINFO_ADDRESS;
+  unsigned short *mode = (unsigned short *)rmfarptr2ptr(vbe->videoModes);
   // int i = 0;
   for (int c = 0;; c++) {
     if (mode[c] == 0xffff)
       break;
     printk("Mode: %04x ", mode[c]);
-    VESAModeInfo* info = GetVESAModeInfo(mode[c]);
+    VESAModeInfo *info = GetVESAModeInfo(mode[c]);
     printk("%d x %d x %d\n", info->width, info->height, info->bitsPerPixel);
     // sleep(500);
   }
@@ -94,24 +94,38 @@ void get_all_mode() {
   _get_all_mode();
   //
 }
-int set_mode(int width, int height, int bpp) {
+unsigned set_mode(int width, int height, int bpp) {
   regs16_t regs;
   regs.ax = 0x4f00;
   regs.es = 0x07e0;
   regs.di = 0x0000;
   INT(0x10, &regs);
-  VESAControllerInfo* vbe = (struct VESAControllerInfo*)VBEINFO_ADDRESS;
-  unsigned short* mode = (unsigned short*)rmfarptr2ptr(vbe->videoModes);
+  VESAControllerInfo *vbe = (struct VESAControllerInfo *)VBEINFO_ADDRESS;
+  unsigned short *mode = (unsigned short *)rmfarptr2ptr(vbe->videoModes);
   // int i = 0;
   for (int c = 0;; c++) {
     if (mode[c] == 0xffff)
       break;
-    VESAModeInfo* info = GetVESAModeInfo(mode[c]);
+    VESAModeInfo *info = GetVESAModeInfo(mode[c]);
     if (info->width == width && info->height == height &&
         info->bitsPerPixel == bpp) {
       SwitchVBEMode(mode[c]);
-      return 0;
+      struct VBEINFO *v = VBEINFO_ADDRESS;
+      return v->vram;
     }
   }
   return -1;
 }
+typedef struct {
+  unsigned setWindow;
+  unsigned setDisplayStart;
+  unsigned setPalette;
+  unsigned IOPrivlnfo;
+  long extensionSig;
+  long setWindowLen;
+  // 展信息标志，恒为 0FBADFBADh
+  // 以下信息于缓冲区
+  long setDisplayStartLen;
+  long setPaletteLen;
+  // 以下是代码和表格
+} VBEProtectedModeInfo;

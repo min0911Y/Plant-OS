@@ -233,7 +233,7 @@ void cur_service() {
   unlock(&l);
   int j = 0;
   while (1) {
-    timer_settime(cur_tmr, 500);
+    timer_settime(cur_tmr, 50);
     while (fifo8_status(&fifo) == 0) {
       lock(&l);
       if (f) {
@@ -258,7 +258,7 @@ void cur_service() {
   }
 }
 void SwitchToHighTextMode() {
-  if (set_mode(1024, 768, 32) != 0) {
+  if (set_mode(1024, 768, 32) == (unsigned)(-1)) {
     printk("Can't enable 1024x768x32 VBE mode.\n\n");
     return;
   }

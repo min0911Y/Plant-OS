@@ -9,5 +9,5 @@ ENTRYPOINT := 0x70000000
 LD := ld
 LD_FLAGS := -m elf_i386 -static -e Main -Ttext $(ENTRYPOINT)
 LINK := $(LD) $(LD_FLAGS)
-BASIC_LIB_C := $(LIBS_PATH)/libp.a $(LIBS_PATH)/libtcc1.a
-BASIC_LIB_CPP := $(LIBS_PATH)/libp.a $(LIBS_PATH)/libtcc1.a $(LIBS_PATH)/libcpps.a
+BASIC_LIB_C := $(LIBS_PATH)/libp.a $(LIBS_PATH)/libtcc1.a $(LIBS_PATH)/libabi.a
+BASIC_LIB_CPP := $(LIBS_PATH)/libcpps.a $(LIBS_PATH)/libtcc1.a $(LIBS_PATH)/libabi.a

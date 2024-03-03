@@ -2,7 +2,7 @@
 #define _CMD_H
 #include <define.h>
 // command.c
-void command_run(char *cmdline);
+int command_run(char *cmdline);
 void show_heap(memory* mem);
 void pci_list();
 void cmd_dir(char **args);

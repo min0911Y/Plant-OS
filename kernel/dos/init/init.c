@@ -27,6 +27,7 @@ void socket_init();
 void init_devfs();
 void init_vfs();
 void do_init_seg_register();
+unsigned base_count;
 void sysinit(void) {
   struct FIFO8 keyfifo, mousefifo;
   struct FIFO8 keyfifo_sr1, keyfifo_sr2;
@@ -95,6 +96,13 @@ void sysinit(void) {
   SetDrive((unsigned char *)"DISK_DRIVE");
   SetDrive((unsigned char *)"NETCARD_DRIVE");
   
+  printk("benching cpu.....\n");
+  base_count = 0;
+  unsigned c = timerctl.count;
+  while(timerctl.count - c < 100) {
+    base_count++;
+  }
+  printk("base count is %08x\n",base_count);
   into_mtask();
   for(;;);
 }
