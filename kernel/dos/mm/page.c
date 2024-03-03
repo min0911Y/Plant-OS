@@ -11,12 +11,12 @@ void init_pdepte(unsigned int pde_addr, unsigned pte_addr, unsigned page_end) {
 
   memset((void *)pde_addr, 0, page_end - pde_addr);
   // 这是初始化PDE 页目录
-  for (int addr = pde_addr, i = pte_addr | PG_P | PG_RWW | PG_USU;
+  for (int addr = pde_addr, i = pte_addr | PG_P | PG_RWW;
        addr != pte_addr; addr += 4, i += 0x1000) {
     *(int *)(addr) = i;
   }
   // 这是初始化PTE 页表
-  for (int addr = PTE_ADDRESS, i = PG_P | PG_RWW | PG_USU; addr != PAGE_END;
+  for (int addr = PTE_ADDRESS, i = PG_P | PG_RWW; addr != PAGE_END;
        addr += 4, i += 0x1000) {
     *(int *)(addr) = i;
   }
@@ -43,7 +43,6 @@ unsigned pde_clone(unsigned addr) {
     unsigned p = *pde_entry & (0xfffff000);
     for (int j = 0; j < 0x1000; j += 4) {
       unsigned int *pte_entry = (unsigned int *)(p + j);
-
       if (pages[IDX(*pte_entry)].count &&
           (page_get_attr(get_line_address(i / 4, j / 4, 0)) & PG_USU)) {
         pages[IDX(*pte_entry)].count++;
@@ -220,6 +219,7 @@ void C_init_page() {
   init_page_manager(pages);
   page_set_alloced(pages, 0, 0xa01000);
   page_set_alloced(pages, 0xc0000000, 0xffffffff);
+
 }
 void pf_set(unsigned int memsize) {
   uint32_t *pte = (uint32_t *)PTE_ADDRESS;

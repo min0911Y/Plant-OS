@@ -215,7 +215,7 @@ img_run :
 	$(MAKE) -C $(NETPATH)
 	$(MAKE) -C $(MSTPATH)
 	$(MAKE) Mimg
-	qemu-system-x86_64 -net nic,model=pcnet -net user -serial stdio -device sb16 -device floppy -fda ./img/Powerint_DOS_386.img -hda ./img/Disk2.img -hdb ./img/Disk3.img -hdc ./img/res.img \
+	qemu-system-x86_64.exe -net nic,model=pcnet -net user -serial stdio -device sb16 -device floppy -fda ./img/Powerint_DOS_386.img -hda ./img/Disk2.img -hdb ./img/Disk3.img -hdc ./img/res.img \
 	-drive file=disk.img,if=none,id=drive0 -device ahci,id=ahci -device ide-hd,drive=drive0,bus=ahci.0 -drive file=big_disk.img,if=none,id=drive1 -device ide-hd,drive=drive1,bus=ahci.1		\
 	 -boot a -m 4096
 full :

@@ -62,18 +62,7 @@ void gmouse(gmouse_t *gmouse) {
       //  logkf("%02x\n",i);
       if (mouse_decode(&mdec, i) != 0) {
         // logkf("%d %d\n",mdec.x,mdec.y);
-        gmouse->x += mdec.x;
-        gmouse->y += mdec.y;
-        if (gmouse->x > gmouse->desktop->xsize) {
-          gmouse->x = gmouse->desktop->xsize;
-        } else if (gmouse->x < -16) {
-          gmouse->x = -16;
-        }
-        if (gmouse->y > gmouse->desktop->ysize) {
-          gmouse->y = gmouse->desktop->ysize;
-        } else if (gmouse->y < -19) {
-          gmouse->y = -19;
-        }
+
         if ((mdec.btn & 0x01) != 0) {
           // 左键
           gmouse->click_left = NULL;
@@ -151,6 +140,18 @@ void gmouse(gmouse_t *gmouse) {
               }
             }
           }
+        }
+        gmouse->x += mdec.x;
+        gmouse->y += mdec.y;
+        if (gmouse->x > gmouse->desktop->xsize) {
+          gmouse->x = gmouse->desktop->xsize;
+        } else if (gmouse->x < -16) {
+          gmouse->x = -16;
+        }
+        if (gmouse->y > gmouse->desktop->ysize) {
+          gmouse->y = gmouse->desktop->ysize;
+        } else if (gmouse->y < -19) {
+          gmouse->y = -19;
         }
         sheet_slide(gmouse->sht, gmouse->x, gmouse->y);
       }

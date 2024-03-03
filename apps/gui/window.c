@@ -54,6 +54,7 @@ void handle_left_window(window_t *window, gmouse_t *gmouse) {
     // 移动
     window->x += mdec.x;
     window->y += mdec.y;
+
   } else if (Collision(window->x + window->xsize - 21, window->y + 5, 16, 19,
                        gmouse->x, gmouse->y)) {
     // 关闭

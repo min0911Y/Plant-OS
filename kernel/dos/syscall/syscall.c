@@ -382,25 +382,20 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
       t->TTY = current_task()->TTY;
       t->nfs = task->nfs;
       t->ptid = task->tid;
-      
+
       for (int i = DIDX(0x70000000) * 4; i < 0x1000; i += 4) {
         unsigned int *pde_entry = (unsigned int *)(current_task()->pde + i);
         unsigned p = *pde_entry & (0xfffff000);
         for (int j = 0; j < 0x1000; j += 4) {
           unsigned int *pte_entry = (unsigned int *)(p + j);
 
-          if (pages[IDX(*pte_entry)].count == 2 ||
-              pages[IDX(*pte_entry)].count == 3) {
-            if (pages[IDX(*pte_entry)].count == 3) {
-              //logk("3 %08x\n", get_line_address(i / 4, j / 4, 0));
-            } else {
-              pages[IDX(*pte_entry)].count--;
-            }
+          if (pages[IDX(*pte_entry)].count >= 2) {
+            pages[IDX(*pte_entry)].count--;
           }
         }
         // pages[IDX(*pde_entry)].count--;
       }
-      
+
       unsigned *r = page_malloc_one_no_mark();
       r[0] = esi;
       r[1] = edx;
