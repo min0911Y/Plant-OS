@@ -11,6 +11,7 @@ char mtask_stop_flag = 0;
 unsigned get_cr3() { asm volatile("movl %cr3, %eax\n"); }
 void set_cr3(uint32_t pde) { asm volatile("movl %%eax, %%cr3\n" ::"a"(pde)); }
 mtask *next_set = NULL;
+mtask null_task;
 static void init_task() {
   for (int i = 0; i < 255; i++) {
     m[i].jiffies = 0;   // 最后一次执行的全局时间片
@@ -63,6 +64,7 @@ bool task_check_train(mtask *task) {
   }
   return false;
 }
+extern mtask *mouse_use_task;
 void task_next() {
   // io_sti();
   if (mtask_stop_flag && next_set == NULL)
@@ -75,8 +77,10 @@ void task_next() {
   current->running = 0;
   mtask *next = NULL;
   int i;
+  mtask *j = NULL;
   if (next_set) {
     i = next_set->tid;
+    j = next_set;
     next_set = NULL;
   } else {
     i = 0;
@@ -110,7 +114,15 @@ void task_next() {
       continue;
     }
   OK:
-    if (!next || p->jiffies < next->jiffies || p->urgent)
+    if (p->urgent) {
+      if (next->urgent && p->jiffies < next->jiffies) {
+        next = p;
+      } else {
+        next = p;
+      }
+      continue;
+    }
+    if (!next || p->jiffies < next->jiffies)
       if ((!task_check_train(next)) ||
           (task_check_train(next) && task_check_train(p))) {
         next = p;
@@ -139,6 +151,7 @@ H:
   if (current_task()->state == WILL_EMPTY) {
     current_task()->state = READY;
   }
+  // logk("run %d\n",next->tid);
   task_switch(next); // 调度
 }
 
@@ -270,7 +283,7 @@ void task_kill(unsigned tid) {
     }
   }
   io_cli();
-  if(get_task(tid) == current_task()) {
+  if (get_task(tid) == current_task()) {
     set_cr3(PDE_ADDRESS);
   }
   free_pde(m[tid].pde);
@@ -323,7 +336,13 @@ void task_kill(unsigned tid) {
       ;
 }
 
-mtask *current_task() { return current; }
+mtask *current_task() {
+  if (current == NULL) {
+    null_task.tid = NULL_TID;
+    return &null_task;
+  }
+  return current;
+}
 int into_mtask() {
   init_task();
   set_cr0(get_cr0() & ~(CR0_EM | CR0_TS));
@@ -430,7 +449,19 @@ void task_fall_blocked(enum STATE state) {
   task_next();
 }
 void task_exit(unsigned status) {
+
   unsigned tid = current_task()->tid;
+  for (int i = 0; i < 255; i++) {
+    if (m[i].state == EMPTY || m[i].state == WILL_EMPTY || m[i].state == READY)
+      continue;
+    if (m[i].tid == tid)
+      continue;
+    if (m[i].ptid == tid) {
+      int tid = m[i].tid;
+      get_task(m[i].tid)->signal |= SIGMASK(SIGINT);
+      waittid(tid);
+    }
+  }
   io_cli();
   set_cr3(PDE_ADDRESS);
   free_pde(m[tid].pde);
@@ -493,7 +524,7 @@ int waittid(uint32_t tid) {
     task_fall_blocked(WAITING);
   }
   unsigned status = t->status;
-  logk("task exit with code %d\n",status);
+  logk("task exit with code %d\n", status);
   t->state = EMPTY;
   return status;
 }
@@ -559,7 +590,7 @@ int task_fork() {
   memcpy(m, current_task(), sizeof(mtask));
   unsigned stack = page_malloc(64 * 1024);
   change_page_task_id(tid, stack, 64 * 1024);
-  unsigned int off = m->top - (unsigned)m->esp;
+  // unsigned int off = m->top - (unsigned)m->esp;
   memcpy(stack, m->top - 64 * 1024, 64 * 1024);
   logk("s = %08x \n", m->top - 64 * 1024);
   m->top = stack += 64 * 1024;
@@ -578,11 +609,24 @@ int task_fork() {
     m->Ukeyfifo->buf = page_malloc(4096);
     memcpy(m->Ukeyfifo->buf, current_task()->Ukeyfifo->buf, 4096);
   }
+  if (current_task()->keyfifo) {
+    m->keyfifo = (char *)page_malloc_one();
+    memcpy(m->keyfifo, current_task()->keyfifo, sizeof(struct FIFO8));
+    m->keyfifo->buf = (char *)page_malloc_one();
+    memcpy(m->keyfifo->buf, current_task()->keyfifo->buf, 4096);
+  }
+  if (current_task()->mousefifo) {
+    m->mousefifo = (char *)page_malloc_one();
+    memcpy(m->mousefifo, current_task()->mousefifo, sizeof(struct FIFO8));
+    m->mousefifo->buf = (char *)page_malloc_one();
+    memcpy(m->mousefifo->buf, current_task()->mousefifo->buf, 4096);
+  }
   logk("copy vfs\n");
   copy_vfs(current_task(), m);
   m->pde = pde_clone(current_task()->pde);
   m->running = 0;
   m->jiffies = 0;
+  m->timeout = 1;
   m->state = RUNNING;
   m->ptid = get_tid(current_task());
   m->tid = tid;

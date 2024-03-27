@@ -41,7 +41,7 @@ mtask *create_task(unsigned eip, unsigned esp, unsigned ticks, unsigned floor);
 void task_to_user_mode_elf(char *filename);
 void task_kill(unsigned tid);
 void task_exit(unsigned status);
-int os_execute(char *filename,char *line);
+int os_execute(char *filename, char *line);
 int os_execute_shell(char *line);
 void idle();
 void init();
@@ -52,7 +52,7 @@ void task_fifo_sleep(mtask *task);
 struct FIFO8 *task_get_mouse_fifo(mtask *task);
 void task_lock();
 void task_unlock();
-void task_to_user_mode(unsigned eip,unsigned esp);
+void task_to_user_mode(unsigned eip, unsigned esp);
 void task_set_fifo(mtask *task, struct FIFO8 *kfifo, struct FIFO8 *mfifo);
 void os_execute_no_ret(char *filename, char *line);
 uint32_t get_father_tid(mtask *t);
@@ -79,19 +79,20 @@ void *page_malloc(int size);
 void page_free(void *p, int size);
 void page_map(void *target, void *start, void *end);
 void change_page_task_id(int task_id, void *p, unsigned int size);
-void PF(unsigned edi, unsigned esi, unsigned ebp, unsigned esp,
-    unsigned ebx, unsigned edx, unsigned ecx, unsigned eax,
-    unsigned gs, unsigned fs, unsigned es, unsigned ds,
-   unsigned error, unsigned eip, unsigned cs, unsigned eflags);
-void page_set_physics_attr(uint32_t vaddr,void *paddr,uint32_t attr);
-uint32_t page_get_attr(unsigned vaddr) ;
+void PF(unsigned edi, unsigned esi, unsigned ebp, unsigned esp, unsigned ebx,
+        unsigned edx, unsigned ecx, unsigned eax, unsigned gs, unsigned fs,
+        unsigned es, unsigned ds, unsigned error, unsigned eip, unsigned cs,
+        unsigned eflags);
+void page_set_physics_attr(uint32_t vaddr, void *paddr, uint32_t attr);
+uint32_t page_get_attr(unsigned vaddr);
 uint32_t page_get_phy(unsigned vaddr);
-void copy_from_phy_to_line(unsigned phy,unsigned line,unsigned pde,unsigned size);
-uint32_t page_get_attr_pde(unsigned vaddr,unsigned pde);
-void set_line_address(unsigned val,unsigned line,unsigned pde,unsigned size);
-void page_link_pde(unsigned addr,unsigned pde);
-uint32_t page_get_phy_pde(unsigned vaddr,unsigned pde);
-void page_links(unsigned start,unsigned numbers);
+void copy_from_phy_to_line(unsigned phy, unsigned line, unsigned pde,
+                           unsigned size);
+uint32_t page_get_attr_pde(unsigned vaddr, unsigned pde);
+void set_line_address(unsigned val, unsigned line, unsigned pde, unsigned size);
+void page_link_pde(unsigned addr, unsigned pde);
+uint32_t page_get_phy_pde(unsigned vaddr, unsigned pde);
+void page_links(unsigned start, unsigned numbers);
 // nasmfunc.asm
 void int32(unsigned char intnum, regs16_t *regs);
 void floppy_int(void);
@@ -246,7 +247,7 @@ void mem_free(memory *mem, void *p, uint32_t size);
 memory *memory_init(uint32_t start, uint32_t size);
 void *malloc(int size);
 void free(void *p);
-void* realloc(void* ptr, uint32_t size);
+void *realloc(void *ptr, uint32_t size);
 // ipc.c
 int send_ipc_message(int to_tid, void *data, unsigned int size, char type);
 int send_ipc_message_by_name(char *tname, void *data, unsigned int size,
@@ -277,7 +278,10 @@ void lock_init(lock_t *l);
 int mount(char *fileName);
 void unmount(char drive);
 // signal.c
-void set_signal_handler(unsigned sig,unsigned handler);
+void set_signal_handler(unsigned sig, unsigned handler);
 // farcall.c
-uint32_t call_across_page(uint32_t (*f)(void *arg),unsigned cr3,void *a);
+uint32_t call_across_page(uint32_t (*f)(void *arg), unsigned cr3, void *a);
+// fartty.c
+struct tty *fartty_alloc(void *vram, unsigned handle, unsigned cr3, int xsize,
+                         int ysize);
 #endif

@@ -141,8 +141,6 @@ void sheet_refresh(struct SHEET* sht, int bx0, int by0, int bx1, int by1) {
   if (sht->height >= 0) { /* 如果正在显示，则按新图层的信息刷新画面*/
     sheet_refreshsub(sht->ctl, sht->vx0 + bx0, sht->vy0 + by0, sht->vx0 + bx1,
                      sht->vy0 + by1, sht->height, sht->height);
-  } else {
-    logk("SHEET: refresh error %d\n", sht->height);
   }
   return;
 }

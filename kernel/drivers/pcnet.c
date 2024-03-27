@@ -210,8 +210,9 @@ void init_pcnet_card() {
   io_base = pci_get_port_base(bus, dev, func);
   init_Card_all();
 }
-
+int recv = 0;
 void Recv() {
+  recv = 1;
   //printk("\nPCNET RECV: ");
   for (; (recvBufferDesc[currentRecvBuffer].flags & 0x80000000) == 0;
        currentRecvBuffer = (currentRecvBuffer + 1) % 8) {
@@ -227,7 +228,8 @@ void Recv() {
       }
        //printk("\n");
     }
-
+    recv = 0;
+    currentRecvBuffer = 0;
     Card_Recv_Handler(recvBufferDesc[currentRecvBuffer].address);
 
     clean(recvBufferDesc[currentRecvBuffer].address, 2048);
@@ -235,8 +237,10 @@ void Recv() {
     recvBufferDesc[currentRecvBuffer].flags = 0x8000f7ff;
   }
   currentRecvBuffer = 0;
+  
 }
 void PcnetSend(uint8_t* buffer, int size) {
+  while(recv);
   int sendDesc = currentSendBuffer;
   currentSendBuffer = (currentSendBuffer + 1) % 8;
   clean(sendBufferDesc[currentSendBuffer].address, 2048);

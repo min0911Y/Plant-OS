@@ -12,7 +12,8 @@ void Socket_Init(socket_t socket, unsigned int remoteIP,
                  unsigned short localPort);
 void Socket_Free(socket_t socket);
 void Socket_Send(socket_t socket, unsigned char *data, unsigned int size);
-void Socket_Recv(socket_t socket, unsigned char *data, unsigned int size);
+int Socket_Recv(socket_t socket, unsigned char *data, unsigned int size);
+void listen(socket_t socket);
 unsigned int GetIP();
 int ping(unsigned int remoteIP);
 #ifdef __cplusplus

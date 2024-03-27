@@ -119,17 +119,38 @@ int mouse_decode(struct MOUSE_DEC *mdec, unsigned char dat) {
 // int a = 1;
 unsigned m_cr3 = 0;
 unsigned m_eip = 0;
+unsigned times = 0;
 void inthandler2c(int *esp) {
-  //logk("2c\n");
+  // logk("2c\n");
   unsigned char data;
   io_out8(PIC1_OCW2, 0x64);
   io_out8(PIC0_OCW2, 0x62);
   data = io_in8(PORT_KEYDAT);
-  if (mouse_use_task != NULL || !mouse_use_task->fifosleep ||
-      mouse_use_task->state == 1) {
-     //   logk("put %08x\n",task_get_mouse_fifo(mouse_use_task));
-    fifo8_put(task_get_mouse_fifo(mouse_use_task), data);
-    mtask_run_now(mouse_use_task);
+  times++;
+  if (times == 4) {
+    times = 0;
+    if (mouse_use_task != NULL || !mouse_use_task->fifosleep ||
+        mouse_use_task->state == 1) {
+      //   logk("put %08x\n",task_get_mouse_fifo(mouse_use_task));
+      fifo8_put(task_get_mouse_fifo(mouse_use_task), data);
+
+      if (current_task() != mouse_use_task) {
+      //  logk("SET 1\n");
+        mouse_use_task->timeout = 5;
+        mouse_use_task->ready = 1;
+        mouse_use_task->urgent = 1;
+        mouse_use_task->running = 0;
+        mtask_run_now(mouse_use_task);
+      } else{
+        mouse_use_task->running = 0;
+      }
+    }
+  } else {
+    if (mouse_use_task != NULL || !mouse_use_task->fifosleep ||
+        mouse_use_task->state == 1) {
+      //   logk("put %08x\n",task_get_mouse_fifo(mouse_use_task));
+      fifo8_put(task_get_mouse_fifo(mouse_use_task), data);
+    }
   }
   return;
 }

@@ -5,13 +5,16 @@
 #include <syscall.h>
 #include <time.h>
 static struct VBEINFO *vinfo;
+desktop_t *desktop0;
 static void click1(button_t *button) {
-  printf("You click the test button!\n");
-  int x = rand() % button->super_window->window->xsize;
-  int y = rand() % button->super_window->window->ysize;
-  button->super_window->slide_sheet(button->super_window, button->sht, x, y);
+  window_t *a =
+      create_window(desktop0, "console", 40 * 8 + 8, 20 * 16 + 28, NowTaskID());
+  a->display(a, 0, 0, 3);
+  create_console(a, 40 * 8, 20 * 16, 4, 24);
 }
+
 unsigned char *ascfont, *hzkfont;
+void handle(uint32_t *a) { logkf("%c", a[2]); }
 void main() {
   if (filesize("A:\\other\\font.bin") == -1 ||
       filesize("A:\\other\\HZK16") == -1) {
@@ -21,14 +24,8 @@ void main() {
   int xsize_input, ysize_input;
   char *buffer_input;
 re:
-  buffer_input = malloc(512);
-  printf("desktop xsize:");
-  scan(buffer_input, 512);
-  xsize_input = (int)strtol(buffer_input, NULL, 10);
-  printf("desktop ysize:");
-  scan(buffer_input, 512);
-  ysize_input = (int)strtol(buffer_input, NULL, 10);
-  free((void *)buffer_input);
+  xsize_input = 1024;
+  ysize_input = 768;
   unsigned vram;
   vram = set_mode(xsize_input, ysize_input);
 
@@ -37,45 +34,54 @@ re:
   hzkfont = (unsigned char *)malloc(filesize("A:\\other\\HZK16"));
   api_ReadFile("A:\\other\\font.bin", ascfont);
   api_ReadFile("A:\\other\\HZK16", hzkfont);
-  desktop_t *desktop0 = create_desktop(xsize_input, ysize_input, NowTaskID());
+  desktop0 = create_desktop(xsize_input, ysize_input, NowTaskID());
   desktop0->display(desktop0, vram);
   desktop0->draw(desktop0, 0, 0, xsize_input, ysize_input,
                  argb(0, 58, 110, 165));
   desktop0->draw(desktop0, 10, 30, 18 + 48 * 8 + 8, 30 + 16, COL_C6C6C6);
   desktop0->puts(desktop0, "Power Desktop powered by Powerint DOS 386 kernel",
                  18, 30, COL_000000);
-  window_t *window0 = create_window(desktop0, "hello0", 200, 200, NowTaskID());
-  window_t *window1 = create_window(desktop0, "hello1", 200, 200, NowTaskID());
+
   window_t *window2 =
       create_window(desktop0, "console", 80 * 8 + 8, 25 * 16 + 28, NowTaskID());
   window_t *window3 =
       create_window(desktop0, "console", 40 * 8 + 8, 20 * 16 + 28, NowTaskID());
-  window0->display(window0, 100, 100, 1);
-  window1->display(window1, 200, 200, 2);
+
   window2->display(window2, 250, 250, 3);
   window2->display(window3, 400, 400, 4);
-  window0->puts(window0, "Hello world!", 52, 92, COL_000000);
   gmouse_t *gmouse0 =
       create_gmouse(desktop0, desktop0->xsize / 2, desktop0->ysize / 2, 5);
+  console_t *console0 = create_console(window2, 80 * 8, 25 * 16, 4, 24);
+  // console_t *console1 = create_console(window3, 40 * 8, 20 * 16, 4, 24);
 
+  window_t *window0 = create_window(desktop0, "hello0", 200, 200, NowTaskID());
+  window_t *window1 = create_window(desktop0, "hello1", 200, 200, NowTaskID());
+  window0->puts(window0, "Hello world!", 52, 92, COL_000000);
   super_window_t *super_window0 = create_super_window(window1);
+  window0->display(window0, 100, 100, 1);
+  window1->display(window1, 200, 200, 2);
   button_t *button0 =
-      create_button(super_window0, "test", 50, 20, 50, 50, click1);
+      create_button(super_window0, "test", 100, 20, 50, 50, click1);
   textbox_t *textbox0 = create_textbox(super_window0, 15 * 8, 16, 4, 110);
+  unsigned clock1 = clock();
   for (;;) {
-    time_t rawtime;
-    struct tm *info;
-    char buffer[80];
+    if (clock1 - clock() >= 1000) {
+      clock1 = clock();
+      time_t rawtime;
+      struct tm *info;
+      char buffer[80];
 
-    rawtime = time(&rawtime);
+      rawtime = time(&rawtime);
 
-    info = localtime(&rawtime);
+      info = localtime(&rawtime);
 
-    strftime(buffer, 80, "%Y-%m-%d %H:%M:%S", info);
-    desktop0->draw(desktop0, 10, 10, 18 + strlen(buffer) * 8 + 8, 10 + 16,
-                   COL_C6C6C6);
-    desktop0->puts(desktop0, buffer, 18, 10, COL_000000);
-    sleep(1000);
+      strftime(buffer, 80, "%Y-%m-%d %H:%M:%S", info);
+      desktop0->draw(desktop0, 10, 10, 18 + strlen(buffer) * 8 + 8, 10 + 16,
+                     COL_C6C6C6);
+      desktop0->puts(desktop0, buffer, 18, 10, COL_000000);
+    } else {
+      api_yield();
+    }
   }
 }
 void SDraw_Box(vram_t *vram, int x, int y, int x1, int y1, color_t color,

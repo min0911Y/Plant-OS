@@ -3006,21 +3006,23 @@ register const char *accept;
 
   return 0;
 }
-size_t strspn(const char *s, const char *accept) {
-  const char *p = s;
-  const char *a;
-  size_t count = 0;
+#define BITOP1(a,b,op) \
+ ((a)[(size_t)(b)/(8*sizeof *(a))] op (size_t)1<<((size_t)(b)%(8*sizeof *(a))))
 
-  for (; *p != '\0'; ++p) {
-    for (a = accept; *a != '\0'; ++a) {
-      if (*p == *a)
-        break;
-    }
-    if (*a == '\0')
-      return count;
-    ++count;
-  }
-  return count;
+size_t strspn(const char *s, const char *c)
+{
+	const char *a = s;
+	size_t byteset[32/sizeof(size_t)] = { 0 };
+
+	if (!c[0]) return 0;
+	if (!c[1]) {
+		for (; *s == *c; s++);
+		return s-a;
+	}
+
+	for (; *c && BITOP1(byteset, *(unsigned char *)c, |=); c++);
+	for (; *s && BITOP1(byteset, *(unsigned char *)s, &); s++);
+	return s-a;
 }
 int strcoll(const char *str1, const char *str2) { return strcmp(str1, str2); }
 double frexp(double x, int *e) {

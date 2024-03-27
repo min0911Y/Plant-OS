@@ -1,6 +1,7 @@
 #include <dos.h>
 #define EFLAGS_AC_BIT 0x00040000
 #define CR0_CACHE_DISABLE 0x60000000
+
 typedef unsigned int uintptr_t;
 unsigned int memtest_sub(unsigned int, unsigned int);
 unsigned int memtest(unsigned int start, unsigned int end) {
@@ -435,3 +436,5 @@ void* krealloc(void* ptr, uint32_t size) {
   }
   return new;
 }
+
+

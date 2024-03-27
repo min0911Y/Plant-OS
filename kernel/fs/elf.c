@@ -31,8 +31,7 @@ void load_segment(Elf32_Phdr *phdr, void *elf) {
     p = (e - d) / 0x1000 + 1;
   }
   for (unsigned i = 0; i < p; i++) {
-    if (!(page_get_attr(d + i * 0x1000) & PG_RWW))
-      page_link(d + i * 0x1000);
+    page_link(d + i * 0x1000);
   }
   memcpy(phdr->p_vaddr, elf + phdr->p_offset, phdr->p_filesz);
   if (phdr->p_memsz > phdr->p_filesz) { // 这个是bss段

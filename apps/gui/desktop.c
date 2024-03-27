@@ -26,7 +26,8 @@ void hide_desktop(desktop_t *desktop) {
 
 void draw_desktop(desktop_t *desktop, int x, int y, int x1, int y1,
                   color_t color) {
-  SDraw_Box(desktop->vram, x, y, x1, y1, color, desktop->xsize);
+  if (color != 0x12ffffff)
+    SDraw_Box(desktop->vram, x, y, x1, y1, color, desktop->xsize);
   sheet_refresh(desktop->sht, x, y, x1, y1);
   return;
 }

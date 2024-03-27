@@ -21,6 +21,9 @@ typedef struct intr_frame1_t {
   unsigned eip;
 } signal_frame_t;
 void b2() {
+
+
+  for(;;);
   return;
 }
 void signal_deal() {
@@ -49,11 +52,13 @@ void signal_deal() {
       frame->es = i->es;
       frame->ds = i->ds;
       frame->eip = i->eip;
-      frame->eip1 = return_to_app;
+      frame->eip1 = task->ret_to_app;
       i->eip = task->handler[SIGINT];
       i->esp = frame;
       asm volatile ("xchg %bx,%bx");
       return;
+    } else {
+      task_exit(0);
     }
   } else {
     return;

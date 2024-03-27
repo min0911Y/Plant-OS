@@ -37,8 +37,10 @@ OBJS_BOOTPACK = $(OUTPATH)kernelc.o $(OUTPATH)screen.o $(OUTPATH)command.o $(OUT
 				$(OUTPATH)time.o $(OUTPATH)etherframe.o $(OUTPATH)arp.o $(OUTPATH)ipv4.o $(OUTPATH)icmp.o $(OUTPATH)udp.o \
 				$(OUTPATH)dhcp.o $(OUTPATH)tcp.o $(OUTPATH)chat.o $(OUTPATH)dns.o $(OUTPATH)socket.o $(OUTPATH)bit.o \
 				$(OUTPATH)http.o $(OUTPATH)ftp.o $(OUTPATH)linux_style_file.o $(OUTPATH)netgobang.o $(OUTPATH)ide.o \
-				$(OUTPATH)net_syscall.o $(OUTPATH)ntp.o $(OUTPATH)vdisk.o $(OUTPATH)rootfs.o $(OUTPATH)mount.o $(OUTPATH)mtask.o $(OUTPATH)basetask.o $(OUTPATH)execute.o \
-				$(OUTPATH)network.o $(OUTPATH)rtl8139.o $(OUTPATH)vfs.o $(OUTPATH)build.o $(OUTPATH)mst.o $(OUTPATH)str.o $(OUTPATH)pfs.o $(OUTPATH)signal.o $(OUTPATH)rtc.o $(OUTPATH)ahci.o $(OUTPATH)farcall.o
+				$(OUTPATH)net_syscall.o $(OUTPATH)ntp.o $(OUTPATH)vdisk.o $(OUTPATH)rootfs.o $(OUTPATH)mount.o \
+				$(OUTPATH)mtask.o $(OUTPATH)basetask.o $(OUTPATH)execute.o $(OUTPATH)network.o $(OUTPATH)rtl8139.o \
+				$(OUTPATH)vfs.o $(OUTPATH)build.o $(OUTPATH)mst.o $(OUTPATH)str.o $(OUTPATH)pfs.o $(OUTPATH)signal.o \
+				$(OUTPATH)rtc.o $(OUTPATH)ahci.o $(OUTPATH)farcall.o $(OUTPATH)fartty.o
 
 # 默认动作
 
@@ -96,6 +98,9 @@ Mimg : $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $(OUTPATH)
 		mcopy -i ./disk.img $(APPSOUTPATH)doom.bin ::
 		mcopy -i ./disk.img $(RESPATH)doom1.wad ::
 		mcopy -i ./disk.img $(APPSOUTPATH)gui.bin ::
+		mcopy -i ./disk.img $(APPSOUTPATH)stamon.bin ::
+		mmd -i ./disk.img include
+		mcopy -i ./disk.img $(APPSPATH)stm/bin/include/* ::/include
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(LOADERPATH)dosldr.bin ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(OUTPATH)kernel.bin ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(RESPATH)autoexec.bat ::
@@ -106,7 +111,7 @@ Mimg : $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $(OUTPATH)
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(OUTPATH)boot_pfs.bin ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(RESPATH)setup.mst ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(APPSOUTPATH)setup1.bin ::
-		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(APPSOUTPATH)bainian.bin ::
+		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(APPSOUTPATH)lsh.bin ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(APPSOUTPATH)psh.bin ::
 		mmd -i $(IMGPATH)Powerint_DOS_386.img other
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(FONTPATH)font.bin ::/other
@@ -136,7 +141,6 @@ Mimg : $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $(OUTPATH)
 		mcopy -i $(IMGPATH)Disk3.img $(APPSOUTPATH)miniunz.bin ::/bin
 		mcopy -i $(IMGPATH)Disk3.img $(APPSOUTPATH)image.bin ::/bin
 		mcopy -i $(IMGPATH)Disk3.img $(APPSOUTPATH)c4.bin ::/bin
-		mcopy -i $(IMGPATH)Disk3.img $(APPSOUTPATH)lox.bin ::/bin
 		mcopy -i $(IMGPATH)Disk3.img $(APPSOUTPATH)clock.bin ::/bin
 		mcopy -i $(IMGPATH)Disk3.img $(APPSOUTPATH)luac.bin ::/bin
 		mcopy -i $(IMGPATH)Disk3.img $(APPSOUTPATH)mmake.bin ::/bin

@@ -1,5 +1,5 @@
 [BITS 32]
-GLOBAL Socket_Alloc,Socket_Init,Socket_Free,Socket_Send,Socket_Recv,GetIP,ping
+GLOBAL Socket_Alloc,Socket_Init,Socket_Free,Socket_Send,Socket_Recv,GetIP,ping,listen
 [SECTION .text]
 Socket_Alloc:
     push    ebx
@@ -54,19 +54,17 @@ Socket_Send:
     pop eax
     ret
 Socket_Recv:
-    push    eax
     push    ebx
     push    ecx
     push    edx
     mov eax,0x04
-    mov ebx,[esp+20]
-    mov ecx,[esp+24]
-    mov edx,[esp+28]
+    mov ebx,[esp+16]
+    mov ecx,[esp+20]
+    mov edx,[esp+24]
     int 30h
     pop edx
     pop ecx
     pop ebx
-    pop eax
     ret
 GetIP:
     mov eax,0x06
@@ -78,4 +76,13 @@ ping:
     mov ebx,[esp+8]
     int 30h
     pop ebx
+    ret
+listen:
+    push eax
+    push ebx
+    mov eax,0x08
+    mov ebx,[esp + 12]
+    int 0x30
+    pop ebx
+    pop eax
     ret

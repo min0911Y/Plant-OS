@@ -31,6 +31,14 @@
     "initializer_list": "cpp",
     "utility": "cpp",
     "mst.h": "c",
-    "gui.h": "c"
+    "gui.h": "c",
+    "signal.h": "c",
+    "atomic": "c",
+    "ios": "c",
+    "list": "c",
+    "system_error": "c",
+    "xiosbase": "c",
+    "net.h": "c",
+    "memory": "c"
   }
 }

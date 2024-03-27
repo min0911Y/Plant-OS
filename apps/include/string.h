@@ -21,7 +21,7 @@ char *strchr(const char *s, int c);
 char *strrchr(const char *s1, int ch);
 double strtod(const char * nptr, char ** endptr);
 size_t strcspn(const char *s, const char *c);
-size_t strspn(const char* s, const char* accept);
+size_t strspn(const char* s, const char *c);
 void* memchr(const void* s, int c, size_t n);
 void *memset(void *dest, int c, size_t n);
 void *memcpy(void *dest, const void *src, size_t n);

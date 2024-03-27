@@ -286,8 +286,9 @@ asm_inthandler2c:
   pop fs
   pop es
   pop ds
-	IRETD
+  IRETD
 interrput_exit:
+	xchg bx,bx
   popa
   pop gs
   pop fs

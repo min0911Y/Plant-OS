@@ -36,24 +36,7 @@ void user_thread_into() {
 void test(unsigned int b) { return; }
 void *malloc_app_heap(void *alloc_addr, uint32_t ds_base, uint32_t size) {
   memory *mem = (memory *)alloc_addr;
-  mem->freeinf = (freeinfo *)((char *)mem->freeinf + ds_base);
-  freeinfo *fi;
-  for (fi = mem->freeinf; fi->next != NULL; fi = fi->next) {
-    fi->next = (freeinfo *)((char *)fi->next + ds_base);
-    fi->f = (free_member *)((char *)fi->f + ds_base);
-  }
-  fi->f = (free_member *)((char *)fi->f + ds_base);
-  char *p = (char *)mem_alloc(mem, size + sizeof(int)) + ds_base;
-  *(int *)p = size;
-  p += sizeof(int);
-  fi->f = (free_member *)((char *)fi->f - ds_base);
-  for (fi = mem->freeinf; ((freeinfo *)((char *)fi + ds_base))->next != NULL;
-       fi = ((freeinfo *)((char *)fi + ds_base))->next) {
-    fi->next = (freeinfo *)((char *)fi->next - ds_base);
-    fi->f = (free_member *)((char *)fi->f - ds_base);
-  }
-  mem->freeinf = (freeinfo *)((char *)mem->freeinf - ds_base);
-  return (void *)p;
+  return (void *)mem_alloc(mem, size);
 }
 void free_app_heap(void *alloc_addr, uint32_t ds_base, void *p) {
   memory *mem = (memory *)alloc_addr;
@@ -142,6 +125,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
       mouse_ready(&mdec);
       for (;;) {
         if (fifo8_status(task_get_mouse_fifo(task)) == 0) {
+          task_next();
         } else {
           i = fifo8_get(task_get_mouse_fifo(task));
           if (mouse_decode(&mdec, i) != 0) {
@@ -332,7 +316,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
         reg[EAX] = check_vbe_mode(ecx, (struct VBEINFO *)VBEINFO_ADDRESS);
       } else if (ebx == 0x05) {
         unsigned v = set_mode(ecx, edx, 32);
-        logk("reg[EAX] = %08x\n", v);
+        logk("reg[EAX] = %08x %d\n", v, pages[IDX(0xfd07c2d0)].count);
         reg[EAX] = v;
         unsigned count = div_round_up(ecx * edx * 4, 0x1000);
         for (int i = 0; i < count; i++) {
@@ -368,6 +352,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
     } else if (ebx == 0x09) {
       get_msg_all((void *)(ds_base + edx));
     } else if (ebx == 0x0a) {
+      logk("CREATE %08x\n", page_get_phy((unsigned)0x709f8448));
       extern int init_ok_flag;
       init_ok_flag = 0;
       // unsigned int *stack = page_malloc_one() + 0x1000;
@@ -375,6 +360,35 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
       // *stack = (unsigned int)(esi);
       // stack--;
       // *stack = (unsigned int)(edx);
+      unsigned pde = current_task()->pde;
+      io_cli();
+      set_cr3(PDE_ADDRESS);
+      for (int i = DIDX(0x70000000) * 4; i < 0x1000; i += 4) {
+        unsigned int *pde_entry = (unsigned int *)(pde + i);
+        if (pages[IDX(*pde_entry)].count > 1 && !(*pde_entry & PG_SHARED)) {
+          uint32_t old = *pde_entry & 0xfffff000;
+          *pde_entry = (unsigned)page_malloc_one_count_from_4gb();
+          memcpy((void *)(*pde_entry), (void *)old, 0x1000);
+          pages[IDX(old)].count--;
+          *pde_entry |= 7;
+          *pde_entry |= PG_SHARED;
+        } else {
+          *pde_entry |= PG_SHARED;
+        }
+        unsigned p = *pde_entry & (0xfffff000);
+        for (int j = 0; j < 0x1000; j += 4) {
+          unsigned int *pte_entry = (unsigned int *)(p + j);
+          if (pages[IDX(*pte_entry)].count == 1 && (*pte_entry & PG_USU) &&
+              !(*pte_entry & PG_SHARED)) {
+            *pte_entry |= PG_SHARED;
+          }
+        }
+      }
+      set_cr3(pde);
+      io_sti();
+      logk("OK\n");
+      // for (;;)
+      //   ;
       mtask *t = create_task(user_thread_into, (unsigned)0, 1, 1);
       init_ok_flag = 1;
       t->alloc_addr = task->alloc_addr;
@@ -383,22 +397,10 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
       t->nfs = task->nfs;
       t->ptid = task->tid;
 
-      for (int i = DIDX(0x70000000) * 4; i < 0x1000; i += 4) {
-        unsigned int *pde_entry = (unsigned int *)(current_task()->pde + i);
-        unsigned p = *pde_entry & (0xfffff000);
-        for (int j = 0; j < 0x1000; j += 4) {
-          unsigned int *pte_entry = (unsigned int *)(p + j);
-
-          if (pages[IDX(*pte_entry)].count >= 2) {
-            pages[IDX(*pte_entry)].count--;
-          }
-        }
-        // pages[IDX(*pde_entry)].count--;
-      }
-
       unsigned *r = page_malloc_one_no_mark();
       r[0] = esi;
       r[1] = edx;
+
       t->line = (char *)r;
       reg[EAX] = t->tid;
     } else if (ebx == 0x0b) {
@@ -533,16 +535,19 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
   } else if (eax == 0x34) {
     reg[EAX] = fifo8_get(current_task()->Ukeyfifo);
   } else if (eax == 0x35) {
+    // logk("ADD MEMORY TO RUN!\n");
+    // for(;;);
     logk("sbrk %08x\n", ebx);
     unsigned page_len = div_round_up(ebx, 0x1000);
     unsigned start_addr =
         ((task->alloc_addr + task->alloc_size - 1) & 0xfffff000);
     page_links(start_addr + 0x1000, page_len);
     // for (int i = 0; i < page_len; i++) {
+    //   // logk("L:%08x\n",start_addr + (i + 1) * 0x1000);
     //   page_link(start_addr + (i + 1) * 0x1000);
     // }
     task->alloc_size += ebx;
-    logk("ok\n");
+    logk("ok %08x\n", task->alloc_addr + task->alloc_size);
   } else if (eax == 0x36) {
     char *s = env_read(ebx + ds_base);
     if (s) {
@@ -613,6 +618,23 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
     reg[EAX] = i;
   } else if (eax == 0x4f) {
     reg[EAX] = fifo8_get(task_get_mouse_fifo(task));
+  } else if (eax == 0x50) {
+    if (current_task()->ready == 0) {
+      io_cli();
+//      current_task()->timeout = 1;
+      task_next();
+      io_sti();
+    } else {
+      current_task()->ready = 0;
+    }
+  } else if (eax == 0x51) {
+    reg[EAX] = fartty_alloc(ebx, ecx, current_task()->pde, edx, esi);
+  } else if (eax == 0x52) {
+    tty_set(get_task(ebx), ecx);
+  } else if (eax == 0x53) {
+    tty_free(ebx);
+  } else if (eax == 0x54) {
+    current_task()->ret_to_app = ebx;
   }
   return;
 }

@@ -1,8 +1,9 @@
+#include <fcntl.h>
+#include <net.h>
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
 #include <syscall.h>
-#include <fcntl.h>
 int flag_m = 0;
 int m_tid;
 void do_test(unsigned eip);
@@ -23,28 +24,74 @@ void test_signal() {
   printf("SIGINT!!!\n");
   exit(0);
 }
-void c(void *data) {
-  printf("%08x\n",data);
-}
+void c(void *data) { printf("%08x\n", data); }
 char *s;
 int a111 = 0;
-int main(int argc, char **argv) {
-  asm volatile("ud2");
-  write((int)stdout,"hello",5);
-  return 0;
-  unsigned int *v = set_mode(1024,768);
-  logkf("%08x\n",v);
-  memset(v,0xff,1024*768*4);
+#define A(x) (x >> 24)
+#define B(x) ((x >> 16) & 0xff)
+#define C(x) ((x >> 8) & 0xff)
+#define D(x) (x & 0xff)
+
+void c1() {
+  printf("C1\n");
+
   for(;;);
+}
+void b1() {
+  AddThread("",c1,(unsigned)malloc(1024*512)+1024*512);
+  printf("B1\n");
+
+  for(;;);
+}
+int main(int argc, char **argv) {
+  if(fork() == 0) {
+    printf("P\n");
+    sleep(1000);
+    exit(0);
+  } else {
+    printf("S\n");
+  }
+  return 0;
+  AddThread("",b1,(unsigned)malloc(1024*512)+1024*512);
+
+  printf("MAIN\n");
+  for(;;);
+  return 0;
+  unsigned IP;
+  IP = GetIP();
+  printf("%d.%d.%d.%d\n", A(IP), B(IP), C(IP), D(IP));
+  socket_t s;
+  s = Socket_Alloc(TCP_PROTOCOL);
+  Socket_Init(s, 0, 0, IP, 2115);
+  listen(s);
+  printf("A Connect\n");
+  char buf[512] = {0};
+  while (1) {
+    int a = Socket_Recv(s, buf, 512);
+    if(a == 0) break;
+    buf[a] = 0;
+    printf("%s", buf);
+  }
+  Socket_Free(s);
+  return 0;
+  asm volatile("ud2");
+  write((int)stdout, "hello", 5);
+  return 0;
+  unsigned int *v = set_mode(1024, 768);
+  logkf("%08x\n", v);
+  memset(v, 0xff, 1024 * 768 * 4);
+  for (;;)
+    ;
   return 0;
   do_test(c);
-  for(;;);
+  for (;;)
+    ;
   return 0;
   char *a[30000];
   void *b1;
   b1 = malloc(40);
   free(b1);
-  printf("b = %p\n",b1);
+  printf("b = %p\n", b1);
   for (int i = 0; i < 30000; i++) {
     a[i] = malloc(10);
   }
@@ -53,7 +100,7 @@ int main(int argc, char **argv) {
     free(a[i]);
   }
   b1 = malloc(40);
-  printf("b = %p\n",b1);
+  printf("b = %p\n", b1);
   return 0;
   int i;
   if (i = fork()) {

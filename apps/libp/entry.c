@@ -5,9 +5,11 @@
 int main(int argc, char **argv);
 void init_env();
 void init_mem();
-
+void return_to_app();
+void set_rt(unsigned rt);
 void Main() {
   // 初始化stdio stderr
+  set_rt(return_to_app);
   init_mem();
   stdout = malloc(sizeof(FILE));
   stdin = malloc(sizeof(FILE));
@@ -31,11 +33,8 @@ void Main() {
   }
   for (int i = 0; i < get_argc(buf); i++) {
     get_arg(argv[i], buf, i);
-    // printf("#%d %s\n",i,argv[i]);
   }
   init_float();
-  //   printf("Get_Argc = %d\n",Get_Argc(buf));
-  //   printf("buf = %s\n", buf);
 
   exit(main(get_argc(buf), argv));
   while(1);

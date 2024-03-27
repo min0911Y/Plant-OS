@@ -1,4 +1,5 @@
 [BITS 32]				
+GLOBAL tty_alloc,tty_free,tty_set
 GLOBAL putch,putstr,getch,get_mouse,get_xy,goto_xy
 GLOBAL SwitchTo320X200X256,SwitchToText8025,Draw_Char,sleep
 GLOBAL PrintChineseChar,PrintChineseStr,Draw_Str,api_malloc,api_free
@@ -13,8 +14,15 @@ GLOBAL haveMsg,PhyMemGetByte,GetMessageAll,PhyMemSetByte,format,api_heapsize,api
 GLOBAL get_hour_hex,get_min_hex,get_sec_hex,get_day_of_month,get_day_of_week,get_mon_hex,get_year,AddThread,init_float
 GLOBAL TaskLock,TaskUnlock,SubThread,set_mode,VBEDraw_Px,VBEGet_Px,VBEGetBuffer,VBESetBuffer,roll,VBEDraw_Box,listfile
 GLOBAL vfs_check_mount,vfs_mount,vfs_change_disk,vfs_delfile,vfs_change_path,tty_start_cur_moving,tty_stop_cur_moving,vfs_unmount_disk,logk
-GLOBAL tty_get_xsize,tty_get_ysize,api_rename,mouse_support,signal,fork,waittid,do_test,mouse_enable,mouse_dat_status,mouse_dat_get
+GLOBAL tty_get_xsize,tty_get_ysize,api_rename,mouse_support,signal,fork,waittid,do_test,mouse_enable,mouse_dat_status,mouse_dat_get,api_yield,return_to_app,set_rt
 [SECTION .text]
+return_to_app:
+  popa
+  pop gs
+  pop fs
+  pop es
+  pop ds
+  ret
 putch:
 push	edx
 push	eax
@@ -1146,4 +1154,54 @@ mouse_dat_status:
 mouse_dat_get:
 	mov eax,0x4f
 	int 0x36
+	ret
+api_yield:
+	mov eax,0x50
+	int 0x36
+	ret
+tty_alloc:
+	push ebx
+	push ecx
+	push edx
+	push esi ; 16
+	mov ebx, [esp+16+4]
+	mov ecx, [esp+16+8]
+	mov edx, [esp+16+12]
+	mov esi, [esp+16+16]
+	mov eax,0x51
+	int 0x36
+	pop esi
+	pop edx
+	pop ecx
+	pop ebx
+	ret
+tty_set:
+	push eax
+	push ebx
+	push ecx ; 12
+	mov ebx, [esp+12+4]
+	mov ecx, [esp+12+8]
+	mov eax, 0x52
+	int 0x36
+	pop ecx
+	pop ebx
+	pop eax
+	ret
+tty_free:
+	push eax
+	push ebx
+	mov ebx, [esp +8 +4]
+	mov eax,0x53
+	int 0x36
+	pop ebx
+	pop eax
+	ret
+set_rt:
+	push eax
+	push ebx
+	mov ebx,[esp+8+4]
+	mov eax,0x54
+	int 0x36
+	pop ebx
+	pop eax
 	ret

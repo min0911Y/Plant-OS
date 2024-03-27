@@ -16,6 +16,7 @@ struct finfo_block {
   unsigned short year, month, day;
   unsigned short hour, minute;
 };
+typedef unsigned int tty_t;
 void putch(char ch);
 unsigned int getch();
 char input_char_inSM();
@@ -114,6 +115,9 @@ int waittid(unsigned tid);
 void mouse_enable();
 int mouse_dat_status();
 int mouse_dat_get();
+tty_t tty_alloc(void *vram,unsigned handle,unsigned xsize,unsigned ysize);
+void tty_set(unsigned tid,tty_t tty);
+void tty_free(tty_t tty);
 #ifdef __cplusplus
 }
 #endif

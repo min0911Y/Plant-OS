@@ -19,7 +19,7 @@ void task_app() {
   fifo8_init((struct FIFO8 *)kfifo, 4096, (unsigned char *)kbuf);
   fifo8_init((struct FIFO8 *)mfifo, 4096, (unsigned char *)mbuf);
   task_set_fifo(current_task(), (struct FIFO8 *)kfifo, (struct FIFO8 *)mfifo);
-  current_task()->alloc_size = 1 * 1024 * 1024;
+  current_task()->alloc_size = 2 * 1024 * 1024;
   char tmp[100];
   task_to_user_mode_elf(filename);
   for (;;)
@@ -198,9 +198,9 @@ int os_execute(char *filename, char *line) {
   strcpy(fm, filename);
   init_ok_flag = 0;
   
-  mtask *t = create_task(task_app, 0, 5, 1);
+  mtask *t = create_task(task_app, 0, 1, 1);
   // 轮询
-  t->train = 1;
+  t->train = 0;
   vfs_change_disk_for_task(current_task()->nfs->drive, t);
   List *l;
   char *path;
@@ -245,7 +245,7 @@ int os_execute(char *filename, char *line) {
 int os_execute_shell(char *line) {
   extern int init_ok_flag;
   init_ok_flag = 0;
-  mtask *t = create_task(task_shell, 0, 5, 1);
+  mtask *t = create_task(task_shell, 0, 1, 1);
   t->nfs = current_task()->nfs;
   t->train = 1;
   int old = current_task()->sigint_up;

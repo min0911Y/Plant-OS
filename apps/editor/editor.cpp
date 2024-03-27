@@ -1149,7 +1149,7 @@ public:
     c->ml = n->maxLine();
 #endif
     char *stack = (char *)malloc(16 * 1024);
-    stack += 16 * 1024;
+    stack += 16 * 1024 -4;
     unsigned int *s = (unsigned int *)(stack);
     *s = (unsigned int)this;
     if (mouse_support())
@@ -1227,17 +1227,20 @@ public:
   }
 };
 void m_thread(void *s) {
+ // exit(0);
   Editor *b = (Editor *)s;
   for (;;) {
-    int mouse = get_mouse();
-    if (GetMouse_btn(mouse) == CLICK_LEFT) {
-      b->Click(GetMouse_x(mouse), GetMouse_y(mouse));
-    } else if (GetMouse_btn(mouse) == 4) {
-      b->Up();
-    } else if (GetMouse_btn(mouse) == 5) {
-      b->Down();
-    }
+  //  logk("a");
+    // int mouse = get_mouse();
+    // if (GetMouse_btn(mouse) == CLICK_LEFT) {
+    //   b->Click(GetMouse_x(mouse), GetMouse_y(mouse));
+    // } else if (GetMouse_btn(mouse) == 4) {
+    //   b->Up();
+    // } else if (GetMouse_btn(mouse) == 5) {
+    //   b->Down();
+    // }
   }
+  //exit(0);
 }
 int mLine(char *buffer, int len) {
   int l = 0;
@@ -1281,7 +1284,7 @@ int main(int argc, char **argv) {
   Editor *e = new Editor();
   char *c = e->Main(argv[1]);
   int l = strlen(c);
-  system("cls");
+  clear();
   char *bb = (char *)malloc(strlen(c) + 1 + mLine(c, l));
   for (int i = 0, j = 0; i < l; i++) {
     if (c[i] == '\n') {

@@ -8,8 +8,11 @@ int main(int argc,char **argv);
 extern "C" void init_env();
 extern "C" void init_mem();
 extern "C" void init_float();
+extern "C" void return_to_app();
+extern "C" void set_rt(unsigned rt);
 extern "C" void Main()
 {
+  set_rt((unsigned)return_to_app);
   // 初始化stdio stderr
   init_mem();
   stdout = (FILE *)malloc(sizeof(FILE));
@@ -63,6 +66,15 @@ void *operator new[](size_t size)
     return malloc(size);
 }
  
+void operator delete(void *p,unsigned int size)
+{
+    free(p);
+}
+ 
+void operator delete[](void *p,unsigned int size)
+{
+    free(p);
+}
 void operator delete(void *p)
 {
     free(p);

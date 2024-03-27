@@ -22,6 +22,7 @@ typedef vram_t color_t;
 #define PIT_CTRL 0x0043
 #define PIT_CNT0 0x0040
 #define AR_TSS32 0x0089
+#define NULL_TID 11459810
 #define Panic_Print(func, info, ...)                                           \
   func("%s--PANIC: %s:%d Info:" info "\n", __FUNCTION__, __FILE__, __LINE__,   \
        ##__VA_ARGS__);
@@ -243,6 +244,7 @@ typedef struct mtask {
   unsigned status;
   unsigned signal;
   unsigned handler[30];
+  unsigned ret_to_app;
 } _packed mtask;
 typedef struct intr_frame_t {
   unsigned edi;
@@ -271,7 +273,8 @@ typedef struct intr_frame_t {
 #define PG_P 1
 #define PG_USU 4
 #define PG_RWW 2
-#define PG_PCD 1 << 4
+#define PG_PCD 16
+#define PG_SHARED 1024
 #define PDE_ADDRESS 0x400000
 #define PTE_ADDRESS (PDE_ADDRESS+0x1000)
 #define PAGE_END (PTE_ADDRESS + 0x400000)
@@ -1033,6 +1036,9 @@ struct Socket {
   uint32_t seqNum;
   uint32_t ackNum;
   uint16_t MSS;
+  int flag; // 1 有包 0 没包
+  int size;
+  char *buf;
 } __attribute__((packed));
 // UDP state
 #define SOCKET_ALLOC -1
@@ -1117,5 +1123,6 @@ typedef struct {
 } vdisk;
 // signal
 #define SIGINT 0
+#define SIGKIL 1
 #define SIGMASK(n) 1 << n
 #endif

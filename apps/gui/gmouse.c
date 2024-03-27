@@ -50,12 +50,25 @@ int mouse_decode(struct MOUSE_DEC *mdec, unsigned char dat) {
   return -1;
 }
 struct MOUSE_DEC mdec;
+void (*drop)();
+char keytable1[0x54] = { // 未按下Shift
+    0,    0x01, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-',  '=',
+    '\b', '\t', 'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[',  ']',
+    10,   0,    'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', '\'', '`',
+    0,    '\\', 'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/', 0,    '*',
+    0,    ' ',  0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,    0,
+    0,    '7',  '8', '9', '-', '4', '5', '6', '+', '1', '2', '3', '0',  '.'};
 void gmouse(gmouse_t *gmouse) {
   mdec.phase = 1;
   mouse_enable();
+  start_keyboard_message();
+  drop = NULL;
+  logkf("GMOUSE ID = %d\n", NowTaskID());
   for (;;) {
-    // logkf("%d\n",mouse_dat_status());
-    if (mouse_dat_status() == 0) {
+    //logkf("%d\n",mouse_dat_status());
+    if (mouse_dat_status() == 0 && key_press_status() == 0 &&
+        key_up_status() == 0) {
+   //   api_yield();
       continue;
     } else if (mouse_dat_status() != 0) {
       int i = mouse_dat_get();
@@ -70,27 +83,32 @@ void gmouse(gmouse_t *gmouse) {
           gmouse->stay = NULL;
           gmouse->click_button_last = NULL;
           gmouse->click_textbox_last = NULL;
-          for (int top = gmouse->sht->ctl->top - 1; top != 0; top--) {
-            for (int i = 1;
-                 list_search_by_count(i, gmouse->desktop->window_list) != NULL;
-                 i++) {
-              window_t *w = (window_t *)list_search_by_count(
-                                i, gmouse->desktop->window_list)
-                                ->val;
-              if (Collision(w->x, w->y, w->xsize, w->ysize, gmouse->x,
-                            gmouse->y) &&
-                  w->sht->height == top) {
-                    //logk("call\n");
-                gmouse->click_left = w;
-                if (w->handle_left != NULL) {
-                  w->handle_left(w, gmouse);
+
+          if (!drop)
+            for (int top = gmouse->sht->ctl->top - 1; top != 0; top--) {
+              for (int i = 1; list_search_by_count(
+                                  i, gmouse->desktop->window_list) != NULL;
+                   i++) {
+                window_t *w = (window_t *)list_search_by_count(
+                                  i, gmouse->desktop->window_list)
+                                  ->val;
+                if (Collision(w->x, w->y, w->xsize, w->ysize, gmouse->x,
+                              gmouse->y) &&
+                    w->sht->height == top) {
+                  // logk("call\n");
+                  gmouse->click_left = w;
+                  if (w->handle_left != NULL) {
+                    w->handle_left(w, gmouse);
+                  }
+                  top = 1;
+                  break;
                 }
-                top = 1;
-                break;
               }
             }
-          }
+          else
+            drop();
         } else if ((mdec.btn & 0x02) != 0) {
+          drop = NULL;
           // 右键
           gmouse->click_left = NULL;
           gmouse->click_right = NULL;
@@ -117,10 +135,12 @@ void gmouse(gmouse_t *gmouse) {
         } else if ((mdec.btn & 0x04) != 0) {
           // 滚动
         } else {
+          drop = NULL;
           // 停留
           gmouse->click_left = NULL;
           gmouse->click_right = NULL;
           gmouse->stay = NULL;
+         // logkf("%p\n",gmouse->desktop->window_list);
           for (int top = gmouse->sht->ctl->top - 1; top != 0; top--) {
             for (int i = 1;
                  list_search_by_count(i, gmouse->desktop->window_list) != NULL;
@@ -128,6 +148,7 @@ void gmouse(gmouse_t *gmouse) {
               window_t *w = (window_t *)list_search_by_count(
                                 i, gmouse->desktop->window_list)
                                 ->val;
+                             //   logkf("w = %p\n",w);
               if (Collision(w->x, w->y, w->xsize, w->ysize, gmouse->x,
                             gmouse->y) &&
                   w->sht->height == top) {
@@ -155,15 +176,17 @@ void gmouse(gmouse_t *gmouse) {
         }
         sheet_slide(gmouse->sht, gmouse->x, gmouse->y);
       }
+    } else if (key_press_status() != 0) {
+      if (gmouse->click_textbox_last != NULL) {
+        gmouse->click_textbox_last->add_char(gmouse->click_textbox_last,
+                                             keytable1[get_key_press()]);
+      } else {
+        get_key_press();
+      }
+    } else if (key_up_status() != 0) {
+      get_key_up();
     }
-    // else if (fifo8_status(task_get_key_fifo(current_task())) != 0) {
-    //   if (gmouse->click_textbox_last != NULL) {
-    //     gmouse->click_textbox_last->add_char(gmouse->click_textbox_last,
-    //                                          getch());
-    //   } else {
-    //     fifo8_get(task_get_key_fifo(current_task())); // 排空
-    //   }
-    // }
+    // api_yield();
   }
 }
 void draw_mouse_cursor(vram_t *mouse, int bc) {

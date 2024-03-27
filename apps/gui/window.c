@@ -5,8 +5,10 @@ void display_window(window_t *window, int x, int y, int pos) {
   window->y = y;
   window->using1 = true;
   sheet_slide(window->sht, x, y);
-  sheet_updown(window->sht, pos);
-  sheet_refresh(window->sht, 0, 0, window->xsize, window->ysize);
+  if (window->sht->height != pos) {
+    sheet_updown(window->sht, pos);
+  }
+  // sheet_refresh(window->sht, 0, 0, window->xsize, window->ysize);
 }
 
 void hide_window(window_t *window) {
@@ -37,6 +39,7 @@ void close_window(window_t *window) {
 
 void draw_window(window_t *window, int x, int y, int x1, int y1,
                  color_t color) {
+                  logkf("vram is %p\n",window->vram);
   SDraw_Box(window->vram, x, y, x1, y1, color, window->xsize);
   sheet_refresh(window->sht, x, y, x1, y1);
 }
@@ -45,7 +48,26 @@ void puts_window(window_t *window, char *s, int x, int y, color_t color) {
   Sputs(window->vram, s, x, y, color, window->xsize);
   sheet_refresh(window->sht, x, y, x + strlen(s) * 8, y + 16);
 }
-
+extern void (*drop)();
+window_t *backup_w;
+gmouse_t *backup_gmouse;
+void w_drop() {
+  if (Collision(backup_w->x + 3, backup_w->y + 3, backup_w->xsize - 37, 20,
+                backup_gmouse->x, backup_gmouse->y)) {
+    // 移动
+    int oldx;
+    oldx = backup_w->x;
+    backup_w->x += mdec.x;
+    backup_w->y += mdec.y;
+    backup_w->display(backup_w, (backup_w->x + 2) & ~3, backup_w->y,
+                      backup_w->sht->ctl->top - 1);
+    int x = (backup_w->x + 2) & ~3;
+    x -= oldx;
+    mdec.x = x;
+  } else {
+    drop = NULL;
+  }
+}
 void handle_left_window(window_t *window, gmouse_t *gmouse) {
   if (!window->using1)
     return;
@@ -54,17 +76,19 @@ void handle_left_window(window_t *window, gmouse_t *gmouse) {
     // 移动
     window->x += mdec.x;
     window->y += mdec.y;
-
+    backup_w = window;
+    backup_gmouse = gmouse;
+    drop = w_drop;
   } else if (Collision(window->x + window->xsize - 21, window->y + 5, 16, 19,
                        gmouse->x, gmouse->y)) {
     // 关闭
     window->close(window);
-    //printk("You close a window.\n");
+    // printk("You close a window.\n");
     return;
   } else if (Collision(window->x + window->xsize - 37, window->y + 5, 16, 19,
                        gmouse->x, gmouse->y)) {
     window->hide(window);
-   // printk("You hide a window.\n");
+    // printk("You hide a window.\n");
     return;
   }
   window->display(window, window->x, window->y, window->sht->ctl->top - 1);
@@ -102,7 +126,7 @@ window_t *create_window(desktop_t *desktop, char *title, int xsize, int ysize,
   res->super_window = NULL;
   list_add_val((uintptr_t)res, desktop->window_list);
 
-  sheet_setbuf(res->sht, res->vram, xsize, ysize, COL_TRANSPARENT);
+  sheet_setbuf(res->sht, res->vram, xsize, ysize, -1);
 
   static char *closebtn[14] = {
       "OOOOOOOOOOOOOOO@", "OQQQQQQQQQQQQQ$@", "OQQQQQQQQQQQQQ$@",
