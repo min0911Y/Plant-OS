@@ -162,45 +162,45 @@ void file_savefile(int clustno, int size, char *buf, int *fat,
   void *img = kmalloc(alloc_size);
   clean((char *)img, alloc_size);
   memcpy(img, buf, size); // 把要写入的数据复制到新请求的内存地址
-  // for (int i = 0; i != (alloc_size / get_dm(vfs).ClustnoBytes); i++) {
-  //   uint32_t sec = (get_dm(vfs).FileDataAddress +
-  //                   (clustno - 2) * get_dm(vfs).ClustnoBytes) /
-  //                  get_dm(vfs).SectorBytes;
-  //   Disk_Write(sec, get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes,
-  //              img + i * get_dm(vfs).ClustnoBytes, vfs->disk_number);
-  //   clustno = fat[clustno];
-  // }
-  int flag = 0, a, num = 0, sec_start = 0;
   for (int i = 0; i != (alloc_size / get_dm(vfs).ClustnoBytes); i++) {
     uint32_t sec = (get_dm(vfs).FileDataAddress +
                     (clustno - 2) * get_dm(vfs).ClustnoBytes) /
                    get_dm(vfs).SectorBytes;
-    if (!flag) {
-      a = sec;
-      num = 1;
-    } else {
-      if (a + num == sec) {
-        num++;
-      } else {
-        Disk_Write(a, num * get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes,
-                   img + sec_start * get_dm(vfs).ClustnoBytes,
-                   vfs->disk_number);
-        sec_start += num;
-        a = sec;
-        num = 1;
-        clustno = fat[clustno];
-        continue;
-      }
-    }
-    // Disk_Read(sec, get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes,
-    //           img + i * get_dm(vfs).ClustnoBytes, vfs->disk_number);
-    flag = 1;
+    Disk_Write(sec, get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes,
+               img + i * get_dm(vfs).ClustnoBytes, vfs->disk_number);
     clustno = fat[clustno];
   }
-  if (num) {
-    Disk_Write(a, num * get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes,
-               img + sec_start * get_dm(vfs).ClustnoBytes, vfs->disk_number);
-  }
+  // int flag = 0, a, num = 0, sec_start = 0;
+  // for (int i = 0; i != (alloc_size / get_dm(vfs).ClustnoBytes); i++) {
+  //   uint32_t sec = (get_dm(vfs).FileDataAddress +
+  //                   (clustno - 2) * get_dm(vfs).ClustnoBytes) /
+  //                  get_dm(vfs).SectorBytes;
+  //   if (!flag) {
+  //     a = sec;
+  //     num = 1;
+  //   } else {
+  //     if (a + num == sec) {
+  //       num++;
+  //     } else {
+  //       Disk_Write(a, num * get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes,
+  //                  img + sec_start * get_dm(vfs).ClustnoBytes,
+  //                  vfs->disk_number);
+  //       sec_start += num;
+  //       a = sec;
+  //       num = 1;
+  //       clustno = fat[clustno];
+  //       continue;
+  //     }
+  //   }
+  //   // Disk_Read(sec, get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes,
+  //   //           img + i * get_dm(vfs).ClustnoBytes, vfs->disk_number);
+  //   flag = 1;
+  //   clustno = fat[clustno];
+  // }
+  // // if (num) {
+  // //   Disk_Write(a, num * get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes,
+  // //              img + sec_start * get_dm(vfs).ClustnoBytes, vfs->disk_number);
+  // // }
   kfree(img);
   if (size <
       clustall *

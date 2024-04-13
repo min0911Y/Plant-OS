@@ -10,8 +10,8 @@ void task_app() {
   filename = r[0];
   current_task()->line = r[1];
   page_free_one(r);
-  logk("%08x\n",current_task()->top);
-  
+  logk("%08x\n", current_task()->top);
+
   char *kfifo = (char *)page_malloc_one();
   char *mfifo = (char *)page_malloc_one();
   char *kbuf = (char *)page_malloc_one();
@@ -19,7 +19,9 @@ void task_app() {
   fifo8_init((struct FIFO8 *)kfifo, 4096, (unsigned char *)kbuf);
   fifo8_init((struct FIFO8 *)mfifo, 4096, (unsigned char *)mbuf);
   task_set_fifo(current_task(), (struct FIFO8 *)kfifo, (struct FIFO8 *)mfifo);
-  current_task()->alloc_size = 2 * 1024 * 1024;
+  current_task()->alloc_size = (uint32_t *)malloc(4);
+  current_task()->alloced = 1;
+  *(current_task()->alloc_size) = 2 * 1024 * 1024;
   char tmp[100];
   task_to_user_mode_elf(filename);
   for (;;)
@@ -35,7 +37,9 @@ void task_shell() {
   fifo8_init((struct FIFO8 *)kfifo, 4096, (unsigned char *)kbuf);
   fifo8_init((struct FIFO8 *)mfifo, 4096, (unsigned char *)mbuf);
   task_set_fifo(current_task(), (struct FIFO8 *)kfifo, (struct FIFO8 *)mfifo);
-  current_task()->alloc_size = 1 * 1024 * 1024;
+  current_task()->alloc_size = (uint32_t *)malloc(4);
+  current_task()->alloced = 1;
+  *(current_task()->alloc_size) = 1 * 1024 * 1024;
   char tmp[100];
   task_to_user_mode_shell();
   for (;;)
@@ -83,9 +87,9 @@ void task_to_user_mode_shell() {
       ;
   }
   unsigned alloc_addr = (elf32_get_max_vaddr(p) & 0xfffff000) + 0x1000;
-  unsigned pg = div_round_up(current_task()->alloc_size, 0x1000);
+  unsigned pg = div_round_up(*(current_task()->alloc_size), 0x1000);
   for (int i = 0; i < pg + 128; i++) {
-    //logk("%d\n",i);
+    // logk("%d\n",i);
     page_link(alloc_addr + i * 0x1000);
   }
   unsigned alloced_esp = alloc_addr + 128 * 0x1000;
@@ -94,15 +98,15 @@ void task_to_user_mode_shell() {
   page_link(0xf0000000);
   *(unsigned char *)(0xf0000000) = 1;
   current_task()->alloc_addr = alloc_addr;
-  
+
   iframe->eip = load_elf(p);
   current_task()->user_mode = 1;
   tss.esp0 = current_task()->top;
   change_page_task_id(current_task()->tid, iframe->esp - 512 * 1024,
                       512 * 1024);
-  
+
   asm volatile("movl %0, %%esp\n"
-                "xchg %%bx,%%bx\n"
+               "xchg %%bx,%%bx\n"
                "popa\n"
                "pop %%gs\n"
                "pop %%fs\n"
@@ -136,11 +140,11 @@ void task_to_user_mode_elf(char *filename) {
   iframe->cs = GET_SEL(4 * 8, SA_RPL3);
   iframe->eflags = (0 << 12 | 0b10 | 1 << 9);
   iframe->esp = NULL; // 设置用户态堆栈
-  tss.eflags =0x202;
+  tss.eflags = 0x202;
   char *p = page_malloc(vfs_filesize(filename));
   vfs_readfile(filename, p);
   if (!elf32Validate(p)) {
-    page_free(p,vfs_filesize(filename));
+    page_free(p, vfs_filesize(filename));
     while (FindForCount(1, vfs_now->path) != NULL) {
       free(FindForCount(vfs_now->path->ctl->all, vfs_now->path)->val);
       DeleteVal(vfs_now->path->ctl->all, vfs_now->path);
@@ -157,9 +161,9 @@ void task_to_user_mode_elf(char *filename) {
       ;
   }
   unsigned alloc_addr = (elf32_get_max_vaddr(p) & 0xfffff000) + 0x1000;
-  unsigned pg = div_round_up(current_task()->alloc_size, 0x1000);
-  for (int i = 0; i < pg+128*4; i++) {
-    //logk("link %08x\n",alloc_addr + i * 0x1000);
+  unsigned pg = div_round_up(*(current_task()->alloc_size), 0x1000);
+  for (int i = 0; i < pg + 128 * 4; i++) {
+    // logk("link %08x\n",alloc_addr + i * 0x1000);
     page_link(alloc_addr + i * 0x1000);
   }
   unsigned alloced_esp = alloc_addr + 128 * 0x1000 * 4;
@@ -173,13 +177,13 @@ void task_to_user_mode_elf(char *filename) {
   // logk("value = %08x\n",*(unsigned int *)(0xb5000000));
   current_task()->alloc_addr = alloc_addr;
   iframe->eip = load_elf(p);
-  logk("eip = %08x\n",&(iframe->eip));
+  logk("eip = %08x\n", &(iframe->eip));
   current_task()->user_mode = 1;
   tss.esp0 = current_task()->top;
   change_page_task_id(current_task()->tid, p, vfs_filesize(filename));
   change_page_task_id(current_task()->tid, iframe->esp - 512 * 1024,
                       512 * 1024);
-  logk("%d\n",get_interrupt_state());
+  logk("%d\n", get_interrupt_state());
   asm volatile("movl %0, %%esp\n"
                "popa\n"
                "pop %%gs\n"
@@ -197,7 +201,7 @@ int os_execute(char *filename, char *line) {
   char *fm = (char *)malloc(strlen(filename) + 1);
   strcpy(fm, filename);
   init_ok_flag = 0;
-  
+
   mtask *t = create_task(task_app, 0, 1, 1);
   // 轮询
   t->train = 0;
@@ -225,7 +229,7 @@ int os_execute(char *filename, char *line) {
   r[0] = fm;
   r[1] = p1;
   t->line = r;
-  
+
   unsigned status = waittid(t->tid);
   current_task()->fifosleep = o;
 
@@ -261,7 +265,7 @@ int os_execute_shell(char *line) {
   int o = current_task()->fifosleep;
   current_task()->fifosleep = 1;
   t->line = p1;
- // io_sti();
+  // io_sti();
   unsigned status = waittid(t->tid);
   current_task()->fifosleep = o;
   free(p1);

@@ -8,15 +8,16 @@ MST_Object *env;
 char *env_read(char *name);
 void env_write(char *name, char *val);
 void env_init(int m) {
-  if (filesize("/env.cfg") == -1) {
+  if (filesize("env.cfg") == -1) {
     if (m == 1) {
       _path = "";
       return;
     }
-    mkfile("/env.cfg");
+    mkfile("env.cfg");
+    Edit_File("env.cfg", "# created by psh", 16, 0);
   }
-  char *buff = (char *)malloc(filesize("/env.cfg") + 1);
-  api_ReadFile("/env.cfg", buff);
+  char *buff = (char *)malloc(filesize("env.cfg") + 1);
+  api_ReadFile("env.cfg", buff);
   env = MST_init(buff);
   if (env->err) {
     MST_free(env);

@@ -857,7 +857,7 @@ static void ahci_vdisk_read(char drive, unsigned char *buffer,
       break;
     }
   if (i == 5) {
-      printk("AHCI Read Error!\n");
+      printk("AHCI Read Error! Read %d %d\n",number,lba);
       for (;;)
         ;
   }

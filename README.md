@@ -1,12 +1,12 @@
-# About Powerint DOS
+# About Plant OS
 
-- Powerint DOS is an operating system used for learning purposes only.
+- Plant OS is an operating system used for learning purposes only.
 - At first, the operating system was in 16-bit real mode, but now it is in 32-bit protected mode (386 version).
 - Due to COVID-19, Zhou Zhihao stayed at home and started the project in December 2020.
 - The project was about operating systems and Zhou Zhihao named it 'Powerint,' meaning powerful interrupts that we can use. After coding for about a year, the operating system had the normal functionality like MS-DOS but it was still in 16-bit real mode.
-- In December 2021, the writer of Simple OS, Qiu Chenjun, collaborated with Zhou Zhihao. They helped Powerint DOS transition into a new world, 32-bit protected mode, and renamed it Powerint DOS 386.
-- After over a year of coding, Powerint DOS 386 is continuously improving.
-
+- In December 2021, the writer of Simple OS, Qiu Chenjun, collaborated with Zhou Zhihao. They helped Plant OS transition into a new world, 32-bit protected mode, and renamed it Plant OS.
+- After over a year of coding, Plant OS is continuously improving.
+**Anyhow, you should know that Plant OS is made for learning how the computer works, it can't be your everyday OS to work. And Plant OS still has many bugs, if you want and can, you can fix the bugs and make a pull request, we will merge. By the way, the OS maybe stays in protect mode forever because we are still students, we don't have enough time to improve the OS, forgive us. Also, if you find some bugs, you can make a issue, we will fix it up as quickly as possible (if we have enough abilities to fix)**
 ## Build
 
 **Note: you may need to install nasm, gcc, g++, mtools and qemu before build**

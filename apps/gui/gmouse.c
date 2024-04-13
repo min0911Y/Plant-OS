@@ -65,10 +65,10 @@ void gmouse(gmouse_t *gmouse) {
   drop = NULL;
   logkf("GMOUSE ID = %d\n", NowTaskID());
   for (;;) {
-    //logkf("%d\n",mouse_dat_status());
+    // logkf("%d\n",mouse_dat_status());
     if (mouse_dat_status() == 0 && key_press_status() == 0 &&
         key_up_status() == 0) {
-   //   api_yield();
+      api_yield();
       continue;
     } else if (mouse_dat_status() != 0) {
       int i = mouse_dat_get();
@@ -140,7 +140,7 @@ void gmouse(gmouse_t *gmouse) {
           gmouse->click_left = NULL;
           gmouse->click_right = NULL;
           gmouse->stay = NULL;
-         // logkf("%p\n",gmouse->desktop->window_list);
+          // logkf("%p\n",gmouse->desktop->window_list);
           for (int top = gmouse->sht->ctl->top - 1; top != 0; top--) {
             for (int i = 1;
                  list_search_by_count(i, gmouse->desktop->window_list) != NULL;
@@ -148,7 +148,7 @@ void gmouse(gmouse_t *gmouse) {
               window_t *w = (window_t *)list_search_by_count(
                                 i, gmouse->desktop->window_list)
                                 ->val;
-                             //   logkf("w = %p\n",w);
+              //   logkf("w = %p\n",w);
               if (Collision(w->x, w->y, w->xsize, w->ysize, gmouse->x,
                             gmouse->y) &&
                   w->sht->height == top) {

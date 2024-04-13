@@ -26,6 +26,7 @@ void b2() {
   for(;;);
   return;
 }
+// TODO: 给GUI接管
 void signal_deal() {
   if (!current_task())
     return;
@@ -58,7 +59,8 @@ void signal_deal() {
       asm volatile ("xchg %bx,%bx");
       return;
     } else {
-      task_exit(0);
+
+     // task_exit(0);
     }
   } else {
     return;

@@ -36,6 +36,7 @@ static void init_task() {
     m[i].waittid = -1;
     m[i].alloc_addr = 0;
     m[i].alloc_size = 0;
+    m[i].alloced = 0;
     m[i].ready = 0;
     m[i].pde = 0;
     m[i].Pkeyfifo = NULL;
@@ -309,6 +310,10 @@ void task_kill(unsigned tid) {
   m[tid].waittid = -1;
   m[tid].state = WILL_EMPTY;
   m[tid].alloc_addr = 0;
+  if (m[tid].alloced) {
+    free(m[tid].alloc_size);
+    m[tid].alloced = 0;
+  }
   m[tid].alloc_size = 0;
   m[tid].running = 0;
   m[tid].ready = 0;
@@ -487,6 +492,10 @@ void task_exit(unsigned status) {
   m[tid].waittid = -1;
   m[tid].state = DIED;
   m[tid].alloc_addr = 0;
+  if (m[tid].alloced) {
+    free(m[tid].alloc_size);
+    m[tid].alloced = 0;
+  }
   m[tid].alloc_size = 0;
   m[tid].running = 0;
   m[tid].ready = 0;

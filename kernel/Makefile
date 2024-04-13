@@ -89,18 +89,18 @@ make_img:
 	mformat -f 1440 -B $(OUTPATH)boot.bin -i $(IMGPATH)ndisasm.img
 	mformat -f 1440 -B $(OUTPATH)boot.bin -i $(IMGPATH)doom1.img
 	mformat -f 1440 -B $(OUTPATH)boot.bin -i $(IMGPATH)doom2.img
-	mformat -t 64 -h 64 -i ./disk.img
+	mformat -t 64 -h 64 -s 16 -i ./disk.img
 	mformat -t 64 -h 64 -i ./big_disk.img
 Mimg : $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $(OUTPATH)boot32.bin Makefile
 	$(MAKE) make_img
 		mcopy -i ./disk.img $(BIDPATH)nasm.zip ::
 		mcopy -i ./disk.img $(APPSOUTPATH)duktape.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)doom.bin ::
+		mcopy -i ./disk.img $(APPSOUTPATH)ttf.bin ::
 		mcopy -i ./disk.img $(RESPATH)doom1.wad ::
+		mcopy -i ./disk.img $(RESPATH)font.ttf ::
 		mcopy -i ./disk.img $(APPSOUTPATH)gui.bin ::
-		mcopy -i ./disk.img $(APPSOUTPATH)stamon.bin ::
-		mmd -i ./disk.img include
-		mcopy -i ./disk.img $(APPSPATH)stm/bin/include/* ::/include
+		
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(LOADERPATH)dosldr.bin ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(OUTPATH)kernel.bin ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(RESPATH)autoexec.bat ::
@@ -111,7 +111,7 @@ Mimg : $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $(OUTPATH)
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(OUTPATH)boot_pfs.bin ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(RESPATH)setup.mst ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(APPSOUTPATH)setup1.bin ::
-		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(APPSOUTPATH)lsh.bin ::
+		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(APPSOUTPATH)gui.bin ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(APPSOUTPATH)psh.bin ::
 		mmd -i $(IMGPATH)Powerint_DOS_386.img other
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(FONTPATH)font.bin ::/other
@@ -221,7 +221,7 @@ img_run :
 	$(MAKE) Mimg
 	qemu-system-x86_64.exe -net nic,model=pcnet -net user -serial stdio -device sb16 -device floppy -fda ./img/Powerint_DOS_386.img -hda ./img/Disk2.img -hdb ./img/Disk3.img -hdc ./img/res.img \
 	-drive file=disk.img,if=none,id=drive0 -device ahci,id=ahci -device ide-hd,drive=drive0,bus=ahci.0 -drive file=big_disk.img,if=none,id=drive1 -device ide-hd,drive=drive1,bus=ahci.1		\
-	 -boot a -m 4096
+	 -boot a -m 512
 full :
 	$(MAKE) -C $(DOSPATH)
 	$(MAKE) -C $(IOPATH)

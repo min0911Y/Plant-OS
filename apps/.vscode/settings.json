@@ -39,6 +39,10 @@
     "system_error": "c",
     "xiosbase": "c",
     "net.h": "c",
-    "memory": "c"
+    "memory": "c",
+    "stb_ttf.h": "c",
+    "stdarg.h": "c",
+    "type_traits": "c",
+    "utf.h": "c"
   }
 }

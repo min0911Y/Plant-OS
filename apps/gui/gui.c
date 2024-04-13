@@ -1,9 +1,13 @@
 #include "gui.h"
+#include "../libutf/include/utf.h"
+#include <math.h>
+#include <stb_ttf.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <syscall.h>
 #include <time.h>
+
 static struct VBEINFO *vinfo;
 desktop_t *desktop0;
 static void click1(button_t *button) {
@@ -15,7 +19,164 @@ static void click1(button_t *button) {
 
 unsigned char *ascfont, *hzkfont;
 void handle(uint32_t *a) { logkf("%c", a[2]); }
+char *ttf_buffer;
+stbtt_fontinfo font;
+uint32_t LCD_AlphaBlend(uint32_t foreground_color, uint32_t background_color,
+                        uint8_t alpha) {
+  uint8_t *fg = (uint8_t *)&foreground_color;
+  uint8_t *bg = (uint8_t *)&background_color;
+
+  uint32_t rb = (((uint32_t)(*fg & 0xFF) * alpha) +
+                 ((uint32_t)(*bg & 0xFF) * (256 - alpha))) >>
+                8;
+  uint32_t g = (((uint32_t)(*(fg + 1) & 0xFF) * alpha) +
+                ((uint32_t)(*(bg + 1) & 0xFF) * (256 - alpha))) >>
+               8;
+  uint32_t a = (((uint32_t)(*(fg + 2) & 0xFF) * alpha) +
+                ((uint32_t)(*(bg + 2) & 0xFF) * (256 - alpha))) >>
+               8;
+
+  return (rb & 0xFF) | ((g & 0xFF) << 8) | ((a & 0xFF) << 16);
+}
+void set_size(int s1) {}
+#define EPS (2.22044604925031308085e-16)
+static const float_t toint = 1 / EPS;
+
+float roundf(float x) {
+  union {
+    float f;
+    uint32_t i;
+  } u = {x};
+  int e = u.i >> 23 & 0xff;
+  float_t y;
+
+  if (e >= 0x7f + 23)
+    return x;
+  if (u.i >> 31)
+    x = -x;
+  if (e < 0x7f - 1) {
+    FORCE_EVAL(x + toint);
+    return 0 * u.f;
+  }
+  y = x + toint - toint - x;
+  if (y > 0.5f)
+    y = y + x - 1;
+  else if (y <= -0.5f)
+    y = y + x + 1;
+  else
+    y = y + x;
+  if (u.i >> 31)
+    y = -y;
+  return y;
+}
+char *TTF_Print(vram_t *vram, unsigned xsize, int xpos, int y_shift, unsigned c,
+                int *buf, unsigned bc, unsigned *width, unsigned *heigh) {
+  /* 创建位图 */
+  int bitmap_w = 512; /* 位图的宽 */
+  int bitmap_h = 128; /* 位图的高 */
+  unsigned char *bitmap = calloc(bitmap_w * bitmap_h, sizeof(unsigned char));
+
+  /* "STB"的 unicode 编码 */
+  int *word = buf;
+
+  /* 计算字体缩放 */
+  float pixels = 30.0; /* 字体大小（字号） */
+  float scale = stbtt_ScaleForPixelHeight(
+      &font, pixels); /* scale = pixels / (ascent - descent) */
+
+  /**
+   * 获取垂直方向上的度量
+   * ascent：字体从基线到顶部的高度；
+   * descent：基线到底部的高度，通常为负值；
+   * lineGap：两个字体之间的间距；
+   * 行间距为：ascent - descent + lineGap。
+   */
+  int ascent = 0;
+  int descent = 0;
+  int lineGap = 0;
+  stbtt_GetFontVMetrics(&font, &ascent, &descent, &lineGap);
+
+  /* 根据缩放调整字高 */
+  ascent = roundf(ascent * scale);
+  descent = roundf(descent * scale);
+
+  int x = 0; /*位图的x*/
+  int max = 0;
+  /* 循环加载word中每个字符 */
+  unsigned h = (int)((float)(ascent - descent + lineGap * scale));
+  for (int i = 0; word[i] != 0; ++i) {
+    /**
+     * 获取水平方向上的度量
+     * advanceWidth：字宽；
+     * leftSideBearing：左侧位置；
+     */
+    int advanceWidth = 0;
+    int leftSideBearing = 0;
+    stbtt_GetCodepointHMetrics(&font, word[i], &advanceWidth, &leftSideBearing);
+
+    /* 获取字符的边框（边界） */
+    int c_x1, c_y1, c_x2, c_y2;
+    stbtt_GetCodepointBitmapBox(&font, word[i], scale, scale, &c_x1, &c_y1,
+                                &c_x2, &c_y2);
+
+    /* 计算位图的y (不同字符的高度不同） */
+    int y = ascent + c_y1;
+    // if (y > max)
+    //   max = y;
+    /* 渲染字符 */
+    int byteOffset = x + roundf(leftSideBearing * scale) + (y * bitmap_w);
+    stbtt_MakeCodepointBitmap(&font, bitmap + byteOffset, c_x2 - c_x1,
+                              c_y2 - c_y1, bitmap_w, scale, scale, word[i]);
+
+    /* 调整x */
+    x += roundf(advanceWidth * scale);
+
+    /* 调整字距 */
+    int kern;
+    kern = stbtt_GetCodepointKernAdvance(&font, word[i], word[i + 1]);
+    x += roundf(kern * scale);
+  }
+  *width = x;
+  *heigh = max + h;
+  return bitmap;
+}
+void put_bitmap(unsigned char *bitmap, vram_t *vram, unsigned x, unsigned y,
+                unsigned width, unsigned heigh, unsigned bitmap_xsize,
+                unsigned xsize, unsigned fc, unsigned bc) {
+  for (int i = 0; i < width; i++) {
+    for (int j = 0; j < heigh; j++) {
+      vram[(y + j) * xsize + (x + i)] =
+          LCD_AlphaBlend(fc, bc, bitmap[j * bitmap_xsize + i]);
+    }
+  }
+}
+
+void print_box_ttf(struct SHEET *sht, vram_t *vram, char *buf, unsigned fc,
+                   unsigned bc, unsigned x, unsigned y, unsigned xsize) {
+  Rune *r = (Rune *)malloc((utflen(buf) + 1) * sizeof(Rune));
+  r[utflen(buf)] = 0;
+  int i = 0;
+  while (*buf != '\0') {
+    buf += chartorune(&(r[i++]), buf);
+  }
+  unsigned width, heigh;
+  char *bitmap = TTF_Print(vram, xsize, x, y, fc, r, bc, &width, &heigh);
+  SDraw_Box(vram, x, y, x + width, y + heigh, bc, xsize);
+  sheet_refresh(sht, x, y, x + width, y + heigh);
+  put_bitmap(bitmap, vram, x, y, width, heigh, 512, xsize, fc, bc);
+  sheet_refresh(sht, x, y, x + width, y + heigh);
+  free(bitmap);
+  free(r);
+}
 void main() {
+  ttf_buffer = malloc(filesize("font.ttf"));
+  unsigned char buf[100];
+  printf("Reading font...");
+  api_ReadFile("font.ttf", ttf_buffer);
+  printf("Done.\n");
+  stbtt_InitFont(&font, ttf_buffer, stbtt_GetFontOffsetForIndex(ttf_buffer, 0));
+
+  set_size(15);
   if (filesize("A:\\other\\font.bin") == -1 ||
       filesize("A:\\other\\HZK16") == -1) {
     print("error\n");
@@ -38,9 +199,16 @@ re:
   desktop0->display(desktop0, vram);
   desktop0->draw(desktop0, 0, 0, xsize_input, ysize_input,
                  argb(0, 58, 110, 165));
-  desktop0->draw(desktop0, 10, 30, 18 + 48 * 8 + 8, 30 + 16, COL_C6C6C6);
-  desktop0->puts(desktop0, "Power Desktop powered by Powerint DOS 386 kernel",
-                 18, 30, COL_000000);
+
+  // print_box_ttf(desktop0->sht, desktop0->vram,
+  //               "原神，启动！Genshin Impact Start!", COL_000000,
+  //               COL_C6C6C6, 10, 30, desktop0->xsize);
+
+  // desktop0->draw(desktop0, 10, 30, 18 + 48 * 8 + 8, 30 + 16, COL_C6C6C6);
+
+  // desktop0->puts(desktop0, "Power Desktop powered by Powerint DOS 386
+  // kernel",
+  //                18, 30, COL_000000);
 
   window_t *window2 =
       create_window(desktop0, "console", 80 * 8 + 8, 25 * 16 + 28, NowTaskID());
@@ -65,7 +233,7 @@ re:
   textbox_t *textbox0 = create_textbox(super_window0, 15 * 8, 16, 4, 110);
   unsigned clock1 = clock();
   for (;;) {
-    if (clock1 - clock() >= 1000) {
+    if (clock() - clock1 >= 1000) {
       clock1 = clock();
       time_t rawtime;
       struct tm *info;
@@ -75,10 +243,23 @@ re:
 
       info = localtime(&rawtime);
 
-      strftime(buffer, 80, "%Y-%m-%d %H:%M:%S", info);
-      desktop0->draw(desktop0, 10, 10, 18 + strlen(buffer) * 8 + 8, 10 + 16,
-                     COL_C6C6C6);
-      desktop0->puts(desktop0, buffer, 18, 10, COL_000000);
+      strftime(buffer, 80, "当前时间：%Y-%m-%d %H:%M:%S", info);
+      // desktop0->draw(desktop0, 10, 10, 18 + strlen(buffer) * width + width,
+      //                10 + height, COL_C6C6C6);
+      // logkf("A %d %d\n",width,hei);
+      // desktop0->vram[10 * desktop0->xsize + 10]=0;
+
+      // unsigned width, heigh;
+      // char *bitmap = TTF_Print(desktop0->vram, desktop0->xsize, 18, 10,
+      //                          COL_000000, buffer, COL_C6C6C6, &width,
+      //                          &heigh);
+      // desktop0->draw(desktop0, 10, 10, 18 + width, 10 + heigh, COL_C6C6C6);
+      // put_bitmap(bitmap, desktop0->vram, 10, 10, width, heigh, 512,
+      //            desktop0->xsize, COL_000000, COL_C6C6C6);
+      // sheet_refresh(desktop0->sht, 10, 10, 10 + width, 10 + heigh);
+      // free(bitmap);
+      print_box_ttf(desktop0->sht, desktop0->vram, buffer, COL_000000,
+                    COL_C6C6C6, 10, 10, desktop0->xsize);
     } else {
       api_yield();
     }

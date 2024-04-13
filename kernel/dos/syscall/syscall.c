@@ -66,7 +66,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
   mtask *task = current_task();
   int ds_base = 0;
   void *alloc_addr = task->alloc_addr;
-  int alloc_size = task->alloc_size;
+  int alloc_size = *(task->alloc_size);
   memory *current_mm = task->mm;
   int *reg = &eax + 1; /* eax后面的地址*/
                        /*强行改写通过PUSHAD保存的值*/
@@ -144,7 +144,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
               break;
             } else if ((mdec.btn & 0x04) != 0) {
               reg[ECX] = task->mx;
-              int alloc_size = task->alloc_size;
+              int alloc_size = *(task->alloc_size);
               reg[EDX] = task->my;
               reg[ESI] = 3;
               break;
@@ -540,14 +540,16 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
     logk("sbrk %08x\n", ebx);
     unsigned page_len = div_round_up(ebx, 0x1000);
     unsigned start_addr =
-        ((task->alloc_addr + task->alloc_size - 1) & 0xfffff000);
+        ((task->alloc_addr + *(task->alloc_size) - 1) & 0xfffff000);
+    io_cli();
     page_links(start_addr + 0x1000, page_len);
+    io_sti();
     // for (int i = 0; i < page_len; i++) {
     //   // logk("L:%08x\n",start_addr + (i + 1) * 0x1000);
     //   page_link(start_addr + (i + 1) * 0x1000);
     // }
-    task->alloc_size += ebx;
-    logk("ok %08x\n", task->alloc_addr + task->alloc_size);
+    *(task->alloc_size) += ebx;
+    logk("ok %08x\n", task->alloc_addr + *(task->alloc_size));
   } else if (eax == 0x36) {
     char *s = env_read(ebx + ds_base);
     if (s) {
@@ -614,7 +616,6 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
   } else if (eax == 0x4e) {
     unsigned i;
     i = fifo8_status(task_get_mouse_fifo(task));
-
     reg[EAX] = i;
   } else if (eax == 0x4f) {
     reg[EAX] = fifo8_get(task_get_mouse_fifo(task));

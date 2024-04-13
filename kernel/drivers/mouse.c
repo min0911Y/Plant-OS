@@ -141,6 +141,7 @@ void inthandler2c(int *esp) {
         mouse_use_task->urgent = 1;
         mouse_use_task->running = 0;
         mtask_run_now(mouse_use_task);
+        asm volatile ("int $0x20"); // 调度
       } else{
         mouse_use_task->running = 0;
       }

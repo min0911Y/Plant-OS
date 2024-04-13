@@ -1152,8 +1152,8 @@ public:
     stack += 16 * 1024 -4;
     unsigned int *s = (unsigned int *)(stack);
     *s = (unsigned int)this;
-    if (mouse_support())
-      AddThread("mouse", (unsigned int)&m_thread, (unsigned int)stack - 4);
+    // if (mouse_support())
+    //   AddThread("mouse", (unsigned int)&m_thread, (unsigned int)stack - 4);
     r->showAll();
     int times = 0;
     int tap = 0;

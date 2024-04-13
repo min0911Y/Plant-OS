@@ -218,7 +218,8 @@ typedef struct mtask {
   uint64_t tid,ptid;
   memory *mm;
   uint32_t alloc_addr;
-  uint32_t alloc_size;
+  uint32_t *alloc_size;
+  uint32_t alloced;
   struct tty *TTY;
   int DisableExpFlag;
   uint32_t CatchEIP;

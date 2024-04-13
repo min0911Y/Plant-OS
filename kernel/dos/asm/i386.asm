@@ -387,6 +387,9 @@ return_to_app:
   pop es
   pop ds
   ret
+copy:
+  mov eax,[esp + 4]
+  
 do_init_seg_register:
   pusha
   mov ax,1*8
