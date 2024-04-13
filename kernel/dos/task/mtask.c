@@ -1,5 +1,6 @@
 // 多任务重构 -- mtask.c (区别与以前的多任务)
 #include <dos.h>
+#define STACK_SIZE 256 * 1024
 void free_pde(unsigned addr);
 char default_drive, default_drive_number;
 static char flags_once = false;
@@ -168,8 +169,8 @@ mtask *create_task(unsigned eip, unsigned esp, unsigned ticks, unsigned floor) {
   if (!t) {
     return NULL;
   }
-  unsigned esp_alloced = page_malloc(64 * 1024) + 64 * 1024;
-  change_page_task_id(t->tid, esp_alloced - 64 * 1024, 64 * 1024);
+  unsigned esp_alloced = page_malloc(STACK_SIZE) + STACK_SIZE;
+  change_page_task_id(t->tid, esp_alloced - STACK_SIZE, STACK_SIZE);
   t->esp = esp_alloced - sizeof(stack_frame); // switch用到的栈帧
   t->esp->eip = eip;                          // 设置跳转地址
   t->user_mode = 0;                           // 设置是否是user_mode
@@ -597,13 +598,13 @@ int task_fork() {
   int tid = 0;
   tid = m->tid;
   memcpy(m, current_task(), sizeof(mtask));
-  unsigned stack = page_malloc(64 * 1024);
-  change_page_task_id(tid, stack, 64 * 1024);
+  unsigned stack = page_malloc(STACK_SIZE);
+  change_page_task_id(tid, stack, STACK_SIZE);
   // unsigned int off = m->top - (unsigned)m->esp;
-  memcpy(stack, m->top - 64 * 1024, 64 * 1024);
-  logk("s = %08x \n", m->top - 64 * 1024);
-  m->top = stack += 64 * 1024;
-  stack += 64 * 1024;
+  memcpy(stack, m->top - STACK_SIZE, STACK_SIZE);
+  logk("s = %08x \n", m->top - STACK_SIZE);
+  m->top = stack += STACK_SIZE;
+  stack += STACK_SIZE;
   m->esp = stack;
   m->nfs = NULL;
   if (current_task()->Pkeyfifo) {

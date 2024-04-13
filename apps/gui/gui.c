@@ -232,34 +232,29 @@ re:
       create_button(super_window0, "test", 100, 20, 50, 50, click1);
   textbox_t *textbox0 = create_textbox(super_window0, 15 * 8, 16, 4, 110);
   unsigned clock1 = clock();
+  time_t rawtime;
+  struct tm *info;
+  char buffer[80];
+  clock1 = clock();
+
+  rawtime = time(&rawtime);
+
+  info = localtime(&rawtime);
+
+  strftime(buffer, 80, "当前时间：%Y-%m-%d %H:%M:%S", info);
+  print_box_ttf(desktop0->sht, desktop0->vram, buffer, COL_000000, argb(0, 58, 110, 165),
+                512-200 ,0, desktop0->xsize);
   for (;;) {
     if (clock() - clock1 >= 1000) {
       clock1 = clock();
-      time_t rawtime;
-      struct tm *info;
-      char buffer[80];
 
       rawtime = time(&rawtime);
 
       info = localtime(&rawtime);
 
       strftime(buffer, 80, "当前时间：%Y-%m-%d %H:%M:%S", info);
-      // desktop0->draw(desktop0, 10, 10, 18 + strlen(buffer) * width + width,
-      //                10 + height, COL_C6C6C6);
-      // logkf("A %d %d\n",width,hei);
-      // desktop0->vram[10 * desktop0->xsize + 10]=0;
-
-      // unsigned width, heigh;
-      // char *bitmap = TTF_Print(desktop0->vram, desktop0->xsize, 18, 10,
-      //                          COL_000000, buffer, COL_C6C6C6, &width,
-      //                          &heigh);
-      // desktop0->draw(desktop0, 10, 10, 18 + width, 10 + heigh, COL_C6C6C6);
-      // put_bitmap(bitmap, desktop0->vram, 10, 10, width, heigh, 512,
-      //            desktop0->xsize, COL_000000, COL_C6C6C6);
-      // sheet_refresh(desktop0->sht, 10, 10, 10 + width, 10 + heigh);
-      // free(bitmap);
       print_box_ttf(desktop0->sht, desktop0->vram, buffer, COL_000000,
-                    COL_C6C6C6, 10, 10, desktop0->xsize);
+                    argb(0, 58, 110, 165), 512-200 ,0, desktop0->xsize);
     } else {
       api_yield();
     }

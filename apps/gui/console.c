@@ -2,7 +2,7 @@
 #include <syscall.h>
 void console_task(tty_t tty) {
   tty_set(NowTaskID(), tty);
-  exec("A:\\psh.bin","");
+  exec("psh.bin","");
   for (;;)
     ;
 }

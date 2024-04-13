@@ -135,14 +135,13 @@ void inthandler2c(int *esp) {
       fifo8_put(task_get_mouse_fifo(mouse_use_task), data);
 
       if (current_task() != mouse_use_task) {
-      //  logk("SET 1\n");
+        //  logk("SET 1\n");
         mouse_use_task->timeout = 5;
         mouse_use_task->ready = 1;
         mouse_use_task->urgent = 1;
         mouse_use_task->running = 0;
-        mtask_run_now(mouse_use_task);
-        asm volatile ("int $0x20"); // 调度
-      } else{
+        task_next();
+      } else {
         mouse_use_task->running = 0;
       }
     }

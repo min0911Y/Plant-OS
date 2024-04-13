@@ -18,7 +18,7 @@ static void fartty_putchar(struct tty *res, int c) {
   res->color = nc;
 }
 static void fartty_MoveCursor(struct tty *res, int x, int y) {
-  uint32_t args[10];
+  uint32_t *args[10];
   args[0] = 1;
   args[1] = res->vram;
   args[2] = x;
@@ -26,14 +26,9 @@ static void fartty_MoveCursor(struct tty *res, int x, int y) {
   args[7] = res->x;
   args[8] = res->y;
   args[9] = res->color;
+  res->x = x;
+  res->y = y;
   call_across_page(res->reserved[0], res->reserved[1], args);
-  int nx, ny, nc;
-  nx = args[7];
-  ny = args[8];
-  nc = args[9];
-  res->x = nx;
-  res->y = ny;
-  res->color = nc;
 }
 static void fartty_clear(struct tty *res) {
   uint32_t args[10];

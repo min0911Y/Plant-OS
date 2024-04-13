@@ -100,6 +100,7 @@ Mimg : $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $(OUTPATH)
 		mcopy -i ./disk.img $(RESPATH)doom1.wad ::
 		mcopy -i ./disk.img $(RESPATH)font.ttf ::
 		mcopy -i ./disk.img $(APPSOUTPATH)gui.bin ::
+		mcopy -i ./disk.img $(APPSOUTPATH)psh.bin ::
 		
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(LOADERPATH)dosldr.bin ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(OUTPATH)kernel.bin ::

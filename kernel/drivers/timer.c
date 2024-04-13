@@ -124,7 +124,6 @@ void inthandler20(int cs, int *esp) {
   timerctl.next = timer->timeout;
 
   if (current) {
-    asm volatile ("sti");
     task_next();
   }
   // extern struct TIMER *mt_timer1, *mt_timer2, *mt_timer3;
