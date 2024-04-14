@@ -12,6 +12,20 @@
 #define Right_Up 187
 #define Right_Down 188
 #define T_DrawBox(x, y, w, h, c) Text_Draw_Box((y), (x), (h) + y, (w) + x, (c))
+
+void cpy(char *filename,char *filename1) {
+  if(filesize(filename) == -1) return;
+  int sz = filesize(filename);
+  char *buffer = malloc(sz);
+  print("Read\n");
+  api_ReadFile(filename,buffer);
+  print("mkfile\n");
+  mkfile(filename1);
+  print("Edit\n");
+  Edit_File(filename1,buffer,sz,0);
+  free(buffer);
+}
+
 void Box(int x, int y, int w, int h) {
   goto_xy(x, y);
   putch(Left_Up);
@@ -159,7 +173,7 @@ int do_step(SPACE *step, MST_Object *m) {
     char *path2[255];
     sprintf(path1, "A:\\%s", MST_get_string_in_array(m, i, files_arr));
     sprintf(path2, "C:\\%s", MST_get_string_in_array(m, i, files_arr));
-    Copy(path1, path2);
+    cpy(path1, path2);
     set(i + 1, files_in_total);
   }
   if (!MST_get_var("next", step)) {

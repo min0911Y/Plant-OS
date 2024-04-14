@@ -382,6 +382,7 @@ void task_run(mtask *task) {
   // 加急一下
   task->urgent = 1;
   task->ready = 1;
+  task->running = 0;
 }
 void task_fifo_sleep(mtask *task) { task->fifosleep = 1; }
 struct FIFO8 *task_get_mouse_fifo(mtask *task) { return task->mousefifo; }

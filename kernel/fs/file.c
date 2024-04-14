@@ -231,10 +231,10 @@ int Copy(char *path, char *path1) {
   // printk("-----------------------------\n");
   vfs_createfile(path1);
 
-  path1_file_buffer = malloc(fsz(path) + 1);
+  path1_file_buffer = kmalloc(fsz(path) + 1);
   int sz = fsz(path);
   vfs_readfile(path, path1_file_buffer);
   vfs_writefile(path1, path1_file_buffer, sz);
-  free(path1_file_buffer);
+  kfree(path1_file_buffer);
   return 0;
 }
