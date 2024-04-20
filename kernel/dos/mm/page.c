@@ -309,14 +309,8 @@ void gc(unsigned tid) {
   int i;
   for (i = 0; i < 1024 * 1024; i++) {
     if (pages[i].count && pages[i].task_id == tid) {
-      if (pages[i].count > 1) {
-        pages[i].count--;
-        pages[i].task_id =
-            0; // 不知道接下来谁会用，但是有可能被继承这个tid的人给误删除，所以这里把task_id置为0
-        continue;
-      }
-      // logk("free %08x\n",PAGE(i));
-      page_free_one((void *)PAGE(i));
+      pages[i].count = 0;
+      pages[i].task_id = 0;
     }
   }
 }
@@ -329,8 +323,7 @@ void page_free_one(void *p) {
   if (IDX(p) >= 1024 * 1024) // 超过最大页
     return;
   if (pages[IDX(p)].count - 1 > 0) {
-    if(pages[IDX(p)].task_id == current_task()->tid) 
-    {
+    if (pages[IDX(p)].task_id == current_task()->tid) {
       pages[IDX(p)].task_id = 0;
     }
     pages[IDX(p)].count--;
@@ -459,23 +452,24 @@ uint32_t page_get_phy(unsigned vaddr) {
 void copy_on_write(uint32_t vaddr) {
   void *pd = (void *)current_task()->pde; // PDE页目录地址
   void *pde = (void *)((unsigned)pd + (unsigned)(DIDX(vaddr) * 4)); // PTE地址
-  void *pde_phy = (void *)(*(unsigned int *)(pde) & 0xfffff000); // 页
+  void *pde_phy = (void *)(*(unsigned int *)(pde) & 0xfffff000);    // 页
 
   if (!(*(unsigned *)pde & PG_RWW)) { // PDE如果不可写
     // 不可写的话，就需要对PDE做COW操作
     unsigned backup = *(unsigned int *)(pde); // 用于备份原有页的属性
     if (pages[IDX(backup)].count < 2 || *(unsigned *)pde & PG_SHARED) {
       // 如果只有一个人引用，并且PDE属性是共享
-
       // 设置可写属性，然后进入下一步
       *(unsigned *)pde |= PG_RWW;
       goto PDE_FLUSH;
     }
     // 进行COW
-    *(unsigned int *)(pde) = (unsigned)page_malloc_one_count_from_4gb(); // 分配一页
+    *(unsigned int *)(pde) =
+        (unsigned)page_malloc_one_count_from_4gb();          // 分配一页
     memcpy((void *)(*(unsigned int *)pde), pde_phy, 0x1000); // 复制内容
-    *(unsigned int *)(pde) |= (backup & 0x00000fff) | PG_RWW; // 设置属性（并且可读）
-    pages[IDX(backup)].count--; // 原有引用减少
+    *(unsigned int *)(pde) |=
+        (backup & 0x00000fff) | PG_RWW; // 设置属性（并且可读）
+    pages[IDX(backup)].count--;         // 原有引用减少
   PDE_FLUSH:
     // 刷新快表
     flush_tlb(*(unsigned int *)(pde));
@@ -485,7 +479,7 @@ void copy_on_write(uint32_t vaddr) {
   if (!(*(unsigned *)pte & PG_RWW)) {
     if (pages[IDX(*(unsigned *)pte)].count < 2 || // 只有一个人引用
         *(unsigned *)pte & PG_SHARED /*或   这是一个SHARED页*/) {
-      *(unsigned *)pte |= PG_RWW;  // 设置RWW
+      *(unsigned *)pte |= PG_RWW; // 设置RWW
       goto FLUSH;
     }
     // 获取旧页信息
@@ -556,7 +550,7 @@ void PF(unsigned edi, unsigned esi, unsigned ebp, unsigned esp, unsigned ebx,
   set_cr3(PDE_ADDRESS); // 设置一个安全的页表
   void *line_address = (void *)get_cr2();
 
-  if (!(page_get_attr((unsigned)line_address) & PG_P) || // 不存在
+  if (!(page_get_attr((unsigned)line_address) & PG_P) ||     // 不存在
       (!(page_get_attr((unsigned)line_address) & PG_USU))) { // 用户不可写
 
     printk("Fatal error: Attempt to read/write a non-existent/kernel memory "
@@ -570,7 +564,7 @@ void PF(unsigned edi, unsigned esi, unsigned ebp, unsigned esp, unsigned ebx,
          "halt \n   --- at PF()",
          line_address, eip);
     if (current_task()->user_mode) { // 用户级FAULT
-      task_exit(-1); // 强制退出
+      task_exit(-1);                 // 强制退出
     }
     io_cli();
     // 系统级FAULT

@@ -261,7 +261,9 @@ void task_to_user_mode(unsigned eip, unsigned esp) {
   iframe->esp = esp; // 设置用户态堆栈
   current->user_mode = 1;
   tss.esp0 = current->top;
-  change_page_task_id(current_task()->tid, iframe->esp - 64 * 1024, 64 * 1024);
+  logk("TTT %d\n",current_task()->tid);
+ // task_exit(0);
+  //change_page_task_id(current_task()->tid, iframe->esp - 64 * 1024, 64 * 1024);
   io_sti();
   asm volatile("movl %0, %%esp\n"
                "popa\n"
@@ -453,8 +455,10 @@ void task_fall_blocked(enum STATE state) {
   }
   current_task()->state = state;
   current_task()->ready = 0;
+  io_sti();
   task_next();
 }
+extern struct PAGE_INFO *pages ;
 void task_exit(unsigned status) {
 
   unsigned tid = current_task()->tid;
@@ -465,10 +469,11 @@ void task_exit(unsigned status) {
       continue;
     if (m[i].ptid == tid) {
       int tid = m[i].tid;
-      get_task(m[i].tid)->signal |= SIGMASK(SIGINT);
+      get_task(m[i].tid)->signal |= SIGMASK(SIGKIL);
       waittid(tid);
     }
   }
+  
   io_cli();
   set_cr3(PDE_ADDRESS);
   free_pde(m[tid].pde);

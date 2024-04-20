@@ -1152,8 +1152,8 @@ public:
     stack += 16 * 1024 -4;
     unsigned int *s = (unsigned int *)(stack);
     *s = (unsigned int)this;
-    // if (mouse_support())
-    //   AddThread("mouse", (unsigned int)&m_thread, (unsigned int)stack - 4);
+    if (mouse_support())
+      AddThread("mouse", (unsigned int)&m_thread, (unsigned int)stack - 4);
     r->showAll();
     int times = 0;
     int tap = 0;
@@ -1231,14 +1231,14 @@ void m_thread(void *s) {
   Editor *b = (Editor *)s;
   for (;;) {
   //  logk("a");
-    // int mouse = get_mouse();
-    // if (GetMouse_btn(mouse) == CLICK_LEFT) {
-    //   b->Click(GetMouse_x(mouse), GetMouse_y(mouse));
-    // } else if (GetMouse_btn(mouse) == 4) {
-    //   b->Up();
-    // } else if (GetMouse_btn(mouse) == 5) {
-    //   b->Down();
-    // }
+    int mouse = get_mouse();
+    if (GetMouse_btn(mouse) == CLICK_LEFT) {
+      b->Click(GetMouse_x(mouse), GetMouse_y(mouse));
+    } else if (GetMouse_btn(mouse) == 4) {
+      b->Up();
+    } else if (GetMouse_btn(mouse) == 5) {
+      b->Down();
+    }
   }
   //exit(0);
 }

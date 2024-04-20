@@ -125,6 +125,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
       mouse_ready(&mdec);
       for (;;) {
         if (fifo8_status(task_get_mouse_fifo(task)) == 0) {
+          signal_deal();
           task_next();
         } else {
           i = fifo8_get(task_get_mouse_fifo(task));
