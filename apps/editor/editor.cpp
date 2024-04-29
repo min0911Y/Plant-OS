@@ -1,4 +1,5 @@
 /* Editor.cpp : 文本编辑器*/
+// Copyright (C) 2024 min0911
 #include <mouse.h>
 #include <mst.h>
 #include <stdarg.h>
@@ -46,6 +47,7 @@ struct StringStyle {
   char *start;
   char *end;
 };
+/* 如果要实现高亮，需要使用这些变量 */
 MST_Object *mst_obj;
 SPACE *comment_config;
 SPACE *number_config;
@@ -57,7 +59,8 @@ struct km_style {
   char *key;
   int color;
 };
-
+///////////////高亮依赖///////////////
+// 转换大写
 void strtoupper(char *str) {
   while (*str != '\0') {
     if (*str >= 'a' && *str <= 'z') {
@@ -113,6 +116,7 @@ int kmp(char *str_main, char *str_branch) {
     return -1; // 没有找到的话返回-1
   }
 }
+// 处理转义字符
 void convert(char *str) {
   int i, j;
   for (i = 0, j = 0; str[i] != '\0'; i++, j++) {
@@ -142,13 +146,8 @@ void convert(char *str) {
   }
   str[j] = '\0';
 }
-void *operator new(size_t size, void *ptr) { return ptr; }
 
-void *operator new[](size_t size, void *ptr) { return ptr; }
-
-void operator delete(void *ptr, void *place) {}
-void operator delete[](void *ptr, void *place) {}
-
+// EVector C++-style的数组实现
 template <typename T> class EVector {
 public:
   EVector() : _size(0), _capacity(1), _data(new T[1]) {}
@@ -240,6 +239,9 @@ private:
 };
 EVector<StringStyle> string_vector;
 EVector<km_style> key_map;
+
+////////////////高亮结束/////////////////////
+
 // 用“ ”画一个长方形
 void putSpace(int x, int y, int w, int h) {
   goto_xy(x, y);
@@ -550,6 +552,7 @@ public:
     buf_x = 0;
     buf_y = 0;
   }
+  /* 高效的打印字符，空间换时间 */
   void r_putch(int ch) {
     // 获取当前光标的xy,那么我们就不用再去记录光标的位置了
     short bx, by;
@@ -563,6 +566,7 @@ public:
       goto_xy(bx + 1, by);
     }
   }
+  /* 清空缓冲区 */
   void r_clean() {
     for (int i = 0; i < MAX_LINE; i++) {
       for (int j = 0; j < MAX_CHAR_A_LINE; j++) {
@@ -570,6 +574,7 @@ public:
       }
     }
   }
+  /* 清空之后检查一下清空完成没有（或许没必要） */
   void r_check() {
     for (int i = 0; i < MAX_LINE; i++) {
       for (int j = 0; j < MAX_CHAR_A_LINE; j++) {
@@ -581,20 +586,24 @@ public:
       }
     }
   }
+  ///////////////显示////////////////////
   void showAll() {
-    Line *l = p->getBuf();
+    Line *l = p->getBuf(); // 获取布局信息
     char buf[90];
-    tty_stop_cur_moving();
-    goto_xy(0, 0);
+    tty_stop_cur_moving(); // 暂停光标移动
+    goto_xy(0, 0);         // 将下一个字符的显示位置移动到原点
     for (int i = 0; i < MAX_LINE; i++) {
       goto_xy(0, i);
+#if 0
       int fg = 0;
       int fg1 = 0;
       int ll = 0;
       int b = 0;
       char *end;
+#endif
       for (int j = 0, l1 = 0; j < MAX_CHAR_A_LINE; j++) {
         r_putch(l[i].line[j].ch == '\0' ? ' ' : l[i].line[j].ch);
+#if 0
         if (mst_obj == nullptr) {
           continue;
         }
@@ -689,6 +698,7 @@ public:
             }
           }
         }
+#endif
       }
       buf[0] = 0;
     }
@@ -705,17 +715,19 @@ public:
     sprintf(buf0, "COL %d LINE %d      %s | Text", camera->index,
             camera->y + camera->curser_pos_y + 1, filename);
 #endif
-    if (camera->len != 0) {
-      int d = (int)(((float)camera->index / (float)camera->len) * 100);
+    if (camera->len != 0) { // 分母不是0
+      int d = (int)(((float)camera->index / (float)camera->len) *
+                    100); // 算出百分比
       char *s;
+      // 计算之后需要的间隔
       if (d == 100) {
         s = "";
-      } else if(d < 100 && d != 0) {
+      } else if (d < 100 && d != 0) {
         s = " ";
       } else {
         s = "  ";
       }
-        sprintf(buf2, "%s%d%%", s,d);
+      sprintf(buf2, "%s%d%%", s, d);
     } else {
       sprintf(buf2, " --%%");
     }
@@ -725,10 +737,12 @@ public:
     for (int i = 0; i < strlen(buf2); i++) {
       buf1[MAX_CHAR_A_LINE - 5 + i] = buf2[i];
     }
+    // 设置状态栏
     setState(buf1);
     goto_xy(camera->curser_pos_x, camera->curser_pos_y);
+
+    // 重新开始移动光标
     tty_start_cur_moving();
-    // r_clean();
   }
 
 private:
@@ -796,8 +810,8 @@ public:
       }
     }
 #endif
-    insert_char(camera->buffer, camera->index, ch, camera);
-    p->SetUse();
+    insert_char(camera->buffer, camera->index, ch, camera); // 直接插入
+    p->SetUse(); // 标记修改过了
   }
   void Delete() {
     /* 判断3“0”情况 */
@@ -822,10 +836,15 @@ public:
       }
     }
 #endif
-    delete_char(camera->buffer, camera->index, camera);
-    p->SetUse();
+    delete_char(camera->buffer, camera->index, camera); // 直接删除
+    p->SetUse();                                        // 标记一下
   }
   void To(int line) {
+    if (line <= 0) {
+      setState("Cannot To");
+      getch();
+      return;
+    }
     p->Set();
     Line *l = p->getBuf();
     if (line <= (camera->y) + MAX_LINE && (line > camera->y)) {
@@ -913,10 +932,11 @@ public:
     }
   }
   /* 上下左右操作 */
+
+  // 向上移动
   void up() {
     if (camera->y == 0 && camera->curser_pos_y == 0) {
-      // 无法上移
-      // printf("Can not up.\n");
+      // 移不了了，就什么都不干
       return;
     }
     if (camera->curser_pos_y == 0) {
@@ -963,6 +983,7 @@ public:
       }
     }
   }
+  // 向下移动
   int down() {
     Line *l;
     p->Set();
@@ -971,11 +992,11 @@ public:
     if (camera->curser_pos_y != MAX_LINE - 1) {
       if (l[camera->curser_pos_y + 1].line[0].ch == '\0' &&
           l[camera->curser_pos_y + 1].line_flag == 0) {
-        return 0;
+        return 0; // failed
       }
     } else {
       if (ml < (camera->y + camera->curser_pos_y) + 1) {
-        return 0;
+        return 0; // failed
       }
     }
     if (camera->curser_pos_y == MAX_LINE - 1) {
@@ -989,7 +1010,6 @@ public:
       } else {
         camera->index = l[MAX_LINE - 1].line[l[MAX_LINE - 1].len - 1].index + 1;
       }
-      // camera->curser_pos_x = l[MAX_LINE - 1].len;
       if (camera->buffer[l[camera->curser_pos_y]
                              .line[l[camera->curser_pos_y].len - 1]
                              .index +
@@ -1011,7 +1031,6 @@ public:
                             .line[l[camera->curser_pos_y].len - 1]
                             .index +
                         1;
-        //     printf("INDEX=%d\n", camera->index);
       }
       if (camera->buffer[l[camera->curser_pos_y]
                              .line[l[camera->curser_pos_y].len - 1]
@@ -1024,41 +1043,42 @@ public:
         camera->curser_pos_x = l[camera->curser_pos_y].len;
       }
     }
-    return 1;
+    return 1; // success
   }
+  // 左移动
   void left() {
-    if (camera->curser_pos_x == 0) {
+    if (camera->curser_pos_x == 0) { // 已经完全无法左移了，所以上移
       up();
-      Line *l = p->getBuf();
-
     } else {
+      // 就是正常左移，索引减去一
       camera->curser_pos_x--;
       camera->index--;
     }
   }
+  // 右移动
   void right(int b) {
-    // printf("this.\n");
+    /*
+      b指代模式
+      0 代表输入的向右
+      1 代表用户更改索引位置时的向右
+     */
+    // 获取行布局
     p->Set();
     Line *l = p->getBuf();
     if ((camera->curser_pos_x == l[camera->curser_pos_y].len && b)) {
-      // printf("%d %d   s Y=%d\n", camera->curser_pos_x,
-      //        l[camera->curser_pos_y].len, camera->curser_pos_y);
-      // system("PAUSE");
-      int ret = down();
-      // system("PAUSE");
-
-      if (ret) {
-        if (b) {
+      int ret = down(); // 看一下能不能下去
+      if (ret) {        // 成功了！
+        if (b) {        // 用户的向右
           camera->curser_pos_x = 0;
           if (l[camera->curser_pos_y].len != 0) {
             camera->index = l[camera->curser_pos_y].line[0].index;
           }
         } else {
+          // 正常输入的
           camera->curser_pos_x = 1;
           camera->index = l[camera->curser_pos_y].start_index + 1;
         }
       }
-      // asm("nop");
     } else {
       if (camera->curser_pos_x == MAX_CHAR_A_LINE) {
         camera->curser_pos_x = 1;
@@ -1074,6 +1094,7 @@ public:
     }
   }
 };
+////////////////处理鼠标的进程函数声明///////////////
 void m_thread(void *s);
 
 class Editor {
@@ -1088,8 +1109,6 @@ public:
   }
   void Up() {
     if (c->y == 0) {
-      // 无法上移
-      // printf("Can not up.\n");
       return;
     }
     c->curser_pos_x = 0;
@@ -1099,9 +1118,6 @@ public:
     r->showAll();
   }
   void Down() {
-    // if (c->y != MAX_LINE - 1) {
-    //   return;
-    // }
     int temp_x = c->curser_pos_x;
     int temp_y = c->curser_pos_y;
     c->curser_pos_x = 0;
@@ -1149,7 +1165,7 @@ public:
     c->ml = n->maxLine();
 #endif
     char *stack = (char *)malloc(16 * 1024);
-    stack += 16 * 1024 -4;
+    stack += 16 * 1024 - 4;
     unsigned int *s = (unsigned int *)(stack);
     *s = (unsigned int)this;
     if (mouse_support())
@@ -1226,11 +1242,11 @@ public:
     }
   }
 };
+
+// 鼠标进程
 void m_thread(void *s) {
- // exit(0);
   Editor *b = (Editor *)s;
   for (;;) {
-  //  logk("a");
     int mouse = get_mouse();
     if (GetMouse_btn(mouse) == CLICK_LEFT) {
       b->Click(GetMouse_x(mouse), GetMouse_y(mouse));
@@ -1240,7 +1256,6 @@ void m_thread(void *s) {
       b->Down();
     }
   }
-  //exit(0);
 }
 int mLine(char *buffer, int len) {
   int l = 0;
@@ -1297,17 +1312,5 @@ int main(int argc, char **argv) {
 
   clear();
   Edit_File(argv[1], bb, strlen(c) + mLine(c, l), 0);
-  // char b[50];
-  // printf("File:");
-  // gets(b);
-  // FILE *fp = fopen(b,"wb");
-  // for(int i = 0;i<strlen(c);i++) {
-  // 	if(c[i] == '\n') {
-  // 		fputc('\r',fp);
-  // 		fputc('\n',fp);
-  // 	} else {
-  // 		fputc(c[i],fp);
-  // 	}
-  // }
   return 0;
 }

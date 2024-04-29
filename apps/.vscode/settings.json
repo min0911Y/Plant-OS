@@ -43,6 +43,9 @@
     "stb_ttf.h": "c",
     "stdarg.h": "c",
     "type_traits": "c",
-    "utf.h": "c"
+    "utf.h": "c",
+    "dos.h": "c",
+    "exception": "c",
+    "list.h": "c"
   }
 }

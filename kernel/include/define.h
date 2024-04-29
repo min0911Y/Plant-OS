@@ -119,7 +119,7 @@ typedef struct {
 } lock_t;
 #define LOCK_UNLOCKED 0
 #define LOCK_LOCKED 1
-typedef struct  { // IPC头（在TASK结构体中的头）
+typedef struct { // IPC头（在TASK结构体中的头）
   int now;
   IPCMessage messages[MAX_IPC_MESSAGE];
   lock_t l;
@@ -200,9 +200,7 @@ typedef struct {
   uint32_t eax, ebx, ecx, edx, esi, edi, ebp;
   uint32_t eip;
 } stack_frame;
-enum STATE {
-  EMPTY,RUNNING,WAITING,SLEEPING,WILL_EMPTY,READY,DIED
-};
+enum STATE { EMPTY, RUNNING, WAITING, SLEEPING, WILL_EMPTY, READY, DIED };
 typedef struct mtask {
   stack_frame *esp;
   unsigned pde;
@@ -212,10 +210,10 @@ typedef struct mtask {
   unsigned timeout; // 需要占用多少时间片
   int floor;
   enum STATE state; // 此项为1（RUNNING） 即正常调度，为 2（WAITING） 3
-                  // （SLEEPING）的时候不执行 ，0 EMPTY 空闲格子
+                    // （SLEEPING）的时候不执行 ，0 EMPTY 空闲格子
   uint64_t jiffies;
   struct vfs_t *nfs;
-  uint64_t tid,ptid;
+  uint64_t tid, ptid;
   memory *mm;
   uint32_t alloc_addr;
   uint32_t *alloc_size;
@@ -234,7 +232,7 @@ typedef struct mtask {
   void (*keyboard_press)(unsigned char data, uint32_t task);
   void (*keyboard_release)(unsigned char data, uint32_t task);
   char fifosleep;
-  int mx,my;
+  int mx, my;
   char *line;
   struct TIMER *timer;
   IPC_Header ipc_header;
@@ -246,6 +244,8 @@ typedef struct mtask {
   unsigned signal;
   unsigned handler[30];
   unsigned ret_to_app;
+  unsigned times;
+  unsigned signal_disable;
 } _packed mtask;
 typedef struct intr_frame_t {
   unsigned edi;
@@ -277,7 +277,7 @@ typedef struct intr_frame_t {
 #define PG_PCD 16
 #define PG_SHARED 1024
 #define PDE_ADDRESS 0x400000
-#define PTE_ADDRESS (PDE_ADDRESS+0x1000)
+#define PTE_ADDRESS (PDE_ADDRESS + 0x1000)
 #define PAGE_END (PTE_ADDRESS + 0x400000)
 #define PAGE_MANNAGER PAGE_END
 struct FIFO8 {
@@ -460,7 +460,9 @@ struct tty {
   void (*print)(struct tty *res, const char *string); // print函数
   void (*Draw_Box)(struct tty *res, int x, int y, int x1, int y1,
                    unsigned char color); // Draw_Box函数
-  unsigned int reserved[4];              // 保留项
+  int (*fifo_status)(struct tty *res);
+  int (*fifo_get)(struct tty *res);
+  unsigned int reserved[4]; // 保留项
 };
 struct Input_StacK {
   char **Stack;
@@ -734,7 +736,7 @@ struct VBEINFO {
 #define VGA_NUM_AC_REGS 21
 #define VGA_NUM_REGS                                                           \
   (1 + VGA_NUM_SEQ_REGS + VGA_NUM_CRTC_REGS + VGA_NUM_GC_REGS + VGA_NUM_AC_REGS)
-#define _vmemwr(DS, DO, S, N) memcpy((char *)((DS)*16 + (DO)), S, N)
+#define _vmemwr(DS, DO, S, N) memcpy((char *)((DS) * 16 + (DO)), S, N)
 #define SB16_IRQ 5
 #define SB16_FAKE_TID -3
 #define SB16_PORT_MIXER 0x224
@@ -813,9 +815,9 @@ struct IDEHardDiskInfomationBlock {
 
 /* net */
 #define swap32(x)                                                              \
-  ((((x)&0xff000000) >> 24) | (((x)&0x00ff0000) >> 8) |                        \
-   (((x)&0x0000ff00) << 8) | (((x)&0x000000ff) << 24))
-#define swap16(x) ((((x)&0xff00) >> 8) | (((x)&0x00ff) << 8))
+  ((((x) & 0xff000000) >> 24) | (((x) & 0x00ff0000) >> 8) |                    \
+   (((x) & 0x0000ff00) << 8) | (((x) & 0x000000ff) << 24))
+#define swap16(x) ((((x) & 0xff00) >> 8) | (((x) & 0x00ff) << 8))
 // 以太网帧
 struct EthernetFrame_head {
   uint8_t dest_mac[6];

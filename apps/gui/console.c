@@ -2,7 +2,7 @@
 #include <syscall.h>
 void console_task(tty_t tty) {
   tty_set(NowTaskID(), tty);
-  exec("psh.bin","");
+  exec("psh.bin", "");
   for (;;)
     ;
 }
@@ -53,6 +53,15 @@ color_t text_color_to_real_color(unsigned char text_color, bool back_or_font) {
     return COL_FFFFFF;
 }
 void putchar_console(struct tty *res, int c) {
+  if (c == '\r')
+    return;
+  if (c == '\t') {
+    putchar_console(res, ' ');
+    putchar_console(res, ' ');
+    putchar_console(res, ' ');
+    putchar_console(res, ' ');
+    return;
+  }
   console_t *console = (console_t *)res->vram;
   if (res->x == res->xsize) {
     if (res->y == res->ysize - 1) {
@@ -216,6 +225,8 @@ void mtty_handle(uint32_t *a) {
   tty->x = a[7];
   tty->y = a[8];
   tty->color = a[9];
+
+  console_t *cons = (console_t *)tty->vram;
   switch (a[0]) {
   case 0:
     putchar_console(tty, a[2]);
@@ -231,6 +242,12 @@ void mtty_handle(uint32_t *a) {
     break;
   case 4:
     Draw_Box_console(tty, a[2], a[3], a[4], a[5], a[6]);
+    break;
+  case 5:
+    a[0] = fifo8_status(cons->window->fifo_keypress);
+    break;
+  case 6:
+    a[0] = fifo8_get(cons->window->fifo_keypress);
     break;
   default:
     break;
@@ -277,30 +294,36 @@ console_t *create_console(window_t *window, int xsize, int ysize, int x,
   res->close = close_console;
   window->draw(window, x, y, x + xsize, y + ysize, COL_000000);
 
-   res->shtctl = shtctl_init(window->vram, window->xsize, window->ysize);
-   res->sht_cur = sheet_alloc(res->shtctl);
-   res->sht_copy = sheet_alloc(res->shtctl);
-   res->vram_cur = malloc(8 * 16 * sizeof(vram_t));
-   res->vram_copy = malloc(window->xsize * window->ysize * sizeof(vram_t));
-   SDraw_Box(res->vram_cur, 0, 0, 8, 16, COL_FFFFFF, 8);
-   memcpy((void *)res->vram_copy, (void *)window->vram,
-          window->xsize * window->ysize * sizeof(vram_t));
-   sheet_setbuf(res->sht_cur, res->vram_cur, 8, 16, COL_TRANSPARENT);
-   sheet_setbuf(res->sht_copy, res->vram_copy, window->xsize, window->ysize, -1);
-   sheet_slide(res->sht_cur, res->x, res->y);
-   sheet_slide(res->sht_copy, 0, 0);
-   sheet_updown(res->sht_copy, 0);
-   sheet_updown(res->sht_cur, 1);
-   sheet_refresh(res->sht_copy, 0, 0, window->xsize, window->ysize);
-   sheet_refresh(res->sht_cur, 0, 0, 8, 16);
-   window->draw = draw_console_window;
-   window->puts = puts_console_window;
-   res->tty = mtty_alloc((void *)res, xsize / 8, ysize / 16, putchar_console,
-                         MoveCursor_console, clear_console, screen_ne_console,
-                         Draw_Box_console);
+  res->shtctl = shtctl_init(window->vram, window->xsize, window->ysize);
+  res->sht_cur = sheet_alloc(res->shtctl);
+  res->sht_copy = sheet_alloc(res->shtctl);
+  res->vram_cur = malloc(8 * 16 * sizeof(vram_t));
+  res->vram_copy = malloc(window->xsize * window->ysize * sizeof(vram_t));
+  SDraw_Box(res->vram_cur, 0, 0, 8, 16, COL_FFFFFF, 8);
+  memcpy((void *)res->vram_copy, (void *)window->vram,
+         window->xsize * window->ysize * sizeof(vram_t));
+  sheet_setbuf(res->sht_cur, res->vram_cur, 8, 16, COL_TRANSPARENT);
+  sheet_setbuf(res->sht_copy, res->vram_copy, window->xsize, window->ysize, -1);
+  sheet_slide(res->sht_cur, res->x, res->y);
+  sheet_slide(res->sht_copy, 0, 0);
+  sheet_updown(res->sht_copy, 0);
+  sheet_updown(res->sht_cur, 1);
+  sheet_refresh(res->sht_copy, 0, 0, window->xsize, window->ysize);
+  sheet_refresh(res->sht_cur, 0, 0, 8, 16);
+  window->draw = draw_console_window;
+  window->puts = puts_console_window;
+  res->tty = mtty_alloc((void *)res, xsize / 8, ysize / 16, putchar_console,
+                        MoveCursor_console, clear_console, screen_ne_console,
+                        Draw_Box_console);
 
-   void *stack = (unsigned)malloc(32 * 1024) + 32 * 1024;
-   ((unsigned int *)stack)[-1] = tty_alloc(res->tty,mtty_handle,xsize / 8,ysize / 16);
-   res->tid = AddThread("", console_task, (unsigned int)stack - 8);
+  void *stack = (unsigned)malloc(32 * 1024) + 32 * 1024;
+  ((unsigned int *)stack)[-1] =
+      tty_alloc(res->tty, mtty_handle, xsize / 8, ysize / 16);
+  // MEMORY LEAK!!!!!
+  uint8_t *buf;
+  buf = malloc(128);
+  res->window->fifo_keypress = malloc(sizeof(struct FIFO8));
+  fifo8_init(res->window->fifo_keypress, 128, buf);
+  res->tid = AddThread("", console_task, (unsigned int)stack - 8);
   return res;
 }

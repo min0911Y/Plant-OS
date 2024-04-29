@@ -122,38 +122,28 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
       int by = my1;
       int bmp =
           *(char *)(task->TTY->vram + by * task->TTY->xsize * 2 + bx * 2 + 1);
-      mouse_ready(&mdec);
+      if(mdec.sleep == 1)
+        mouse_ready(&mdec);
       for (;;) {
         if (fifo8_status(task_get_mouse_fifo(task)) == 0) {
-          signal_deal();
           task_next();
+          signal_deal();
         } else {
           i = fifo8_get(task_get_mouse_fifo(task));
           if (mouse_decode(&mdec, i) != 0) {
             if (task->TTY != now_tty() && task->TTY->using1 == 1) {
               continue;
             }
-            if ((mdec.btn & 0x01) != 0) {
-              reg[ECX] = task->mx;
-              reg[EDX] = task->my;
-              reg[ESI] = 1;
-              break;
-            } else if ((mdec.btn & 0x02) != 0) {
-              reg[ECX] = task->mx;
-              reg[EDX] = task->my;
-              reg[ESI] = 2;
-              break;
-            } else if ((mdec.btn & 0x04) != 0) {
-              reg[ECX] = task->mx;
-              int alloc_size = *(task->alloc_size);
-              reg[EDX] = task->my;
-              reg[ESI] = 3;
-              break;
-            } else if (mdec.roll != MOUSE_ROLL_NONE) {
+            if (mdec.roll != MOUSE_ROLL_NONE) {
               reg[ECX] = task->mx;
               reg[EDX] = task->my;
               reg[ESI] = 3 + mdec.roll;
-              break;
+           //   mouse_sleep(&mdec);
+              *(char *)(task->TTY->vram + task->my * task->TTY->xsize * 2 +
+                        task->mx * 2 + 1) = bmp;
+              task->mx = mx1;
+              task->my = my1;
+              return;
             }
             mx1 = task->mx;
             my1 = task->my;
@@ -178,20 +168,34 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
                             task->mx * 2 + 1);
             *(char *)(task->TTY->vram + task->my * task->TTY->xsize * 2 +
                       task->mx * 2 + 1) = ~bmp;
-            //  mouse_sleep(&mdec);
-            //  sleep(50);
-            mouse_ready(&mdec);
+            if ((mdec.btn & 0x01) != 0) {
+              reg[ECX] = task->mx;
+              reg[EDX] = task->my;
+              reg[ESI] = 1;
+              break;
+            } else if ((mdec.btn & 0x02) != 0) {
+              reg[ECX] = task->mx;
+              reg[EDX] = task->my;
+              reg[ESI] = 2;
+              break;
+            } else if ((mdec.btn & 0x04) != 0) {
+              reg[ECX] = task->mx;
+              int alloc_size = *(task->alloc_size);
+              reg[EDX] = task->my;
+              reg[ESI] = 3;
+              break;
+            }
           }
         }
       }
-      mouse_sleep(&mdec);
       *(char *)(task->TTY->vram + task->my * task->TTY->xsize * 2 +
                 task->mx * 2 + 1) = bmp;
       task->mx = mx1;
       task->my = my1;
     }
   } else if (eax == 0x10) { // mouse_support
-    reg[EAX] = running_mode == POWERINTDOS;
+    extern mtask *mouse_use_task;
+    reg[EAX] = running_mode == POWERINTDOS && mouse_use_task == NULL;
   } else if (eax == 0x16) {
     if (ebx == 0x01) {
       reg[EDX] = getch();
@@ -202,7 +206,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
     }
   } else if (eax == 0x19) {
     logk("--------------------------------\n");
-    logk("c: %08x\n", task->pde);
+    logk("c: %08x %s\n", task->pde,(char *)(edx + ds_base));
     reg[EAX] = command_run((char *)(edx + ds_base));
     // asm("xchg %bx,%bx");
     logk("n: %08x\n", task->pde);
@@ -368,10 +372,11 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
         unsigned int *pde_entry = (unsigned int *)(pde + i);
         if (pages[IDX(*pde_entry)].count > 1 && !(*pde_entry & PG_SHARED)) {
           uint32_t old = *pde_entry & 0xfffff000;
+          uint32_t attr = *pde_entry & 0xfff;
           *pde_entry = (unsigned)page_malloc_one_count_from_4gb();
           memcpy((void *)(*pde_entry), (void *)old, 0x1000);
           pages[IDX(old)].count--;
-          *pde_entry |= 7;
+          *pde_entry |= attr;
           *pde_entry |= PG_SHARED;
         } else {
           *pde_entry |= PG_SHARED;
@@ -397,7 +402,8 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
       t->TTY = current_task()->TTY;
       t->nfs = task->nfs;
       t->ptid = task->tid;
-
+      t->mx = 0;
+      t->my = 0;
       unsigned *r = page_malloc_one_no_mark();
       r[0] = esi;
       r[1] = edx;
@@ -623,7 +629,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
   } else if (eax == 0x50) {
     if (current_task()->ready == 0) {
       io_cli();
-//      current_task()->timeout = 1;
+      //      current_task()->timeout = 1;
       task_next();
       io_sti();
     } else {
@@ -637,6 +643,10 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
     tty_free(ebx);
   } else if (eax == 0x54) {
     current_task()->ret_to_app = ebx;
+  } else if (eax == 0x55) {
+    extern int disable_flag;
+    disable_flag = 1;
+  } else if (eax == 0x56) {
   }
   return;
 }

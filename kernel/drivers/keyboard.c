@@ -63,19 +63,35 @@ int getch() {
     return keytable1[ch];
   }
 }
+extern struct tty *tty_default;
+int tty_fifo_status() {
+  mtask *task = current_task();
+  if (task->TTY->using1 != 1) {
+    return tty_default->fifo_status(tty_default);
+  } else {
+    return task->TTY->fifo_status(task->TTY);
+  }
+}
+int tty_fifo_get() {
+  mtask *task = current_task();
+  if (task->TTY->using1 != 1) {
+    return tty_default->fifo_get(tty_default);
+  } else {
+    return task->TTY->fifo_get(task->TTY);
+  }
+}
 int input_char_inSM() {
   int i;
   mtask *task = current_task();
   while (1) {
-    if ((fifo8_status(task_get_key_fifo(task)) == 0)) {
+    if ((tty_fifo_status() == 0)) {
       // 不返回扫描码的情况
       // 1.没有输入
       // 2.窗口未处于顶端
       // 3.正在运行的控制台并不是函数发起的控制台（TTY）
     } else {
       // 返回扫描码
-      i = fifo8_get(
-          task_get_key_fifo(current_task())); // 从FIFO缓冲区中取出扫描码
+      i = tty_fifo_get(); // 从FIFO缓冲区中取出扫描码
       if (i != -1) {
         break;
       }
@@ -114,7 +130,7 @@ int sc2a(int sc) {
     return keytable1[ch];
   }
 }
-
+int disable_flag = 0;
 void inthandler21(int *esp) {
   // 键盘中断处理函数
   unsigned char data, s[4];
@@ -152,7 +168,7 @@ void inthandler21(int *esp) {
       if (!get_task(i)) {
         continue;
       }
-      if(get_task(i)->sigint_up) {
+      if (get_task(i)->sigint_up) {
         get_task(i)->signal |= SIGMASK(SIGINT);
       }
     }
@@ -191,26 +207,27 @@ void inthandler21(int *esp) {
     }
     if (get_task(i)->keyboard_press != NULL) {
       // TASK结构体中有对按下键特殊处理的
-      get_task(i)->keyboard_press(data, i); // 处理按下键
+      get_task(i)->keyboard_press(data + e0_flag, i); // 处理按下键
     }
   }
-  for (int i = 0; i < 255; i++) {
-    if (!get_task(i)) {
-      continue;
-    }
-    // 按下键通常处理
-    mtask *task = get_task(i); // 每个进程都处理一遍
-    if (task->state != RUNNING || task->fifosleep) {
-      if (task->state == WAITING && task->waittid == -1) {
-        goto THROUGH;
+  if (disable_flag == 0)
+    for (int i = 0; i < 255; i++) {
+      if (!get_task(i)) {
+        continue;
       }
-      // 如果进程正在休眠或被锁了
-      continue;
+      // 按下键通常处理
+      mtask *task = get_task(i); // 每个进程都处理一遍
+      if (task->state != RUNNING || task->fifosleep) {
+        if (task->state == WAITING && task->waittid == -1) {
+          goto THROUGH;
+        }
+        // 如果进程正在休眠或被锁了
+        continue;
+      }
+      // 一般进程
+    THROUGH:
+      //    logk("send\n");
+      fifo8_put(task_get_key_fifo(task), data + e0_flag);
     }
-    // 一般进程
-  THROUGH:
-    //    logk("send\n");
-    fifo8_put(task_get_key_fifo(task), data + e0_flag);
-  }
   return;
 }

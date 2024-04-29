@@ -44,6 +44,8 @@ static void init_task() {
     m[i].Ukeyfifo = NULL;
     m[i].sigint_up = 0;
     m[i].train = 0;
+    m[i].signal_disable = 0;
+    m[i].times = 0;
     lock_init(&(m[i].ipc_header.l));
     m[i].ipc_header.now = 0;
     for (int k = 0; k < MAX_IPC_MESSAGE; k++) {
@@ -176,8 +178,10 @@ mtask *create_task(unsigned eip, unsigned esp, unsigned ticks, unsigned floor) {
   t->user_mode = 0;                           // 设置是否是user_mode
   if (current == NULL) {                      // 还没启用多任务
     t->pde = PDE_ADDRESS;                     // 所以先用预设好的页表
+    t->times = PDE_ADDRESS;
   } else {
     t->pde = pde_clone(current_task()->pde); // 启用了就复制一个
+    t->times = t->pde;
   }
   t->top = esp_alloced; // r0的esp
   t->floor = floor;
@@ -261,9 +265,10 @@ void task_to_user_mode(unsigned eip, unsigned esp) {
   iframe->esp = esp; // 设置用户态堆栈
   current->user_mode = 1;
   tss.esp0 = current->top;
-  logk("TTT %d\n",current_task()->tid);
- // task_exit(0);
-  //change_page_task_id(current_task()->tid, iframe->esp - 64 * 1024, 64 * 1024);
+  logk("TTT %d\n", current_task()->tid);
+  // task_exit(0);
+  // change_page_task_id(current_task()->tid, iframe->esp - 64 * 1024, 64 *
+  // 1024);
   io_sti();
   asm volatile("movl %0, %%esp\n"
                "popa\n"
@@ -324,6 +329,8 @@ void task_kill(unsigned tid) {
   m[tid].ipc_header.now = 0;
   m[tid].sigint_up = 0;
   m[tid].train = 0;
+  m[tid].times = 0;
+  m[tid].signal_disable = 0;
   lock_init(&(m[tid].ipc_header.l));
   for (int k = 0; k < MAX_IPC_MESSAGE; k++) {
     m[tid].ipc_header.messages[k].from_tid = -1;
@@ -458,9 +465,11 @@ void task_fall_blocked(enum STATE state) {
   io_sti();
   task_next();
 }
-extern struct PAGE_INFO *pages ;
+extern struct PAGE_INFO *pages;
 void task_exit(unsigned status) {
-
+  if(mouse_use_task == current_task()) {
+    mouse_sleep(&mdec);
+  }
   unsigned tid = current_task()->tid;
   for (int i = 0; i < 255; i++) {
     if (m[i].state == EMPTY || m[i].state == WILL_EMPTY || m[i].state == READY)
@@ -468,12 +477,9 @@ void task_exit(unsigned status) {
     if (m[i].tid == tid)
       continue;
     if (m[i].ptid == tid) {
-      int tid = m[i].tid;
-      get_task(m[i].tid)->signal |= SIGMASK(SIGKIL);
-      waittid(tid);
+      task_kill(m[i].tid);
     }
   }
-  
   io_cli();
   set_cr3(PDE_ADDRESS);
   free_pde(m[tid].pde);
@@ -511,6 +517,8 @@ void task_exit(unsigned status) {
   m[tid].sigint_up = 0;
   m[tid].train = 0;
   m[tid].status = status;
+  m[tid].times = 0;
+  m[tid].signal_disable = 0;
   lock_init(&(m[tid].ipc_header.l));
   for (int k = 0; k < MAX_IPC_MESSAGE; k++) {
     m[tid].ipc_header.messages[k].from_tid = -1;

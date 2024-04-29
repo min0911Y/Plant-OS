@@ -96,6 +96,8 @@ void sysinit(void) {
   SetDrive((unsigned char *)"DISK_DRIVE");
   SetDrive((unsigned char *)"NETCARD_DRIVE");
   
+
+  printk("Hello Plant OS Kernel\n");
   printk("benching cpu.....\n");
   base_count = 0;
   unsigned c = timerctl.count;

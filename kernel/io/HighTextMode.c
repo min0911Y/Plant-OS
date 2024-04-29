@@ -257,6 +257,8 @@ void cur_service() {
     }
   }
 }
+int default_tty_fifo_status(struct tty *res);
+int default_tty_fifo_get(struct tty *res);
 void SwitchToHighTextMode() {
   if (set_mode(1024, 768, 32) == (unsigned)(-1)) {
     printk("Can't enable 1024x768x32 VBE mode.\n\n");
@@ -289,7 +291,7 @@ void SwitchToHighTextMode() {
   struct tty *tty_h = tty_alloc((void *)sht_scr, vinfo->xsize / 8,
                                 vinfo->ysize / 16, putchar_HighTextMode,
                                 MoveCursor_HighTextMode, clear_HighTextMode,
-                                screen_ne_HighTextMode, Draw_Box_HighTextMode);
+                                screen_ne_HighTextMode, Draw_Box_HighTextMode,default_tty_fifo_status,default_tty_fifo_get);
   tty_set_default(tty_h);
   tty_set(current_task(), tty_h);
 }

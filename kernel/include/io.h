@@ -34,7 +34,8 @@ struct tty *tty_alloc(void *vram, int xsize, int ysize,
                       void (*clear)(struct tty *res),
                       void (*screen_ne)(struct tty *res),
                       void (*Draw_Box)(struct tty *res, int x, int y, int x1,
-                                       int y1, unsigned char color));
+                                       int y1, unsigned char color),
+                      int (*fifo_status)(struct tty *res), int (*fifo_get)(struct tty *res));
 void tty_free(struct tty *res);
 struct tty *tty_set(mtask *task, struct tty *res);
 struct tty *tty_set_default(struct tty *res);

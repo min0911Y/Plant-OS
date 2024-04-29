@@ -42,19 +42,21 @@ unsigned pde_clone(unsigned addr) {
   for (int i = DIDX(0x70000000) * 4; i < 0x1000; i += 4) {
     unsigned int *pde_entry = (unsigned int *)(addr + i);
     unsigned p = *pde_entry & (0xfffff000);
+    pages[IDX(*pde_entry)].count++;
+    *pde_entry &= ~PG_RWW;
     for (int j = 0; j < 0x1000; j += 4) {
       unsigned int *pte_entry = (unsigned int *)(p + j);
-      if (pages[IDX(*pte_entry)].count &&
-          (page_get_attr(get_line_address(i / 4, j / 4, 0)) & PG_USU)) {
-        pages[IDX(*pte_entry)].count++;
+      if (!(*pde_entry & PG_USU) && !(*pde_entry & PG_P)) {
+        continue;
       }
-      *pte_entry &= ~PG_RWW;
+      if ((page_get_attr(get_line_address(i / 4, j / 4, 0)) & PG_USU)) {
+        pages[IDX(*pte_entry)].count++;
+        if(page_get_attr(get_line_address(i / 4, j / 4, 0)) & PG_SHARED) {
+          *pte_entry |= PG_RWW;
+          continue;
+        }
+      }
     }
-    if (pages[IDX(*pde_entry)].count) {
-      pages[IDX(*pde_entry)].count++;
-    }
-
-    *pde_entry &= ~PG_RWW;
   }
   unsigned result = (unsigned)page_malloc_one_no_mark();
   memcpy((void *)result, (void *)addr, 0x1000);
@@ -70,29 +72,24 @@ void pde_reset(unsigned addr) {
     *pde_entry |= PG_RWW;
   }
 }
+// BUG
 void free_pde(unsigned addr) {
   if (addr == PDE_ADDRESS)
     return;
   for (int i = DIDX(0x70000000) * 4; i < 0x1000; i += 4) {
     unsigned int *pde_entry = (unsigned int *)(addr + i);
     unsigned p = *pde_entry & (0xfffff000);
+    if (!(*pde_entry & PG_USU) && !(*pde_entry & PG_P)) {
+      continue;
+    }
     for (int j = 0; j < 0x1000; j += 4) {
       unsigned int *pte_entry = (unsigned int *)(p + j);
-      if (!(*pte_entry & PG_RWW)) {
-        if (pages[IDX(*pte_entry)].count > 1) {
-          if (get_task(pages[IDX(*pte_entry)].task_id)->pde == addr)
-            pages[IDX(*pte_entry)].task_id = 0; // 还有别人引用
-          pages[IDX(*pte_entry)].count--;
-        }
+      if (*pte_entry & PG_USU && *pte_entry & PG_P) {
+        pages[IDX(*pte_entry)].count--;
       }
     }
-    if (!(*pde_entry & PG_RWW)) {
-      if (pages[IDX(*pde_entry)].count > 1) {
-        if (get_task(pages[IDX(*pde_entry)].task_id)->pde == addr)
-          pages[IDX(*pde_entry)].task_id = 0; // 还有别人引用
-        pages[IDX(*pde_entry)].count--;
-      }
-    }
+
+    pages[IDX(*pde_entry)].count--;
   }
   flush_tlb(addr);
   page_free_one((void *)addr);
@@ -188,6 +185,9 @@ void page_links_pde(unsigned start, unsigned numbers, unsigned pde) {
         j = 1;
       }
     }
+  }
+  if(j) {
+    page_free_one(a[j-1]);
   }
 }
 void page_links(unsigned start, unsigned numbers) {

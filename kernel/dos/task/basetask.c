@@ -4,6 +4,7 @@ extern unsigned int PCI_ADDR_BASE;
 char *shell_data;
 extern unsigned base_count;
 float f_cpu_usage;
+unsigned ret_to_app;
 void idle() {
   while (1) {
     unsigned c = timerctl.count;
@@ -15,7 +16,12 @@ void idle() {
     f_cpu_usage *= 100.0f;
   }
 }
+void return_to_app();
 void init() {
+  ret_to_app = page_malloc_one_no_mark();
+  memcpy(ret_to_app, return_to_app, 0x1000);
+  page_set_physics_attr(ret_to_app, ret_to_app,
+                        page_get_attr(ret_to_app) | PG_USU);
   logk("init task has been started!\n");
 
   PCI_ADDR_BASE = (unsigned int)page_malloc(1 * 1024 * 1024);

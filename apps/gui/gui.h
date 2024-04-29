@@ -51,6 +51,15 @@ void gui();
 
 void gui_api(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
              int eax);
+
+struct FIFO8 {
+  unsigned char *buf;
+  int p, q, size, free, flags;
+};
+void fifo8_init(struct FIFO8 *fifo, int size, unsigned char *buf);
+int fifo8_put(struct FIFO8 *fifo, unsigned char data);
+int fifo8_get(struct FIFO8 *fifo);
+int fifo8_status(struct FIFO8 *fifo);
 #define MAX_SHEETS 256
 struct SHEET {
   vram_t *buf;
@@ -97,6 +106,8 @@ struct window {
   unsigned tid;
   int xsize, ysize, x, y;
   char *title;
+  struct FIFO8 *fifo_keypress;
+  struct FIFO8 *fifo_keyup;
   void (*display)(window_t *window, int x, int y, int pos);
   void (*hide)(window_t *window);
   void (*draw)(window_t *window, int x, int y, int x1, int y1, color_t color);
@@ -197,4 +208,13 @@ void SDraw_Char(vram_t *vram1, int x, int y, char c, color_t color, int xsize);
 void boxfill(vram_t *vram, int xsize, color_t c, int x0, int y0, int x1,
              int y1);
 bool Collision(int x, int y, int w, int h, int x1, int y1);
+
+typedef struct {
+  List *phead; // 队头
+  List *ctl;
+} queue_t;
+queue_t *queue_init();
+void queue_push(queue_t *q, unsigned value);
+unsigned queue_pop(queue_t *q);
+void queue_free(queue_t *q);
 #endif

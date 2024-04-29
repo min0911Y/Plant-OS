@@ -9,7 +9,6 @@ static void tty_print(struct tty *res, const char *string) {
       res->screen_ne(res);
     }
     res->putchar(res, ((unsigned char *)string)[i]);
-    
   }
 }
 static void tty_gotoxy(struct tty *res, int x, int y) {
@@ -50,11 +49,19 @@ static void tty_gotoxy(struct tty *res, int x, int y) {
     }
   }
 }
+
+int default_tty_fifo_status(struct tty *res) {
+  return fifo8_status(task_get_key_fifo(current_task()));
+}
+int default_tty_fifo_get(struct tty *res) {
+  return fifo8_get(task_get_key_fifo(current_task()));
+}
 void init_tty() {
   tty_list = NewList();
   tty_default =
       tty_alloc(0xb8000, 80, 25, putchar_TextMode, MoveCursor_TextMode,
-                clear_TextMode, screen_ne_TextMode, Draw_Box_TextMode);
+                clear_TextMode, screen_ne_TextMode, Draw_Box_TextMode,
+                default_tty_fifo_status, default_tty_fifo_get);
 }
 struct tty *tty_alloc(void *vram, int xsize, int ysize,
                       void (*putchar)(struct tty *res, int c),
@@ -62,7 +69,8 @@ struct tty *tty_alloc(void *vram, int xsize, int ysize,
                       void (*clear)(struct tty *res),
                       void (*screen_ne)(struct tty *res),
                       void (*Draw_Box)(struct tty *res, int x, int y, int x1,
-                                       int y1, unsigned char color)) {
+                                       int y1, unsigned char color),
+                      int (*fifo_status)(struct tty *res), int (*fifo_get)(struct tty *res)) {
   struct tty *res = (struct tty *)page_malloc(sizeof(struct tty));
   res->using1 = 1;
   res->x = 0;
@@ -77,6 +85,8 @@ struct tty *tty_alloc(void *vram, int xsize, int ysize,
   res->Draw_Box = Draw_Box;
   res->gotoxy = tty_gotoxy;
   res->print = tty_print;
+  res->fifo_status = fifo_status;
+  res->fifo_get = fifo_get;
   res->color = 0x07;
   res->cur_moving = 1;
   AddVal((int)res, tty_list);
@@ -114,10 +124,8 @@ void tty_set_reserved(struct tty *res, unsigned int reserved1,
   res->reserved[2] = reserved3;
   res->reserved[3] = reserved4;
 }
-void tty_stop_cursor_moving(struct tty *t) {
-  t->cur_moving = 0;
-}
+void tty_stop_cursor_moving(struct tty *t) { t->cur_moving = 0; }
 void tty_start_curor_moving(struct tty *t) {
   t->cur_moving = 1;
-  t->MoveCursor(t,t->x,t->y);
+  t->MoveCursor(t, t->x, t->y);
 }

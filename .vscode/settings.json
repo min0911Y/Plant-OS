@@ -117,7 +117,8 @@
         "stack": "c",
         "locale": "c",
         "xutility": "c",
-        "xlocbuf": "c"
+        "xlocbuf": "c",
+        "xtree": "c"
     },
     "cSpell.words": [],
     "C_Cpp.codeAnalysis.clangTidy.checks.disabled": [

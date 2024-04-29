@@ -381,15 +381,15 @@ task_start:
 	pop ebp
 	ret
 return_to_app:
+  mov eax,0x56
+  int 0x36
   popa
   pop gs
   pop fs
   pop es
   pop ds
   ret
-copy:
-  mov eax,[esp + 4]
-  
+retuen_to_app_end:
 do_init_seg_register:
   pusha
   mov ax,1*8

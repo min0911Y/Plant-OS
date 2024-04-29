@@ -30,6 +30,9 @@ void b2() {
 void signal_deal() {
   if (!current_task())
     return;
+  if(current_task()->signal_disable) {
+    return;
+  }
   mtask *task;
   task = current_task();
   //logk("B %d\n",task->signal);
