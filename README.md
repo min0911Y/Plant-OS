@@ -86,3 +86,10 @@ qemu-system-i386 -net nic,model=pcnet -net user -serial stdio -device sb16 -devi
 - wenxuanjun
 - duoduo70(time.c)
 - ...
+
+## About issues
+I am so glad to see you want to report bugs by issues. But anyhow, you should follow some rules to help us fix bugs quickly.
+
+That's the [rules](issue_rules.md) (Chinese, not English)
+
+If you accept following the rules, send issues whenever you want and no matter how serious the problem is.

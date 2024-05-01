@@ -1,5 +1,5 @@
 "step" = [{
-	"files" = ["dosldr.bin","kernel.bin","autoexec.bat","boot.bin","boot_pfs.bin","psh.bin",{
+	"files" = ["dosldr.bin","kernel.bin","init.mst","boot.bin","boot_pfs.bin","psh.bin","init.bin",{
 		"dir" = "other"
 	},"other/uname.bin","other/font.bin","other/HZK16"]
 	"next" = {

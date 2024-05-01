@@ -44,6 +44,8 @@ void b1() {
   for(;;);
 }
 int main(int argc, char **argv) {
+  asm ("int $0x72");
+  return 0;
   if(fork() == 0) {
     printf("P\n");
     sleep(1000);

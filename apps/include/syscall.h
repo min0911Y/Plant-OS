@@ -118,6 +118,7 @@ int mouse_dat_get();
 tty_t tty_alloc(void *vram,unsigned handle,unsigned xsize,unsigned ysize);
 void tty_set(unsigned tid,tty_t tty);
 void tty_free(tty_t tty);
+void set_custom_handler(unsigned handler);
 #ifdef __cplusplus
 }
 #endif

@@ -168,6 +168,12 @@ void print_box_ttf(struct SHEET *sht, vram_t *vram, char *buf, unsigned fc,
   free(bitmap);
   free(r);
 }
+enum { EDI, ESI, EBP, ESP, EBX, EDX, ECX, EAX };
+void gui_api1(uint32_t *a) {
+  if(a[EAX] == 0x01) {
+    
+  }
+}
 void main() {
   ttf_buffer = malloc(filesize("font.ttf"));
   unsigned char buf[100];
@@ -190,6 +196,9 @@ re:
   unsigned vram;
   vram = set_mode(xsize_input, ysize_input);
 
+
+
+  set_custom_handler(gui_api1);
   logkf("vram = %08x\n", vram);
   ascfont = (unsigned char *)malloc(filesize("A:\\other\\font.bin"));
   hzkfont = (unsigned char *)malloc(filesize("A:\\other\\HZK16"));
@@ -244,17 +253,6 @@ re:
   strftime(buffer, 80, "当前时间：%Y-%m-%d %H:%M:%S", info);
   print_box_ttf(desktop0->sht, desktop0->vram, buffer, COL_000000, argb(0, 58, 110, 165),
                 512-200 ,0, desktop0->xsize);
-  queue_t *q;
-  q = queue_init();
-  logk("QUEUE1\n");
-  queue_push(q,12);
-  logk("2\n");
-  queue_push(q,13);
-  logk("3\n");
-  unsigned a = queue_pop(q);
-  unsigned b = queue_pop(q);
-  logkf("QUEUE %d %d\n",a,b);
-  queue_free(q);
   
   for (;;) {
     if (clock() - clock1 >= 1000) {

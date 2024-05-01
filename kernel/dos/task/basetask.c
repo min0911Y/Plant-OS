@@ -71,7 +71,7 @@ void init() {
   clear();
   shell_data = (char *)page_malloc(vfs_filesize("psh.bin"));
   vfs_readfile("psh.bin", shell_data);
-  os_execute_no_ret("psh.bin", "psh.bin");
+  os_execute_no_ret("init.bin", "init.bin");
 
   page_free(current_task()->top - 64 * 1024, 64 * 1024);
   page_free(current_task()->nfs, sizeof(vfs_t));

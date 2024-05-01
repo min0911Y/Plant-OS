@@ -1,0 +1,14 @@
+"todo" = [
+    {
+        "action" = "output"
+        "out" = "the message is outed by init.bin\n"
+    },
+    {
+        "action" = "run"
+        "path" = "other/uname.bin -a"
+    },
+    {
+        "action" = "run"
+        "path" = "psh.bin"
+    }
+]

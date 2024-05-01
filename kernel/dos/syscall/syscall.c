@@ -5,6 +5,8 @@
 #define PAGE(idx) ((unsigned)idx << 12) // 获取页索引 idx 对应的页开始的位置
 unsigned div_round_up(unsigned num, unsigned size);
 extern struct PAGE_INFO *pages;
+unsigned custom_handler = 0;
+unsigned custom_handler_pde = 0;
 void kbd_press(uint8_t dat, uint32_t task) {
   fifo8_put(get_task(task)->Pkeyfifo, dat);
 }
@@ -122,7 +124,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
       int by = my1;
       int bmp =
           *(char *)(task->TTY->vram + by * task->TTY->xsize * 2 + bx * 2 + 1);
-      if(mdec.sleep == 1)
+      if (mdec.sleep == 1)
         mouse_ready(&mdec);
       for (;;) {
         if (fifo8_status(task_get_mouse_fifo(task)) == 0) {
@@ -138,7 +140,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
               reg[ECX] = task->mx;
               reg[EDX] = task->my;
               reg[ESI] = 3 + mdec.roll;
-           //   mouse_sleep(&mdec);
+              //   mouse_sleep(&mdec);
               *(char *)(task->TTY->vram + task->my * task->TTY->xsize * 2 +
                         task->mx * 2 + 1) = bmp;
               task->mx = mx1;
@@ -206,7 +208,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
     }
   } else if (eax == 0x19) {
     logk("--------------------------------\n");
-    logk("c: %08x %s\n", task->pde,(char *)(edx + ds_base));
+    logk("c: %08x %s\n", task->pde, (char *)(edx + ds_base));
     reg[EAX] = command_run((char *)(edx + ds_base));
     // asm("xchg %bx,%bx");
     logk("n: %08x\n", task->pde);
@@ -647,6 +649,22 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
     extern int disable_flag;
     disable_flag = 1;
   } else if (eax == 0x56) {
+    if (!custom_handler) {
+      custom_handler = ebx;
+      custom_handler_pde = current_task()->pde;
+    }
   }
   return;
+}
+
+void custom_inthandler(int edi, int esi, int ebp, int esp, int ebx, int edx,
+                       int ecx, int eax) {
+  if (!custom_handler)
+    return;
+  int *reg = &eax + 1; /* eax后面的地址*/
+  unsigned args[] = {edi, esi, ebp, esp, ebx, edx, ecx, eax};
+  call_across_page(custom_handler, custom_handler_pde, args);
+  for (int i = 0; i < 8; i++) {
+    reg[i] = args[i];
+  }
 }

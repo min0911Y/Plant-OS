@@ -282,6 +282,9 @@ void task_to_user_mode(unsigned eip, unsigned esp) {
 }
 
 void task_kill(unsigned tid) {
+  if (mouse_use_task == current_task()) {
+    mouse_sleep(&mdec);
+  }
   for (int i = 0; i < 255; i++) {
     if (m[i].state == EMPTY || m[i].state == WILL_EMPTY || m[i].state == READY)
       continue;
@@ -467,7 +470,7 @@ void task_fall_blocked(enum STATE state) {
 }
 extern struct PAGE_INFO *pages;
 void task_exit(unsigned status) {
-  if(mouse_use_task == current_task()) {
+  if (mouse_use_task == current_task()) {
     mouse_sleep(&mdec);
   }
   unsigned tid = current_task()->tid;

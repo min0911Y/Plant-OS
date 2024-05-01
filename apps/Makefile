@@ -39,6 +39,7 @@ default : Makefile
 	make -r -C minizip
 	make -r -C duktape
 	make -r -C mmake
+	make -r -C init
 clean :
 	rm libs/*
 	rm out/*

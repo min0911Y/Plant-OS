@@ -100,6 +100,7 @@ int get_eip();
 void farjmp(int eip, int cs);
 void farcall(int eip, int cs);
 void asm_inthandler36();
+void asm_inthandler72();
 void asm_gui_api();
 void asm_net_api();
 void asm_inthandler2c();

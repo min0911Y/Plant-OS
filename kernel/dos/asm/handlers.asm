@@ -1,6 +1,6 @@
 [BITS 32]
 section .data
-GLOBAL	asm_inthandler21, asm_inthandler20
+GLOBAL	asm_inthandler21, asm_inthandler20,asm_inthandler72
 EXTERN	inthandler21,inthandler20,inthandler36,inthandler2c,signal_deal
 GLOBAL	asm_inthandler36,asm_inthandler2c,floppy_int,interrput_exit
 section .text
@@ -23,6 +23,32 @@ asm_inthandler36:
 	MOV		DS,AX ; 将操作系统用段地址存入DS和ES
 	MOV		ES,AX
 	CALL	inthandler36
+	ADD		ESP,32
+	call signal_deal
+	POPAD
+	POP		ES
+	POP		DS
+  add esp,32
+  pop gs
+  pop fs
+  pop es
+  pop ds
+	IRETD
+extern custom_inthandler
+asm_inthandler72:
+	push ds
+  push es
+  push fs
+  push gs
+  pusha
+	PUSH	DS
+	PUSH	ES
+	PUSHAD			; 用于保存的PUSH
+	PUSHAD
+	MOV		AX,SS
+	MOV		DS,AX ; 将操作系统用段地址存入DS和ES
+	MOV		ES,AX
+	CALL	custom_inthandler
 	ADD		ESP,32
 	call signal_deal
 	POPAD

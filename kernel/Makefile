@@ -107,12 +107,13 @@ Mimg : $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $(OUTPATH)
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(RESPATH)autoexec.bat ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(RESPATH)env.cfg ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(RESPATH)sys.cfg ::
+		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(RESPATH)init.mst ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(OUTPATH)boot.bin ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(OUTPATH)boot32.bin ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(OUTPATH)boot_pfs.bin ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(RESPATH)setup.mst ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(APPSOUTPATH)setup1.bin ::
-		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(APPSOUTPATH)gui.bin ::
+		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(APPSOUTPATH)init.bin ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(APPSOUTPATH)psh.bin ::
 		mmd -i $(IMGPATH)Powerint_DOS_386.img other
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(FONTPATH)font.bin ::/other
