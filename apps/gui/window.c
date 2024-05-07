@@ -101,6 +101,8 @@ void handle_left_window(window_t *window, gmouse_t *gmouse) {
       window->super_window->handle_left(window->super_window, gmouse);
     }
   }
+  if(window->handle_left_for_api)
+    window->handle_left_for_api(window,gmouse);
 }
 
 window_t *create_window(desktop_t *desktop, char *title, int xsize, int ysize,
@@ -119,6 +121,7 @@ window_t *create_window(desktop_t *desktop, char *title, int xsize, int ysize,
   res->draw = draw_window;
   res->puts = puts_window;
   res->handle_left = handle_left_window;
+  res->handle_left_for_api = NULL;
   res->handle_right = NULL;
   res->handle_stay = NULL;
   res->close = close_window;

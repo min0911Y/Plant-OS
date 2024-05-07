@@ -99,9 +99,12 @@ Mimg : $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $(OUTPATH)
 		mcopy -i ./disk.img $(APPSOUTPATH)ttf.bin ::
 		mcopy -i ./disk.img $(RESPATH)doom1.wad ::
 		mcopy -i ./disk.img $(RESPATH)font.ttf ::
+		mcopy -i ./disk.img $(RESPATH)123.jpg ::
 		mcopy -i ./disk.img $(APPSOUTPATH)gui.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)psh.bin ::
-		
+		mcopy -i ./disk.img $(APPSOUTPATH)nasm.bin ::
+		mcopy -i ./disk.img $(APPSOUTPATH)ndisasm.bin ::
+		mcopy -i ./disk.img $(APPSOUTPATH)bitz.bin ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(LOADERPATH)dosldr.bin ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(OUTPATH)kernel.bin ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(RESPATH)autoexec.bat ::
@@ -132,7 +135,7 @@ Mimg : $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $(OUTPATH)
 		mcopy -i $(IMGPATH)Disk2.img $(APPSOUTPATH)copy.bin ::/bin
 		mcopy -i $(IMGPATH)Disk2.img $(APPSOUTPATH)basic.bin ::/bin
 		mcopy -i $(IMGPATH)Disk2.img $(APPSOUTPATH)cal.bin ::/bin
-		mcopy -i $(IMGPATH)Disk2.img $(APPSOUTPATH)bitz.bin ::/bin
+
 		mcopy -i $(IMGPATH)Disk2.img $(APPSOUTPATH)editor.bin ::/bin
 		mcopy -i $(IMGPATH)Disk2.img $(APPSOUTPATH)calc.bin ::/bin
 		mcopy -i $(IMGPATH)Disk2.img $(RESPATH)editor.mst ::
@@ -223,7 +226,7 @@ img_run :
 	$(MAKE) Mimg
 	qemu-system-x86_64.exe -net nic,model=pcnet -net user -serial stdio -device sb16 -device floppy -fda ./img/Powerint_DOS_386.img -hda ./img/Disk2.img -hdb ./img/Disk3.img -hdc ./img/res.img \
 	-drive file=disk.img,if=none,id=drive0 -device ahci,id=ahci -device ide-hd,drive=drive0,bus=ahci.0 -drive file=big_disk.img,if=none,id=drive1 -device ide-hd,drive=drive1,bus=ahci.1		\
-	 -boot a -m 512
+	 -boot a -m 4096
 full :
 	$(MAKE) -C $(DOSPATH)
 	$(MAKE) -C $(IOPATH)

@@ -230,6 +230,24 @@ double	exp(double);
 double  pow(double,double);
 double modf(double x, double *iptr);
 double scalbn(double x, int n);
+float atanf(float x);
+float atan2f(float y, float x);
+float ceilf(float x);
+float asinf(float x);
+float acosf(float x);
+float atan2f(float y, float x);
+double copysign(double x, double y);
+float copysignf(float x, float y);
+float cosf(float x);
+float expf(float x);
+float fabsf(float x);
+float floorf(float x);
+float logf(float x);
+float fmodf(float x, float y);
+float log10f(float x);
+float scalbnf(float x, int n);
+float powf(float x, float y);
+float sinf(float x);
 static int signbit(double x)
 {
 	union {

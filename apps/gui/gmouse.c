@@ -191,15 +191,30 @@ void gmouse(gmouse_t *gmouse) {
         }
       }
       uint8_t i = get_key_press();
-      if (gmouse->click_textbox_last != NULL) {
-        gmouse->click_textbox_last->add_char(gmouse->click_textbox_last,
-                                             keytable1[i]);
-      }
-      if(r->fifo_keypress) {
-        fifo8_put(r->fifo_keypress,i);
+      // if (gmouse->click_textbox_last != NULL) {
+      //   gmouse->click_textbox_last->add_char(gmouse->click_textbox_last,
+      //                                        keytable1[i]);
+      // }
+      if (r->fifo_keypress) {
+        fifo8_put(r->fifo_keypress, i);
       }
     } else if (key_up_status() != 0) {
-      get_key_up();
+      window_t *r = NULL;
+      for (int i = 1;
+           list_search_by_count(i, gmouse->desktop->window_list) != NULL; i++) {
+        window_t *w =
+            (window_t *)list_search_by_count(i, gmouse->desktop->window_list)
+                ->val;
+        //   logkf("w = %p\n",w);
+        if (w->sht->height == gmouse->sht->ctl->top - 1) {
+          r = w;
+          break;
+        }
+      }
+      uint8_t i = get_key_up();
+      if (r->fifo_keyup) {
+        fifo8_put(r->fifo_keyup, i);
+      }
     }
     // api_yield();
   }

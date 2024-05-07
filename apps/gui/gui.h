@@ -63,10 +63,20 @@ struct FIFO8 {
   unsigned char *buf;
   int p, q, size, free, flags;
 };
+struct FIFO32 {
+  int *buf;
+  int size, free, flags;
+  int next_r, next_w;
+};
 void fifo8_init(struct FIFO8 *fifo, int size, unsigned char *buf);
 int fifo8_put(struct FIFO8 *fifo, unsigned char data);
 int fifo8_get(struct FIFO8 *fifo);
 int fifo8_status(struct FIFO8 *fifo);
+
+void fifo32_init(struct FIFO32 *fifo, int size, int *buf);
+int fifo32_put(struct FIFO32 *fifo, int data);
+int fifo32_get(struct FIFO32 *fifo);
+int fifo32_status(struct FIFO32 *fifo);
 #define MAX_SHEETS 256
 struct SHEET {
   vram_t *buf;
@@ -115,7 +125,8 @@ struct window {
   char *title;
   struct FIFO8 *fifo_keypress;
   struct FIFO8 *fifo_keyup;
-  queue_t *events;
+  struct FIFO32 *events;
+  unsigned int event[32];
   void (*display)(window_t *window, int x, int y, int pos);
   void (*hide)(window_t *window);
   void (*draw)(window_t *window, int x, int y, int x1, int y1, color_t color);
@@ -123,6 +134,7 @@ struct window {
   void (*handle_left)(window_t *window, gmouse_t *gmouse);
   void (*handle_right)(window_t *window, gmouse_t *gmouse);
   void (*handle_stay)(window_t *window, gmouse_t *gmouse);
+  void (*handle_left_for_api)(window_t *window, gmouse_t *gmouse);
   void (*close)(window_t *window);
 };
 

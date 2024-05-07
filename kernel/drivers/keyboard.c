@@ -39,8 +39,8 @@ void init_keyboard(void) {
 int getch() {
   unsigned char ch;
   ch = input_char_inSM(); // 扫描码
-  if (ch > 0x80) {        // keytable之外的键（↑,↓,←,→）
-    ch -= 0x80;
+  if (ch == 0xe0) {       // keytable之外的键（↑,↓,←,→）
+    ch = input_char_inSM();
     if (ch == 0x48) { // ↑
       return -1;
     } else if (ch == 0x50) { // ↓
@@ -100,8 +100,7 @@ int input_char_inSM() {
   return i;
 }
 int kbhit() {
-  return fifo8_status(current_task()->keyfifo) !=
-         0; // 进程的键盘FIFO缓冲区是否为空
+  return tty_fifo_status() != 0; // 进程的键盘FIFO缓冲区是否为空
 }
 int sc2a(int sc) {
   // 扫描码转化ASCII码
@@ -138,13 +137,8 @@ void inthandler21(int *esp) {
   data = io_in8(PORT_KEYDAT); // 从键盘IO口读取扫描码
   //  特殊键处理
   if (data == 0xe0) {
-    e0_flag = 0x80;
+    e0_flag = 1;
     return;
-  }
-  if (e0_flag) {
-    if (data > 0x80) {
-      e0_flag = 0;
-    }
   }
   if (data == 0x2a || data == 0x36) { // Shift按下
     shift = 1;
@@ -154,7 +148,6 @@ void inthandler21(int *esp) {
   }
   if (data == 0x3a) { // Caps Lock按下
     caps_lock = caps_lock ^ 1;
-    return;
   }
   if (data == 0xaa || data == 0xb6) { // Shift松开
     shift = 0;
@@ -195,9 +188,14 @@ void inthandler21(int *esp) {
       }
       if (get_task(i)->keyboard_release != NULL) {
         // TASK结构体中有对松开键特殊处理的
+        if (e0_flag) {
+          get_task(i)->keyboard_release(0xe0, i);
+        }
         get_task(i)->keyboard_release(data, i); // 处理松开键
       }
     }
+    if (e0_flag == 1)
+      e0_flag = 0;
     return;
   }
   for (int i = 0; i < 255; i++) {
@@ -207,7 +205,10 @@ void inthandler21(int *esp) {
     }
     if (get_task(i)->keyboard_press != NULL) {
       // TASK结构体中有对按下键特殊处理的
-      get_task(i)->keyboard_press(data + e0_flag, i); // 处理按下键
+      if (e0_flag) {
+        get_task(i)->keyboard_press(0xe0, i);
+      }
+      get_task(i)->keyboard_press(data, i); // 处理按下键
     }
   }
   if (disable_flag == 0)
@@ -227,7 +228,12 @@ void inthandler21(int *esp) {
       // 一般进程
     THROUGH:
       //    logk("send\n");
-      fifo8_put(task_get_key_fifo(task), data + e0_flag);
+      if(e0_flag) {
+        fifo8_put(task_get_key_fifo(task), 0xe0);
+      }
+      fifo8_put(task_get_key_fifo(task), data);
     }
+  if (e0_flag == 1)
+    e0_flag = 0;
   return;
 }

@@ -1,4 +1,6 @@
+#include "../sdl2/include/SDL.h"
 #include <fcntl.h>
+#include <gui.h>
 #include <net.h>
 #include <signal.h>
 #include <stdio.h>
@@ -35,18 +37,208 @@ int a111 = 0;
 void c1() {
   printf("C1\n");
 
-  for(;;);
+  for (;;)
+    ;
 }
 void b1() {
-  AddThread("",c1,(unsigned)malloc(1024*512)+1024*512);
+  AddThread("", c1, (unsigned)malloc(1024 * 512) + 1024 * 512);
   printf("B1\n");
 
-  for(;;);
+  for (;;)
+    ;
 }
-int main(int argc, char **argv) {
-  asm ("int $0x72");
+#define POINTS_COUNT 4
+
+static SDL_Point points[POINTS_COUNT] = {
+    {320, 200}, {300, 240}, {340, 240}, {320, 200}};
+#define PACK_XY(x, y) ((x << 16) | y)
+static SDL_Rect bigrect = {0, 0, 280, 280};
+enum { MOUSE_STAY = 1, MOUSE_CLICK_LEFT, MOUSE_CLICK_RIGHT, CLOSE_WINDOW };
+
+
+
+#define WINDOW_WIDTH 800  
+#define WINDOW_HEIGHT 600  
+#define SQUARE_SIZE 50  
+#define CIRCLE_RADIUS 200  
+#define CIRCLE_CENTER_X (WINDOW_WIDTH / 2)  
+#define CIRCLE_CENTER_Y (WINDOW_HEIGHT / 2)  
+#define ANGLE_INCREMENT 2 // 控制正方形移动速度的角度增量  
+  
+SDL_Window *window;  
+SDL_Renderer *renderer;  
+SDL_Event event;  
+double angle = 0; // 初始角度  
+  
+int main(int argc, char* argv[]) {  
+    SDL_Init(SDL_INIT_VIDEO);  
+    window = SDL_CreateWindow("SDL Circle Motion", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, WINDOW_WIDTH, WINDOW_HEIGHT, SDL_WINDOW_SHOWN);  
+    renderer = SDL_CreateRenderer(window, -1, 0);  
+  
+    while (1) {  
+        while (SDL_PollEvent(&event)) {  
+            if (event.type == SDL_QUIT) {  
+                exit(0);  
+            }  
+        }  
+  
+        // 更新角度和位置  
+        angle += ANGLE_INCREMENT;  
+        if (angle > 360) {  
+            angle = 0; // 或者使用 fmod(angle, 360) 来避免超过360度  
+        }  
+  
+        // 计算正方形在圆周上的位置  
+        int squareX = CIRCLE_CENTER_X + (int)(CIRCLE_RADIUS * cos(angle * M_PI / 180.0));  
+        int squareY = CIRCLE_CENTER_Y - (int)(CIRCLE_RADIUS * sin(angle * M_PI / 180.0)); // 注意Y轴方向可能需要调整  
+  
+        // 清除屏幕  
+        SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255); // 白色背景  
+        SDL_RenderClear(renderer);  
+  
+        // 绘制正方形  
+        SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255); // 红色正方形  
+        SDL_Rect squareRect = {squareX - SQUARE_SIZE / 2, squareY - SQUARE_SIZE / 2, SQUARE_SIZE, SQUARE_SIZE};  
+        SDL_RenderFillRect(renderer, &squareRect);  
+  
+        // 更新屏幕  
+        SDL_RenderPresent(renderer);  
+  
+        // 控制帧率，例如：延迟以保持一定的帧率  
+        SDL_Delay(16); // 大约60 FPS  
+    }  
+  
+    SDL_DestroyRenderer(renderer);  
+    SDL_DestroyWindow(window);  
+    SDL_Quit();  
+    return 0;  
+}
+int main1(int argc, char **argv) {
+
+  // window_t wnd1 = create_window("a",0,0,800,600);
+  // unsigned *buf1 = window_get_fb(wnd1);
+  // buf1[0 * 800 + 0] = 0x0;
+  // buf1[0 * 800 + 1] = 0x0;
+  // buf1[1 * 800 + 0] = 0x0;
+  // buf1[1 * 800 + 1] = 0x0;
+  // window_refresh(wnd1,PACK_XY(0,0),PACK_XY(1,1));
+  // sleep(1000);
+  // close_window(wnd1);
+  // return 0;
+  if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+    fprintf(stderr, "SDL initialization failed: %s\n", SDL_GetError());
+    return -1;
+  }
+
+  // 创建窗口
+  SDL_Window *window =
+      SDL_CreateWindow("SDL2 Window", SDL_WINDOWPOS_UNDEFINED,
+                       SDL_WINDOWPOS_UNDEFINED, 800, 600, SDL_WINDOW_SHOWN);
+  if (window == NULL) {
+    fprintf(stderr, "Window creation failed: %s\n", SDL_GetError());
+    SDL_Quit();
+    return -1;
+  }
+  SDL_Renderer *renderer;
+  renderer = SDL_CreateRenderer(window, -1, 0);
+  printf("Create Window successfully\n");
+  SDL_SetRenderDrawColor(renderer, 0, 0, 255, 255);
+  // sleep(1000);
+  /* Select the color for drawing. It is set to white here. */
+
+  // SDL_SetRenderDrawColor(renderer, 255, 255, 255, 0);
+  // /* Clear the entire screen to our selected color. */
+  // SDL_RenderClear(renderer);
+
+  //  设置颜色，画点
+  SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
+  SDL_RenderDrawPoint(renderer, 500, 500);
+
+  //  设置颜色，画线
+  SDL_SetRenderDrawColor(renderer, 0, 255, 0, 255);
+  SDL_RenderDrawLines(renderer, points, POINTS_COUNT);
+
+  //  设置颜色，画矩形
+  SDL_SetRenderDrawColor(renderer, 0, 0, 255, 255);
+  SDL_Rect rect = {200, 300, 100, 100};
+  SDL_RenderDrawRect(renderer, &rect);
+
+  //  设置颜色，填充目标矩形区域
+  SDL_SetRenderDrawColor(renderer, 0, 255, 255, 255);
+  SDL_Rect rect2 = {400, 400, 100, 100};
+  SDL_RenderFillRect(renderer, &rect2);
+
+  //  设置颜色，填充目标矩形区域
+  SDL_SetRenderDrawColor(renderer, 0, 0, 255, 255);
+  SDL_RenderFillRect(renderer, &bigrect);
+
+  /* Up until now everything was drawn behind the scenes.
+  This will show the new, red contents of the window. */
+  SDL_RenderPresent(renderer);
+  SDL_Event event;
+  SDL_StartTextInput();
+  while (1) {
+    // Wait
+    while (SDL_PollEvent(&event)) {
+      if (event.type == SDL_QUIT) {
+      } else if (event.type == SDL_MOUSEBUTTONDOWN) {
+        printf("DOWN %d %d\n", event.button.x, event.button.y);
+      } else if (event.type == SDL_TEXTINPUT) {
+        printf("%s",event.text.text);
+      }
+    }
+  }
+  // 退出SDL
+  SDL_DestroyWindow(window);
+  SDL_Quit();
   return 0;
-  if(fork() == 0) {
+
+  window_t wnd = create_window("TEST", 0, 0, 320, 200);
+  sleep(1000);
+  for (int i = 2; i < 100; i++) {
+    for (int j = 21; j < 100; j++) {
+      draw_px(wnd, i, j, 0);
+    }
+  }
+
+  window_refresh(wnd, (2 >> 16) | (21), (100 >> 16) | 100);
+  while (1) {
+    unsigned a = window_get_event(wnd);
+    if (a == -1) {
+      continue;
+    }
+    unsigned b;
+    switch (a) {
+    case MOUSE_STAY:
+      b = window_get_event(wnd);
+      break;
+    case MOUSE_CLICK_LEFT:
+      b = window_get_event(wnd);
+      int x = b >> 16;
+      int y = b & 0xffff;
+      draw_px(wnd, x, y, 0x0);
+      draw_px(wnd, x + 1, y, 0x0);
+      draw_px(wnd, x, y + 1, 0x0);
+      draw_px(wnd, x + 1, y + 1, 0x0);
+      window_refresh(wnd, b, ((x + 1) << 16) | (y + 1));
+      break;
+    case MOUSE_CLICK_RIGHT:
+      b = window_get_event(wnd);
+      printf("CLICK RIGHT %d %d\n", b >> 16, b & 0x0000ffff);
+      break;
+    case CLOSE_WINDOW:
+      printf("CLOSE\n");
+      close_window(wnd);
+      exit(0);
+      break;
+    default:
+      break;
+    }
+  }
+  for (;;)
+    ;
+  return 0;
+  if (fork() == 0) {
     printf("P\n");
     sleep(1000);
     exit(0);
@@ -54,10 +246,11 @@ int main(int argc, char **argv) {
     printf("S\n");
   }
   return 0;
-  AddThread("",b1,(unsigned)malloc(1024*512)+1024*512);
+  AddThread("", b1, (unsigned)malloc(1024 * 512) + 1024 * 512);
 
   printf("MAIN\n");
-  for(;;);
+  for (;;)
+    ;
   return 0;
   unsigned IP;
   IP = GetIP();
@@ -70,7 +263,8 @@ int main(int argc, char **argv) {
   char buf[512] = {0};
   while (1) {
     int a = Socket_Recv(s, buf, 512);
-    if(a == 0) break;
+    if (a == 0)
+      break;
     buf[a] = 0;
     printf("%s", buf);
   }

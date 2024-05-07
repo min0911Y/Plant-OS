@@ -7,6 +7,9 @@ unsigned div_round_up(unsigned num, unsigned size);
 extern struct PAGE_INFO *pages;
 unsigned custom_handler = 0;
 unsigned custom_handler_pde = 0;
+void page_set_physics_attr_pde(uint32_t vaddr, void *paddr, uint32_t attr,
+                               unsigned pde_backup);
+mtask *custom_handler_owner;
 void kbd_press(uint8_t dat, uint32_t task) {
   fifo8_put(get_task(task)->Pkeyfifo, dat);
 }
@@ -60,7 +63,7 @@ void free_app_heap(void *alloc_addr, uint32_t ds_base, void *p) {
   mem->freeinf = (freeinfo *)((char *)mem->freeinf - ds_base);
   return;
 }
-enum { EDI, ESI, EBP, ESP, EBX, EDX, ECX, EAX };
+enum { EDI, ESI, EBP, ESP, EBX, EDX, ECX, EAX,M_PDE,C_PDE };
 void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
                   int eax) {
   // PowerintDOS API
@@ -359,7 +362,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
     } else if (ebx == 0x09) {
       get_msg_all((void *)(ds_base + edx));
     } else if (ebx == 0x0a) {
-      logk("CREATE %08x\n", page_get_phy((unsigned)0x709f8448));
+
       extern int init_ok_flag;
       init_ok_flag = 0;
       // unsigned int *stack = page_malloc_one() + 0x1000;
@@ -546,19 +549,26 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
   } else if (eax == 0x35) {
     // logk("ADD MEMORY TO RUN!\n");
     // for(;;);
+
     logk("sbrk %08x\n", ebx);
+    io_cli();
+
     unsigned page_len = div_round_up(ebx, 0x1000);
+
     unsigned start_addr =
         ((task->alloc_addr + *(task->alloc_size) - 1) & 0xfffff000);
-    io_cli();
+    logk("SA %08x %d %08x\n", start_addr, page_len, current_task()->alloc_addr);
     page_links(start_addr + 0x1000, page_len);
-    io_sti();
     // for (int i = 0; i < page_len; i++) {
     //   // logk("L:%08x\n",start_addr + (i + 1) * 0x1000);
     //   page_link(start_addr + (i + 1) * 0x1000);
     // }
     *(task->alloc_size) += ebx;
-    logk("ok %08x\n", task->alloc_addr + *(task->alloc_size));
+    io_sti();
+    logk("ok %08x %08x\n", task->alloc_addr + *(task->alloc_size),
+         page_get_attr(0x7182bd98));
+    unsigned c = current_task()->pde + (unsigned)(DIDX(0x7182bd98) * 4);
+    logk("%08x\n", *(unsigned int *)c & 0xfff);
   } else if (eax == 0x36) {
     char *s = env_read(ebx + ds_base);
     if (s) {
@@ -611,7 +621,9 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
   } else if (eax == 0x48) {
     logk(ebx);
   } else if (eax == 0x49) {
+    unsigned old = current_task()->handler[ebx];
     set_signal_handler(ebx, ecx);
+    reg[EAX] = old;
   } else if (eax == 0x4a) {
     reg[EAX] = task_fork();
   } else if (eax == 0x4b) {
@@ -652,19 +664,50 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
     if (!custom_handler) {
       custom_handler = ebx;
       custom_handler_pde = current_task()->pde;
+      custom_handler_owner = current_task();
     }
+  } else if (eax == 0x57) {
+    unsigned a1 = reg[EBX] & 0xfffff000;
+    unsigned sz = reg[ECX];
+    unsigned a_pde = reg[EDX];
+    unsigned b1 = reg[ESI] & 0xfffff000;
+    unsigned b_pde = reg[EDI];
+    unsigned count = div_round_up(sz, 0x1000);
+    io_cli();
+    for (int i = 0; i < count; i++) {
+      unsigned paddr;
+      paddr = page_get_phy_pde(b1 + i * 0x1000, b_pde);
+      page_set_physics_attr_pde(a1 + i * 0x1000, paddr, 7,
+                                a_pde); // PG_P | PG_USU | PG_RWW
+    }
+    io_sti();
   }
   return;
 }
 
 void custom_inthandler(int edi, int esi, int ebp, int esp, int ebx, int edx,
                        int ecx, int eax) {
+  unsigned *alloc_sz = current_task()->alloc_size;
+  unsigned alloc_ar = current_task()->alloc_addr;
   if (!custom_handler)
     return;
+
+  current_task()->alloc_size = custom_handler_owner->alloc_size;
+  current_task()->alloc_addr = custom_handler_owner->alloc_addr;
   int *reg = &eax + 1; /* eax后面的地址*/
-  unsigned args[] = {edi, esi, ebp, esp, ebx, edx, ecx, eax};
+  unsigned args[] = {edi, esi, ebp, esp, ebx, edx, ecx, eax,custom_handler_pde,current_task()->pde};
+  if (ebx) {
+    char *s1 = malloc(strlen(ebx) + 1);
+    memcpy(s1, ebx, strlen(ebx) + 1);
+    args[EBX] = s1;
+  }
   call_across_page(custom_handler, custom_handler_pde, args);
+  if (ebx)
+    free(args[EBX]);
+  args[EBX] = ebx;
   for (int i = 0; i < 8; i++) {
     reg[i] = args[i];
   }
+  current_task()->alloc_size = alloc_sz;
+  current_task()->alloc_addr = alloc_ar;
 }

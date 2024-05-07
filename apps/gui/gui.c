@@ -11,8 +11,7 @@
 static struct VBEINFO *vinfo;
 desktop_t *desktop0;
 static void click1(button_t *button) {
-  window_t *a =
-      create_window(desktop0, "console", 40 * 8 + 8, 20 * 16 + 28, NowTaskID());
+  window_t *a = create_window(desktop0, "console1", 800, 600, NowTaskID());
   a->display(a, 0, 0, 3);
   create_console(a, 40 * 8, 20 * 16, 4, 24);
 }
@@ -168,10 +167,120 @@ void print_box_ttf(struct SHEET *sht, vram_t *vram, char *buf, unsigned fc,
   free(bitmap);
   free(r);
 }
-enum { EDI, ESI, EBP, ESP, EBX, EDX, ECX, EAX };
+enum {
+  EDI,
+  ESI,
+  EBP,
+  ESP,
+  EBX,
+  EDX,
+  ECX,
+  EAX,
+  M_PDE,
+  C_PDE
+}; // M_PDE是GUI程序的PDE，C_PDE是调用者的PDE
+enum { MOUSE_STAY = 1, MOUSE_CLICK_LEFT, MOUSE_CLICK_RIGHT, CLOSE_WINDOW };
+#define PACK_XY(x, y) ((x << 16) | y)
+void handle_stay_api(window_t *window, gmouse_t *gmouse) {
+  // queue_push(window->events, MOUSE_STAY);
+  // queue_push(window->events, PACK_XY(gmouse->x, gmouse->y));
+  fifo32_put(window->events, MOUSE_STAY);
+  fifo32_put(window->events,
+             PACK_XY(gmouse->x - window->x, gmouse->y - window->y));
+}
+void handle_click_left_api(window_t *window, gmouse_t *gmouse) {
+  // queue_push(window->events, MOUSE_CLICK_LEFT);
+  // queue_push(window->events, PACK_XY(gmouse->x, gmouse->y));
+  fifo32_put(window->events, MOUSE_CLICK_LEFT);
+  fifo32_put(window->events,
+             PACK_XY(gmouse->x - window->x, gmouse->y - window->y));
+}
+void handle_click_right_api(window_t *window, gmouse_t *gmouse) {
+  // queue_push(window->events, MOUSE_CLICK_RIGHT);
+  // queue_push(window->events, PACK_XY(gmouse->x, gmouse->y));
+  fifo32_put(window->events, MOUSE_CLICK_RIGHT);
+  fifo32_put(window->events,
+             PACK_XY(gmouse->x - window->x, gmouse->y - window->y));
+}
+void handle_close_window(window_t *window) {
+  // queue_push(window->events, CLOSE_WINDOW);
+  fifo32_put(window->events, CLOSE_WINDOW);
+}
+void sheet_refresh(struct SHEET *sht, int bx0, int by0, int bx1, int by1);
 void gui_api1(uint32_t *a) {
-  if(a[EAX] == 0x01) {
-    
+  if (a[EAX] == 0x01) {
+    window_t *wnd = create_window(desktop0, a[EBX], a[EDI], a[ESI], 0);
+    wnd->events = (struct FIFO32 *)malloc(sizeof(struct FIFO32));
+    fifo32_init(wnd->events, 32, wnd->event);
+    wnd->handle_stay = handle_stay_api;
+    wnd->handle_left_for_api = handle_click_left_api;
+    wnd->handle_right = handle_click_right_api;
+    wnd->close = handle_close_window;
+    wnd->display(wnd, a[ECX], a[EDX], 1);
+    a[EAX] = wnd;
+  } else if (a[EAX] == 0x02) {
+    window_t *wnd = (window_t *)a[ECX];
+    a[EAX] = fifo32_get(wnd->events);
+  } else if (a[EAX] == 0x03) {
+    window_t *wnd = (window_t *)a[ECX];
+    free(wnd->events);
+    if (wnd->console != NULL) {
+      wnd->console->close(wnd->console);
+    } else if (wnd->super_window != NULL) {
+      wnd->super_window->close(wnd->super_window);
+    }
+    int count = 1;
+    for (; list_search_by_count(count, wnd->desktop->window_list)->val !=
+           (uintptr_t)wnd;
+         count++)
+      ;
+    list_delete_by_count(count, wnd->desktop->window_list);
+    sheet_free(wnd->sht);
+    free((void *)wnd->vram);
+    free((void *)wnd);
+  } else if (a[EAX] == 0x04) {
+    window_t *wnd = (window_t *)a[ECX];
+    wnd->vram[a[EDX] * wnd->xsize + a[ESI]] = a[EDI];
+  } else if (a[EAX] == 0x05) {
+    window_t *wnd = (window_t *)a[ECX];
+    sheet_refresh(wnd->sht, a[EDX] >> 16, a[EDX] & 0xffff, a[ESI] >> 16,
+                  a[ESI] & 0xffff);
+  } else if (a[EAX] == 0x06) // 设置framebuffer
+  {
+    window_t *wnd = (window_t *)a[ECX];
+    unsigned buf = wnd->vram;
+    mem_map(0xfd000000, wnd->xsize * wnd->ysize * 4 + (buf & 0xfff), a[C_PDE],
+            buf, a[M_PDE]);
+    a[EAX] = 0xfd000000 + (buf & 0xfff);
+  } else if (a[EAX] == 0x07) {
+    window_t *wnd = (window_t *)a[ECX];
+    wnd->fifo_keypress = malloc(sizeof(struct FIFO8));
+    uint8_t *buf = (uint8_t *)malloc(128);
+    fifo8_init(wnd->fifo_keypress, 128, buf);
+    wnd->fifo_keyup = malloc(sizeof(struct FIFO8));
+    uint8_t *buf1 = (uint8_t *)malloc(128);
+    fifo8_init(wnd->fifo_keyup, 128, buf1);
+
+  } else if (a[EAX] == 0x08) {
+    window_t *wnd = (window_t *)a[ECX];
+    free(wnd->fifo_keypress->buf);
+    free(wnd->fifo_keypress);
+    wnd->fifo_keypress = NULL;
+    free(wnd->fifo_keyup->buf);
+    free(wnd->fifo_keyup);
+    wnd->fifo_keyup = NULL;
+  } else if (a[EAX] == 0x09) {
+    window_t *wnd = (window_t *)a[ECX];
+    a[EAX] = fifo8_status(wnd->fifo_keypress);
+  } else if (a[EAX] == 0x0a) {
+    window_t *wnd = (window_t *)a[ECX];
+    a[EAX] = fifo8_get(wnd->fifo_keypress);
+  } else if (a[EAX] == 0x0b) {
+    window_t *wnd = (window_t *)a[ECX];
+    a[EAX] = fifo8_status(wnd->fifo_keyup);
+  } else if (a[EAX] == 0x0c) {
+    window_t *wnd = (window_t *)a[ECX];
+    a[EAX] = fifo8_get(wnd->fifo_keyup);
   }
 }
 void main() {
@@ -195,8 +304,6 @@ re:
   ysize_input = 768;
   unsigned vram;
   vram = set_mode(xsize_input, ysize_input);
-
-
 
   set_custom_handler(gui_api1);
   logkf("vram = %08x\n", vram);
@@ -251,9 +358,9 @@ re:
   info = localtime(&rawtime);
 
   strftime(buffer, 80, "当前时间：%Y-%m-%d %H:%M:%S", info);
-  print_box_ttf(desktop0->sht, desktop0->vram, buffer, COL_000000, argb(0, 58, 110, 165),
-                512-200 ,0, desktop0->xsize);
-  
+  print_box_ttf(desktop0->sht, desktop0->vram, buffer, COL_000000,
+                argb(0, 58, 110, 165), 512 - 200, 0, desktop0->xsize);
+
   for (;;) {
     if (clock() - clock1 >= 1000) {
       clock1 = clock();
@@ -264,7 +371,7 @@ re:
 
       strftime(buffer, 80, "当前时间：%Y-%m-%d %H:%M:%S", info);
       print_box_ttf(desktop0->sht, desktop0->vram, buffer, COL_000000,
-                    argb(0, 58, 110, 165), 512-200 ,0, desktop0->xsize);
+                    argb(0, 58, 110, 165), 512 - 200, 0, desktop0->xsize);
     } else {
       api_yield();
     }

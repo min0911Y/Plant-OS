@@ -118,7 +118,13 @@
         "locale": "c",
         "xutility": "c",
         "xlocbuf": "c",
-        "xtree": "c"
+        "xtree": "c",
+        "sdl_config_bookos.h": "c",
+        "sdl_internal.h": "c",
+        "sdl_config_plos.h": "c",
+        "sdl_endian.h": "c",
+        "signal.h": "c",
+        "sdl.h": "c"
     },
     "cSpell.words": [],
     "C_Cpp.codeAnalysis.clangTidy.checks.disabled": [

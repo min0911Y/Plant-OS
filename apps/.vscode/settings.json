@@ -46,6 +46,8 @@
     "utf.h": "c",
     "dos.h": "c",
     "exception": "c",
-    "list.h": "c"
+    "list.h": "c",
+    "sdl_events_c.h": "c",
+    "sdl_sysvideo.h": "c"
   }
 }

@@ -46,6 +46,8 @@ static void init_task() {
     m[i].train = 0;
     m[i].signal_disable = 0;
     m[i].times = 0;
+    m[i].keyboard_press = NULL;
+    m[i].keyboard_release = NULL;
     lock_init(&(m[i].ipc_header.l));
     m[i].ipc_header.now = 0;
     for (int k = 0; k < MAX_IPC_MESSAGE; k++) {
@@ -334,6 +336,8 @@ void task_kill(unsigned tid) {
   m[tid].train = 0;
   m[tid].times = 0;
   m[tid].signal_disable = 0;
+  m[tid].keyboard_press = NULL;
+  m[tid].keyboard_release = NULL;
   lock_init(&(m[tid].ipc_header.l));
   for (int k = 0; k < MAX_IPC_MESSAGE; k++) {
     m[tid].ipc_header.messages[k].from_tid = -1;
@@ -522,6 +526,8 @@ void task_exit(unsigned status) {
   m[tid].status = status;
   m[tid].times = 0;
   m[tid].signal_disable = 0;
+  m[tid].keyboard_press = NULL;
+  m[tid].keyboard_release = NULL;
   lock_init(&(m[tid].ipc_header.l));
   for (int k = 0; k < MAX_IPC_MESSAGE; k++) {
     m[tid].ipc_header.messages[k].from_tid = -1;

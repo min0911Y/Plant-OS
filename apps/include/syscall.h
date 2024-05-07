@@ -119,6 +119,7 @@ tty_t tty_alloc(void *vram,unsigned handle,unsigned xsize,unsigned ysize);
 void tty_set(unsigned tid,tty_t tty);
 void tty_free(tty_t tty);
 void set_custom_handler(unsigned handler);
+void mem_map(unsigned a1,unsigned sz,unsigned a_pde,unsigned b1,unsigned b_pde);
 #ifdef __cplusplus
 }
 #endif
