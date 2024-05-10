@@ -314,7 +314,40 @@ bool vfs_change_disk_for_task(uint8_t drive, mtask *task) {
   PDEBUG("OK.");
   return true;
 }
-bool vfs_change_path(char *dictName) { return vfs_now->cd(vfs_now, dictName); }
+bool vfs_change_path(char *dictName) {
+  char *buf = malloc(strlen(dictName) + 1);
+  char *r = buf;
+  memcpy(buf, dictName, strlen(dictName) + 1);
+  int i = 0;
+  if (buf[i] == '/' || buf[i] == '\\') {
+    if (!vfs_now->cd(vfs_now, "/")) {
+      free(r);
+      return false;
+    }
+    i++;
+    buf++;
+  }
+
+  for (;; i++) {
+    if (buf[i] == '/' || buf[i] == '\\') {
+      buf[i] = 0;
+      if (!vfs_now->cd(vfs_now, buf)) {
+        free(r);
+        return false;
+      }
+      buf += strlen(buf) + 1;
+    }
+    if (buf[i] == 0) {
+      if (!vfs_now->cd(vfs_now, buf)) {
+        free(r);
+        return false;
+      }
+      break;
+    }
+  }
+  free(r);
+  return true;
+}
 void vfs_getPath(char *buffer) {
   char *path;
   List *l;
@@ -349,7 +382,7 @@ void vfs_getPath_no_drive(char *buffer) {
     insert_str(buffer, path, pos);
     pos += strlen(path);
   }
-  if(i == 1) {
+  if (i == 1) {
     insert_char(buffer, 0, '/');
   }
 }

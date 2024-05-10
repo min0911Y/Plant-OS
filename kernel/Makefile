@@ -105,6 +105,16 @@ Mimg : $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $(OUTPATH)
 		mcopy -i ./disk.img $(APPSOUTPATH)nasm.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)ndisasm.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)bitz.bin ::
+		mcopy -i ./disk.img $(APPSOUTPATH)lite.bin ::
+		mmd -i ./disk.img data
+		mmd -i ./disk.img data/core
+		mmd -i ./disk.img data/fonts
+		mmd -i ./disk.img data/plugins
+		mmd -i ./disk.img data/user
+		mcopy -i ./disk.img ../apps/lite-1.11/data/core/* ::/data/core
+		mcopy -i ./disk.img ../apps/lite-1.11/data/fonts/* ::/data/fonts
+		mcopy -i ./disk.img ../apps/lite-1.11/data/plugins/* ::/data/plugins
+		mcopy -i ./disk.img ../apps/lite-1.11/data/user/* ::/data/user
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(LOADERPATH)dosldr.bin ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(OUTPATH)kernel.bin ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(RESPATH)autoexec.bat ::

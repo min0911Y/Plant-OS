@@ -284,6 +284,8 @@ void gui_api1(uint32_t *a) {
   }
 }
 void main() {
+  // char *s34 = malloc(64*1024*1024);
+  // free(s34);
   ttf_buffer = malloc(filesize("font.ttf"));
   unsigned char buf[100];
   printf("Reading font...");

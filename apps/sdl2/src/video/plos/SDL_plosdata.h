@@ -31,6 +31,8 @@ typedef struct {
     SDL_Window *window;
     uint32_t shift;
     uint32_t caps_lock;
+    uint32_t ctrl;
+    uint32_t alt;
 } SDL_VideoData;
 
 typedef struct {

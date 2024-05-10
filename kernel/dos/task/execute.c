@@ -2,6 +2,11 @@
 #include <dos.h>
 extern char *shell_data;
 extern struct TSS32 tss;
+extern struct PAGE_INFO *pages;
+#define IDX(addr) ((unsigned)addr >> 12)            // 获取 addr 的页索引
+#define DIDX(addr) (((unsigned)addr >> 22) & 0x3ff) // 获取 addr 的页目录索引
+#define TIDX(addr) (((unsigned)addr >> 12) & 0x3ff) // 获取 addr 的页表索引
+#define PAGE(idx) ((unsigned)idx << 12) // 获取页索引 idx 对应的页开始的位置
 void task_app() {
   char *filename;
   while (!current_task()->line)
@@ -22,6 +27,41 @@ void task_app() {
   current_task()->alloc_size = (uint32_t *)malloc(4);
   current_task()->alloced = 1;
   *(current_task()->alloc_size) = 2 * 1024 * 1024;
+  unsigned pde = current_task()->pde;
+  io_cli();
+  set_cr3(PDE_ADDRESS);
+  logk("P1 %08x\n", current_task()->pde);
+  for (int i = DIDX(0x70000000) * 4; i < 0x1000; i += 4) {
+    unsigned int *pde_entry = (unsigned int *)(pde + i);
+
+    if ((*pde_entry & PG_SHARED) || pages[IDX(*pde_entry)].count > 1) {
+      // if (pde_entry == 0x08e6b718) {
+      //   for (;;)
+      //     ;
+      // }
+      if (pages[IDX(*pde_entry)].count > 1) {
+        uint32_t old = *pde_entry & 0xfffff000;
+        uint32_t attr = *pde_entry & 0xfff;
+        *pde_entry = (unsigned)page_malloc_one_count_from_4gb();
+        memcpy((void *)(*pde_entry), (void *)old, 0x1000);
+        pages[IDX(old)].count--;
+        *pde_entry |= PG_USU | PG_P | PG_RWW;
+      } else {
+        *pde_entry &= 0xfffff;
+        *pde_entry |= 7;
+      }
+    }
+    unsigned p = *pde_entry & (0xfffff000);
+    for (int j = 0; j < 0x1000; j += 4) {
+      unsigned int *pte_entry = (unsigned int *)(p + j);
+      if ((*pte_entry & PG_SHARED)) {
+        *pte_entry &= 0xfffff000;
+        *pte_entry |= PG_USU | PG_P;
+      }
+    }
+  }
+  io_sti();
+  set_cr3(pde);
   char tmp[100];
   task_to_user_mode_elf(filename);
   for (;;)
@@ -40,6 +80,38 @@ void task_shell() {
   current_task()->alloc_size = (uint32_t *)malloc(4);
   current_task()->alloced = 1;
   *(current_task()->alloc_size) = 1 * 1024 * 1024;
+
+  unsigned pde = current_task()->pde;
+  io_cli();
+  set_cr3(PDE_ADDRESS);
+  for (int i = DIDX(0x70000000) * 4; i < 0x1000; i += 4) {
+    unsigned int *pde_entry = (unsigned int *)(pde + i);
+    if ((*pde_entry & PG_SHARED) || pages[IDX(*pde_entry)].count > 1) {
+
+      if (pages[IDX(*pde_entry)].count > 1) {
+        uint32_t old = *pde_entry & 0xfffff000;
+        uint32_t attr = *pde_entry & 0xfff;
+        *pde_entry = (unsigned)page_malloc_one_count_from_4gb();
+        memcpy((void *)(*pde_entry), (void *)old, 0x1000);
+        pages[IDX(old)].count--;
+        *pde_entry |= PG_USU | PG_P | PG_RWW;
+      } else {
+        *pde_entry &= 0xfffff;
+        *pde_entry |= 7;
+      }
+    } else {
+    }
+    unsigned p = *pde_entry & (0xfffff000);
+    for (int j = 0; j < 0x1000; j += 4) {
+      unsigned int *pte_entry = (unsigned int *)(p + j);
+      if ((*pte_entry & PG_SHARED)) {
+        *pte_entry &= 0xfffff000;
+        *pte_entry |= PG_USU | PG_P;
+      }
+    }
+  }
+  io_sti();
+  set_cr3(pde);
   char tmp[100];
   task_to_user_mode_shell();
   for (;;)

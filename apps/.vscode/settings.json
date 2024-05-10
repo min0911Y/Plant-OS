@@ -48,6 +48,12 @@
     "exception": "c",
     "list.h": "c",
     "sdl_events_c.h": "c",
-    "sdl_sysvideo.h": "c"
+    "sdl_sysvideo.h": "c",
+    "stb_truetype.h": "c",
+    "lua.h": "c",
+    "lauxlib.h": "c",
+    "lualib.h": "c",
+    "api.h": "c",
+    "renderer.h": "c"
   }
 }

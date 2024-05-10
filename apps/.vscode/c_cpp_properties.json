@@ -4,7 +4,9 @@
             "name": "Linux",
             "includePath": [
                 "${workspaceFolder}/include",
-                "${workspaceFolder}/sdl2/include"
+                "${workspaceFolder}/sdl2/include",
+                "${workspaceFolder}/lite-1.11/src",
+                "${workspaceFolder}/sdl2"
             ],
             "defines": [],
             "compilerPath": "/usr/bin/gcc",

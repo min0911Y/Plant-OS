@@ -4627,8 +4627,8 @@ void mem_defragmenter(freeinfo *finf) {
   }
 }
 int mem_free_finf(memory *mem, freeinfo *finf, void *p, uint32_t size) {
-  quicksort(finf->f, 0, mem_get_all_finf(finf) - 1);
-  mem_defragmenter(finf);
+  // quicksort(finf->f, 0, mem_get_all_finf(finf) - 1);
+  // mem_defragmenter(finf);
   free_member *tmp1 = NULL, // 第一（二）个连续的内存 其limit与start相等
       *tmp2 = NULL; // 第二（一）个连续的内存  其start与limit相等
   int idx1, idx2;
@@ -4638,7 +4638,9 @@ int mem_free_finf(memory *mem, freeinfo *finf, void *p, uint32_t size) {
     uintptr_t current_start = (uintptr_t)finf->f[i].start;
     uintptr_t current_end = (uintptr_t)finf->f[i].end;
     uintptr_t ptr_val = (uintptr_t)p;
-
+    if (current_start + current_end == 0) {
+      break;
+    }
     if (current_end == ptr_val) {
       tmp1 = &(finf->f[i]);
       idx1 = i;
@@ -4657,8 +4659,8 @@ int mem_free_finf(memory *mem, freeinfo *finf, void *p, uint32_t size) {
     // 配置这个格子
     n->start = p;
     n->end = (uint32_t)p + size;
-    quicksort(finf->f, 0, mem_get_all_finf(finf) - 1);
-    mem_defragmenter(finf);
+    // quicksort(finf->f, 0, mem_get_all_finf(finf) - 1);
+    // mem_defragmenter(finf);
     return 1;
   }
   // for(;;);
@@ -4666,20 +4668,20 @@ int mem_free_finf(memory *mem, freeinfo *finf, void *p, uint32_t size) {
   if (tmp1 && tmp2) {
     tmp1->end = tmp2->end;
     mem_delete(idx2, finf);
-    quicksort(finf->f, 0, mem_get_all_finf(finf) - 1);
-    mem_defragmenter(finf);
+    // quicksort(finf->f, 0, mem_get_all_finf(finf) - 1);
+    // mem_defragmenter(finf);
     return 1;
   }
   if (tmp1) { // BUGFIX
     tmp1->end += size;
-    quicksort(finf->f, 0, mem_get_all_finf(finf) - 1);
-    mem_defragmenter(finf);
+    // quicksort(finf->f, 0, mem_get_all_finf(finf) - 1);
+    // mem_defragmenter(finf);
     return 1;
   }
   if (tmp2) {
     tmp2->start = p;
-    quicksort(finf->f, 0, mem_get_all_finf(finf) - 1);
-    mem_defragmenter(finf);
+    // quicksort(finf->f, 0, mem_get_all_finf(finf) - 1);
+    // mem_defragmenter(finf);
     return 1;
   }
 
@@ -4689,7 +4691,9 @@ void *mem_alloc_finf(memory *mem, freeinfo *finf, uint32_t size,
                      freeinfo *if_nomore) {
   free_member *choice = NULL;
   int choice_index = 0;
-  for (int i = 0; i < FREE_MAX_NUM; i++) {
+  int fg = 0;
+  int i;
+ R: for (i = 0; i < FREE_MAX_NUM; i++) {
     if (finf->f[i].start == 0 && finf->f[i].end == 0) {
       break;
     }
@@ -4706,7 +4710,12 @@ void *mem_alloc_finf(memory *mem, freeinfo *finf, uint32_t size,
       }
     }
   }
-  if (choice == NULL) {
+  if (choice == NULL && fg == 0) {
+    quicksort(finf->f, 0, mem_get_all_finf(finf) - 1);
+    mem_defragmenter(finf);
+    fg =1;
+    goto R;
+  } else if (choice == NULL) {
     mem->memerrno = ERRNO_NO_ENOGHT_MEMORY;
     return NULL;
   }
@@ -4777,8 +4786,12 @@ void show_mem(memory *mem) {
       if (finf->f[i].start == 0 && finf->f[i].end == 0) {
         break;
       }
+
       printf("START: %08x END: %08x SIZE: %08x Bytes\n", finf->f[i].start,
              finf->f[i].end, finf->f[i].end - finf->f[i].start);
+            if( (finf->f[i].start & 0xfff) != 0) {
+        for(;;);
+      }
     }
     finf = finf->next;
   }
@@ -4795,6 +4808,7 @@ retry:
     sbrk(size);
     mem_free(mm, alloc_start + total_size, size);
     total_size += size;
+  //  show_mem(mm);
     goto retry;
   }
   return a;
@@ -4804,11 +4818,11 @@ void mm_free(uint32_t addr, uint32_t size) {
   mem_free(mm, addr, size);
 }
 void *mem_alloc_nb(memory *mem, uint32_t size, uint32_t n) {
-  size = ((size - 1) / n + 1) * n;
+  size = (size + 0xfff) & 0xfffff000;
   return mm_alloc(size);
 }
 void mem_free_nb(memory *mem, void *p, uint32_t size, uint32_t n) {
-  size = ((size - 1) / n + 1) * n;
+  size = (size + 0xfff) & 0xfffff000;
   mm_free(p, size);
 }
 memory *memory_init(uint32_t start, uint32_t size) {
@@ -4843,11 +4857,18 @@ memory *memory_init(uint32_t start, uint32_t size) {
     mem->freeinf->f[i].end = 0;
   }
   mem->memerrno = ERRNO_NOPE;
+  // if(start & 0xfff) {
+  //   int old = start;
+  //   start += 0x1000;
+  //   start &= 0xfffff;
+  //   size -= old-start;
+  // }
   mem_free(mem, (void *)start, size);
   return mem;
 }
 char flag = 0;
 void init_mem() {
+  //sbrk(128*1024*1024);
   alloc_start = api_malloc(1);
   mm = memory_init(alloc_start, api_heapsize());
   total_size = api_heapsize();
@@ -4857,7 +4878,7 @@ void init_mem() {
 
 void *malloc(int size) {
   if (flag) {
-    void *p = mem_alloc_nb(mm, size + sizeof(int), 16);
+    void *p = mem_alloc_nb(mm, size + sizeof(int), 0x1000);
     *(int *)p = size;
     return (char *)p + sizeof(int);
   } else {
@@ -4869,9 +4890,20 @@ void free(void *p) {
   if (p == NULL)
     return;
   int size = *(int *)((char *)p - sizeof(int));
-  mem_free_nb(mm, (char *)p - sizeof(int), size + sizeof(int), 16);
+  mem_free_nb(mm, (char *)p - sizeof(int), size + sizeof(int), 0x1000);
 }
-
+struct finfo_block *api_listfile(char *path);
+struct finfo_block *listfile(char *path) {
+  struct finfo_block *r;
+RETRY:
+  r = api_listfile(path);
+  if(r) return r;
+  sbrk(0x1000);
+  //printf("sbrk for listfile\n");
+  mem_free(mm, alloc_start + total_size, 0x1000);
+  total_size += 0x1000;
+  goto RETRY;
+}
 int fseek(FILE *fp, int offset, int whence) {
   if (whence == 0) {
     fp->p = offset;

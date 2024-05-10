@@ -1254,6 +1254,9 @@ bool Fat_WriteFile(struct vfs_t *vfs, char *path, char *buffer, int size) {
 }
 List *Fat_ListFile(struct vfs_t *vfs, char *dictpath) {
   struct FAT_FILEINFO *finfo = Get_dictaddr(dictpath, vfs);
+  if(finfo == NULL) {
+    return NULL;
+  }
   List *result = NewList();
   char s[30];
   for (int i = 0; i != 30; i++) {

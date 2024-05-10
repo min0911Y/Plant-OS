@@ -210,6 +210,11 @@ int run(char *line) {
       printf("Invalid path.\n");
     }
     free(s);
+  } else if (strncmp("mkfile ", line, 7) == 0) {
+    char *s = (char *)malloc(256);
+    get_arg(s, line, 1);
+    mkfile(s);
+    free(s);
   } else if (strncmp("type ", line, 5) == 0) {
     char *s = (char *)malloc(256);
     get_arg(s, line, 1);

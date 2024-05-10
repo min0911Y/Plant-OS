@@ -41,7 +41,9 @@ void user_thread_into() {
 void test(unsigned int b) { return; }
 void *malloc_app_heap(void *alloc_addr, uint32_t ds_base, uint32_t size) {
   memory *mem = (memory *)alloc_addr;
-  return (void *)mem_alloc(mem, size);
+  size = (size + 0xfff) & 0xfffff000;
+  void *p = (void *)mem_alloc(mem, size);
+  return p;
 }
 void free_app_heap(void *alloc_addr, uint32_t ds_base, void *p) {
   memory *mem = (memory *)alloc_addr;
@@ -63,7 +65,7 @@ void free_app_heap(void *alloc_addr, uint32_t ds_base, void *p) {
   mem->freeinf = (freeinfo *)((char *)mem->freeinf - ds_base);
   return;
 }
-enum { EDI, ESI, EBP, ESP, EBX, EDX, ECX, EAX,M_PDE,C_PDE };
+enum { EDI, ESI, EBP, ESP, EBX, EDX, ECX, EAX, M_PDE, C_PDE };
 void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
                   int eax) {
   // PowerintDOS API
@@ -244,6 +246,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
       EDIT_FILE(FilePath, Ptr, length, offset);
     } else if (ebx == 0x06) {
       char *Path = (char *)(ds_base + edx);
+    //  logk("listfile %s\n",Path);
       struct List *file_list = vfs_listfile(Path);
       int number;
       for (number = 1; FindForCount(number, file_list) != NULL; number++)
@@ -251,12 +254,16 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
       char *p = (char *)malloc_app_heap(alloc_addr, ds_base,
                                         number * sizeof(vfs_file));
       for (int i = 1; FindForCount(i, file_list) != NULL; i++) {
-        memcpy((void *)(p + sizeof(vfs_file) * (i - 1)),
-               (void *)FindForCount(i, file_list)->val, sizeof(vfs_file));
+        if (p) {
+          memcpy((void *)(p + sizeof(vfs_file) * (i - 1)),
+                 (void *)FindForCount(i, file_list)->val, sizeof(vfs_file));
+        }
         free((void *)FindForCount(i, file_list)->val);
       }
-      memset((void *)(p + (number - 1) * sizeof(vfs_file)), 0,
-             sizeof(vfs_file));
+      if (p)
+        memset((void *)(p + (number - 1) * sizeof(vfs_file)), 0,
+               sizeof(vfs_file));
+    e:
       DeleteList(file_list);
       reg[EAX] = (int)p - ds_base;
     }
@@ -547,28 +554,12 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
   } else if (eax == 0x34) {
     reg[EAX] = fifo8_get(current_task()->Ukeyfifo);
   } else if (eax == 0x35) {
-    // logk("ADD MEMORY TO RUN!\n");
-    // for(;;);
-
-    logk("sbrk %08x\n", ebx);
-    io_cli();
-
-    unsigned page_len = div_round_up(ebx, 0x1000);
-
-    unsigned start_addr =
-        ((task->alloc_addr + *(task->alloc_size) - 1) & 0xfffff000);
-    logk("SA %08x %d %08x\n", start_addr, page_len, current_task()->alloc_addr);
-    page_links(start_addr + 0x1000, page_len);
-    // for (int i = 0; i < page_len; i++) {
-    //   // logk("L:%08x\n",start_addr + (i + 1) * 0x1000);
-    //   page_link(start_addr + (i + 1) * 0x1000);
+    unsigned start_addr = task->alloc_addr + *(task->alloc_size);
+    // for (int i = 0; i < (ebx / 0x1000); i++) {
+    //   page_link_share(start_addr + (i) * 0x1000);
     // }
+    page_links(start_addr,ebx / 0x1000);
     *(task->alloc_size) += ebx;
-    io_sti();
-    logk("ok %08x %08x\n", task->alloc_addr + *(task->alloc_size),
-         page_get_attr(0x7182bd98));
-    unsigned c = current_task()->pde + (unsigned)(DIDX(0x7182bd98) * 4);
-    logk("%08x\n", *(unsigned int *)c & 0xfff);
   } else if (eax == 0x36) {
     char *s = env_read(ebx + ds_base);
     if (s) {
@@ -689,13 +680,24 @@ void custom_inthandler(int edi, int esi, int ebp, int esp, int ebx, int edx,
                        int ecx, int eax) {
   unsigned *alloc_sz = current_task()->alloc_size;
   unsigned alloc_ar = current_task()->alloc_addr;
+  unsigned tid = current_task()->tid;
   if (!custom_handler)
     return;
 
   current_task()->alloc_size = custom_handler_owner->alloc_size;
   current_task()->alloc_addr = custom_handler_owner->alloc_addr;
+  current_task()->tid = custom_handler_owner->tid;
   int *reg = &eax + 1; /* eax后面的地址*/
-  unsigned args[] = {edi, esi, ebp, esp, ebx, edx, ecx, eax,custom_handler_pde,current_task()->pde};
+  unsigned args[] = {edi,
+                     esi,
+                     ebp,
+                     esp,
+                     ebx,
+                     edx,
+                     ecx,
+                     eax,
+                     custom_handler_pde,
+                     current_task()->pde};
   if (ebx) {
     char *s1 = malloc(strlen(ebx) + 1);
     memcpy(s1, ebx, strlen(ebx) + 1);
@@ -710,4 +712,5 @@ void custom_inthandler(int edi, int esi, int ebp, int esp, int ebx, int edx,
   }
   current_task()->alloc_size = alloc_sz;
   current_task()->alloc_addr = alloc_ar;
+  current_task()->tid = tid;
 }

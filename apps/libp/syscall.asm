@@ -12,7 +12,7 @@ GLOBAL _exit,key_press_status,key_up_status,get_key_press,get_key_up,sbrk,api_ge
 GLOBAL timer_alloc,timer_settime,timer_out,timer_free,clock,start_keyboard_message,clear
 GLOBAL haveMsg,PhyMemGetByte,GetMessageAll,PhyMemSetByte,format,api_heapsize,api_current_drive
 GLOBAL get_hour_hex,get_min_hex,get_sec_hex,get_day_of_month,get_day_of_week,get_mon_hex,get_year,AddThread,init_float
-GLOBAL TaskLock,TaskUnlock,SubThread,set_mode,VBEDraw_Px,VBEGet_Px,VBEGetBuffer,VBESetBuffer,roll,VBEDraw_Box,listfile
+GLOBAL TaskLock,TaskUnlock,SubThread,set_mode,VBEDraw_Px,VBEGet_Px,VBEGetBuffer,VBESetBuffer,roll,VBEDraw_Box,api_listfile
 GLOBAL vfs_check_mount,vfs_mount,vfs_change_disk,vfs_delfile,vfs_change_path,tty_start_cur_moving,tty_stop_cur_moving,vfs_unmount_disk,logk
 GLOBAL tty_get_xsize,tty_get_ysize,api_rename,mouse_support,signal,fork,waittid,do_test,mouse_enable,mouse_dat_status,mouse_dat_get,api_yield,return_to_app,set_rt,set_custom_handler,mem_map
 [SECTION .text]
@@ -966,7 +966,7 @@ sbrk:
 	pop eax
 	pop ebx
 	ret
-listfile:
+api_listfile:
 push	ebx
 push	edx
 mov	eax,0x1a

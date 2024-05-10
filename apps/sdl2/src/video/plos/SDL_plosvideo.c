@@ -90,6 +90,8 @@ static int PLOS_CreateWindow(_THIS, SDL_Window *window) {
   data1->window = window;
   data1->shift = 0;
   data1->caps_lock = 0;
+  data1->ctrl = 0;
+  data1->alt = 0;
   window_start_recv_keyboard(data->window);
   return 0;
 }
@@ -502,7 +504,14 @@ void PLOS_PumpEvents(_THIS) {
       if (scancode == SDL_SCANCODE_CAPSLOCK) {
         data->caps_lock = !data->caps_lock;
       }
-      if (SDL_SacncodeVisiable(scancode) && data->startTextInput) {
+      if (scancode == SDL_SCANCODE_LCTRL) {
+        data->ctrl = 1;
+      }
+      if (scancode == SDL_SCANCODE_LALT) {
+        data->alt = 1;
+      }
+      if (SDL_SacncodeVisiable(scancode) && data->startTextInput &&
+          data->ctrl == 0 && data->alt == 0) {
         char s[2] = {0};
         if (data->shift || data->caps_lock) {
           s[0] = keytable[i];
@@ -527,6 +536,12 @@ void PLOS_PumpEvents(_THIS) {
       uint32_t scancode = to_sdl_code(i);
       if (scancode == SDL_SCANCODE_LSHIFT) {
         data->shift = 0;
+      }
+      if (scancode == SDL_SCANCODE_LCTRL) {
+        data->ctrl = 0;
+      }
+      if (scancode == SDL_SCANCODE_LALT) {
+        data->alt = 0;
       }
       SDL_SendKeyboardKey(SDL_RELEASED, scancode);
     }
