@@ -257,9 +257,19 @@ static int f_list_dir(lua_State *L) {
 
 static int f_absolute_path(lua_State *L) {
   const char *path = luaL_checkstring(L, 1);
+  if (path[0] == '/') {
+    lua_pushstring(L, path);
+    return 1;
+  }
   char cwd[255];
+  char result[255];
   api_getcwd(cwd);
-  lua_pushstring(L, cwd);
+  if (cwd[strlen(cwd) - 1] == '/') {
+    sprintf(result, "/%s",path);
+  } else {
+    sprintf(result,"%s/%s",cwd,path);
+  }
+  lua_pushstring(L, path);
   return 1;
 }
 

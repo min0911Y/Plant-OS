@@ -143,19 +143,12 @@ void page_link_pde_share(unsigned addr, unsigned pde) {
   unsigned *pte = (unsigned int *)((pde + t * 4));
 
   if (pages[IDX(*pte)].count > 1 && !(*pte & PG_SHARED)) {
-    int flag;
-    if (*pte & PG_SHARED) {
-      flag = 1;
-    }
     // 这个页目录还有人引用，所以需要复制
     pages[IDX(*pte)].count--;
     uint32_t old = *pte & 0xfffff000;
     *pte = (unsigned)page_malloc_one_count_from_4gb();
     memcpy((void *)(*pte), (void *)old, 0x1000);
     *pte |= 7;
-    if (flag) {
-      *pte |= PG_SHARED;
-    }
   } else {
     *pte |= 7;
   }

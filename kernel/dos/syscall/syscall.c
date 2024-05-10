@@ -555,10 +555,10 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
     reg[EAX] = fifo8_get(current_task()->Ukeyfifo);
   } else if (eax == 0x35) {
     unsigned start_addr = task->alloc_addr + *(task->alloc_size);
-    // for (int i = 0; i < (ebx / 0x1000); i++) {
-    //   page_link_share(start_addr + (i) * 0x1000);
-    // }
-    page_links(start_addr,ebx / 0x1000);
+    for (int i = 0; i < (ebx / 0x1000); i++) {
+      page_link_share(start_addr + (i) * 0x1000);
+    }
+   // page_links(start_addr,ebx / 0x1000);
     *(task->alloc_size) += ebx;
   } else if (eax == 0x36) {
     char *s = env_read(ebx + ds_base);
