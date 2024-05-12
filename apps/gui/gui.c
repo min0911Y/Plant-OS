@@ -177,7 +177,8 @@ enum {
   ECX,
   EAX,
   M_PDE,
-  C_PDE
+  C_PDE,
+  TID
 }; // M_PDE是GUI程序的PDE，C_PDE是调用者的PDE
 enum { MOUSE_STAY = 1, MOUSE_CLICK_LEFT, MOUSE_CLICK_RIGHT, CLOSE_WINDOW };
 #define PACK_XY(x, y) ((x << 16) | y)
@@ -209,6 +210,7 @@ void handle_close_window(window_t *window) {
 void sheet_refresh(struct SHEET *sht, int bx0, int by0, int bx1, int by1);
 void gui_api1(uint32_t *a) {
   if (a[EAX] == 0x01) {
+    logkf("H %d %d\n",a[EDI],a[ESI]);
     window_t *wnd = create_window(desktop0, a[EBX], a[EDI], a[ESI], 0);
     wnd->events = (struct FIFO32 *)malloc(sizeof(struct FIFO32));
     fifo32_init(wnd->events, 32, wnd->event);
@@ -217,6 +219,7 @@ void gui_api1(uint32_t *a) {
     wnd->handle_right = handle_click_right_api;
     wnd->close = handle_close_window;
     wnd->display(wnd, a[ECX], a[EDX], 1);
+    wnd->tid = a[TID];
     a[EAX] = wnd;
   } else if (a[EAX] == 0x02) {
     window_t *wnd = (window_t *)a[ECX];

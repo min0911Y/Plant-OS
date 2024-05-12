@@ -39,32 +39,17 @@ void user_thread_into() {
 }
 
 void test(unsigned int b) { return; }
-void *malloc_app_heap(void *alloc_addr, uint32_t ds_base, uint32_t size) {
-  memory *mem = (memory *)alloc_addr;
+void *mem_alloc_nb(memory *mem, uint32_t size, uint32_t n) {
   size = (size + 0xfff) & 0xfffff000;
-  void *p = (void *)mem_alloc(mem, size);
-  return p;
+  return mem_alloc(mem, size);
 }
-void free_app_heap(void *alloc_addr, uint32_t ds_base, void *p) {
-  memory *mem = (memory *)alloc_addr;
-  mem->freeinf = (freeinfo *)((char *)mem->freeinf + ds_base);
-  freeinfo *fi;
-  for (fi = mem->freeinf; fi->next != NULL; fi = fi->next) {
-    fi->next = (freeinfo *)((char *)fi->next + ds_base);
-    fi->f = (free_member *)((char *)fi->f + ds_base);
-  }
-  fi->f = (free_member *)((char *)fi->f + ds_base);
-  uint32_t size = ((int *)p)[-1] + sizeof(int);
-  mem_free(mem, (void *)(&((int *)p)[-1] - ds_base), size);
-  fi->f = (free_member *)((char *)fi->f - ds_base);
-  for (fi = mem->freeinf; ((freeinfo *)((char *)fi + ds_base))->next != NULL;
-       fi = ((freeinfo *)((char *)fi + ds_base))->next) {
-    fi->next = (freeinfo *)((char *)fi->next - ds_base);
-    fi->f = (free_member *)((char *)fi->f - ds_base);
-  }
-  mem->freeinf = (freeinfo *)((char *)mem->freeinf - ds_base);
-  return;
+
+void *malloc_app_heap(void *alloc_addr, uint32_t ds_base, uint32_t size) {
+  void *p = mem_alloc_nb(alloc_addr, size + sizeof(int), 0x1000);
+  *(int *)p = size;
+  return (char *)p + sizeof(int);
 }
+void free_app_heap(void *alloc_addr, uint32_t ds_base, void *p) {}
 enum { EDI, ESI, EBP, ESP, EBX, EDX, ECX, EAX, M_PDE, C_PDE };
 void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
                   int eax) {
@@ -246,13 +231,12 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
       EDIT_FILE(FilePath, Ptr, length, offset);
     } else if (ebx == 0x06) {
       char *Path = (char *)(ds_base + edx);
-    //  logk("listfile %s\n",Path);
+      //  logk("listfile %s\n",Path);
       struct List *file_list = vfs_listfile(Path);
       int number;
       for (number = 1; FindForCount(number, file_list) != NULL; number++)
         ;
-      char *p = (char *)malloc_app_heap(alloc_addr, ds_base,
-                                        number * sizeof(vfs_file));
+      char *p = ecx;
       for (int i = 1; FindForCount(i, file_list) != NULL; i++) {
         if (p) {
           memcpy((void *)(p + sizeof(vfs_file) * (i - 1)),
@@ -558,7 +542,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
     for (int i = 0; i < (ebx / 0x1000); i++) {
       page_link_share(start_addr + (i) * 0x1000);
     }
-   // page_links(start_addr,ebx / 0x1000);
+    // page_links(start_addr,ebx / 0x1000);
     *(task->alloc_size) += ebx;
   } else if (eax == 0x36) {
     char *s = env_read(ebx + ds_base);
@@ -672,6 +656,13 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
                                 a_pde); // PG_P | PG_USU | PG_RWW
     }
     io_sti();
+  } else if (eax == 0x58) {
+    mtask *t = get_task(ebx);
+    t->urgent = 1;
+    t->timeout = 5;
+  } else if (eax == 0x59) {
+    mtask *t = get_task(ebx);
+    t->timeout = 1;
   }
   return;
 }
@@ -697,7 +688,8 @@ void custom_inthandler(int edi, int esi, int ebp, int esp, int ebx, int edx,
                      ecx,
                      eax,
                      custom_handler_pde,
-                     current_task()->pde};
+                     current_task()->pde,
+                     tid};
   if (ebx) {
     char *s1 = malloc(strlen(ebx) + 1);
     memcpy(s1, ebx, strlen(ebx) + 1);

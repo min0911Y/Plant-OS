@@ -76,7 +76,7 @@ void pde_reset(unsigned addr) {
 void free_pde(unsigned addr) {
   if (addr == PDE_ADDRESS)
     return;
-  for (int i = DIDX(0x70000000) * 4; i < 0x1000; i += 4) {
+  for (int i = DIDX(0x70000000) * 4; i < DIDX(0xf1000000) * 4; i += 4) {
     unsigned int *pde_entry = (unsigned int *)(addr + i);
     unsigned p = *pde_entry & (0xfffff000);
     if (!(*pde_entry & PG_USU) && !(*pde_entry & PG_P)) {

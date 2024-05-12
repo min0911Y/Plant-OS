@@ -1192,6 +1192,7 @@ ST_FUNC void tcc_add_runtime(TCCState *s1)
     /* add libc */
     if (!s1->nostdlib) {
         tcc_add_library_err(s1, "p");
+        tcc_add_library_err(s1, "abi");
 #ifdef TCC_LIBGCC
         if (!s1->static_link) {
             if (TCC_LIBGCC[0] == '/')

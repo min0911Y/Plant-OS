@@ -55,74 +55,79 @@ static SDL_Point points[POINTS_COUNT] = {
 static SDL_Rect bigrect = {0, 0, 280, 280};
 enum { MOUSE_STAY = 1, MOUSE_CLICK_LEFT, MOUSE_CLICK_RIGHT, CLOSE_WINDOW };
 
+#define WINDOW_WIDTH 800
+#define WINDOW_HEIGHT 600
+#define SQUARE_SIZE 50
+#define CIRCLE_RADIUS 200
+#define CIRCLE_CENTER_X (WINDOW_WIDTH / 2)
+#define CIRCLE_CENTER_Y (WINDOW_HEIGHT / 2)
+#define ANGLE_INCREMENT 2 // 控制正方形移动速度的角度增量
 
-
-#define WINDOW_WIDTH 800  
-#define WINDOW_HEIGHT 600  
-#define SQUARE_SIZE 50  
-#define CIRCLE_RADIUS 200  
-#define CIRCLE_CENTER_X (WINDOW_WIDTH / 2)  
-#define CIRCLE_CENTER_Y (WINDOW_HEIGHT / 2)  
-#define ANGLE_INCREMENT 2 // 控制正方形移动速度的角度增量  
-  
-SDL_Window *window;  
-SDL_Renderer *renderer;  
-SDL_Event event;  
-double angle = 0; // 初始角度  
-  
-int main(int argc, char* argv[]) {  
-  struct finfo_block *f = listfile("data/core");
-  int i = 1;
-
-  for (int j = 0; f[j].name[0]; j++) {
-    printf("%s\n",f[j].name);
+SDL_Window *window;
+SDL_Renderer *renderer;
+SDL_Event event;
+double angle = 0; // 初始角度
+int mai1n() {
+  void *p[10];
+  for (int i = 0; i < 10; i++) {
+    p[i] = malloc(0x1000);
+  }
+  printf("%p\n", p[0]);
+  for (int i = 0; i < 10; i++) {
+    free(p[i]);
   }
 
   return 0;
-  for(;;) {
-    malloc(0x1000);
+}
+int main(int argc, char *argv[]) {
+  SDL_Init(SDL_INIT_VIDEO);
+  window = SDL_CreateWindow("SDL Circle Motion", SDL_WINDOWPOS_UNDEFINED,
+                            SDL_WINDOWPOS_UNDEFINED, WINDOW_WIDTH,
+                            WINDOW_HEIGHT, SDL_WINDOW_SHOWN);
+
+  renderer = SDL_CreateRenderer(window, -1, 0);
+
+  while (1) {
+    // while (SDL_PollEvent(&event)) {
+    //   if (event.type == SDL_QUIT) {
+    //     exit(0);
+    //   }
+    // }
+
+    // 更新角度和位置
+    angle += ANGLE_INCREMENT;
+    if (angle > 360) {
+      angle = 0; // 或者使用 fmod(angle, 360) 来避免超过360度
+    }
+
+    // 计算正方形在圆周上的位置
+    int squareX =
+        CIRCLE_CENTER_X + (int)(CIRCLE_RADIUS * cos(angle * M_PI / 180.0));
+    int squareY = CIRCLE_CENTER_Y -
+                  (int)(CIRCLE_RADIUS *
+                        sin(angle * M_PI / 180.0)); // 注意Y轴方向可能需要调整
+
+    // 清除屏幕
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255); // 白色背景
+    SDL_RenderClear(renderer);
+
+    // 绘制正方形
+    SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255); // 红色正方形
+    SDL_Rect squareRect = {squareX - SQUARE_SIZE / 2, squareY - SQUARE_SIZE / 2,
+                           SQUARE_SIZE, SQUARE_SIZE};
+    SDL_RenderFillRect(renderer, &squareRect);
+
+    // 更新屏幕
+    SDL_RenderPresent(renderer);
+
+    // 控制帧率，例如：延迟以保持一定的帧率
+    SDL_Delay(16); // 大约60 FPS
   }
-    SDL_Init(SDL_INIT_VIDEO);  
-    window = SDL_CreateWindow("SDL Circle Motion", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, WINDOW_WIDTH, WINDOW_HEIGHT, SDL_WINDOW_SHOWN);  
-    renderer = SDL_CreateRenderer(window, -1, 0);  
-  
-    while (1) {  
-        while (SDL_PollEvent(&event)) {  
-            if (event.type == SDL_QUIT) {  
-                exit(0);  
-            }  
-        }  
-  
-        // 更新角度和位置  
-        angle += ANGLE_INCREMENT;  
-        if (angle > 360) {  
-            angle = 0; // 或者使用 fmod(angle, 360) 来避免超过360度  
-        }  
-  
-        // 计算正方形在圆周上的位置  
-        int squareX = CIRCLE_CENTER_X + (int)(CIRCLE_RADIUS * cos(angle * M_PI / 180.0));  
-        int squareY = CIRCLE_CENTER_Y - (int)(CIRCLE_RADIUS * sin(angle * M_PI / 180.0)); // 注意Y轴方向可能需要调整  
-  
-        // 清除屏幕  
-        SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255); // 白色背景  
-        SDL_RenderClear(renderer);  
-  
-        // 绘制正方形  
-        SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255); // 红色正方形  
-        SDL_Rect squareRect = {squareX - SQUARE_SIZE / 2, squareY - SQUARE_SIZE / 2, SQUARE_SIZE, SQUARE_SIZE};  
-        SDL_RenderFillRect(renderer, &squareRect);  
-  
-        // 更新屏幕  
-        SDL_RenderPresent(renderer);  
-  
-        // 控制帧率，例如：延迟以保持一定的帧率  
-        SDL_Delay(16); // 大约60 FPS  
-    }  
-  
-    SDL_DestroyRenderer(renderer);  
-    SDL_DestroyWindow(window);  
-    SDL_Quit();  
-    return 0;  
+
+  SDL_DestroyRenderer(renderer);
+  SDL_DestroyWindow(window);
+  SDL_Quit();
+  return 0;
 }
 int main1(int argc, char **argv) {
 
@@ -195,7 +200,7 @@ int main1(int argc, char **argv) {
       } else if (event.type == SDL_MOUSEBUTTONDOWN) {
         printf("DOWN %d %d\n", event.button.x, event.button.y);
       } else if (event.type == SDL_TEXTINPUT) {
-        printf("%s",event.text.text);
+        printf("%s", event.text.text);
       }
     }
   }

@@ -52,7 +52,7 @@ static int PLOS_VideoInit(_THIS) {
   display.desktop_mode = current_mode;
   display.current_mode = current_mode;
   display.driverdata = NULL;
-  if (SDL_AddVideoDisplay(&display) < 0) {
+  if (SDL_AddVideoDisplay(&display,SDL_FALSE) < 0) {
     return -1;
   }
 
@@ -70,6 +70,7 @@ static void PLOS_VideoQuit(_THIS) {}
  * @return  0 if successful, -1 on error
  */
 static int PLOS_CreateWindow(_THIS, SDL_Window *window) {
+  printf("PLOS_CreateWindow\n");
   SDL_WindowData *data;
   SDL_VideoData *data1 = (SDL_VideoData *)_this->driverdata;
   if (window->flags & SDL_WINDOW_OPENGL) {
@@ -82,6 +83,7 @@ static int PLOS_CreateWindow(_THIS, SDL_Window *window) {
     return -1;
   }
 
+  
   data->window =
       create_window("SDL2_Window", 0, 0, window->w + 2, window->h + 21);
   data->deviceData = (SDL_VideoData *)_this->driverdata; /* 指向设备数据 */
@@ -549,16 +551,21 @@ void PLOS_PumpEvents(_THIS) {
     if (i == -1)
       return;
     if (i == MOUSE_CLICK_LEFT) {
-      f = 1;
+      
       int j = window_get_event(data->wnd);
+      
       SDL_SendMouseMotion(data->window, 0, 0, (j >> 16) - 2, (j & 0xffff) - 21);
-      SDL_SendMouseButton(data->window, 0, SDL_PRESSED, SDL_BUTTON_LEFT);
+      if(f != 1)
+        SDL_SendMouseButton(data->window, 0, SDL_PRESSED, SDL_BUTTON_LEFT);
+      f = 1;
     }
     if (i == MOUSE_CLICK_RIGHT) {
-      f = 2;
+      
       int j = window_get_event(data->wnd);
       SDL_SendMouseMotion(data->window, 0, 0, (j >> 16) - 2, (j & 0xffff) - 21);
-      SDL_SendMouseButton(data->window, 0, SDL_PRESSED, SDL_BUTTON_RIGHT);
+      if(f != 2)
+        SDL_SendMouseButton(data->window, 0, SDL_PRESSED, SDL_BUTTON_RIGHT);
+      f = 2;
     }
     if (i == MOUSE_STAY) {
       if (f) {
@@ -637,4 +644,5 @@ static SDL_VideoDevice *PLOS_CreateDevice(int devindex) {
 static int PlantOS_Available() { return 1; }
 
 VideoBootStrap PLOS_bootstrap = {"Plant OS", "PlantOS Screen",
-                                 PlantOS_Available, PLOS_CreateDevice};
+                                 PLOS_CreateDevice,
+                                 NULL /* no ShowMessageBox implementation */};

@@ -1,7 +1,7 @@
 LIBS_PATH := ../libs
 INCLUDE_PATH := ../include
 include ../defs.mk
-CFLAGS := -m32 -I$(INCLUDE_PATH) -nostdinc -nolibc -nostdlib -ffreestanding -fno-stack-protector -Qn -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fomit-frame-pointer -finput-charset=UTF-8 -fexec-charset=GB2312 -march=pentium -Qn -O2 -w
+CFLAGS = -m32 -I$(INCLUDE_PATH) -nostdinc -nolibc -nostdlib -ffreestanding -fno-stack-protector -Qn -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fomit-frame-pointer -finput-charset=UTF-8 -fexec-charset=GB2312 -march=pentium -Qn -O0 -w
 NASM = nasm
 OBJS_PACK1 = ../out/lua.obj
 OBJS_PACK2 = ../out/luac.obj

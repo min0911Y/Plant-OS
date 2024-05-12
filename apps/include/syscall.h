@@ -66,7 +66,7 @@ void GetMessageAll(void *data);
 char PhyMemGetByte(int addr);
 void PhyMemSetByte(int addr, char data);
 int format(unsigned drive, char *fs_name);
-void *malloc(int size);
+void *malloc(size_t size);
 void free(void *p);
 void *realloc(void *ptr, uint32_t size);
 int get_hour_hex();
@@ -120,6 +120,8 @@ void tty_set(unsigned tid,tty_t tty);
 void tty_free(tty_t tty);
 void set_custom_handler(unsigned handler);
 void mem_map(unsigned a1,unsigned sz,unsigned a_pde,unsigned b1,unsigned b_pde);
+void task_set_level_higher(unsigned tid);
+void task_set_level_normal(unsigned tid);
 #ifdef __cplusplus
 }
 #endif

@@ -78,18 +78,8 @@ int fifo32_put(struct FIFO32 *fifo, int data);
 int fifo32_get(struct FIFO32 *fifo);
 int fifo32_status(struct FIFO32 *fifo);
 #define MAX_SHEETS 256
-struct SHEET {
-  vram_t *buf;
-  int bxsize, bysize, vx0, vy0, col_inv, height, flags;
-  struct SHTCTL *ctl;
-};
-struct SHTCTL {
-  vram_t *vram;
-  unsigned char *map;
-  int xsize, ysize, top;
-  struct SHEET *sheets[MAX_SHEETS];
-  struct SHEET sheets0[MAX_SHEETS];
-};
+
+
 struct desktop {
   bool using1;
   struct SHTCTL *shtctl;
@@ -228,6 +218,18 @@ void SDraw_Char(vram_t *vram1, int x, int y, char c, color_t color, int xsize);
 void boxfill(vram_t *vram, int xsize, color_t c, int x0, int y0, int x1,
              int y1);
 bool Collision(int x, int y, int w, int h, int x1, int y1);
-
+struct SHEET {
+  vram_t *buf;
+  int bxsize, bysize, vx0, vy0, col_inv, height, flags;
+  struct SHTCTL *ctl;
+  window_t *wnd;
+};
+struct SHTCTL {
+  vram_t *vram;
+  unsigned char *map;
+  int xsize, ysize, top;
+  struct SHEET *sheets[MAX_SHEETS];
+  struct SHEET sheets0[MAX_SHEETS];
+};
 
 #endif

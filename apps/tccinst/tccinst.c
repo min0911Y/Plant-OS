@@ -6,13 +6,13 @@ void copy_drive(char d, char *p1, char *p2) {
   if (p2[0] == '/') {
     sprintf(buf, "%c:%s", d, p2);
   } else {
-    sprintf(buf, "%c:\\%s",d, p2);
+    sprintf(buf, "%c:\\%s", d, p2);
   }
   Copy(p1, buf);
   free(buf);
 }
 char tosmaller(char s) {
-  if(s >= 'A' && s <= 'Z') {
+  if (s >= 'A' && s <= 'Z') {
     s += 32;
   }
   return s;
@@ -53,27 +53,30 @@ R:
   copy_drive(d, "tcc.bin", "/tcc.bin");
   printf(" -> tcc/lib/libp.a\n");
   copy_drive(d, "tcc/lib/libp.a", "/tcc/lib/libp.a");
+  printf(" -> tcc/lib/libabi.a\n");
+  copy_drive(d, "tcc/lib/libabi.a", "/tcc/lib/libabi.a");
   printf(" -> tcc/inst/libtcc1.a\n");
   copy_drive(d, "tcc/inst/libtcc1.a", "/tcc/inst/libtcc1.a");
+
   printf("now, copy headers\n");
-  struct finfo_block *f= listfile("tcc/include");
-  for(int i = 0;f[i].name[0];i++) {
-    if(f[i].type == DIR) {
+  struct finfo_block *f = listfile("tcc/include");
+  for (int i = 0; f[i].name[0]; i++) {
+    if (f[i].type == DIR) {
       continue;
     }
     char s[500];
     char s2[500];
-    for(int j = 0;j<strlen(f[i].name);j++) {
+    for (int j = 0; j < strlen(f[i].name); j++) {
       f[i].name[j] = tosmaller(f[i].name[j]);
     }
-    printf(" -> %s\n",f[i].name);
-    sprintf(s,"tcc/include/%s",f[i].name);
-    sprintf(s2,"tcc/include/%s",f[i].name);
-    copy_drive(d,s,s2);
+    printf(" -> %s\n", f[i].name);
+    sprintf(s, "tcc/include/%s", f[i].name);
+    sprintf(s2, "tcc/include/%s", f[i].name);
+    copy_drive(d, s, s2);
   }
   printf("last, build crti.c\n");
   char buf[255];
-  sprintf(buf,"tcc.bin -c crti.c -o %c:\\tcc\\crt\\crti.o",d);
-  printf("execute: %s\n",buf);
+  sprintf(buf, "tcc.bin -c crti.c -o %c:\\tcc\\crt\\crti.o", d);
+  printf("execute: %s\n", buf);
   system(buf);
 }

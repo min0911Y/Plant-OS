@@ -54,6 +54,17 @@
     "lauxlib.h": "c",
     "lualib.h": "c",
     "api.h": "c",
-    "renderer.h": "c"
+    "renderer.h": "c",
+    "sdl.h": "c",
+    "sdl_render.h": "c",
+    "sdl_config_minimal.h": "c",
+    "sdl_platform.h": "c",
+    "sdl_internal.h": "c",
+    "array": "c",
+    "format": "c",
+    "vector": "c",
+    "xhash": "c",
+    "xtree": "c",
+    "sdl_log.h": "c"
   }
 }

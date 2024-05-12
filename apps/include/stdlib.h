@@ -11,7 +11,7 @@ extern "C" {
 #define RAND_MAX 32767
 void putch(char ch);
 unsigned int getch();
-void *malloc(int size);
+void *malloc(size_t size);
 void free(void *p);
 void *realloc(void *ptr, uint32_t size);
 void qsort (void *, size_t, size_t, int (*)(const void *, const void *));
@@ -24,7 +24,7 @@ int atoi(const char * nptr);
 int abs(int a);
 double atof(const char *s);
 void atexit(void (*func)(void));
-void *calloc(size_t m, size_t n) ;
+void *calloc(int num, size_t size) ;
 #define EXIT_SUCCESS 0
 #define EXIT_FAILURE 1
 #ifdef __cplusplus

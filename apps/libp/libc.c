@@ -409,17 +409,17 @@ static size_t mal0_clear(char *p, size_t n) {
 
 static int allzerop(void *p) { return 0; }
 
-void *calloc(size_t m, size_t n) {
-  if (n && m > (size_t)-1 / n) {
-    return 0;
-  }
-  n *= m;
-  void *p = malloc(n);
-  if (!p || (!allzerop(p)))
-    return p;
-  n = mal0_clear(p, n);
-  return memset(p, 0, n);
-}
+// void *calloc(size_t m, size_t n) {
+//   if (n && m > (size_t)-1 / n) {
+//     return 0;
+//   }
+//   n *= m;
+//   void *p = malloc(n);
+//   if (!p || (!allzerop(p)))
+//     return p;
+//   n = mal0_clear(p, n);
+//   return memset(p, 0, n);
+// }
 #define BITOP(a, b, op)                                                        \
   ((a)[(size_t)(b) / (8 * sizeof *(a))] op(size_t) 1                           \
    << ((size_t)(b) % (8 * sizeof *(a))))
@@ -2249,14 +2249,14 @@ int atoi(const char *nptr) { return (int)strtol(nptr, NULL, 10); }
 //   // printf("_Znwj:%d\n", size);
 //   return malloc(size);
 // }
-void *realloc(void *ptr, uint32_t size) {
-  void *new = malloc(size);
-  if (ptr) {
-    memcpy(new, ptr, *(int *)((int)ptr - 4));
-    free(ptr);
-  }
-  return new;
-}
+// void *realloc(void *ptr, uint32_t size) {
+//   void *new = malloc(size);
+//   if (ptr) {
+//     memcpy(new, ptr, *(int *)((int)ptr - 4));
+//     free(ptr);
+//   }
+//   return new;
+// }
 double scalbn(double x, int n) {
   union {
     double f;
@@ -4779,7 +4779,7 @@ void mem_free(memory *mem, void *p, uint32_t size) {
   }
 }
 void show_mem(memory *mem) {
-  printf("----------------\n");
+  logkf("----------------\n");
   freeinfo *finf = mem->freeinf;
   while (finf) {
     for (int i = 0; i < FREE_MAX_NUM; i++) {
@@ -4787,15 +4787,14 @@ void show_mem(memory *mem) {
         break;
       }
 
-      printf("START: %08x END: %08x SIZE: %08x Bytes\n", finf->f[i].start,
+      logkf("START: %08x END: %08x SIZE: %08x Bytes\n", finf->f[i].start,
              finf->f[i].end, finf->f[i].end - finf->f[i].start);
             if( (finf->f[i].start & 0xfff) != 0) {
-        for(;;);
       }
     }
     finf = finf->next;
   }
-  printf("----------------\n");
+  logkf("----------------\n");
 }
 static unsigned div_round_up(unsigned num, unsigned size) {
   return (num + size - 1) / size;
@@ -4805,10 +4804,12 @@ void *mm_alloc(uint32_t size) {
 retry:
   a = mem_alloc(mm, size);
   if (!a) {
-    sbrk(size);
-    mem_free(mm, alloc_start + total_size, size);
-    total_size += size;
-  //  show_mem(mm);
+    int sz = (size + 0xfff) & 0xfffff000;
+    logkf("%08x\n",sz);
+    sbrk(sz);
+    mem_free(mm, alloc_start + total_size, sz);
+    total_size += sz;
+    show_mem(mm);
     goto retry;
   }
   return a;
@@ -4818,11 +4819,11 @@ void mm_free(uint32_t addr, uint32_t size) {
   mem_free(mm, addr, size);
 }
 void *mem_alloc_nb(memory *mem, uint32_t size, uint32_t n) {
-  size = (size + 0xfff) & 0xfffff000;
+  size = (size + 0xf) & 0xfffffff0;
   return mm_alloc(size);
 }
 void mem_free_nb(memory *mem, void *p, uint32_t size, uint32_t n) {
-  size = (size + 0xfff) & 0xfffff000;
+  size = (size + 0xf) & 0xfffffff0;
   mm_free(p, size);
 }
 memory *memory_init(uint32_t start, uint32_t size) {
@@ -4868,41 +4869,31 @@ memory *memory_init(uint32_t start, uint32_t size) {
 }
 char flag = 0;
 void init_mem() {
-  //sbrk(128*1024*1024);
-  alloc_start = api_malloc(1);
-  mm = memory_init(alloc_start, api_heapsize());
-  total_size = api_heapsize();
-  //  printf("total size = %08x\n",total_size);
-  flag = 1;
+ abi_alloc_init();
 }
 
-void *malloc(int size) {
-  if (flag) {
-    void *p = mem_alloc_nb(mm, size + sizeof(int), 0x1000);
-    *(int *)p = size;
-    return (char *)p + sizeof(int);
-  } else {
-    return __builtin_alloca(size);
-  }
-}
-void free(void *p) {
-  // printf("free\n");
-  if (p == NULL)
-    return;
-  int size = *(int *)((char *)p - sizeof(int));
-  mem_free_nb(mm, (char *)p - sizeof(int), size + sizeof(int), 0x1000);
-}
-struct finfo_block *api_listfile(char *path);
+// void *malloc(int size) {
+//   if (flag) {
+//  //   logkf("malloc %d\n",size);
+//     void *p = mem_alloc_nb(mm, size + sizeof(int), 128);
+//     *(int *)p = size;
+//     return (char *)p + sizeof(int);
+//   } else {
+//     return __builtin_alloca(size);
+//   }
+// }
+// void free(void *p) {
+//   // printf("free\n");
+//   if (p == NULL)
+//     return;
+//   int size = *(int *)((char *)p - sizeof(int));
+//   mem_free_nb(mm, (char *)p - sizeof(int), size + sizeof(int), 128);
+// }
+struct finfo_block *api_listfile(struct finfo_block *r,char *path);
 struct finfo_block *listfile(char *path) {
-  struct finfo_block *r;
-RETRY:
-  r = api_listfile(path);
-  if(r) return r;
-  sbrk(0x1000);
-  //printf("sbrk for listfile\n");
-  mem_free(mm, alloc_start + total_size, 0x1000);
-  total_size += 0x1000;
-  goto RETRY;
+  struct finfo_block *r = (struct finfo_block *)malloc(255*sizeof(struct finfo_block));
+  api_listfile(r,path);
+  return r;
 }
 int fseek(FILE *fp, int offset, int whence) {
   if (whence == 0) {
@@ -6028,4 +6019,8 @@ float tanf(float x)
 	/* argument reduction */
 	n = __rem_pio2f(x, &y);
 	return __tandf(y, n&1);
+}
+int isblank(int c)
+{
+	return (c == ' ' || c == '\t');
 }

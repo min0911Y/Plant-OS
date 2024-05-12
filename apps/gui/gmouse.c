@@ -64,6 +64,11 @@ void gmouse(gmouse_t *gmouse) {
   start_keyboard_message();
   drop = NULL;
   logkf("GMOUSE ID = %d\n", NowTaskID());
+  unsigned new = 0;
+  unsigned old = 0;
+  unsigned last_left = 0;
+  unsigned last_right = 0;
+  window_t *choice = NULL;
   for (;;) {
     // logkf("%d\n",mouse_dat_status());
     if (mouse_dat_status() == 0 && key_press_status() == 0 &&
@@ -84,28 +89,29 @@ void gmouse(gmouse_t *gmouse) {
           gmouse->click_button_last = NULL;
           gmouse->click_textbox_last = NULL;
 
-          if (!drop)
+          if (!drop) {
             for (int top = gmouse->sht->ctl->top - 1; top != 0; top--) {
-              for (int i = 1; list_search_by_count(
-                                  i, gmouse->desktop->window_list) != NULL;
-                   i++) {
-                window_t *w = (window_t *)list_search_by_count(
-                                  i, gmouse->desktop->window_list)
-                                  ->val;
-                if (Collision(w->x, w->y, w->xsize, w->ysize, gmouse->x,
-                              gmouse->y) &&
-                    w->sht->height == top) {
-                  // logk("call\n");
-                  gmouse->click_left = w;
-                  if (w->handle_left != NULL) {
-                    w->handle_left(w, gmouse);
-                  }
-                  top = 1;
-                  break;
+             // logkf("%d\n",top);
+              if (Collision(gmouse->sht->ctl->sheets[top]->vx0,
+                            gmouse->sht->ctl->sheets[top]->vy0,
+                            gmouse->sht->ctl->sheets[top]->bxsize,
+                            gmouse->sht->ctl->sheets[top]->bysize, gmouse->x,
+                            gmouse->y)) {
+                if (gmouse->sht->ctl->sheets[top]->wnd == NULL)
+                  continue;
+                gmouse->click_left = gmouse->sht->ctl->sheets[top]->wnd;
+                if (gmouse->sht->ctl->sheets[top]->wnd->handle_left != NULL) {
+                  gmouse->sht->ctl->sheets[top]->wnd->handle_left(
+                      gmouse->sht->ctl->sheets[top]->wnd, gmouse);
                 }
+                top = 1;
+                if (gmouse->sht->ctl->sheets[top]->wnd->tid) {
+                  new = gmouse->sht->ctl->sheets[top]->wnd->tid;
+                }
+                break;
               }
             }
-          else
+          } else
             drop();
         } else if ((mdec.btn & 0x02) != 0) {
           drop = NULL;
@@ -114,22 +120,23 @@ void gmouse(gmouse_t *gmouse) {
           gmouse->click_right = NULL;
           gmouse->stay = NULL;
           for (int top = gmouse->sht->ctl->top - 1; top != 0; top--) {
-            for (int i = 1;
-                 list_search_by_count(i, gmouse->desktop->window_list) != NULL;
-                 i++) {
-              window_t *w = (window_t *)list_search_by_count(
-                                i, gmouse->desktop->window_list)
-                                ->val;
-              if (Collision(w->x, w->y, w->xsize, w->ysize, gmouse->x,
-                            gmouse->y) &&
-                  w->sht->height == top) {
-                gmouse->click_right = w;
-                if (w->handle_right != NULL) {
-                  w->handle_right(w, gmouse);
-                }
-                top = 1;
-                break;
+            if (Collision(gmouse->sht->ctl->sheets[top]->vx0,
+                          gmouse->sht->ctl->sheets[top]->vy0,
+                          gmouse->sht->ctl->sheets[top]->bxsize,
+                          gmouse->sht->ctl->sheets[top]->bysize, gmouse->x,
+                          gmouse->y)) {
+              if (gmouse->sht->ctl->sheets[top]->wnd == NULL)
+                continue;
+              gmouse->click_right = gmouse->sht->ctl->sheets[top]->wnd;
+              if (gmouse->sht->ctl->sheets[top]->wnd->handle_right != NULL) {
+                gmouse->sht->ctl->sheets[top]->wnd->handle_right(
+                    gmouse->sht->ctl->sheets[top]->wnd, gmouse);
               }
+              top = 1;
+              if (gmouse->sht->ctl->sheets[top]->wnd->tid) {
+                new = gmouse->sht->ctl->sheets[top]->wnd->tid;
+              }
+              break;
             }
           }
         } else if ((mdec.btn & 0x04) != 0) {
@@ -142,23 +149,24 @@ void gmouse(gmouse_t *gmouse) {
           gmouse->stay = NULL;
           // logkf("%p\n",gmouse->desktop->window_list);
           for (int top = gmouse->sht->ctl->top - 1; top != 0; top--) {
-            for (int i = 1;
-                 list_search_by_count(i, gmouse->desktop->window_list) != NULL;
-                 i++) {
-              window_t *w = (window_t *)list_search_by_count(
-                                i, gmouse->desktop->window_list)
-                                ->val;
-              //   logkf("w = %p\n",w);
-              if (Collision(w->x, w->y, w->xsize, w->ysize, gmouse->x,
-                            gmouse->y) &&
-                  w->sht->height == top) {
-                gmouse->stay = w;
-                if (w->handle_stay != NULL) {
-                  w->handle_stay(w, gmouse);
-                }
-                top = 1;
-                break;
+            if (Collision(gmouse->sht->ctl->sheets[top]->vx0,
+                          gmouse->sht->ctl->sheets[top]->vy0,
+                          gmouse->sht->ctl->sheets[top]->bxsize,
+                          gmouse->sht->ctl->sheets[top]->bysize, gmouse->x,
+                          gmouse->y)) {
+              if (gmouse->sht->ctl->sheets[top]->wnd == NULL)
+                continue;
+              gmouse->stay = gmouse->sht->ctl->sheets[top]->wnd;
+
+              if (gmouse->sht->ctl->sheets[top]->wnd->handle_stay != NULL) {
+                gmouse->sht->ctl->sheets[top]->wnd->handle_stay(
+                    gmouse->sht->ctl->sheets[top]->wnd, gmouse);
               }
+              if (gmouse->sht->ctl->sheets[top]->wnd->tid) {
+                new = gmouse->sht->ctl->sheets[top]->wnd->tid;
+              }
+              top = 1;
+              break;
             }
           }
         }
@@ -179,14 +187,21 @@ void gmouse(gmouse_t *gmouse) {
     } else if (key_press_status() != 0) {
 
       window_t *r = NULL;
-      for (int i = 1;
-           list_search_by_count(i, gmouse->desktop->window_list) != NULL; i++) {
-        window_t *w =
-            (window_t *)list_search_by_count(i, gmouse->desktop->window_list)
-                ->val;
+      for (int i = 1;; i++) {
+        List *lw =
+            (window_t *)list_search_by_count(i, gmouse->desktop->window_list);
+        window_t *w;
+        if (lw == NULL) {
+          break;
+        } else {
+          w = lw->val;
+        }
         //   logkf("w = %p\n",w);
         if (w->sht->height == gmouse->sht->ctl->top - 1) {
           r = w;
+          if (w->tid) {
+            new = w->tid;
+          }
           break;
         }
       }
@@ -200,14 +215,21 @@ void gmouse(gmouse_t *gmouse) {
       }
     } else if (key_up_status() != 0) {
       window_t *r = NULL;
-      for (int i = 1;
-           list_search_by_count(i, gmouse->desktop->window_list) != NULL; i++) {
-        window_t *w =
-            (window_t *)list_search_by_count(i, gmouse->desktop->window_list)
-                ->val;
+      for (int i = 1;; i++) {
+        List *lw =
+            (window_t *)list_search_by_count(i, gmouse->desktop->window_list);
+        window_t *w;
+        if (lw == NULL) {
+          break;
+        } else {
+          w = lw->val;
+        }
         //   logkf("w = %p\n",w);
         if (w->sht->height == gmouse->sht->ctl->top - 1) {
           r = w;
+          if (w->tid) {
+            new = w->tid;
+          }
           break;
         }
       }
@@ -217,6 +239,14 @@ void gmouse(gmouse_t *gmouse) {
       }
     }
     // api_yield();
+    if (old && old != new)
+      task_set_level_normal(old);
+    if (new) {
+      old = new;
+      new = 0;
+      // logkf("SET %d\n",old);
+      task_set_level_higher(old);
+    }
   }
 }
 void draw_mouse_cursor(vram_t *mouse, int bc) {

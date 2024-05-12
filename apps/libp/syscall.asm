@@ -14,7 +14,7 @@ GLOBAL haveMsg,PhyMemGetByte,GetMessageAll,PhyMemSetByte,format,api_heapsize,api
 GLOBAL get_hour_hex,get_min_hex,get_sec_hex,get_day_of_month,get_day_of_week,get_mon_hex,get_year,AddThread,init_float
 GLOBAL TaskLock,TaskUnlock,SubThread,set_mode,VBEDraw_Px,VBEGet_Px,VBEGetBuffer,VBESetBuffer,roll,VBEDraw_Box,api_listfile
 GLOBAL vfs_check_mount,vfs_mount,vfs_change_disk,vfs_delfile,vfs_change_path,tty_start_cur_moving,tty_stop_cur_moving,vfs_unmount_disk,logk
-GLOBAL tty_get_xsize,tty_get_ysize,api_rename,mouse_support,signal,fork,waittid,do_test,mouse_enable,mouse_dat_status,mouse_dat_get,api_yield,return_to_app,set_rt,set_custom_handler,mem_map
+GLOBAL tty_get_xsize,tty_get_ysize,api_rename,mouse_support,signal,fork,waittid,do_test,mouse_enable,mouse_dat_status,mouse_dat_get,api_yield,return_to_app,set_rt,set_custom_handler,mem_map,task_set_level_higher,task_set_level_normal
 [SECTION .text]
 return_to_app:
   popa
@@ -969,10 +969,15 @@ sbrk:
 api_listfile:
 push	ebx
 push	edx
+push    ecx
+push    eax
 mov	eax,0x1a
 mov	ebx,0x06
-mov edx,[ss:esp+4+8]
+mov ecx,[ss:esp+4+16]
+mov edx,[ss:esp+8+16]
 int 36h
+pop eax
+pop ecx
 pop edx
 pop ebx
 ret
@@ -1233,3 +1238,21 @@ mem_map:
     pop ebx
     pop eax
     ret
+task_set_level_higher:
+	push eax
+	push ebx
+	mov eax,0x58
+	mov ebx,[esp + 4+ 8]
+	int 0x36
+	pop ebx
+	pop eax
+	ret
+task_set_level_normal:
+	push eax
+	push ebx
+	mov eax,0x59
+	mov ebx,[esp + 4+ 8]
+	int 0x36
+	pop ebx
+	pop eax
+	ret

@@ -115,7 +115,7 @@ window_t *create_window(desktop_t *desktop, char *title, int xsize, int ysize,
   res->title = malloc(strlen(title) + 1);
   strcpy(res->title, title);
   res->sht = sheet_alloc(desktop->shtctl);
-  res->tid = tid;
+  res->tid = 0;
   res->display = display_window;
   res->hide = hide_window;
   res->draw = draw_window;
@@ -127,6 +127,7 @@ window_t *create_window(desktop_t *desktop, char *title, int xsize, int ysize,
   res->close = close_window;
   res->console = NULL;
   res->super_window = NULL;
+  res->sht->wnd = res;
   list_add_val((uintptr_t)res, desktop->window_list);
 
   sheet_setbuf(res->sht, res->vram, xsize, ysize, -1);

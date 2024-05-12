@@ -14,4 +14,5 @@ int window_get_key_press_data(window_t wnd);
 int window_get_key_press_status(window_t wnd);
 int window_get_key_up_data(window_t wnd);
 int window_get_key_up_status(window_t wnd);
+
 #endif
