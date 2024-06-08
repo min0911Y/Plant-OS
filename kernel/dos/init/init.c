@@ -85,6 +85,7 @@ void sysinit(void) {
   init_vfs();
   
   Register_fat_fileSys();
+  init_iso9660();
   reg_pfs();
   pf_set(memsize);
   init_acpi();

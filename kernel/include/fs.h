@@ -1,6 +1,8 @@
 #ifndef _FS_H
 #define _FS_H
 #include <define.h>
+// iso9660.c
+void init_iso9660();
 // fat.c
 void Register_fat_fileSys();
 // file.c
