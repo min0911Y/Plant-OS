@@ -2,7 +2,6 @@
 *.bin
 *.coff
 *.dbg
-*.dep
 *.exe
 *.com
 *.lib
@@ -41,7 +40,6 @@ cscope*
 tags
 TAGS
 /*.1
-/Makefile
 /asm/directbl.c
 /asm/directbl.h
 /asm/directiv.h
