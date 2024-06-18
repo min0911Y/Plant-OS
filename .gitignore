@@ -7,7 +7,9 @@ Loader/out/*
 apps/out/*
 apps/doomgeneric/*.o
 apps/sdl2/*.o
+apps/sdl2_old/*.o
 !apps/out/.gitkeep
 kernel/*.img
+!apps/nasm-master/Makefile.dep
 c.py
 cloc.exe
