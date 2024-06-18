@@ -10,7 +10,11 @@ extern struct PAGE_INFO *pages;
 void task_app() {
   char *filename;
   while (!current_task()->line)
-    ;
+    {
+      io_sti();
+      task_next();
+      //printk("%d\n",current_task()->line);
+    }
   unsigned *r = current_task()->line;
   filename = r[0];
   current_task()->line = r[1];
@@ -21,6 +25,7 @@ void task_app() {
   char *mfifo = (char *)page_malloc_one();
   char *kbuf = (char *)page_malloc_one();
   char *mbuf = (char *)page_malloc_one();
+
   fifo8_init((struct FIFO8 *)kfifo, 4096, (unsigned char *)kbuf);
   fifo8_init((struct FIFO8 *)mfifo, 4096, (unsigned char *)mbuf);
   task_set_fifo(current_task(), (struct FIFO8 *)kfifo, (struct FIFO8 *)mfifo);
@@ -235,7 +240,6 @@ void task_to_user_mode_elf(char *filename) {
   unsigned alloc_addr = (elf32_get_max_vaddr(p) & 0xfffff000) + 0x1000;
   unsigned pg = div_round_up(*(current_task()->alloc_size), 0x1000);
   for (int i = 0; i < pg + 128 * 4; i++) {
-    // logk("link %08x\n",alloc_addr + i * 0x1000);
     page_link(alloc_addr + i * 0x1000);
   }
   unsigned alloced_esp = alloc_addr + 128 * 0x1000 * 4;

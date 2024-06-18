@@ -1,6 +1,6 @@
 // 多任务重构 -- mtask.c (区别与以前的多任务)
 #include <dos.h>
-#define STACK_SIZE 256 * 1024
+#define STACK_SIZE 1024 * 1024
 void free_pde(unsigned addr);
 char default_drive, default_drive_number;
 static char flags_once = false;
@@ -73,14 +73,13 @@ bool task_check_train(mtask *task) {
 extern mtask *mouse_use_task;
 void task_next() {
   // io_sti();
-  if (mtask_stop_flag && next_set == NULL)
-    return;
   if (current->running < current->timeout - 1 && current->state == RUNNING &&
       next_set == NULL) {
     current->running++;
     return; // 不需要调度，当前时间片仍然属于你
   }
-  current->running = 0;
+  if (!next_set)
+    current->running = 0;
   mtask *next = NULL;
   int i;
   mtask *j = NULL;
@@ -121,14 +120,10 @@ void task_next() {
     }
   OK:
     if (p->urgent) {
-      if (next->urgent && p->jiffies < next->jiffies) {
-        next = p;
-      } else {
-        next = p;
-      }
-      continue;
+      next = p;
+      break;
     }
-    if (!next || p->jiffies < next->jiffies)
+    if (!next || p->jiffies < next->jiffies || p->running)
       if ((!task_check_train(next)) ||
           (task_check_train(next) && task_check_train(p))) {
         next = p;
@@ -157,7 +152,7 @@ H:
   if (current_task()->state == WILL_EMPTY) {
     current_task()->state = READY;
   }
-  // logk("run %d\n",next->tid);
+  
   task_switch(next); // 调度
 }
 

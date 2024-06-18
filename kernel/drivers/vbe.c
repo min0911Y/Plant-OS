@@ -112,6 +112,8 @@ unsigned set_mode(int width, int height, int bpp) {
       SwitchVBEMode(mode[c]);
       struct VBEINFO *v = VBEINFO_ADDRESS;
       return v->vram;
+    } else {
+   //   printk("%dx%dx%d\n",info->width,info->height,info->bitsPerPixel);
     }
   }
   return -1;

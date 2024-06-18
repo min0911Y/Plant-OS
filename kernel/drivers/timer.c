@@ -82,7 +82,9 @@ void timer_settime(struct TIMER *timer, unsigned int timeout) {
 }
 void usleep(uint64_t nano);
 void sleep(unsigned long long s) {
-  usleep(s*1000000);
+  s /= 10;
+  uint32_t n = timerctl.count;
+  while(timerctl.count - n < s);
 }
 
 uint32_t mt2flag = 0;

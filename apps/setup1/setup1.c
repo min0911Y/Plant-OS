@@ -17,11 +17,8 @@ void cpy(char *filename,char *filename1) {
   if(filesize(filename) == -1) return;
   int sz = filesize(filename);
   char *buffer = malloc(sz);
-  print("Read\n");
   api_ReadFile(filename,buffer);
-  print("mkfile\n");
   mkfile(filename1);
-  print("Edit\n");
   Edit_File(filename1,buffer,sz,0);
   free(buffer);
 }
@@ -257,7 +254,7 @@ int main() {
   Set_Loading(100);
   int CopyFilesCount = 0;
   Array *step = MST_space_get_array(MST_get_var("step", MST_get_root_space(m)));
-  int all_steps;
+  int all_steps = get_array_len(step);
   for (int i = 0; i < all_steps; i++) {
     if(!do_step(MST_get_space_in_array(m,i,step),m)) {
       break;

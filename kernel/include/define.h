@@ -303,6 +303,7 @@ typedef struct List List;
 #define CHAT_CLIENT_PROT 21538
 
 /* fs.h */
+
 extern uint32_t Path_Addr;
 struct FAT_CACHE {
   unsigned int ADR_DISKIMG;

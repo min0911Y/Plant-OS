@@ -1142,7 +1142,7 @@ void fat_InitFS(struct vfs_t *vfs, uint8_t disk_number) {
                                                  get_dm(vfs).RootMaxFiles * 32);
 
   Disk_Read(0, sec, (void *)get_dm(vfs).ADR_DISKIMG, disk_number);
-
+ 
   get_dm(vfs).fat = malloc(get_dm(vfs).FatMaxTerms * sizeof(int));
   get_dm(vfs).FatClustnoFlags = malloc(get_dm(vfs).FatMaxTerms * sizeof(char));
   read_fat((unsigned char *)(get_dm(vfs).ADR_DISKIMG +

@@ -14,7 +14,7 @@ GLOBAL haveMsg,PhyMemGetByte,GetMessageAll,PhyMemSetByte,format,api_heapsize,api
 GLOBAL get_hour_hex,get_min_hex,get_sec_hex,get_day_of_month,get_day_of_week,get_mon_hex,get_year,AddThread,init_float
 GLOBAL TaskLock,TaskUnlock,SubThread,set_mode,VBEDraw_Px,VBEGet_Px,VBEGetBuffer,VBESetBuffer,roll,VBEDraw_Box,api_listfile
 GLOBAL vfs_check_mount,vfs_mount,vfs_change_disk,vfs_delfile,vfs_change_path,tty_start_cur_moving,tty_stop_cur_moving,vfs_unmount_disk,logk
-GLOBAL tty_get_xsize,tty_get_ysize,api_rename,mouse_support,signal,fork,waittid,do_test,mouse_enable,mouse_dat_status,mouse_dat_get,api_yield,return_to_app,set_rt,set_custom_handler,mem_map,task_set_level_higher,task_set_level_normal
+GLOBAL tty_get_xsize,tty_get_ysize,api_rename,mouse_support,signal,fork,waittid,do_test,mouse_enable,mouse_dat_status,mouse_dat_get,api_yield,return_to_app,set_rt,set_custom_handler,mem_map,task_set_level_higher,task_set_level_normal,use_keyboard
 [SECTION .text]
 return_to_app:
   popa
@@ -1017,6 +1017,12 @@ exec:
 clear:
 	push eax
 	mov eax,0x3a
+	int 0x36
+	pop eax
+	ret
+use_keyboard:
+	push eax
+	mov eax,0x55
 	int 0x36
 	pop eax
 	ret

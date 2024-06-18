@@ -129,7 +129,8 @@ static unsigned msbrk(unsigned size) {
 }
 void abi_alloc_init() {
   alloc_start_addr = api_malloc(1);
-  sz = api_heapsize();
+  sz = 0;
+  sz_left = api_heapsize();
   _bottom = NULL;
   _top = NULL;
   _empty = NULL;
@@ -188,7 +189,8 @@ void *malloc(size_t size) {
       else
         _empty = NextFree(p);
       /* clear data */
-      memset(p, 0, size);
+      //printf("will memset %p\n",memset);
+      __builtin_memset(p, 0, size);
       return p;
     }
     if (grow(len) == 0)

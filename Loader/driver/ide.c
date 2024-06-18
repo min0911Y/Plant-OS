@@ -111,6 +111,7 @@ static void Write(char drive, unsigned char *buffer, unsigned int number,
 }
 void ide_initialize(unsigned int BAR0, unsigned int BAR1, unsigned int BAR2,
                     unsigned int BAR3, unsigned int BAR4) {
+
   ClearMaskIrq(15);
   int j, k, count = 0;
   for (int i = 0; i < 4; i++) {
@@ -226,7 +227,11 @@ void ide_initialize(unsigned int BAR0, unsigned int BAR1, unsigned int BAR2,
              ide_devices[i].Size / 1024 / 2,                        /* Size */
              ide_devices[i].Model);
       strcpy(vd.DriveName, ide_devices[i].Model);
-      vd.flag = 1;
+      if (ide_devices[i].Type == IDE_ATAPI) {
+        vd.flag = 2;
+      } else {
+        vd.flag = 1;
+      }
       vd.Read = Read;
       vd.Write = Write;
       vd.size = ide_devices[i].Size / 2 * 1024;

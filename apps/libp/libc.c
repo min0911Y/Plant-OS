@@ -7,10 +7,9 @@
 #include <string.h>
 #include <syscall.h>
 #include <time.h>
-static inline float eval_as_float(float x)
-{
-	float y = x;
-	return y;
+static inline float eval_as_float(float x) {
+  float y = x;
+  return y;
 }
 
 #define SZ_4K 0x1000
@@ -62,97 +61,90 @@ char *strncpy(char *dest, const char *src, size_t n) {
 
 // memset
 void *memset(void *dest, int c, size_t n) {
-  unsigned char *s = dest;
-  size_t k;
+	unsigned char *s = dest;
+	size_t k;
 
-  /* Fill head and tail with minimal branching. Each
-   * conditional ensures that all the subsequently used
-   * offsets are well-defined and in the dest region. */
+	/* Fill head and tail with minimal branching. Each
+	 * conditional ensures that all the subsequently used
+	 * offsets are well-defined and in the dest region. */
 
-  if (!n)
-    return dest;
-  s[0] = c;
-  s[n - 1] = c;
-  if (n <= 2)
-    return dest;
-  s[1] = c;
-  s[2] = c;
-  s[n - 2] = c;
-  s[n - 3] = c;
-  if (n <= 6)
-    return dest;
-  s[3] = c;
-  s[n - 4] = c;
-  if (n <= 8)
-    return dest;
+	if (!n) return dest;
+	s[0] = c;
+	s[n-1] = c;
+	if (n <= 2) return dest;
+	s[1] = c;
+	s[2] = c;
+	s[n-2] = c;
+	s[n-3] = c;
+	if (n <= 6) return dest;
+	s[3] = c;
+	s[n-4] = c;
+	if (n <= 8) return dest;
 
-  /* Advance pointer to align it at a 4-byte boundary,
-   * and truncate n to a multiple of 4. The previous code
-   * already took care of any head/tail that get cut off
-   * by the alignment. */
+	/* Advance pointer to align it at a 4-byte boundary,
+	 * and truncate n to a multiple of 4. The previous code
+	 * already took care of any head/tail that get cut off
+	 * by the alignment. */
 
-  k = -(uintptr_t)s & 3;
-  s += k;
-  n -= k;
-  n &= -4;
+	k = -(uintptr_t)s & 3;
+	s += k;
+	n -= k;
+	n &= -4;
 
 #ifdef __GNUC__
-  typedef uint32_t __attribute__((__may_alias__)) u32;
-  typedef uint64_t __attribute__((__may_alias__)) u64;
+	typedef uint32_t __attribute__((__may_alias__)) u32;
+	typedef uint64_t __attribute__((__may_alias__)) u64;
 
-  u32 c32 = ((u32)-1) / 255 * (unsigned char)c;
+	u32 c32 = ((u32)-1)/255 * (unsigned char)c;
 
-  /* In preparation to copy 32 bytes at a time, aligned on
-   * an 8-byte bounary, fill head/tail up to 28 bytes each.
-   * As in the initial byte-based head/tail fill, each
-   * conditional below ensures that the subsequent offsets
-   * are valid (e.g. !(n<=24) implies n>=28). */
+	/* In preparation to copy 32 bytes at a time, aligned on
+	 * an 8-byte bounary, fill head/tail up to 28 bytes each.
+	 * As in the initial byte-based head/tail fill, each
+	 * conditional below ensures that the subsequent offsets
+	 * are valid (e.g. !(n<=24) implies n>=28). */
 
-  *(u32 *)(s + 0) = c32;
-  *(u32 *)(s + n - 4) = c32;
-  if (n <= 8)
-    return dest;
-  *(u32 *)(s + 4) = c32;
-  *(u32 *)(s + 8) = c32;
-  *(u32 *)(s + n - 12) = c32;
-  *(u32 *)(s + n - 8) = c32;
-  if (n <= 24)
-    return dest;
-  *(u32 *)(s + 12) = c32;
-  *(u32 *)(s + 16) = c32;
-  *(u32 *)(s + 20) = c32;
-  *(u32 *)(s + 24) = c32;
-  *(u32 *)(s + n - 28) = c32;
-  *(u32 *)(s + n - 24) = c32;
-  *(u32 *)(s + n - 20) = c32;
-  *(u32 *)(s + n - 16) = c32;
+	*(u32 *)(s+0) = c32;
+	*(u32 *)(s+n-4) = c32;
+	if (n <= 8) return dest;
+	*(u32 *)(s+4) = c32;
+	*(u32 *)(s+8) = c32;
+	*(u32 *)(s+n-12) = c32;
+	*(u32 *)(s+n-8) = c32;
+	if (n <= 24) return dest;
+	*(u32 *)(s+12) = c32;
+	*(u32 *)(s+16) = c32;
+	*(u32 *)(s+20) = c32;
+	*(u32 *)(s+24) = c32;
+	*(u32 *)(s+n-28) = c32;
+	*(u32 *)(s+n-24) = c32;
+	*(u32 *)(s+n-20) = c32;
+	*(u32 *)(s+n-16) = c32;
 
-  /* Align to a multiple of 8 so we can fill 64 bits at a time,
-   * and avoid writing the same bytes twice as much as is
-   * practical without introducing additional branching. */
+	/* Align to a multiple of 8 so we can fill 64 bits at a time,
+	 * and avoid writing the same bytes twice as much as is
+	 * practical without introducing additional branching. */
 
-  k = 24 + ((uintptr_t)s & 4);
-  s += k;
-  n -= k;
+	k = 24 + ((uintptr_t)s & 4);
+	s += k;
+	n -= k;
 
-  /* If this loop is reached, 28 tail bytes have already been
-   * filled, so any remainder when n drops below 32 can be
-   * safely ignored. */
+	/* If this loop is reached, 28 tail bytes have already been
+	 * filled, so any remainder when n drops below 32 can be
+	 * safely ignored. */
 
-  u64 c64 = c32 | ((u64)c32 << 32);
-  for (; n >= 32; n -= 32, s += 32) {
-    *(u64 *)(s + 0) = c64;
-    *(u64 *)(s + 8) = c64;
-    *(u64 *)(s + 16) = c64;
-    *(u64 *)(s + 24) = c64;
-  }
+	u64 c64 = c32 | ((u64)c32 << 32);
+	for (; n >= 32; n-=32, s+=32) {
+		*(u64 *)(s+0) = c64;
+		*(u64 *)(s+8) = c64;
+		*(u64 *)(s+16) = c64;
+		*(u64 *)(s+24) = c64;
+	}
 #else
-  /* Pure C fallback with no aliasing violations. */
-  for (; n; n--, s++)
-    *s = c;
+	/* Pure C fallback with no aliasing violations. */
+	for (; n; n--, s++) *s = c;
 #endif
 
-  return dest;
+	return dest;
 }
 // memcmp
 int memcmp(const void *vl, const void *vr, size_t n) {
@@ -348,23 +340,6 @@ size_t strlcpy(char *d, const char *s, size_t n) {
 
   if (!n--)
     goto finish;
-#ifdef __GNUC__
-  typedef size_t __attribute__((__may_alias__)) word;
-  const word *ws;
-  if (((uintptr_t)s & ALIGN) == ((uintptr_t)d & ALIGN)) {
-    for (; ((uintptr_t)s & ALIGN) && n && (*d = *s); n--, s++, d++)
-      ;
-    if (n && *s) {
-      wd = (void *)d;
-      ws = (const void *)s;
-      for (; n >= sizeof(size_t) && !HASZERO(*ws);
-           n -= sizeof(size_t), ws++, wd++)
-        *wd = *ws;
-      d = (void *)wd;
-      s = (const void *)ws;
-    }
-  }
-#endif
   for (; n && (*d = *s); n--, s++, d++)
     ;
   *d = 0;
@@ -428,17 +403,6 @@ char *__strchrnul(const char *s, int c) {
   if (!c)
     return (char *)s + strlen(s);
 
-#ifdef __GNUC__
-  typedef size_t __attribute__((__may_alias__)) word;
-  const word *w;
-  for (; (uintptr_t)s % ALIGN; s++)
-    if (!*s || *(unsigned char *)s == c)
-      return (char *)s;
-  size_t k = ONES * c;
-  for (w = (void *)s; !HASZERO(*w) && !HASZERO(*w ^ k); w++)
-    ;
-  s = (void *)w;
-#endif
   for (; *s && *(unsigned char *)s != c; s++)
     ;
   return (char *)s;
@@ -3012,23 +2976,27 @@ register const char *accept;
 
   return 0;
 }
-#define BITOP1(a,b,op) \
- ((a)[(size_t)(b)/(8*sizeof *(a))] op (size_t)1<<((size_t)(b)%(8*sizeof *(a))))
+#define BITOP1(a, b, op)                                                       \
+  ((a)[(size_t)(b) / (8 * sizeof *(a))] op(size_t) 1                           \
+   << ((size_t)(b) % (8 * sizeof *(a))))
 
-size_t strspn(const char *s, const char *c)
-{
-	const char *a = s;
-	size_t byteset[32/sizeof(size_t)] = { 0 };
+size_t strspn(const char *s, const char *c) {
+  const char *a = s;
+  size_t byteset[32 / sizeof(size_t)] = {0};
 
-	if (!c[0]) return 0;
-	if (!c[1]) {
-		for (; *s == *c; s++);
-		return s-a;
-	}
+  if (!c[0])
+    return 0;
+  if (!c[1]) {
+    for (; *s == *c; s++)
+      ;
+    return s - a;
+  }
 
-	for (; *c && BITOP1(byteset, *(unsigned char *)c, |=); c++);
-	for (; *s && BITOP1(byteset, *(unsigned char *)s, &); s++);
-	return s-a;
+  for (; *c && BITOP1(byteset, *(unsigned char *)c, |=); c++)
+    ;
+  for (; *s && BITOP1(byteset, *(unsigned char *)s, &); s++)
+    ;
+  return s - a;
 }
 int strcoll(const char *str1, const char *str2) { return strcmp(str1, str2); }
 double frexp(double x, int *e) {
@@ -3122,6 +3090,7 @@ char *gets(char *str) {
 }
 int puts(char *str) {
   print(str);
+  putchar('\n');
   return strlen(str);
 }
 #define FLAG_ALTNT_FORM 0x01
@@ -4257,7 +4226,7 @@ int printf(const char *format, ...) {
   char buf[5000];
   va_start(ap, format);
   rv = vsnprintf(buf, ~(size_t)0, format, ap);
-  puts(buf);
+  print(buf);
   va_end(ap);
 
   return rv;
@@ -4693,7 +4662,8 @@ void *mem_alloc_finf(memory *mem, freeinfo *finf, uint32_t size,
   int choice_index = 0;
   int fg = 0;
   int i;
- R: for (i = 0; i < FREE_MAX_NUM; i++) {
+R:
+  for (i = 0; i < FREE_MAX_NUM; i++) {
     if (finf->f[i].start == 0 && finf->f[i].end == 0) {
       break;
     }
@@ -4713,7 +4683,7 @@ void *mem_alloc_finf(memory *mem, freeinfo *finf, uint32_t size,
   if (choice == NULL && fg == 0) {
     quicksort(finf->f, 0, mem_get_all_finf(finf) - 1);
     mem_defragmenter(finf);
-    fg =1;
+    fg = 1;
     goto R;
   } else if (choice == NULL) {
     mem->memerrno = ERRNO_NO_ENOGHT_MEMORY;
@@ -4788,8 +4758,8 @@ void show_mem(memory *mem) {
       }
 
       logkf("START: %08x END: %08x SIZE: %08x Bytes\n", finf->f[i].start,
-             finf->f[i].end, finf->f[i].end - finf->f[i].start);
-            if( (finf->f[i].start & 0xfff) != 0) {
+            finf->f[i].end, finf->f[i].end - finf->f[i].start);
+      if ((finf->f[i].start & 0xfff) != 0) {
       }
     }
     finf = finf->next;
@@ -4805,7 +4775,7 @@ retry:
   a = mem_alloc(mm, size);
   if (!a) {
     int sz = (size + 0xfff) & 0xfffff000;
-    logkf("%08x\n",sz);
+    logkf("%08x\n", sz);
     sbrk(sz);
     mem_free(mm, alloc_start + total_size, sz);
     total_size += sz;
@@ -4868,9 +4838,7 @@ memory *memory_init(uint32_t start, uint32_t size) {
   return mem;
 }
 char flag = 0;
-void init_mem() {
- abi_alloc_init();
-}
+void init_mem() { abi_alloc_init(); }
 
 // void *malloc(int size) {
 //   if (flag) {
@@ -4889,10 +4857,11 @@ void init_mem() {
 //   int size = *(int *)((char *)p - sizeof(int));
 //   mem_free_nb(mm, (char *)p - sizeof(int), size + sizeof(int), 128);
 // }
-struct finfo_block *api_listfile(struct finfo_block *r,char *path);
+struct finfo_block *api_listfile(struct finfo_block *r, char *path);
 struct finfo_block *listfile(char *path) {
-  struct finfo_block *r = (struct finfo_block *)malloc(255*sizeof(struct finfo_block));
-  api_listfile(r,path);
+  struct finfo_block *r =
+      (struct finfo_block *)malloc(512 * sizeof(struct finfo_block));
+  api_listfile(r, path);
   return r;
 }
 int fseek(FILE *fp, int offset, int whence) {
@@ -5164,215 +5133,215 @@ int ungetc(int c, FILE *fp) {
   }
 }
 double atof(const char *s) { return strtod(s, 0); }
-int setenv(const char *name,const char * value,int overwrite) {
-
-}
+int setenv(const char *name, const char *value, int overwrite) {}
 
 static const float atanhi1[] = {
-  4.6364760399e-01, /* atan(0.5)hi 0x3eed6338 */
-  7.8539812565e-01, /* atan(1.0)hi 0x3f490fda */
-  9.8279368877e-01, /* atan(1.5)hi 0x3f7b985e */
-  1.5707962513e+00, /* atan(inf)hi 0x3fc90fda */
+    4.6364760399e-01, /* atan(0.5)hi 0x3eed6338 */
+    7.8539812565e-01, /* atan(1.0)hi 0x3f490fda */
+    9.8279368877e-01, /* atan(1.5)hi 0x3f7b985e */
+    1.5707962513e+00, /* atan(inf)hi 0x3fc90fda */
 };
 
 static const float atanlo1[] = {
-  5.0121582440e-09, /* atan(0.5)lo 0x31ac3769 */
-  3.7748947079e-08, /* atan(1.0)lo 0x33222168 */
-  3.4473217170e-08, /* atan(1.5)lo 0x33140fb4 */
-  7.5497894159e-08, /* atan(inf)lo 0x33a22168 */
+    5.0121582440e-09, /* atan(0.5)lo 0x31ac3769 */
+    3.7748947079e-08, /* atan(1.0)lo 0x33222168 */
+    3.4473217170e-08, /* atan(1.5)lo 0x33140fb4 */
+    7.5497894159e-08, /* atan(inf)lo 0x33a22168 */
 };
 
 static const float aT1[] = {
-  3.3333328366e-01,
- -1.9999158382e-01,
-  1.4253635705e-01,
- -1.0648017377e-01,
-  6.1687607318e-02,
+    3.3333328366e-01,  -1.9999158382e-01, 1.4253635705e-01,
+    -1.0648017377e-01, 6.1687607318e-02,
 };
 
-float atanf(float x)
-{
-	float_t w,s1,s2,z;
-	uint32_t ix,sign;
-	int id;
+float atanf(float x) {
+  float_t w, s1, s2, z;
+  uint32_t ix, sign;
+  int id;
 
-	GET_FLOAT_WORD(ix, x);
-	sign = ix>>31;
-	ix &= 0x7fffffff;
-	if (ix >= 0x4c800000) {  /* if |x| >= 2**26 */
-		if (isnan(x))
-			return x;
-		z = atanhi1[3] + 0x1p-120f;
-		return sign ? -z : z;
-	}
-	if (ix < 0x3ee00000) {   /* |x| < 0.4375 */
-		if (ix < 0x39800000) {  /* |x| < 2**-12 */
-			if (ix < 0x00800000)
-				/* raise underflow for subnormal x */
-				FORCE_EVAL(x*x);
-			return x;
-		}
-		id = -1;
-	} else {
-		x = fabsf(x);
-		if (ix < 0x3f980000) {  /* |x| < 1.1875 */
-			if (ix < 0x3f300000) {  /*  7/16 <= |x| < 11/16 */
-				id = 0;
-				x = (2.0f*x - 1.0f)/(2.0f + x);
-			} else {                /* 11/16 <= |x| < 19/16 */
-				id = 1;
-				x = (x - 1.0f)/(x + 1.0f);
-			}
-		} else {
-			if (ix < 0x401c0000) {  /* |x| < 2.4375 */
-				id = 2;
-				x = (x - 1.5f)/(1.0f + 1.5f*x);
-			} else {                /* 2.4375 <= |x| < 2**26 */
-				id = 3;
-				x = -1.0f/x;
-			}
-		}
-	}
-	/* end of argument reduction */
-	z = x*x;
-	w = z*z;
-	/* break sum from i=0 to 10 aT[i]z**(i+1) into odd and even poly */
-	s1 = z*(aT1[0]+w*(aT1[2]+w*aT1[4]));
-	s2 = w*(aT1[1]+w*aT1[3]);
-	if (id < 0)
-		return x - x*(s1+s2);
-	z = atanhi1[id] - ((x*(s1+s2) - atanlo1[id]) - x);
-	return sign ? -z : z;
+  GET_FLOAT_WORD(ix, x);
+  sign = ix >> 31;
+  ix &= 0x7fffffff;
+  if (ix >= 0x4c800000) { /* if |x| >= 2**26 */
+    if (isnan(x))
+      return x;
+    z = atanhi1[3] + 0x1p-120f;
+    return sign ? -z : z;
+  }
+  if (ix < 0x3ee00000) {   /* |x| < 0.4375 */
+    if (ix < 0x39800000) { /* |x| < 2**-12 */
+      if (ix < 0x00800000)
+        /* raise underflow for subnormal x */
+        FORCE_EVAL(x * x);
+      return x;
+    }
+    id = -1;
+  } else {
+    x = fabsf(x);
+    if (ix < 0x3f980000) {   /* |x| < 1.1875 */
+      if (ix < 0x3f300000) { /*  7/16 <= |x| < 11/16 */
+        id = 0;
+        x = (2.0f * x - 1.0f) / (2.0f + x);
+      } else { /* 11/16 <= |x| < 19/16 */
+        id = 1;
+        x = (x - 1.0f) / (x + 1.0f);
+      }
+    } else {
+      if (ix < 0x401c0000) { /* |x| < 2.4375 */
+        id = 2;
+        x = (x - 1.5f) / (1.0f + 1.5f * x);
+      } else { /* 2.4375 <= |x| < 2**26 */
+        id = 3;
+        x = -1.0f / x;
+      }
+    }
+  }
+  /* end of argument reduction */
+  z = x * x;
+  w = z * z;
+  /* break sum from i=0 to 10 aT[i]z**(i+1) into odd and even poly */
+  s1 = z * (aT1[0] + w * (aT1[2] + w * aT1[4]));
+  s2 = w * (aT1[1] + w * aT1[3]);
+  if (id < 0)
+    return x - x * (s1 + s2);
+  z = atanhi1[id] - ((x * (s1 + s2) - atanlo1[id]) - x);
+  return sign ? -z : z;
 }
 
-
-static const float
-pi1     = 3.1415927410e+00, /* 0x40490fdb */
-pi_lo1  = -8.7422776573e-08; /* 0xb3bbbd2e */
+static const float pi1 = 3.1415927410e+00, /* 0x40490fdb */
+    pi_lo1 = -8.7422776573e-08;            /* 0xb3bbbd2e */
 #define pi pi1
 #define pi_lo pi_lo1
-float atan2f(float y, float x)
-{
-	float z;
-	uint32_t m,ix,iy;
+float atan2f(float y, float x) {
+  float z;
+  uint32_t m, ix, iy;
 
-	if (isnan(x) || isnan(y))
-		return x+y;
-	GET_FLOAT_WORD(ix, x);
-	GET_FLOAT_WORD(iy, y);
-	if (ix == 0x3f800000)  /* x=1.0 */
-		return atanf(y);
-	m = ((iy>>31)&1) | ((ix>>30)&2);  /* 2*sign(x)+sign(y) */
-	ix &= 0x7fffffff;
-	iy &= 0x7fffffff;
+  if (isnan(x) || isnan(y))
+    return x + y;
+  GET_FLOAT_WORD(ix, x);
+  GET_FLOAT_WORD(iy, y);
+  if (ix == 0x3f800000) /* x=1.0 */
+    return atanf(y);
+  m = ((iy >> 31) & 1) | ((ix >> 30) & 2); /* 2*sign(x)+sign(y) */
+  ix &= 0x7fffffff;
+  iy &= 0x7fffffff;
 
-	/* when y = 0 */
-	if (iy == 0) {
-		switch (m) {
-		case 0:
-		case 1: return y;   /* atan(+-0,+anything)=+-0 */
-		case 2: return  pi; /* atan(+0,-anything) = pi */
-		case 3: return -pi; /* atan(-0,-anything) =-pi */
-		}
-	}
-	/* when x = 0 */
-	if (ix == 0)
-		return m&1 ? -pi/2 : pi/2;
-	/* when x is INF */
-	if (ix == 0x7f800000) {
-		if (iy == 0x7f800000) {
-			switch (m) {
-			case 0: return  pi/4; /* atan(+INF,+INF) */
-			case 1: return -pi/4; /* atan(-INF,+INF) */
-			case 2: return 3*pi/4;  /*atan(+INF,-INF)*/
-			case 3: return -3*pi/4; /*atan(-INF,-INF)*/
-			}
-		} else {
-			switch (m) {
-			case 0: return  0.0f;    /* atan(+...,+INF) */
-			case 1: return -0.0f;    /* atan(-...,+INF) */
-			case 2: return  pi; /* atan(+...,-INF) */
-			case 3: return -pi; /* atan(-...,-INF) */
-			}
-		}
-	}
-	/* |y/x| > 0x1p26 */
-	if (ix+(26<<23) < iy || iy == 0x7f800000)
-		return m&1 ? -pi/2 : pi/2;
+  /* when y = 0 */
+  if (iy == 0) {
+    switch (m) {
+    case 0:
+    case 1:
+      return y; /* atan(+-0,+anything)=+-0 */
+    case 2:
+      return pi; /* atan(+0,-anything) = pi */
+    case 3:
+      return -pi; /* atan(-0,-anything) =-pi */
+    }
+  }
+  /* when x = 0 */
+  if (ix == 0)
+    return m & 1 ? -pi / 2 : pi / 2;
+  /* when x is INF */
+  if (ix == 0x7f800000) {
+    if (iy == 0x7f800000) {
+      switch (m) {
+      case 0:
+        return pi / 4; /* atan(+INF,+INF) */
+      case 1:
+        return -pi / 4; /* atan(-INF,+INF) */
+      case 2:
+        return 3 * pi / 4; /*atan(+INF,-INF)*/
+      case 3:
+        return -3 * pi / 4; /*atan(-INF,-INF)*/
+      }
+    } else {
+      switch (m) {
+      case 0:
+        return 0.0f; /* atan(+...,+INF) */
+      case 1:
+        return -0.0f; /* atan(-...,+INF) */
+      case 2:
+        return pi; /* atan(+...,-INF) */
+      case 3:
+        return -pi; /* atan(-...,-INF) */
+      }
+    }
+  }
+  /* |y/x| > 0x1p26 */
+  if (ix + (26 << 23) < iy || iy == 0x7f800000)
+    return m & 1 ? -pi / 2 : pi / 2;
 
-	/* z = atan(|y/x|) with correct underflow */
-	if ((m&2) && iy+(26<<23) < ix)  /*|y/x| < 0x1p-26, x < 0 */
-		z = 0.0;
-	else
-		z = atanf(fabsf(y/x));
-	switch (m) {
-	case 0: return z;              /* atan(+,+) */
-	case 1: return -z;             /* atan(-,+) */
-	case 2: return pi - (z-pi_lo); /* atan(+,-) */
-	default: /* case 3 */
-		return (z-pi_lo) - pi; /* atan(-,-) */
-	}
+  /* z = atan(|y/x|) with correct underflow */
+  if ((m & 2) && iy + (26 << 23) < ix) /*|y/x| < 0x1p-26, x < 0 */
+    z = 0.0;
+  else
+    z = atanf(fabsf(y / x));
+  switch (m) {
+  case 0:
+    return z; /* atan(+,+) */
+  case 1:
+    return -z; /* atan(-,+) */
+  case 2:
+    return pi - (z - pi_lo); /* atan(+,-) */
+  default:                   /* case 3 */
+    return (z - pi_lo) - pi; /* atan(-,-) */
+  }
 }
 #undef pi
 #undef pi_lo
-static const float
-pio2_hi1 = 1.5707962513e+00, /* 0x3fc90fda */
-pio2_lo1 = 7.5497894159e-08, /* 0x33a22168 */
-pS01 =  1.6666586697e-01,
-pS11 = -4.2743422091e-02,
-pS21 = -8.6563630030e-03,
-qS11 = -7.0662963390e-01;
+static const float pio2_hi1 = 1.5707962513e+00, /* 0x3fc90fda */
+    pio2_lo1 = 7.5497894159e-08,                /* 0x33a22168 */
+    pS01 = 1.6666586697e-01, pS11 = -4.2743422091e-02, pS21 = -8.6563630030e-03,
+                   qS11 = -7.0662963390e-01;
 #define pio2_hi pio2_hi1
 #define pio2_lo pio2_lo1
 #define pS0 pS01
 #define pS1 pS11
 #define pS2 pS21
 #define qS1 qS11
-static float R1(float z)
-{
-	float_t p, q;
-	p = z*(pS0+z*(pS1+z*pS2));
-	q = 1.0f+z*qS1;
-	return p/q;
+static float R1(float z) {
+  float_t p, q;
+  p = z * (pS0 + z * (pS1 + z * pS2));
+  q = 1.0f + z * qS1;
+  return p / q;
 }
 #define R R1
-float acosf(float x)
-{
-	float z,w,s,c,df;
-	uint32_t hx,ix;
+float acosf(float x) {
+  float z, w, s, c, df;
+  uint32_t hx, ix;
 
-	GET_FLOAT_WORD(hx, x);
-	ix = hx & 0x7fffffff;
-	/* |x| >= 1 or nan */
-	if (ix >= 0x3f800000) {
-		if (ix == 0x3f800000) {
-			if (hx >> 31)
-				return 2*pio2_hi + 0x1p-120f;
-			return 0;
-		}
-		return 0/(x-x);
-	}
-	/* |x| < 0.5 */
-	if (ix < 0x3f000000) {
-		if (ix <= 0x32800000) /* |x| < 2**-26 */
-			return pio2_hi + 0x1p-120f;
-		return pio2_hi - (x - (pio2_lo-x*R(x*x)));
-	}
-	/* x < -0.5 */
-	if (hx >> 31) {
-		z = (1+x)*0.5f;
-		s = sqrtf(z);
-		w = R(z)*s-pio2_lo;
-		return 2*(pio2_hi - (s+w));
-	}
-	/* x > 0.5 */
-	z = (1-x)*0.5f;
-	s = sqrtf(z);
-	GET_FLOAT_WORD(hx,s);
-	SET_FLOAT_WORD(df,hx&0xfffff000);
-	c = (z-df*df)/(s+df);
-	w = R(z)*s+c;
-	return 2*(df+w);
+  GET_FLOAT_WORD(hx, x);
+  ix = hx & 0x7fffffff;
+  /* |x| >= 1 or nan */
+  if (ix >= 0x3f800000) {
+    if (ix == 0x3f800000) {
+      if (hx >> 31)
+        return 2 * pio2_hi + 0x1p-120f;
+      return 0;
+    }
+    return 0 / (x - x);
+  }
+  /* |x| < 0.5 */
+  if (ix < 0x3f000000) {
+    if (ix <= 0x32800000) /* |x| < 2**-26 */
+      return pio2_hi + 0x1p-120f;
+    return pio2_hi - (x - (pio2_lo - x * R(x * x)));
+  }
+  /* x < -0.5 */
+  if (hx >> 31) {
+    z = (1 + x) * 0.5f;
+    s = sqrtf(z);
+    w = R(z) * s - pio2_lo;
+    return 2 * (pio2_hi - (s + w));
+  }
+  /* x > 0.5 */
+  z = (1 - x) * 0.5f;
+  s = sqrtf(z);
+  GET_FLOAT_WORD(hx, s);
+  SET_FLOAT_WORD(df, hx & 0xfffff000);
+  c = (z - df * df) / (s + df);
+  w = R(z) * s + c;
+  return 2 * (df + w);
 }
 #undef pio2_hi
 #undef pio2_lo
@@ -5382,57 +5351,52 @@ float acosf(float x)
 #undef qS1
 #undef R
 
-
-static const double
-pio22 = 1.570796326794896558e+00;
+static const double pio22 = 1.570796326794896558e+00;
 
 static const float
-/* coefficients for R(x^2) */
-pS02 =  1.6666586697e-01,
-pS12 = -4.2743422091e-02,
-pS22 = -8.6563630030e-03,
-qS12 = -7.0662963390e-01;
+    /* coefficients for R(x^2) */
+    pS02 = 1.6666586697e-01,
+    pS12 = -4.2743422091e-02, pS22 = -8.6563630030e-03,
+    qS12 = -7.0662963390e-01;
 #define pio2 pio22
 
 #define pS0 pS02
 #define pS1 pS12
 #define pS2 pS22
 #define qS1 qS12
-static float R2(float z)
-{
-	float_t p, q;
-	p = z*(pS0+z*(pS1+z*pS2));
-	q = 1.0f+z*qS1;
-	return p/q;
+static float R2(float z) {
+  float_t p, q;
+  p = z * (pS0 + z * (pS1 + z * pS2));
+  q = 1.0f + z * qS1;
+  return p / q;
 }
 #define R R2
 
-float asinf(float x)
-{
-	double s;
-	float z;
-	uint32_t hx,ix;
+float asinf(float x) {
+  double s;
+  float z;
+  uint32_t hx, ix;
 
-	GET_FLOAT_WORD(hx, x);
-	ix = hx & 0x7fffffff;
-	if (ix >= 0x3f800000) {  /* |x| >= 1 */
-		if (ix == 0x3f800000)  /* |x| == 1 */
-			return x*pio2 + 0x1p-120f;  /* asin(+-1) = +-pi/2 with inexact */
-		return 0/(x-x);  /* asin(|x|>1) is NaN */
-	}
-	if (ix < 0x3f000000) {  /* |x| < 0.5 */
-		/* if 0x1p-126 <= |x| < 0x1p-12, avoid raising underflow */
-		if (ix < 0x39800000 && ix >= 0x00800000)
-			return x;
-		return x + x*R(x*x);
-	}
-	/* 1 > |x| >= 0.5 */
-	z = (1 - fabsf(x))*0.5f;
-	s = sqrt(z);
-	x = pio2 - 2*(s+s*R(z));
-	if (hx >> 31)
-		return -x;
-	return x;
+  GET_FLOAT_WORD(hx, x);
+  ix = hx & 0x7fffffff;
+  if (ix >= 0x3f800000) {          /* |x| >= 1 */
+    if (ix == 0x3f800000)          /* |x| == 1 */
+      return x * pio2 + 0x1p-120f; /* asin(+-1) = +-pi/2 with inexact */
+    return 0 / (x - x);            /* asin(|x|>1) is NaN */
+  }
+  if (ix < 0x3f000000) { /* |x| < 0.5 */
+    /* if 0x1p-126 <= |x| < 0x1p-12, avoid raising underflow */
+    if (ix < 0x39800000 && ix >= 0x00800000)
+      return x;
+    return x + x * R(x * x);
+  }
+  /* 1 > |x| >= 0.5 */
+  z = (1 - fabsf(x)) * 0.5f;
+  s = sqrt(z);
+  x = pio2 - 2 * (s + s * R(z));
+  if (hx >> 31)
+    return -x;
+  return x;
 }
 #undef pio2
 #undef pS0
@@ -5441,363 +5405,382 @@ float asinf(float x)
 #undef qS1
 #undef R
 
-float ceilf(float x)
-{
-	union {float f; uint32_t i;} u = {x};
-	int e = (int)(u.i >> 23 & 0xff) - 0x7f;
-	uint32_t m;
+float ceilf(float x) {
+  union {
+    float f;
+    uint32_t i;
+  } u = {x};
+  int e = (int)(u.i >> 23 & 0xff) - 0x7f;
+  uint32_t m;
 
-	if (e >= 23)
-		return x;
-	if (e >= 0) {
-		m = 0x007fffff >> e;
-		if ((u.i & m) == 0)
-			return x;
-		FORCE_EVAL(x + 0x1p120f);
-		if (u.i >> 31 == 0)
-			u.i += m;
-		u.i &= ~m;
-	} else {
-		FORCE_EVAL(x + 0x1p120f);
-		if (u.i >> 31)
-			u.f = -0.0;
-		else if (u.i << 1)
-			u.f = 1.0;
-	}
-	return u.f;
+  if (e >= 23)
+    return x;
+  if (e >= 0) {
+    m = 0x007fffff >> e;
+    if ((u.i & m) == 0)
+      return x;
+    FORCE_EVAL(x + 0x1p120f);
+    if (u.i >> 31 == 0)
+      u.i += m;
+    u.i &= ~m;
+  } else {
+    FORCE_EVAL(x + 0x1p120f);
+    if (u.i >> 31)
+      u.f = -0.0;
+    else if (u.i << 1)
+      u.f = 1.0;
+  }
+  return u.f;
 }
 double copysign(double x, double y) {
-	union {double f; uint64_t i;} ux={x}, uy={y};
-	ux.i &= -1ULL/2;
-	ux.i |= uy.i & 1ULL<<63;
-	return ux.f;
+  union {
+    double f;
+    uint64_t i;
+  } ux = {x}, uy = {y};
+  ux.i &= -1ULL / 2;
+  ux.i |= uy.i & 1ULL << 63;
+  return ux.f;
 }
-float copysignf(float x, float y)
-{
-	union {float f; uint32_t i;} ux={x}, uy={y};
-	ux.i &= 0x7fffffff;
-	ux.i |= uy.i & 0x80000000;
-	return ux.f;
+float copysignf(float x, float y) {
+  union {
+    float f;
+    uint32_t i;
+  } ux = {x}, uy = {y};
+  ux.i &= 0x7fffffff;
+  ux.i |= uy.i & 0x80000000;
+  return ux.f;
 }
 
+static const double c1pio2 = 1 * M_PI_2, /* 0x3FF921FB, 0x54442D18 */
+    c2pio2 = 2 * M_PI_2,                 /* 0x400921FB, 0x54442D18 */
+    c3pio2 = 3 * M_PI_2,                 /* 0x4012D97C, 0x7F3321D2 */
+    c4pio2 = 4 * M_PI_2;                 /* 0x401921FB, 0x54442D18 */
 
-static const double
-c1pio2 = 1*M_PI_2, /* 0x3FF921FB, 0x54442D18 */
-c2pio2 = 2*M_PI_2, /* 0x400921FB, 0x54442D18 */
-c3pio2 = 3*M_PI_2, /* 0x4012D97C, 0x7F3321D2 */
-c4pio2 = 4*M_PI_2; /* 0x401921FB, 0x54442D18 */
+static const double S1 = -0x15555554cbac77.0p-55, /* -0.166666666416265235595 */
+    S2 = 0x111110896efbb2.0p-59,  /*  0.0083333293858894631756 */
+    S3 = -0x1a00f9e2cae774.0p-65, /* -0.000198393348360966317347 */
+    S4 = 0x16cd878c3b46a7.0p-71;  /*  0.0000027183114939898219064 */
 
+float __sindf(double x) {
+  double_t r, s, w, z;
 
-static const double
-S1 = -0x15555554cbac77.0p-55, /* -0.166666666416265235595 */
-S2 =  0x111110896efbb2.0p-59, /*  0.0083333293858894631756 */
-S3 = -0x1a00f9e2cae774.0p-65, /* -0.000198393348360966317347 */
-S4 =  0x16cd878c3b46a7.0p-71; /*  0.0000027183114939898219064 */
-
-float __sindf(double x)
-{
-	double_t r, s, w, z;
-
-	/* Try to optimize for parallel evaluation as in __tandf.c. */
-	z = x*x;
-	w = z*z;
-	r = S3 + z*S4;
-	s = z*x;
-	return (x + s*(S1 + z*S2)) + s*w*r;
+  /* Try to optimize for parallel evaluation as in __tandf.c. */
+  z = x * x;
+  w = z * z;
+  r = S3 + z * S4;
+  s = z * x;
+  return (x + s * (S1 + z * S2)) + s * w * r;
 }
-static const double
-C0  = -0x1ffffffd0c5e81.0p-54, /* -0.499999997251031003120 */
-C1  =  0x155553e1053a42.0p-57, /*  0.0416666233237390631894 */
-C2  = -0x16c087e80f1e27.0p-62, /* -0.00138867637746099294692 */
-C3  =  0x199342e0ee5069.0p-68; /*  0.0000243904487962774090654 */
+static const double C0 = -0x1ffffffd0c5e81.0p-54, /* -0.499999997251031003120 */
+    C1 = 0x155553e1053a42.0p-57,  /*  0.0416666233237390631894 */
+    C2 = -0x16c087e80f1e27.0p-62, /* -0.00138867637746099294692 */
+    C3 = 0x199342e0ee5069.0p-68;  /*  0.0000243904487962774090654 */
 
-float __cosdf(double x)
-{
-	double_t r, w, z;
+float __cosdf(double x) {
+  double_t r, w, z;
 
-	/* Try to optimize for parallel evaluation as in __tandf.c. */
-	z = x*x;
-	w = z*z;
-	r = C2+z*C3;
-	return ((1.0+z*C0) + w*C1) + (w*z)*r;
+  /* Try to optimize for parallel evaluation as in __tandf.c. */
+  z = x * x;
+  w = z * z;
+  r = C2 + z * C3;
+  return ((1.0 + z * C0) + w * C1) + (w * z) * r;
 }
-float cosf(float x)
-{
-	double y;
-	uint32_t ix;
-	unsigned n, sign;
+float cosf(float x) {
+  double y;
+  uint32_t ix;
+  unsigned n, sign;
 
-	GET_FLOAT_WORD(ix, x);
-	sign = ix >> 31;
-	ix &= 0x7fffffff;
+  GET_FLOAT_WORD(ix, x);
+  sign = ix >> 31;
+  ix &= 0x7fffffff;
 
-	if (ix <= 0x3f490fda) {  /* |x| ~<= pi/4 */
-		if (ix < 0x39800000) {  /* |x| < 2**-12 */
-			/* raise inexact if x != 0 */
-			FORCE_EVAL(x + 0x1p120f);
-			return 1.0f;
-		}
-		return __cosdf(x);
-	}
-	if (ix <= 0x407b53d1) {  /* |x| ~<= 5*pi/4 */
-		if (ix > 0x4016cbe3)  /* |x|  ~> 3*pi/4 */
-			return -__cosdf(sign ? x+c2pio2 : x-c2pio2);
-		else {
-			if (sign)
-				return __sindf(x + c1pio2);
-			else
-				return __sindf(c1pio2 - x);
-		}
-	}
-	if (ix <= 0x40e231d5) {  /* |x| ~<= 9*pi/4 */
-		if (ix > 0x40afeddf)  /* |x| ~> 7*pi/4 */
-			return __cosdf(sign ? x+c4pio2 : x-c4pio2);
-		else {
-			if (sign)
-				return __sindf(-x - c3pio2);
-			else
-				return __sindf(x - c3pio2);
-		}
-	}
+  if (ix <= 0x3f490fda) {  /* |x| ~<= pi/4 */
+    if (ix < 0x39800000) { /* |x| < 2**-12 */
+      /* raise inexact if x != 0 */
+      FORCE_EVAL(x + 0x1p120f);
+      return 1.0f;
+    }
+    return __cosdf(x);
+  }
+  if (ix <= 0x407b53d1) { /* |x| ~<= 5*pi/4 */
+    if (ix > 0x4016cbe3)  /* |x|  ~> 3*pi/4 */
+      return -__cosdf(sign ? x + c2pio2 : x - c2pio2);
+    else {
+      if (sign)
+        return __sindf(x + c1pio2);
+      else
+        return __sindf(c1pio2 - x);
+    }
+  }
+  if (ix <= 0x40e231d5) { /* |x| ~<= 9*pi/4 */
+    if (ix > 0x40afeddf)  /* |x| ~> 7*pi/4 */
+      return __cosdf(sign ? x + c4pio2 : x - c4pio2);
+    else {
+      if (sign)
+        return __sindf(-x - c3pio2);
+      else
+        return __sindf(x - c3pio2);
+    }
+  }
 
-	/* cos(Inf or NaN) is NaN */
-	if (ix >= 0x7f800000)
-		return x-x;
+  /* cos(Inf or NaN) is NaN */
+  if (ix >= 0x7f800000)
+    return x - x;
 
-	/* general argument reduction needed */
-	n = __rem_pio2f(x,&y);
-	switch (n&3) {
-	case 0: return  __cosdf(y);
-	case 1: return  __sindf(-y);
-	case 2: return -__cosdf(y);
-	default:
-		return  __sindf(y);
-	}
+  /* general argument reduction needed */
+  n = __rem_pio2f(x, &y);
+  switch (n & 3) {
+  case 0:
+    return __cosdf(y);
+  case 1:
+    return __sindf(-y);
+  case 2:
+    return -__cosdf(y);
+  default:
+    return __sindf(y);
+  }
 }
 
 #define EXP2F_TABLE_BITS 5
 #define EXP2F_POLY_ORDER 3
 extern hidden const struct exp2f_data {
-	uint64_t tab[1 << EXP2F_TABLE_BITS];
-	double shift_scaled;
-	double poly[EXP2F_POLY_ORDER];
-	double shift;
-	double invln2_scaled;
-	double poly_scaled[EXP2F_POLY_ORDER];
+  uint64_t tab[1 << EXP2F_TABLE_BITS];
+  double shift_scaled;
+  double poly[EXP2F_POLY_ORDER];
+  double shift;
+  double invln2_scaled;
+  double poly_scaled[EXP2F_POLY_ORDER];
 } __exp2f_data;
 
 #define N (1 << EXP2F_TABLE_BITS)
 
 const struct exp2f_data __exp2f_data = {
-  /* tab[i] = uint(2^(i/N)) - (i << 52-BITS)
-     used for computing 2^(k/N) for an int |k| < 150 N as
-     double(tab[k%N] + (k << 52-BITS)) */
-  .tab = {
-0x3ff0000000000000, 0x3fefd9b0d3158574, 0x3fefb5586cf9890f, 0x3fef9301d0125b51,
-0x3fef72b83c7d517b, 0x3fef54873168b9aa, 0x3fef387a6e756238, 0x3fef1e9df51fdee1,
-0x3fef06fe0a31b715, 0x3feef1a7373aa9cb, 0x3feedea64c123422, 0x3feece086061892d,
-0x3feebfdad5362a27, 0x3feeb42b569d4f82, 0x3feeab07dd485429, 0x3feea47eb03a5585,
-0x3feea09e667f3bcd, 0x3fee9f75e8ec5f74, 0x3feea11473eb0187, 0x3feea589994cce13,
-0x3feeace5422aa0db, 0x3feeb737b0cdc5e5, 0x3feec49182a3f090, 0x3feed503b23e255d,
-0x3feee89f995ad3ad, 0x3feeff76f2fb5e47, 0x3fef199bdd85529c, 0x3fef3720dcef9069,
-0x3fef5818dcfba487, 0x3fef7c97337b9b5f, 0x3fefa4afa2a490da, 0x3fefd0765b6e4540,
-  },
-  .shift_scaled = 0x1.8p+52 / N,
-  .poly = {
-  0x1.c6af84b912394p-5, 0x1.ebfce50fac4f3p-3, 0x1.62e42ff0c52d6p-1,
-  },
-  .shift = 0x1.8p+52,
-  .invln2_scaled = 0x1.71547652b82fep+0 * N,
-  .poly_scaled = {
-  0x1.c6af84b912394p-5/N/N/N, 0x1.ebfce50fac4f3p-3/N/N, 0x1.62e42ff0c52d6p-1/N,
-  },
+    /* tab[i] = uint(2^(i/N)) - (i << 52-BITS)
+       used for computing 2^(k/N) for an int |k| < 150 N as
+       double(tab[k%N] + (k << 52-BITS)) */
+    .tab =
+        {
+            0x3ff0000000000000, 0x3fefd9b0d3158574, 0x3fefb5586cf9890f,
+            0x3fef9301d0125b51, 0x3fef72b83c7d517b, 0x3fef54873168b9aa,
+            0x3fef387a6e756238, 0x3fef1e9df51fdee1, 0x3fef06fe0a31b715,
+            0x3feef1a7373aa9cb, 0x3feedea64c123422, 0x3feece086061892d,
+            0x3feebfdad5362a27, 0x3feeb42b569d4f82, 0x3feeab07dd485429,
+            0x3feea47eb03a5585, 0x3feea09e667f3bcd, 0x3fee9f75e8ec5f74,
+            0x3feea11473eb0187, 0x3feea589994cce13, 0x3feeace5422aa0db,
+            0x3feeb737b0cdc5e5, 0x3feec49182a3f090, 0x3feed503b23e255d,
+            0x3feee89f995ad3ad, 0x3feeff76f2fb5e47, 0x3fef199bdd85529c,
+            0x3fef3720dcef9069, 0x3fef5818dcfba487, 0x3fef7c97337b9b5f,
+            0x3fefa4afa2a490da, 0x3fefd0765b6e4540,
+        },
+    .shift_scaled = 0x1.8p+52 / N,
+    .poly =
+        {
+            0x1.c6af84b912394p-5,
+            0x1.ebfce50fac4f3p-3,
+            0x1.62e42ff0c52d6p-1,
+        },
+    .shift = 0x1.8p+52,
+    .invln2_scaled = 0x1.71547652b82fep+0 * N,
+    .poly_scaled =
+        {
+            0x1.c6af84b912394p-5 / N / N / N,
+            0x1.ebfce50fac4f3p-3 / N / N,
+            0x1.62e42ff0c52d6p-1 / N,
+        },
 };
 #define N (1 << EXP2F_TABLE_BITS)
 #define InvLn2N __exp2f_data.invln2_scaled
 #define T __exp2f_data.tab
 #define C __exp2f_data.poly_scaled
 
-static inline uint32_t top12(float x)
-{
-	return asuint(x) >> 20;
-}
+static inline uint32_t top12(float x) { return asuint(x) >> 20; }
 
-float expf(float x)
-{
-	uint32_t abstop;
-	uint64_t ki, t;
-	double_t kd, xd, z, r, r2, y, s;
+float expf(float x) {
+  uint32_t abstop;
+  uint64_t ki, t;
+  double_t kd, xd, z, r, r2, y, s;
 
-	xd = (double_t)x;
-	abstop = top12(x) & 0x7ff;
-	if (predict_false(abstop >= top12(88.0f))) {
-		/* |x| >= 88 or x is nan.  */
-		if (asuint(x) == asuint(-INFINITY))
-			return 0.0f;
-		if (abstop >= top12(INFINITY))
-			return x + x;
-		if (x > 0x1.62e42ep6f) /* x > log(0x1p128) ~= 88.72 */
-			return __math_oflowf(0);
-		if (x < -0x1.9fe368p6f) /* x < log(0x1p-150) ~= -103.97 */
-			return __math_uflowf(0);
-	}
+  xd = (double_t)x;
+  abstop = top12(x) & 0x7ff;
+  if (predict_false(abstop >= top12(88.0f))) {
+    /* |x| >= 88 or x is nan.  */
+    if (asuint(x) == asuint(-INFINITY))
+      return 0.0f;
+    if (abstop >= top12(INFINITY))
+      return x + x;
+    if (x > 0x1.62e42ep6f) /* x > log(0x1p128) ~= 88.72 */
+      return __math_oflowf(0);
+    if (x < -0x1.9fe368p6f) /* x < log(0x1p-150) ~= -103.97 */
+      return __math_uflowf(0);
+  }
 
-	/* x*N/Ln2 = k + r with r in [-1/2, 1/2] and int k.  */
-	z = InvLn2N * xd;
+  /* x*N/Ln2 = k + r with r in [-1/2, 1/2] and int k.  */
+  z = InvLn2N * xd;
 
-	/* Round and convert z to int, the result is in [-150*N, 128*N] and
-	   ideally ties-to-even rule is used, otherwise the magnitude of r
-	   can be bigger which gives larger approximation error.  */
+  /* Round and convert z to int, the result is in [-150*N, 128*N] and
+     ideally ties-to-even rule is used, otherwise the magnitude of r
+     can be bigger which gives larger approximation error.  */
 #if TOINT_INTRINSICS
-	kd = roundtoint(z);
-	ki = converttoint(z);
+  kd = roundtoint(z);
+  ki = converttoint(z);
 #else
-# define SHIFT __exp2f_data.shift
-	kd = eval_as_double(z + SHIFT);
-	ki = asuint64(kd);
-	kd -= SHIFT;
+#define SHIFT __exp2f_data.shift
+  kd = eval_as_double(z + SHIFT);
+  ki = asuint64(kd);
+  kd -= SHIFT;
 #endif
-	r = z - kd;
+  r = z - kd;
 
-	/* exp(x) = 2^(k/N) * 2^(r/N) ~= s * (C0*r^3 + C1*r^2 + C2*r + 1) */
-	t = T[ki % N];
-	t += ki << (52 - EXP2F_TABLE_BITS);
-	s = asdouble(t);
-	z = C[0] * r + C[1];
-	r2 = r * r;
-	y = C[2] * r + 1;
-	y = z * r2 + y;
-	y = y * s;
-	return eval_as_float(y);
+  /* exp(x) = 2^(k/N) * 2^(r/N) ~= s * (C0*r^3 + C1*r^2 + C2*r + 1) */
+  t = T[ki % N];
+  t += ki << (52 - EXP2F_TABLE_BITS);
+  s = asdouble(t);
+  z = C[0] * r + C[1];
+  r2 = r * r;
+  y = C[2] * r + 1;
+  y = z * r2 + y;
+  y = y * s;
+  return eval_as_float(y);
 }
-float fabsf(float x)
-{
-	union {float f; uint32_t i;} u = {x};
-	u.i &= 0x7fffffff;
-	return u.f;
+float fabsf(float x) {
+  union {
+    float f;
+    uint32_t i;
+  } u = {x};
+  u.i &= 0x7fffffff;
+  return u.f;
 }
-float floorf(float x)
-{
-	union {float f; uint32_t i;} u = {x};
-	int e = (int)(u.i >> 23 & 0xff) - 0x7f;
-	uint32_t m;
+float floorf(float x) {
+  union {
+    float f;
+    uint32_t i;
+  } u = {x};
+  int e = (int)(u.i >> 23 & 0xff) - 0x7f;
+  uint32_t m;
 
-	if (e >= 23)
-		return x;
-	if (e >= 0) {
-		m = 0x007fffff >> e;
-		if ((u.i & m) == 0)
-			return x;
-		FORCE_EVAL(x + 0x1p120f);
-		if (u.i >> 31)
-			u.i += m;
-		u.i &= ~m;
-	} else {
-		FORCE_EVAL(x + 0x1p120f);
-		if (u.i >> 31 == 0)
-			u.i = 0;
-		else if (u.i << 1)
-			u.f = -1.0;
-	}
-	return u.f;
+  if (e >= 23)
+    return x;
+  if (e >= 0) {
+    m = 0x007fffff >> e;
+    if ((u.i & m) == 0)
+      return x;
+    FORCE_EVAL(x + 0x1p120f);
+    if (u.i >> 31)
+      u.i += m;
+    u.i &= ~m;
+  } else {
+    FORCE_EVAL(x + 0x1p120f);
+    if (u.i >> 31 == 0)
+      u.i = 0;
+    else if (u.i << 1)
+      u.f = -1.0;
+  }
+  return u.f;
 }
-float fmodf(float x, float y)
-{
-	union {float f; uint32_t i;} ux = {x}, uy = {y};
-	int ex = ux.i>>23 & 0xff;
-	int ey = uy.i>>23 & 0xff;
-	uint32_t sx = ux.i & 0x80000000;
-	uint32_t i;
-	uint32_t uxi = ux.i;
+float fmodf(float x, float y) {
+  union {
+    float f;
+    uint32_t i;
+  } ux = {x}, uy = {y};
+  int ex = ux.i >> 23 & 0xff;
+  int ey = uy.i >> 23 & 0xff;
+  uint32_t sx = ux.i & 0x80000000;
+  uint32_t i;
+  uint32_t uxi = ux.i;
 
-	if (uy.i<<1 == 0 || isnan(y) || ex == 0xff)
-		return (x*y)/(x*y);
-	if (uxi<<1 <= uy.i<<1) {
-		if (uxi<<1 == uy.i<<1)
-			return 0*x;
-		return x;
-	}
+  if (uy.i << 1 == 0 || isnan(y) || ex == 0xff)
+    return (x * y) / (x * y);
+  if (uxi << 1 <= uy.i << 1) {
+    if (uxi << 1 == uy.i << 1)
+      return 0 * x;
+    return x;
+  }
 
-	/* normalize x and y */
-	if (!ex) {
-		for (i = uxi<<9; i>>31 == 0; ex--, i <<= 1);
-		uxi <<= -ex + 1;
-	} else {
-		uxi &= -1U >> 9;
-		uxi |= 1U << 23;
-	}
-	if (!ey) {
-		for (i = uy.i<<9; i>>31 == 0; ey--, i <<= 1);
-		uy.i <<= -ey + 1;
-	} else {
-		uy.i &= -1U >> 9;
-		uy.i |= 1U << 23;
-	}
+  /* normalize x and y */
+  if (!ex) {
+    for (i = uxi << 9; i >> 31 == 0; ex--, i <<= 1)
+      ;
+    uxi <<= -ex + 1;
+  } else {
+    uxi &= -1U >> 9;
+    uxi |= 1U << 23;
+  }
+  if (!ey) {
+    for (i = uy.i << 9; i >> 31 == 0; ey--, i <<= 1)
+      ;
+    uy.i <<= -ey + 1;
+  } else {
+    uy.i &= -1U >> 9;
+    uy.i |= 1U << 23;
+  }
 
-	/* x mod y */
-	for (; ex > ey; ex--) {
-		i = uxi - uy.i;
-		if (i >> 31 == 0) {
-			if (i == 0)
-				return 0*x;
-			uxi = i;
-		}
-		uxi <<= 1;
-	}
-	i = uxi - uy.i;
-	if (i >> 31 == 0) {
-		if (i == 0)
-			return 0*x;
-		uxi = i;
-	}
-	for (; uxi>>23 == 0; uxi <<= 1, ex--);
+  /* x mod y */
+  for (; ex > ey; ex--) {
+    i = uxi - uy.i;
+    if (i >> 31 == 0) {
+      if (i == 0)
+        return 0 * x;
+      uxi = i;
+    }
+    uxi <<= 1;
+  }
+  i = uxi - uy.i;
+  if (i >> 31 == 0) {
+    if (i == 0)
+      return 0 * x;
+    uxi = i;
+  }
+  for (; uxi >> 23 == 0; uxi <<= 1, ex--)
+    ;
 
-	/* scale result up */
-	if (ex > 0) {
-		uxi -= 1U << 23;
-		uxi |= (uint32_t)ex << 23;
-	} else {
-		uxi >>= -ex + 1;
-	}
-	uxi |= sx;
-	ux.i = uxi;
-	return ux.f;
+  /* scale result up */
+  if (ex > 0) {
+    uxi -= 1U << 23;
+    uxi |= (uint32_t)ex << 23;
+  } else {
+    uxi >>= -ex + 1;
+  }
+  uxi |= sx;
+  ux.i = uxi;
+  return ux.f;
 }
 
 #define LOGF_TABLE_BITS 4
 #define LOGF_POLY_ORDER 4
 extern hidden const struct logf_data {
-	struct {
-		double invc, logc;
-	} tab[1 << LOGF_TABLE_BITS];
-	double ln2;
-	double poly[LOGF_POLY_ORDER - 1]; /* First order coefficient is 1.  */
+  struct {
+    double invc, logc;
+  } tab[1 << LOGF_TABLE_BITS];
+  double ln2;
+  double poly[LOGF_POLY_ORDER - 1]; /* First order coefficient is 1.  */
 } __logf_data;
 
 const struct logf_data __logf_data = {
-  .tab = {
-  { 0x1.661ec79f8f3bep+0, -0x1.57bf7808caadep-2 },
-  { 0x1.571ed4aaf883dp+0, -0x1.2bef0a7c06ddbp-2 },
-  { 0x1.49539f0f010bp+0, -0x1.01eae7f513a67p-2 },
-  { 0x1.3c995b0b80385p+0, -0x1.b31d8a68224e9p-3 },
-  { 0x1.30d190c8864a5p+0, -0x1.6574f0ac07758p-3 },
-  { 0x1.25e227b0b8eap+0, -0x1.1aa2bc79c81p-3 },
-  { 0x1.1bb4a4a1a343fp+0, -0x1.a4e76ce8c0e5ep-4 },
-  { 0x1.12358f08ae5bap+0, -0x1.1973c5a611cccp-4 },
-  { 0x1.0953f419900a7p+0, -0x1.252f438e10c1ep-5 },
-  { 0x1p+0, 0x0p+0 },
-  { 0x1.e608cfd9a47acp-1, 0x1.aa5aa5df25984p-5 },
-  { 0x1.ca4b31f026aap-1, 0x1.c5e53aa362eb4p-4 },
-  { 0x1.b2036576afce6p-1, 0x1.526e57720db08p-3 },
-  { 0x1.9c2d163a1aa2dp-1, 0x1.bc2860d22477p-3 },
-  { 0x1.886e6037841edp-1, 0x1.1058bc8a07ee1p-2 },
-  { 0x1.767dcf5534862p-1, 0x1.4043057b6ee09p-2 },
-  },
-  .ln2 = 0x1.62e42fefa39efp-1,
-  .poly = {
-  -0x1.00ea348b88334p-2, 0x1.5575b0be00b6ap-2, -0x1.ffffef20a4123p-2,
-  }
-};
+    .tab =
+        {
+            {0x1.661ec79f8f3bep+0, -0x1.57bf7808caadep-2},
+            {0x1.571ed4aaf883dp+0, -0x1.2bef0a7c06ddbp-2},
+            {0x1.49539f0f010bp+0, -0x1.01eae7f513a67p-2},
+            {0x1.3c995b0b80385p+0, -0x1.b31d8a68224e9p-3},
+            {0x1.30d190c8864a5p+0, -0x1.6574f0ac07758p-3},
+            {0x1.25e227b0b8eap+0, -0x1.1aa2bc79c81p-3},
+            {0x1.1bb4a4a1a343fp+0, -0x1.a4e76ce8c0e5ep-4},
+            {0x1.12358f08ae5bap+0, -0x1.1973c5a611cccp-4},
+            {0x1.0953f419900a7p+0, -0x1.252f438e10c1ep-5},
+            {0x1p+0, 0x0p+0},
+            {0x1.e608cfd9a47acp-1, 0x1.aa5aa5df25984p-5},
+            {0x1.ca4b31f026aap-1, 0x1.c5e53aa362eb4p-4},
+            {0x1.b2036576afce6p-1, 0x1.526e57720db08p-3},
+            {0x1.9c2d163a1aa2dp-1, 0x1.bc2860d22477p-3},
+            {0x1.886e6037841edp-1, 0x1.1058bc8a07ee1p-2},
+            {0x1.767dcf5534862p-1, 0x1.4043057b6ee09p-2},
+        },
+    .ln2 = 0x1.62e42fefa39efp-1,
+    .poly = {
+        -0x1.00ea348b88334p-2,
+        0x1.5575b0be00b6ap-2,
+        -0x1.ffffef20a4123p-2,
+    }};
 
 #define T __logf_data.tab
 #define A __logf_data.poly
@@ -5805,222 +5788,217 @@ const struct logf_data __logf_data = {
 #define N (1 << LOGF_TABLE_BITS)
 #define OFF 0x3f330000
 
-float logf(float x)
-{
-	double_t z, r, r2, y, y0, invc, logc;
-	uint32_t ix, iz, tmp;
-	int k, i;
+float logf(float x) {
+  double_t z, r, r2, y, y0, invc, logc;
+  uint32_t ix, iz, tmp;
+  int k, i;
 
-	ix = asuint(x);
-	/* Fix sign of zero with downward rounding when x==1.  */
-	if (1 && predict_false(ix == 0x3f800000))
-		return 0;
-	if (predict_false(ix - 0x00800000 >= 0x7f800000 - 0x00800000)) {
-		/* x < 0x1p-126 or inf or nan.  */
-		if (ix * 2 == 0)
-			return __math_divzerof(1);
-		if (ix == 0x7f800000) /* log(inf) == inf.  */
-			return x;
-		if ((ix & 0x80000000) || ix * 2 >= 0xff000000)
-			return __math_invalidf(x);
-		/* x is subnormal, normalize it.  */
-		ix = asuint(x * 0x1p23f);
-		ix -= 23 << 23;
-	}
+  ix = asuint(x);
+  /* Fix sign of zero with downward rounding when x==1.  */
+  if (1 && predict_false(ix == 0x3f800000))
+    return 0;
+  if (predict_false(ix - 0x00800000 >= 0x7f800000 - 0x00800000)) {
+    /* x < 0x1p-126 or inf or nan.  */
+    if (ix * 2 == 0)
+      return __math_divzerof(1);
+    if (ix == 0x7f800000) /* log(inf) == inf.  */
+      return x;
+    if ((ix & 0x80000000) || ix * 2 >= 0xff000000)
+      return __math_invalidf(x);
+    /* x is subnormal, normalize it.  */
+    ix = asuint(x * 0x1p23f);
+    ix -= 23 << 23;
+  }
 
-	/* x = 2^k z; where z is in range [OFF,2*OFF] and exact.
-	   The range is split into N subintervals.
-	   The ith subinterval contains z and c is near its center.  */
-	tmp = ix - OFF;
-	i = (tmp >> (23 - LOGF_TABLE_BITS)) % N;
-	k = (int32_t)tmp >> 23; /* arithmetic shift */
-	iz = ix - (tmp & 0xff800000);
-	invc = T[i].invc;
-	logc = T[i].logc;
-	z = (double_t)asfloat(iz);
+  /* x = 2^k z; where z is in range [OFF,2*OFF] and exact.
+     The range is split into N subintervals.
+     The ith subinterval contains z and c is near its center.  */
+  tmp = ix - OFF;
+  i = (tmp >> (23 - LOGF_TABLE_BITS)) % N;
+  k = (int32_t)tmp >> 23; /* arithmetic shift */
+  iz = ix - (tmp & 0xff800000);
+  invc = T[i].invc;
+  logc = T[i].logc;
+  z = (double_t)asfloat(iz);
 
-	/* log(x) = log1p(z/c-1) + log(c) + k*Ln2 */
-	r = z * invc - 1;
-	y0 = logc + (double_t)k * Ln2;
+  /* log(x) = log1p(z/c-1) + log(c) + k*Ln2 */
+  r = z * invc - 1;
+  y0 = logc + (double_t)k * Ln2;
 
-	/* Pipelined polynomial evaluation to approximate log1p(r).  */
-	r2 = r * r;
-	y = A[1] * r + A[2];
-	y = A[0] * r2 + y;
-	y = y * r2 + (y0 + r);
-	return eval_as_float(y);
+  /* Pipelined polynomial evaluation to approximate log1p(r).  */
+  r2 = r * r;
+  y = A[1] * r + A[2];
+  y = A[0] * r2 + y;
+  y = y * r2 + (y0 + r);
+  return eval_as_float(y);
 }
 
+float scalbnf(float x, int n) {
+  union {
+    float f;
+    uint32_t i;
+  } u;
+  float_t y = x;
 
-float scalbnf(float x, int n)
-{
-	union {float f; uint32_t i;} u;
-	float_t y = x;
-
-	if (n > 127) {
-		y *= 0x1p127f;
-		n -= 127;
-		if (n > 127) {
-			y *= 0x1p127f;
-			n -= 127;
-			if (n > 127)
-				n = 127;
-		}
-	} else if (n < -126) {
-		y *= 0x1p-126f * 0x1p24f;
-		n += 126 - 24;
-		if (n < -126) {
-			y *= 0x1p-126f * 0x1p24f;
-			n += 126 - 24;
-			if (n < -126)
-				n = -126;
-		}
-	}
-	u.i = (uint32_t)(0x7f+n)<<23;
-	x = y * u.f;
-	return x;
+  if (n > 127) {
+    y *= 0x1p127f;
+    n -= 127;
+    if (n > 127) {
+      y *= 0x1p127f;
+      n -= 127;
+      if (n > 127)
+        n = 127;
+    }
+  } else if (n < -126) {
+    y *= 0x1p-126f * 0x1p24f;
+    n += 126 - 24;
+    if (n < -126) {
+      y *= 0x1p-126f * 0x1p24f;
+      n += 126 - 24;
+      if (n < -126)
+        n = -126;
+    }
+  }
+  u.i = (uint32_t)(0x7f + n) << 23;
+  x = y * u.f;
+  return x;
 }
 
-static const double
-s1pio2 = 1*M_PI_2, /* 0x3FF921FB, 0x54442D18 */
-s2pio2 = 2*M_PI_2, /* 0x400921FB, 0x54442D18 */
-s3pio2 = 3*M_PI_2, /* 0x4012D97C, 0x7F3321D2 */
-s4pio2 = 4*M_PI_2; /* 0x401921FB, 0x54442D18 */
+static const double s1pio2 = 1 * M_PI_2, /* 0x3FF921FB, 0x54442D18 */
+    s2pio2 = 2 * M_PI_2,                 /* 0x400921FB, 0x54442D18 */
+    s3pio2 = 3 * M_PI_2,                 /* 0x4012D97C, 0x7F3321D2 */
+    s4pio2 = 4 * M_PI_2;                 /* 0x401921FB, 0x54442D18 */
 
-float sinf(float x)
-{
-	double y;
-	uint32_t ix;
-	int n, sign;
+float sinf(float x) {
+  double y;
+  uint32_t ix;
+  int n, sign;
 
-	GET_FLOAT_WORD(ix, x);
-	sign = ix >> 31;
-	ix &= 0x7fffffff;
+  GET_FLOAT_WORD(ix, x);
+  sign = ix >> 31;
+  ix &= 0x7fffffff;
 
-	if (ix <= 0x3f490fda) {  /* |x| ~<= pi/4 */
-		if (ix < 0x39800000) {  /* |x| < 2**-12 */
-			/* raise inexact if x!=0 and underflow if subnormal */
-			FORCE_EVAL(ix < 0x00800000 ? x/0x1p120f : x+0x1p120f);
-			return x;
-		}
-		return __sindf(x);
-	}
-	if (ix <= 0x407b53d1) {  /* |x| ~<= 5*pi/4 */
-		if (ix <= 0x4016cbe3) {  /* |x| ~<= 3pi/4 */
-			if (sign)
-				return -__cosdf(x + s1pio2);
-			else
-				return __cosdf(x - s1pio2);
-		}
-		return __sindf(sign ? -(x + s2pio2) : -(x - s2pio2));
-	}
-	if (ix <= 0x40e231d5) {  /* |x| ~<= 9*pi/4 */
-		if (ix <= 0x40afeddf) {  /* |x| ~<= 7*pi/4 */
-			if (sign)
-				return __cosdf(x + s3pio2);
-			else
-				return -__cosdf(x - s3pio2);
-		}
-		return __sindf(sign ? x + s4pio2 : x - s4pio2);
-	}
+  if (ix <= 0x3f490fda) {  /* |x| ~<= pi/4 */
+    if (ix < 0x39800000) { /* |x| < 2**-12 */
+      /* raise inexact if x!=0 and underflow if subnormal */
+      FORCE_EVAL(ix < 0x00800000 ? x / 0x1p120f : x + 0x1p120f);
+      return x;
+    }
+    return __sindf(x);
+  }
+  if (ix <= 0x407b53d1) {   /* |x| ~<= 5*pi/4 */
+    if (ix <= 0x4016cbe3) { /* |x| ~<= 3pi/4 */
+      if (sign)
+        return -__cosdf(x + s1pio2);
+      else
+        return __cosdf(x - s1pio2);
+    }
+    return __sindf(sign ? -(x + s2pio2) : -(x - s2pio2));
+  }
+  if (ix <= 0x40e231d5) {   /* |x| ~<= 9*pi/4 */
+    if (ix <= 0x40afeddf) { /* |x| ~<= 7*pi/4 */
+      if (sign)
+        return __cosdf(x + s3pio2);
+      else
+        return -__cosdf(x - s3pio2);
+    }
+    return __sindf(sign ? x + s4pio2 : x - s4pio2);
+  }
 
-	/* sin(Inf or NaN) is NaN */
-	if (ix >= 0x7f800000)
-		return x - x;
+  /* sin(Inf or NaN) is NaN */
+  if (ix >= 0x7f800000)
+    return x - x;
 
-	/* general argument reduction needed */
-	n = __rem_pio2f(x, &y);
-	switch (n&3) {
-	case 0: return  __sindf(y);
-	case 1: return  __cosdf(y);
-	case 2: return  __sindf(-y);
-	default:
-		return -__cosdf(y);
-	}
+  /* general argument reduction needed */
+  n = __rem_pio2f(x, &y);
+  switch (n & 3) {
+  case 0:
+    return __sindf(y);
+  case 1:
+    return __cosdf(y);
+  case 2:
+    return __sindf(-y);
+  default:
+    return -__cosdf(y);
+  }
 }
 
 static const double T3[] = {
-  0x15554d3418c99f.0p-54, /* 0.333331395030791399758 */
-  0x1112fd38999f72.0p-55, /* 0.133392002712976742718 */
-  0x1b54c91d865afe.0p-57, /* 0.0533812378445670393523 */
-  0x191df3908c33ce.0p-58, /* 0.0245283181166547278873 */
-  0x185dadfcecf44e.0p-61, /* 0.00297435743359967304927 */
-  0x1362b9bf971bcd.0p-59, /* 0.00946564784943673166728 */
+    0x15554d3418c99f.0p-54, /* 0.333331395030791399758 */
+    0x1112fd38999f72.0p-55, /* 0.133392002712976742718 */
+    0x1b54c91d865afe.0p-57, /* 0.0533812378445670393523 */
+    0x191df3908c33ce.0p-58, /* 0.0245283181166547278873 */
+    0x185dadfcecf44e.0p-61, /* 0.00297435743359967304927 */
+    0x1362b9bf971bcd.0p-59, /* 0.00946564784943673166728 */
 };
 
-float __tandf(double x, int odd)
-{
-	double_t z,r,w,s,t,u;
+float __tandf(double x, int odd) {
+  double_t z, r, w, s, t, u;
 
-	z = x*x;
-	/*
-	 * Split up the polynomial into small independent terms to give
-	 * opportunities for parallel evaluation.  The chosen splitting is
-	 * micro-optimized for Athlons (XP, X64).  It costs 2 multiplications
-	 * relative to Horner's method on sequential machines.
-	 *
-	 * We add the small terms from lowest degree up for efficiency on
-	 * non-sequential machines (the lowest degree terms tend to be ready
-	 * earlier).  Apart from this, we don't care about order of
-	 * operations, and don't need to to care since we have precision to
-	 * spare.  However, the chosen splitting is good for accuracy too,
-	 * and would give results as accurate as Horner's method if the
-	 * small terms were added from highest degree down.
-	 */
-	r = T3[4] + z*T3[5];
-	t = T3[2] + z*T3[3];
-	w = z*z;
-	s = z*x;
-	u = T3[0] + z*T3[1];
-	r = (x + s*u) + (s*w)*(t + w*r);
-	return odd ? -1.0/r : r;
+  z = x * x;
+  /*
+   * Split up the polynomial into small independent terms to give
+   * opportunities for parallel evaluation.  The chosen splitting is
+   * micro-optimized for Athlons (XP, X64).  It costs 2 multiplications
+   * relative to Horner's method on sequential machines.
+   *
+   * We add the small terms from lowest degree up for efficiency on
+   * non-sequential machines (the lowest degree terms tend to be ready
+   * earlier).  Apart from this, we don't care about order of
+   * operations, and don't need to to care since we have precision to
+   * spare.  However, the chosen splitting is good for accuracy too,
+   * and would give results as accurate as Horner's method if the
+   * small terms were added from highest degree down.
+   */
+  r = T3[4] + z * T3[5];
+  t = T3[2] + z * T3[3];
+  w = z * z;
+  s = z * x;
+  u = T3[0] + z * T3[1];
+  r = (x + s * u) + (s * w) * (t + w * r);
+  return odd ? -1.0 / r : r;
 }
-static const double
-t1pio2 = 1*M_PI_2, /* 0x3FF921FB, 0x54442D18 */
-t2pio2 = 2*M_PI_2, /* 0x400921FB, 0x54442D18 */
-t3pio2 = 3*M_PI_2, /* 0x4012D97C, 0x7F3321D2 */
-t4pio2 = 4*M_PI_2; /* 0x401921FB, 0x54442D18 */
+static const double t1pio2 = 1 * M_PI_2, /* 0x3FF921FB, 0x54442D18 */
+    t2pio2 = 2 * M_PI_2,                 /* 0x400921FB, 0x54442D18 */
+    t3pio2 = 3 * M_PI_2,                 /* 0x4012D97C, 0x7F3321D2 */
+    t4pio2 = 4 * M_PI_2;                 /* 0x401921FB, 0x54442D18 */
 
-float tanf(float x)
-{
-	double y;
-	uint32_t ix;
-	unsigned n, sign;
+float tanf(float x) {
+  double y;
+  uint32_t ix;
+  unsigned n, sign;
 
-	GET_FLOAT_WORD(ix, x);
-	sign = ix >> 31;
-	ix &= 0x7fffffff;
+  GET_FLOAT_WORD(ix, x);
+  sign = ix >> 31;
+  ix &= 0x7fffffff;
 
-	if (ix <= 0x3f490fda) {  /* |x| ~<= pi/4 */
-		if (ix < 0x39800000) {  /* |x| < 2**-12 */
-			/* raise inexact if x!=0 and underflow if subnormal */
-			FORCE_EVAL(ix < 0x00800000 ? x/0x1p120f : x+0x1p120f);
-			return x;
-		}
-		return __tandf(x, 0);
-	}
-	if (ix <= 0x407b53d1) {  /* |x| ~<= 5*pi/4 */
-		if (ix <= 0x4016cbe3)  /* |x| ~<= 3pi/4 */
-			return __tandf((sign ? x+t1pio2 : x-t1pio2), 1);
-		else
-			return __tandf((sign ? x+t2pio2 : x-t2pio2), 0);
-	}
-	if (ix <= 0x40e231d5) {  /* |x| ~<= 9*pi/4 */
-		if (ix <= 0x40afeddf)  /* |x| ~<= 7*pi/4 */
-			return __tandf((sign ? x+t3pio2 : x-t3pio2), 1);
-		else
-			return __tandf((sign ? x+t4pio2 : x-t4pio2), 0);
-	}
+  if (ix <= 0x3f490fda) {  /* |x| ~<= pi/4 */
+    if (ix < 0x39800000) { /* |x| < 2**-12 */
+      /* raise inexact if x!=0 and underflow if subnormal */
+      FORCE_EVAL(ix < 0x00800000 ? x / 0x1p120f : x + 0x1p120f);
+      return x;
+    }
+    return __tandf(x, 0);
+  }
+  if (ix <= 0x407b53d1) { /* |x| ~<= 5*pi/4 */
+    if (ix <= 0x4016cbe3) /* |x| ~<= 3pi/4 */
+      return __tandf((sign ? x + t1pio2 : x - t1pio2), 1);
+    else
+      return __tandf((sign ? x + t2pio2 : x - t2pio2), 0);
+  }
+  if (ix <= 0x40e231d5) { /* |x| ~<= 9*pi/4 */
+    if (ix <= 0x40afeddf) /* |x| ~<= 7*pi/4 */
+      return __tandf((sign ? x + t3pio2 : x - t3pio2), 1);
+    else
+      return __tandf((sign ? x + t4pio2 : x - t4pio2), 0);
+  }
 
-	/* tan(Inf or NaN) is NaN */
-	if (ix >= 0x7f800000)
-		return x - x;
+  /* tan(Inf or NaN) is NaN */
+  if (ix >= 0x7f800000)
+    return x - x;
 
-	/* argument reduction */
-	n = __rem_pio2f(x, &y);
-	return __tandf(y, n&1);
+  /* argument reduction */
+  n = __rem_pio2f(x, &y);
+  return __tandf(y, n & 1);
 }
-int isblank(int c)
-{
-	return (c == ' ' || c == '\t');
-}
+int isblank(int c) { return (c == ' ' || c == '\t'); }

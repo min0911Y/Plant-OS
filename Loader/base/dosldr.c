@@ -23,7 +23,25 @@ uint32_t load_elf(Elf32_Ehdr *hdr) {
   }
   return hdr->e_entry;
 }
-
+void read_pci_class(uint8_t bus, uint8_t device, uint8_t function, uint8_t *class_code, uint8_t *subclass_code) {
+    // 读取设备类别和子类别寄存器的值
+    uint32_t class_register = read_pci(bus, device, function, 0x08);
+    // 解析设备类别和子类别
+    *class_code = (class_register >> 24) & 0xFF;
+    *subclass_code = (class_register >> 16) & 0xFF;
+}
+int is_ide_device(uint8_t bus, uint8_t device, uint8_t function) {
+    uint8_t class_code, subclass_code;
+    // 读取设备类别和子类别
+    read_pci_class(bus, device, function, &class_code, &subclass_code);
+    // 检查设备类别和子类别是否符合IDE设备的类别码
+    if (class_code == 0x01 && subclass_code == 0x01) {
+        return 1; // 是IDE设备
+    } else {
+        return 0; // 不是IDE设备
+    }
+}
+int get_vdisk_type(char drive);
 void DOSLDR_MAIN() {
   struct MEMMAN *memman = MEMMAN_ADDR;
   unsigned int memtotal;
@@ -77,6 +95,9 @@ void DOSLDR_MAIN() {
     }
   }
   default_drive = default_drive_number + 0x41;
+  if(get_vdisk_type(default_drive) != 1) {
+    default_drive++;
+  }
   NowTask()->drive = default_drive;
   NowTask()->drive_number = default_drive_number;
   vfs_mount_disk(NowTask()->drive, NowTask()->drive);

@@ -1,0 +1,28 @@
+#ifndef _H_CPP_NEW
+#define _H_CPP_NEW
+
+#include <bits/c++config.h>
+
+extern "C" {
+    #include <stdlib.h>
+}
+inline void* operator new(std::size_t size) {
+    return malloc(size);
+}
+inline void* operator new[](std::size_t size) {
+    return malloc(size);
+}
+inline void* operator new(std::size_t size, void* ptr) {
+    return ptr;
+}
+inline void* operator new[](std::size_t size, void* ptr) {
+    return ptr;
+}
+inline void operator delete(void * ptr) {
+    free(ptr);
+}
+inline void operator delete[](void* p){
+	free(p);
+}
+
+#endif

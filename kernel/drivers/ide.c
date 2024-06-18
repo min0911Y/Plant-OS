@@ -1,6 +1,7 @@
 #include <dos.h>
 static inline nul(char *f, ...) {}
 #define logk nul
+#define sleep nul
 unsigned char ide_read(unsigned char channel, unsigned char reg);
 #define inb io_in8
 #define outb io_out8
@@ -113,33 +114,9 @@ static void Write(char drive, unsigned char *buffer, unsigned int number,
 }
 void ide_initialize(unsigned int BAR0, unsigned int BAR1, unsigned int BAR2,
                     unsigned int BAR3, unsigned int BAR4) {
-  int i1, j1, k1;
-  int flag = 0;
-  for (i1 = 0; i1 < 255; i1++) {
-    for (j1 = 0; j1 < 32; j1++) {
-      for (k1 = 0; k1 < 8; k1++) {
-        uint32_t p = read_pci(i1, j1, k1, 0x8);
-        uint16_t *reg =
-            &p; // reg[0] ---> P & R, reg[1] ---> Sub Class Class Code
-        uint8_t *codes =
-            &(reg[1]); // codes[0] --> Sub Class Code  codes[1] Class Code
-        if (codes[1] == 0x1 && codes[0] == 0x1) {
-          flag = 1;
-          goto OK;
-        }
-      }
-    }
-  }
-OK:
-  if (flag == 0) {
-    return;
-  }
-  BAR0 = read_bar_n(i1, j1, k1, 0);
-  BAR1 = read_bar_n(i1, j1, k1, 1);
-  BAR2 = read_bar_n(i1, j1, k1, 2);
-  BAR3 = read_bar_n(i1, j1, k1, 3);
-  BAR4 = read_bar_n(i1, j1, k1, 4);
+
   irq_mask_clear(15);
+  irq_mask_clear(14);
   int j, k, count = 0;
   for (int i = 0; i < 4; i++) {
     ide_devices[i].Reserved = 0;
@@ -252,10 +229,15 @@ OK:
            ide_devices[i].Size / 1024 / 2,                        /* Size */
            ide_devices[i].Model);
       strcpy(vd.DriveName, ide_devices[i].Model);
-      vd.flag = 1;
+      if(ide_devices[i].Type == IDE_ATAPI) {
+        vd.flag = 2;
+      } else {
+        vd.flag = 1;
+      }
+
       vd.Read = Read;
       vd.Write = Write;
-      vd.size = ide_devices[i].Size / 2 * 1024;
+      vd.size = ide_devices[i].Size;
       register_vdisk(vd);
     }
 }
@@ -586,6 +568,8 @@ void ide_wait_irq() {
 void ide_irq() {
   logk("ide irq.\n");
   ide_irq_invoked = 1;
+  send_eoi(0xf);
+  send_eoi(0xe);
 }
 unsigned char ide_atapi_read(unsigned char drive, unsigned int lba,
                              unsigned char numsects, unsigned short selector,

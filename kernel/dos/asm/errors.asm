@@ -144,7 +144,8 @@ asm_error14:
 	pop fs
 	pop es
 	pop ds
-	add esp,4 ; what the fuck is esp doing?
+	add esp,4
+	 ; what the fuck is esp doing?
 	sti
 	iretd
 asm_error16:

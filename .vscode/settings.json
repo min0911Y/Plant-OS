@@ -124,7 +124,11 @@
         "sdl_config_plos.h": "c",
         "sdl_endian.h": "c",
         "signal.h": "c",
-        "sdl.h": "c"
+        "sdl.h": "c",
+        "charconv": "c",
+        "sdl_plosdata.h": "c",
+        "list": "cpp",
+        "xhash": "cpp"
     },
     "cSpell.words": [],
     "C_Cpp.codeAnalysis.clangTidy.checks.disabled": [

@@ -65,6 +65,7 @@ desktop_t *create_desktop(int xsize, int ysize, unsigned tid) {
   res->draw = draw_desktop;
   res->tid = tid;
   res->puts = puts_desktop;
+  res->sht->wnd = NULL;
   sheet_setbuf(res->sht, res->vram, xsize, ysize, -1);
   sheet_slide(res->sht, 0, 0);
   sheet_updown(res->sht, 0);

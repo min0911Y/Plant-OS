@@ -40,7 +40,7 @@ OBJS_BOOTPACK = $(OUTPATH)kernelc.o $(OUTPATH)screen.o $(OUTPATH)command.o $(OUT
 				$(OUTPATH)net_syscall.o $(OUTPATH)ntp.o $(OUTPATH)vdisk.o $(OUTPATH)rootfs.o $(OUTPATH)mount.o \
 				$(OUTPATH)mtask.o $(OUTPATH)basetask.o $(OUTPATH)execute.o $(OUTPATH)network.o $(OUTPATH)rtl8139.o \
 				$(OUTPATH)vfs.o $(OUTPATH)build.o $(OUTPATH)mst.o $(OUTPATH)str.o $(OUTPATH)pfs.o $(OUTPATH)signal.o \
-				$(OUTPATH)rtc.o $(OUTPATH)ahci.o $(OUTPATH)farcall.o $(OUTPATH)fartty.o
+				$(OUTPATH)rtc.o $(OUTPATH)ahci.o $(OUTPATH)farcall.o $(OUTPATH)fartty.o $(OUTPATH)iso9660.o
 
 # 默认动作
 
@@ -65,7 +65,7 @@ $(OUTPATH)boot32.bin : $(BOOTPATH)boot32.asm Makefile
 	$(NASM) $(BOOTPATH)boot32.asm -o $(OUTPATH)boot32.bin
 
 $(OUTPATH)kernel.bin : $(OBJS_BOOTPACK) Makefile
-	ld -m elf_i386 -static -Ttext 0x280000 -e KernelMain $(OBJS_BOOTPACK) -o $(OUTPATH)kernel.bin
+	ld -m elf_i386 -static -Ttext 0x280000 -e KernelMain $(OBJS_BOOTPACK) ../apps/libs/libtcc1.a -o $(OUTPATH)kernel.bin
 
 make_img:
 	mkdir -p img
@@ -89,17 +89,21 @@ make_img:
 	mformat -f 1440 -B $(OUTPATH)boot.bin -i $(IMGPATH)ndisasm.img
 	mformat -f 1440 -B $(OUTPATH)boot.bin -i $(IMGPATH)doom1.img
 	mformat -f 1440 -B $(OUTPATH)boot.bin -i $(IMGPATH)doom2.img
-	mformat -t 64 -h 64 -s 16 -i ./disk.img
+	mformat -t 64 -h 64 -s 16 -B $(OUTPATH)boot.bin -i ./disk.img
 	mformat -t 64 -h 64 -i ./big_disk.img
 Mimg : $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $(OUTPATH)boot32.bin Makefile
 	$(MAKE) make_img
+		mcopy -i ./disk.img $(LOADERPATH)dosldr.bin ::
+		mcopy -i ./disk.img $(OUTPATH)kernel.bin ::
+		mcopy -i ./disk.img $(FONTPATH)font.bin ::
+		mcopy -i ./disk.img $(FONTPATH)HZK16 ::
 		mcopy -i ./disk.img $(BIDPATH)nasm.zip ::
 		mcopy -i ./disk.img $(APPSOUTPATH)duktape.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)doom.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)ttf.bin ::
 		mcopy -i ./disk.img $(RESPATH)doom1.wad ::
 		mcopy -i ./disk.img $(RESPATH)font.ttf ::
-		mcopy -i ./disk.img $(RESPATH)123.jpg ::
+		mcopy -i ./disk.img $(RESPATH)123.png ::
 		mcopy -i ./disk.img $(RESPATH)g.nes ::
 		mcopy -i ./disk.img $(APPSOUTPATH)gui.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)psh.bin ::
@@ -108,6 +112,12 @@ Mimg : $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $(OUTPATH)
 		mcopy -i ./disk.img $(APPSOUTPATH)bitz.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)lite.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)nk.bin ::
+		mcopy -i ./disk.img $(APPSOUTPATH)init.bin ::
+		mcopy -i ./disk.img $(APPSOUTPATH)hexview.bin ::
+		mcopy -i ./disk.img $(APPSOUTPATH)kcube.bin ::
+		mcopy -i ./disk.img $(APPSOUTPATH)invader.bin ::
+		mcopy -i ./disk.img $(RESPATH)init.mst ::
+
 		mmd -i ./disk.img data
 		mmd -i ./disk.img data/core
 		mmd -i ./disk.img data/fonts
@@ -117,6 +127,15 @@ Mimg : $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $(OUTPATH)
 		mcopy -i ./disk.img ../apps/lite-1.11/data/fonts/* ::/data/fonts
 		mcopy -i ./disk.img ../apps/lite-1.11/data/plugins/* ::/data/plugins
 		mcopy -i ./disk.img ../apps/lite-1.11/data/user/* ::/data/user
+#		mmd -i ./disk.img stamon
+#		mmd -i ./disk.img stamon/bin
+#		mmd -i ./disk.img stamon/bin/include
+#		mmd -i ./disk.img stamon/demos
+#		mcopy -i ./disk.img $(APPSOUTPATH)stamon.bin ::/stamon/bin
+#		mcopy -i ./disk.img ../apps/stamon/bin/include/* ::/stamon/bin/include
+#		mcopy -i ./disk.img ../apps/stamon/demos/* ::/stamon/demos
+
+
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(LOADERPATH)dosldr.bin ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(OUTPATH)kernel.bin ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(RESPATH)autoexec.bat ::
@@ -236,8 +255,8 @@ img_run :
 	$(MAKE) -C $(NETPATH)
 	$(MAKE) -C $(MSTPATH)
 	$(MAKE) Mimg
-	qemu-system-x86_64 -net nic,model=pcnet -net user -serial stdio -device sb16 -device floppy -fda ./img/Powerint_DOS_386.img -hda ./img/Disk2.img -hdb ./img/Disk3.img -hdc ./img/tcc.img \
-	-drive file=disk.img,if=none,id=drive0 -device ahci,id=ahci -device ide-hd,drive=drive0,bus=ahci.0 -drive file=big_disk.img,if=none,id=drive1 -device ide-hd,drive=drive1,bus=ahci.1		\
+	sudo qemu-system-i386 -enable-kvm -net nic,model=pcnet -net user -serial stdio -device sb16 -device floppy -fda ./img/Powerint_DOS_386.img -hda ./img/Disk2.img -hdb ./img/Disk3.img -hdc ./img/tcc.img \
+	-hdd disk.img \
 	 -boot a -m 4096
 full :
 	$(MAKE) -C $(DOSPATH)

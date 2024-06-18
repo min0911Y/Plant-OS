@@ -134,7 +134,7 @@ ST_FUNC int tcc_tool_ar(TCCState *s1, int argc, char **argv)
         goto the_end;
     }
 
-    sprintf(tfile, "%s.tmp", argv[i_lib]);
+    sprintf(tfile, "%08x.tmp", time(NULL));
     if ((fo = fopen(tfile, "wb+")) == NULL)
     {
         fprintf(stderr, "tcc: ar: can't create temporary file %s\n", tfile);

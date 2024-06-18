@@ -130,6 +130,7 @@ int sc2a(int sc) {
   }
 }
 int disable_flag = 0;
+mtask *keyboard_use_task = NULL;
 void inthandler21(int *esp) {
   // 键盘中断处理函数
   unsigned char data, s[4];
@@ -165,7 +166,7 @@ void inthandler21(int *esp) {
         get_task(i)->signal |= SIGMASK(SIGINT);
       }
     }
-    return;
+    // return;
   }
   // } else if (data >= 0x3b && data <= 0x47 && shift) {
   //   // 按下F1 ~ F12 & Shift
@@ -182,35 +183,79 @@ void inthandler21(int *esp) {
   // 普通键处理
   if (data >= 0x80) {
     // printk("press\n");
-    for (int i = 0; i < 255; i++) {
-      if (!get_task(i)) {
-        continue;
-      }
-      if (get_task(i)->keyboard_release != NULL) {
-        // TASK结构体中有对松开键特殊处理的
+    if (disable_flag && keyboard_use_task) {
+      if (keyboard_use_task->keyboard_release != NULL) {
+        // TASK结构体中有对按下键特殊处理的
         if (e0_flag) {
-          get_task(i)->keyboard_release(0xe0, i);
+          keyboard_use_task->keyboard_release(0xe0, keyboard_use_task->tid);
         }
-        get_task(i)->keyboard_release(data, i); // 处理松开键
+        keyboard_use_task->keyboard_release(
+            data, keyboard_use_task->tid); // 处理按下键
       }
-    }
+      if (current_task() != keyboard_use_task) {
+        keyboard_use_task->timeout = 5;
+        keyboard_use_task->ready = 1;
+        keyboard_use_task->urgent = 1;
+        keyboard_use_task->running = 0;
+        mtask_run_now(keyboard_use_task);
+        task_next();
+      } else {
+        keyboard_use_task->running = 0;
+      }
+    } else
+      for (int i = 0; i < 255; i++) {
+        if (!get_task(i)) {
+          continue;
+        }
+        if (get_task(i)->keyboard_release != NULL) {
+          // TASK结构体中有对松开键特殊处理的
+          if (e0_flag) {
+            get_task(i)->keyboard_release(0xe0, i);
+          }
+          get_task(i)->keyboard_release(data, i); // 处理松开键
+
+          if (disable_flag) {
+          }
+        }
+      }
     if (e0_flag == 1)
       e0_flag = 0;
     return;
   }
-  for (int i = 0; i < 255; i++) {
-    // printk("up\n");
-    if (!get_task(i)) {
-      continue;
-    }
-    if (get_task(i)->keyboard_press != NULL) {
+  if (disable_flag && keyboard_use_task) {
+    if (keyboard_use_task->keyboard_press != NULL) {
       // TASK结构体中有对按下键特殊处理的
       if (e0_flag) {
-        get_task(i)->keyboard_press(0xe0, i);
+        keyboard_use_task->keyboard_press(0xe0, keyboard_use_task->tid);
       }
-      get_task(i)->keyboard_press(data, i); // 处理按下键
+      keyboard_use_task->keyboard_press(data,
+                                        keyboard_use_task->tid); // 处理按下键
     }
-  }
+    if (current_task() != keyboard_use_task) {
+      //   logk("SET 1\n");
+      keyboard_use_task->timeout = 5;
+      keyboard_use_task->ready = 1;
+      keyboard_use_task->urgent = 1;
+      keyboard_use_task->running = 0;
+      mtask_run_now(keyboard_use_task);
+      task_next();
+    } else {
+      keyboard_use_task->running = 0;
+    }
+  } else
+    for (int i = 0; i < 255; i++) {
+      // printk("up\n");
+      if (!get_task(i)) {
+        continue;
+      }
+      if (get_task(i)->keyboard_press != NULL) {
+        // TASK结构体中有对按下键特殊处理的
+        if (e0_flag) {
+          get_task(i)->keyboard_press(0xe0, i);
+        }
+        get_task(i)->keyboard_press(data, i); // 处理按下键
+      }
+    }
   if (disable_flag == 0)
     for (int i = 0; i < 255; i++) {
       if (!get_task(i)) {
@@ -228,7 +273,7 @@ void inthandler21(int *esp) {
       // 一般进程
     THROUGH:
       //    logk("send\n");
-      if(e0_flag) {
+      if (e0_flag) {
         fifo8_put(task_get_key_fifo(task), 0xe0);
       }
       fifo8_put(task_get_key_fifo(task), data);

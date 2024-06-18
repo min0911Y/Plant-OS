@@ -66,6 +66,7 @@ static void Write(char drive,
   fdc_rw(lba,buffer,0,number);
 }
 void init_floppy() {
+  #ifndef __NO_FLOPPY__
   sendbyte(
       CMD_VERSION); //发送命令（获取软盘版本），如果收到回应，说明软盘正在工作
   if (getbyte() == -1) {
@@ -82,6 +83,7 @@ void init_floppy() {
   printf("FLOPPY DISK:reset over!\n");
   sendbyte(CMD_VERSION);               //获取软盘版本
   printf("FDC_VER:0x%x\n", getbyte()); //并且输出到屏幕上
+  #endif
   vdisk vd;
   strcpy(vd.DriveName,"floppy");
   vd.Read = Read;

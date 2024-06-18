@@ -49,6 +49,7 @@ static vfs_t *findSeat(vfs_t *vstl) {
 static vfs_t *check_disk_fs(uint8_t disk_number) {
   for (int i = 0; i < 5; i++) {
     if (vfsstl[i].flag == 1) {
+      PDEBUG("CALL CHECK %s %08x\n",vfsstl[i].FSName,vfsstl[i].Check);
       if (vfsstl[i].Check(disk_number)) {
         return &vfsstl[i];
       }
@@ -71,12 +72,14 @@ bool vfs_mount_disk(uint8_t disk_number, uint8_t drive) {
       return false;
     }
   }
+  PDEBUG("OK1");
   vfs_t *seat = findSeat(vfsMount_Stl);
   if (!seat) {
     WARNING_K("can not find a seat of vfsMount_Stl(it's full)");
     Panic_K("Mount error!");
     return false;
   }
+  PDEBUG("check\n");
   vfs_t *fs = check_disk_fs(disk_number);
   if (!fs) {
     WARNING_K("unknow file system.");

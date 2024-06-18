@@ -25,6 +25,7 @@ int abs(int a);
 double atof(const char *s);
 void atexit(void (*func)(void));
 void *calloc(int num, size_t size) ;
+void abort(void);
 #define EXIT_SUCCESS 0
 #define EXIT_FAILURE 1
 #ifdef __cplusplus

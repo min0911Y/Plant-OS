@@ -16,4 +16,14 @@ typedef short int16_t;
 typedef int int32_t;
 typedef long long int64_t;
 typedef uint32_t uintptr_t;
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+int isxdigit(int c);
+int isdigit(int c);
+int isspace(int c);
+#ifdef __cplusplus
+}
+#endif
 #endif

@@ -8,7 +8,7 @@ section .data
 		GLOBAL ASM_call
 		GLOBAL	load_cr0, store_cr0,memtest_sub,farjmp,farcall,start_app
 		GLOBAL load_tr
-		GLOBAL get_eip,return_to_app,do_init_seg_register
+		GLOBAL get_eip,return_to_app,do_init_seg_register,entering_v86
 str: db 'Yun Xing Ni Ma De Kernel Xiang Si Shi Bu Shi',0
 section .text
 %define ADR_BOTPAK 							   0x0
@@ -397,5 +397,16 @@ do_init_seg_register:
   mov fs,ax
   popa
   ret
+; extern void entering_v86(uint32_t ss, uint32_t esp, uint32_t cs, uint32_t eip);
+entering_v86:
+   mov ebp, esp               ; save stack pointer
+
+   push dword  [ebp+4]        ; ss
+   push dword  [ebp+8]        ; esp
+   pushfd                     ; eflags
+   or dword [esp], (1 << 17)  ; set VM flags
+   push dword [ebp+12]        ; cs
+   push dword  [ebp+16]       ; eip
+   iret
 [SECTION .data]
 testsize:	dd	0

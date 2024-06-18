@@ -38,10 +38,13 @@ void sysinit(void) {
   char mousebuf_sr1[128];
   char keybuf_sr2[32];
   char mousebuf_sr2[128];
+
   do_init_seg_register();
+
   struct SEGMENT_DESCRIPTOR *gdt = (struct SEGMENT_DESCRIPTOR *)ADR_GDT;
   init_page(); // 初始化分页
   init_gdtidt();
+
   IVT = page_malloc(0x400);
   memcpy(IVT, 0x0, 0x400);
   init_pic();
@@ -53,8 +56,6 @@ void sysinit(void) {
   irq_mask_clear(12); // mouse
   set_cr0(get_cr0() | CR0_EM | CR0_TS | CR0_NE);
 
-
-
   fifo8_init(&keyfifo, 32, (unsigned char *)keybuf);
   fifo8_init(&mousefifo, 128, (unsigned char *)mousebuf);
   fifo8_init(&keyfifo_sr1, 32, (unsigned char *)keybuf_sr1);
@@ -65,10 +66,11 @@ void sysinit(void) {
   enable_mouse(&mdec);
   mouse_sleep(&mdec);
 
-  heap = page_malloc(128*1024*1024);
-  public_heap = memory_init(heap,128*1024*1024);
+  heap = page_malloc(128 * 1024 * 1024);
+  public_heap = memory_init(heap, 128 * 1024 * 1024);
   init_tty();
-
+  clear();
+  printk("Welcome to Plant OS Kernel!!!!!!\n");
   memsize = memtest(0x00400000, 0xbfffffff);
 
   if (memsize / (1024 * 1024) < 256) {
@@ -77,34 +79,46 @@ void sysinit(void) {
       sleep(100);
     }
   }
-  
 
   clear();
+  printk("PIT\n");
   init_pit();
+  printk("VDISK\n");
   init_vdisk();
+  printk("VFS\n");
   init_vfs();
-  
+  printk("FAT\n");
   Register_fat_fileSys();
+  printk("ISO9660\n");
+  init_iso9660();
+  printk("PFS\n");
   reg_pfs();
+  printk("pf set up to %08x\n",memsize);
   pf_set(memsize);
-  init_acpi();
+  printk("acpi\n");
+//  init_acpi();
+  printk("sb16\n");
   disable_sb16();
+  printk("input stack\n");
   Input_Stack_Init();
+  printk("socket\n");
   socket_init();
-  //init_driver();
+  // init_driver();
+  printk("mount disk\n");
   init_mount_disk();
+  printk("set drives\n");
   SetDrive((unsigned char *)"DISK_DRIVE");
   SetDrive((unsigned char *)"NETCARD_DRIVE");
-  
 
   printk("Hello Plant OS Kernel\n");
   printk("benching cpu.....\n");
   base_count = 0;
   unsigned c = timerctl.count;
-  while(timerctl.count - c < 100) {
+  while (timerctl.count - c < 100) {
     base_count++;
   }
-  printk("base count is %08x\n",base_count);
+  printk("base count is %08x\n", base_count);
   into_mtask();
-  for(;;);
+  for (;;)
+    ;
 }

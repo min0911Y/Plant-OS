@@ -58,12 +58,16 @@ extern "C" void __cxa_pure_virtual()
 
 void *operator new(size_t size)
 {
-    return malloc(size);
+    void *p = malloc(size);
+    logkf("mother fucker %d %p\n",size,p);
+    return p;
 }
  
 void *operator new[](size_t size)
 {
-    return malloc(size);
+    void *p = malloc(size);
+    logkf("mother fucker %d %p\n",size,p);
+    return p;
 }
  
 void operator delete(void *p,unsigned int size)
@@ -83,4 +87,9 @@ void operator delete(void *p)
 void operator delete[](void *p)
 {
     free(p);
+}
+
+extern "C" void __gxx_personality_v0()
+{
+  exit (-1);
 }

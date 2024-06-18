@@ -846,6 +846,7 @@ OK:
 
 static void ahci_vdisk_read(char drive, unsigned char *buffer,
                             unsigned int number, unsigned int lba) {
+          //                    logk("mapping %d\n",drive_mapping[drive]);
   ahci_read(&(hba_mem_address->ports[drive_mapping[drive]]), lba, 0, number,
             buffer);
 }

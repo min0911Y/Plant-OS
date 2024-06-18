@@ -220,6 +220,8 @@ unsigned int disk_Size(char drive);
 void Disk_Read(unsigned int lba, unsigned int number, void *buffer, char drive);
 void Disk_Write(unsigned int lba, unsigned int number, void *buffer,
                 char drive);
+bool CDROM_Read(unsigned int lba, unsigned int number, void *buffer,
+                char drive);
 bool DiskReady(char drive);
 int getReadyDisk();
 // kernelc.c

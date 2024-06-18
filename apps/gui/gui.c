@@ -7,13 +7,18 @@
 #include <string.h>
 #include <syscall.h>
 #include <time.h>
-
+#define STB_IMAGE_IMPLEMENTATION
+#define STBI_NO_THREAD_LOCALS
+#include "stb_image.h"
+#define STB_IMAGE_RESIZE_IMPLEMENTATION
+#include "stb_image_resize.h"
 static struct VBEINFO *vinfo;
 desktop_t *desktop0;
 static void click1(button_t *button) {
-  window_t *a = create_window(desktop0, "console1", 800, 600, NowTaskID());
+  window_t *a =
+      create_window(desktop0, "console", 80 * 8 + 8, 25 * 16 + 28, NowTaskID());
   a->display(a, 0, 0, 3);
-  create_console(a, 40 * 8, 20 * 16, 4, 24);
+  create_console(a, 80 * 8, 25 * 16, 4, 24);
 }
 
 unsigned char *ascfont, *hzkfont;
@@ -144,14 +149,15 @@ void put_bitmap(unsigned char *bitmap, vram_t *vram, unsigned x, unsigned y,
                 unsigned xsize, unsigned fc, unsigned bc) {
   for (int i = 0; i < width; i++) {
     for (int j = 0; j < heigh; j++) {
-      vram[(y + j) * xsize + (x + i)] =
-          LCD_AlphaBlend(fc, bc, bitmap[j * bitmap_xsize + i]);
+      vram[(y + j) * xsize + (x + i)] = LCD_AlphaBlend(
+          fc, vram[(y + j) * xsize + (x + i)], bitmap[j * bitmap_xsize + i]);
     }
   }
 }
 
 void print_box_ttf(struct SHEET *sht, vram_t *vram, char *buf, unsigned fc,
-                   unsigned bc, unsigned x, unsigned y, unsigned xsize) {
+                   unsigned bc, unsigned x, unsigned y, unsigned xsize,
+                   vram_t *background) {
   Rune *r = (Rune *)malloc((utflen(buf) + 1) * sizeof(Rune));
   r[utflen(buf)] = 0;
   int i = 0;
@@ -160,7 +166,17 @@ void print_box_ttf(struct SHEET *sht, vram_t *vram, char *buf, unsigned fc,
   }
   unsigned width, heigh;
   char *bitmap = TTF_Print(vram, xsize, x, y, fc, r, bc, &width, &heigh);
-  SDraw_Box(vram, x, y, x + width, y + heigh, bc, xsize);
+  // SDraw_Box(vram, x, y, x + width, y + heigh, bc, xsize);
+  if (background) {
+    int i, j;
+    for (i = x; i < x + width; i++) {
+      for (j = y; j < y + heigh; j++) {
+        vram[j * xsize + i] = background[j * xsize + i];
+      }
+    }
+  } else {
+    SDraw_Box(vram, x, y, x + width, y + heigh, bc, xsize);
+  }
   sheet_refresh(sht, x, y, x + width, y + heigh);
   put_bitmap(bitmap, vram, x, y, width, heigh, 512, xsize, fc, bc);
   sheet_refresh(sht, x, y, x + width, y + heigh);
@@ -180,7 +196,7 @@ enum {
   C_PDE,
   TID
 }; // M_PDE是GUI程序的PDE，C_PDE是调用者的PDE
-enum { MOUSE_STAY = 1, MOUSE_CLICK_LEFT, MOUSE_CLICK_RIGHT, CLOSE_WINDOW };
+enum { MOUSE_STAY = 1, MOUSE_CLICK_LEFT, MOUSE_CLICK_RIGHT, CLOSE_WINDOW,MOUSE_WHEEL };
 #define PACK_XY(x, y) ((x << 16) | y)
 void handle_stay_api(window_t *window, gmouse_t *gmouse) {
   // queue_push(window->events, MOUSE_STAY);
@@ -207,10 +223,18 @@ void handle_close_window(window_t *window) {
   // queue_push(window->events, CLOSE_WINDOW);
   fifo32_put(window->events, CLOSE_WINDOW);
 }
+void handle_mouse_wheel(window_t *window, gmouse_t *gmouse, unsigned val) {
+  // queue_push(window->events, MOUSE_CLICK_RIGHT);
+  // queue_push(window->events, PACK_XY(gmouse->x, gmouse->y));
+  fifo32_put(window->events, MOUSE_WHEEL);
+  fifo32_put(window->events,
+             PACK_XY(gmouse->x - window->x, gmouse->y - window->y));
+  fifo32_put(window->events, val);
+}
 void sheet_refresh(struct SHEET *sht, int bx0, int by0, int bx1, int by1);
 void gui_api1(uint32_t *a) {
   if (a[EAX] == 0x01) {
-    logkf("H %d %d\n",a[EDI],a[ESI]);
+    logkf("H %d %d\n", a[EDI], a[ESI]);
     window_t *wnd = create_window(desktop0, a[EBX], a[EDI], a[ESI], 0);
     wnd->events = (struct FIFO32 *)malloc(sizeof(struct FIFO32));
     fifo32_init(wnd->events, 32, wnd->event);
@@ -218,6 +242,7 @@ void gui_api1(uint32_t *a) {
     wnd->handle_left_for_api = handle_click_left_api;
     wnd->handle_right = handle_click_right_api;
     wnd->close = handle_close_window;
+    wnd->handle_mouse_wheel = handle_mouse_wheel;
     wnd->display(wnd, a[ECX], a[EDX], 1);
     wnd->tid = a[TID];
     a[EAX] = wnd;
@@ -286,6 +311,16 @@ void gui_api1(uint32_t *a) {
     a[EAX] = fifo8_get(wnd->fifo_keyup);
   }
 }
+void convert_ABGR_to_ARGB(uint32_t *bitmap, size_t num_pixels) {
+  for (size_t i = 0; i < num_pixels; ++i) {
+    uint32_t pixel = bitmap[i];
+    uint8_t alpha = (pixel >> 24) & 0xFF;
+    uint8_t red = (pixel >> 16) & 0xFF;
+    uint8_t green = (pixel >> 8) & 0xFF;
+    uint8_t blue = pixel & 0xFF;
+    bitmap[i] = (alpha << 24) | (blue << 16) | (green << 8) | red;
+  }
+}
 void main() {
   // char *s34 = malloc(64*1024*1024);
   // free(s34);
@@ -297,8 +332,7 @@ void main() {
   stbtt_InitFont(&font, ttf_buffer, stbtt_GetFontOffsetForIndex(ttf_buffer, 0));
 
   set_size(15);
-  if (filesize("A:\\other\\font.bin") == -1 ||
-      filesize("A:\\other\\HZK16") == -1) {
+  if (filesize("font.bin") == -1 || filesize("HZK16") == -1) {
     print("error\n");
   }
   printf("\n\n");
@@ -312,15 +346,69 @@ re:
 
   set_custom_handler(gui_api1);
   logkf("vram = %08x\n", vram);
-  ascfont = (unsigned char *)malloc(filesize("A:\\other\\font.bin"));
-  hzkfont = (unsigned char *)malloc(filesize("A:\\other\\HZK16"));
-  api_ReadFile("A:\\other\\font.bin", ascfont);
-  api_ReadFile("A:\\other\\HZK16", hzkfont);
+  ascfont = (unsigned char *)malloc(filesize("font.bin"));
+  hzkfont = (unsigned char *)malloc(filesize("HZK16"));
+  api_ReadFile("font.bin", ascfont);
+  api_ReadFile("HZK16", hzkfont);
   desktop0 = create_desktop(xsize_input, ysize_input, NowTaskID());
   desktop0->display(desktop0, vram);
-  desktop0->draw(desktop0, 0, 0, xsize_input, ysize_input,
-                 argb(0, 58, 110, 165));
+  vram_t *background = NULL;
+  if (filesize("123.png") != -1) {
+    int w, h, bpp;
+    stbi_uc *b = stbi_load("123.png", &w, &h, &bpp, 4);
+    if (!b) {
+      goto A;
+    }
+    if (w > xsize_input && h > ysize_input) {
+      uint8_t *b1 = malloc(xsize_input * ysize_input * 4);
+      stbir_resize_uint8(b, w, h, 0, b1, xsize_input, ysize_input, 0, 4);
+      convert_ABGR_to_ARGB(b1, xsize_input * ysize_input);
+      uint32_t *buff = (uint32_t *)b1;
+      background = buff;
+      for (int i = 0; i < xsize_input; i++) {
+        for (int j = 0; j < ysize_input; j++) {
+          desktop0->vram[j * xsize_input + i] = buff[j * xsize_input + i];
+        }
+      }
+    } else if (w > xsize_input) {
+      uint8_t *b1 = malloc(xsize_input * h * 4);
+      stbir_resize_uint8(b, w, h, 0, b1, xsize_input, h, 0, 4);
+      convert_ABGR_to_ARGB(b1, xsize_input * h);
+      uint32_t *buff = (uint32_t *)b1;
+      background = buff;
+      for (int i = 0; i < xsize_input; i++) {
+        for (int j = 0; j < h; j++) {
+          desktop0->vram[j * xsize_input + i] = buff[j * xsize_input + i];
+        }
+      }
+    } else if (h > ysize_input) {
+      uint8_t *b1 = malloc(w * ysize_input * 4);
+      stbir_resize_uint8(b, w, h, 0, b1, w, ysize_input, 0, 4);
+      convert_ABGR_to_ARGB(b1, w * ysize_input);
+      uint32_t *buff = (uint32_t *)b1;
+      background = buff;
+      for (int i = 0; i < w; i++) {
+        for (int j = 0; j < ysize_input; j++) {
+          desktop0->vram[j * xsize_input + i] = buff[j * w + i];
+        }
+      }
+    } else {
+      convert_ABGR_to_ARGB(b, w * h);
+      uint32_t *buff = (uint32_t *)b;
+      background = buff;
+      for (int i = 0; i < w; i++) {
+        for (int j = 0; j < h; j++) {
+          desktop0->vram[j * xsize_input + i] = buff[j * w + i];
+        }
+      }
+    }
+    sheet_refresh(desktop0->sht, 0, 0, xsize_input, ysize_input);
+  } else {
+  A:
 
+    desktop0->draw(desktop0, 0, 0, xsize_input, ysize_input,
+                   argb(0, 58, 110, 165));
+  }
   // print_box_ttf(desktop0->sht, desktop0->vram,
   //               "原神，启动！Genshin Impact Start!", COL_000000,
   //               COL_C6C6C6, 10, 30, desktop0->xsize);
@@ -333,25 +421,19 @@ re:
 
   window_t *window2 =
       create_window(desktop0, "console", 80 * 8 + 8, 25 * 16 + 28, NowTaskID());
-  window_t *window3 =
-      create_window(desktop0, "console", 40 * 8 + 8, 20 * 16 + 28, NowTaskID());
 
   window2->display(window2, 250, 250, 3);
-  window2->display(window3, 400, 400, 4);
   gmouse_t *gmouse0 =
       create_gmouse(desktop0, desktop0->xsize / 2, desktop0->ysize / 2, 5);
   console_t *console0 = create_console(window2, 80 * 8, 25 * 16, 4, 24);
   // console_t *console1 = create_console(window3, 40 * 8, 20 * 16, 4, 24);
 
-  window_t *window0 = create_window(desktop0, "hello0", 200, 200, NowTaskID());
-  window_t *window1 = create_window(desktop0, "hello1", 200, 200, NowTaskID());
-  window0->puts(window0, "Hello world!", 52, 92, COL_000000);
+  window_t *window1 = create_window(desktop0, "ToolBox", 200, 200, NowTaskID());
   super_window_t *super_window0 = create_super_window(window1);
-  window0->display(window0, 100, 100, 1);
   window1->display(window1, 200, 200, 2);
   button_t *button0 =
-      create_button(super_window0, "test", 100, 20, 50, 50, click1);
-  textbox_t *textbox0 = create_textbox(super_window0, 15 * 8, 16, 4, 110);
+      create_button(super_window0, "NewConsole", 100, 20, 50, 50, click1);
+  // textbox_t *textbox0 = create_textbox(super_window0, 15 * 8, 16, 4, 110);
   unsigned clock1 = clock();
   time_t rawtime;
   struct tm *info;
@@ -363,8 +445,9 @@ re:
   info = localtime(&rawtime);
 
   strftime(buffer, 80, "当前时间：%Y-%m-%d %H:%M:%S", info);
-  print_box_ttf(desktop0->sht, desktop0->vram, buffer, COL_000000,
-                argb(0, 58, 110, 165), 512 - 200, 0, desktop0->xsize);
+  print_box_ttf(desktop0->sht, desktop0->vram, buffer, COL_FFFFFF,
+                argb(0, 58, 110, 165), 512 - 200, 0, desktop0->xsize,
+                background);
 
   for (;;) {
     if (clock() - clock1 >= 1000) {
@@ -375,8 +458,9 @@ re:
       info = localtime(&rawtime);
 
       strftime(buffer, 80, "当前时间：%Y-%m-%d %H:%M:%S", info);
-      print_box_ttf(desktop0->sht, desktop0->vram, buffer, COL_000000,
-                    argb(0, 58, 110, 165), 512 - 200, 0, desktop0->xsize);
+      print_box_ttf(desktop0->sht, desktop0->vram, buffer, COL_FFFFFF,
+                    argb(0, 58, 110, 165), 512 - 200, 0, desktop0->xsize,
+                    background);
     } else {
       api_yield();
     }

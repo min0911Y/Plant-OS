@@ -12,29 +12,29 @@ void display_window(window_t *window, int x, int y, int pos) {
 }
 
 void hide_window(window_t *window) {
-  window->using1 = false;
-  sheet_updown(window->sht, -1);
+  // window->using1 = false;
+  // sheet_updown(window->sht, -1);
 }
 
 void close_window(window_t *window) {
-  if (window->console != NULL) {
-    window->console->close(window->console);
-  } else if (window->super_window != NULL) {
-    window->super_window->close(window->super_window);
-  }
-  // if (window->task != get_task(3)) {
-  //   task_delete(window->task);
+  // if (window->console != NULL) {
+  //   window->console->close(window->console);
+  // } else if (window->super_window != NULL) {
+  //   window->super_window->close(window->super_window);
   // }
-  int count = 1;
-  for (; list_search_by_count(count, window->desktop->window_list)->val !=
-         (uintptr_t)window;
-       count++)
-    ;
-  list_delete_by_count(count, window->desktop->window_list);
-  sheet_free(window->sht);
-  free((void *)window->vram);
-  free((void *)window->title);
-  free((void *)window);
+  // // if (window->task != get_task(3)) {
+  // //   task_delete(window->task);
+  // // }
+  // int count = 1;
+  // for (; list_search_by_count(count, window->desktop->window_list)->val !=
+  //        (uintptr_t)window;
+  //      count++)
+  //   ;
+  // list_delete_by_count(count, window->desktop->window_list);
+  // sheet_free(window->sht);
+  // free((void *)window->vram);
+  // free((void *)window->title);
+  // free((void *)window);
 }
 
 void draw_window(window_t *window, int x, int y, int x1, int y1,
@@ -79,6 +79,7 @@ void handle_left_window(window_t *window, gmouse_t *gmouse) {
     backup_w = window;
     backup_gmouse = gmouse;
     drop = w_drop;
+    return;
   } else if (Collision(window->x + window->xsize - 21, window->y + 5, 16, 19,
                        gmouse->x, gmouse->y)) {
     // 关闭
@@ -91,7 +92,8 @@ void handle_left_window(window_t *window, gmouse_t *gmouse) {
     // printk("You hide a window.\n");
     return;
   }
-  window->display(window, window->x, window->y, window->sht->ctl->top - 1);
+  if(window->sht->height != window->sht->ctl->top - 1)
+    window->display(window, window->x, window->y, window->sht->ctl->top - 1);
   if (window->console != NULL) {
     if (window->console->handle_left != NULL) {
       window->console->handle_left(window->console, gmouse);

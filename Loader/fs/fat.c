@@ -1110,6 +1110,7 @@ void Fat_DeleteFs(struct vfs_t *vfs) {
   DeleteList(get_dm(vfs).directory_list);
 }
 bool Fat_Check(uint8_t disk_number) {
+  printk("Fat Check\n");
   uint8_t *boot_sec = malloc(512);
   Disk_Read(0, 1, boot_sec, disk_number);
   if (memcmp(boot_sec + BS_FileSysType, "FAT12   ", 8) == 0 ||

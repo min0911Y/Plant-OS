@@ -12,8 +12,10 @@ void Main() {
   set_rt(return_to_app);
   init_mem();
   stdout = malloc(sizeof(FILE));
+  
   stdin = malloc(sizeof(FILE));
   stderr = malloc(sizeof(FILE));
+  
   stdout->buffer = NULL;
   stdout->mode = WRITE;
   stderr->buffer = NULL;
@@ -27,6 +29,7 @@ void Main() {
   char **argv;
   GetCmdline(buf);
   init_env();
+  
   argv = malloc(sizeof(char *) * (get_argc(buf) + 1));
   for (int i = 0; i < get_argc(buf); i++) {
     argv[i] = malloc(128);
@@ -35,7 +38,6 @@ void Main() {
     get_arg(argv[i], buf, i);
   }
   init_float();
-
   exit(main(get_argc(buf), argv));
   while(1);
 }

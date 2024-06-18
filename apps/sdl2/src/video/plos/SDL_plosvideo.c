@@ -52,7 +52,7 @@ static int PLOS_VideoInit(_THIS) {
   display.desktop_mode = current_mode;
   display.current_mode = current_mode;
   display.driverdata = NULL;
-  if (SDL_AddVideoDisplay(&display,SDL_FALSE) < 0) {
+  if (SDL_AddVideoDisplay(&display, SDL_FALSE) < 0) {
     return -1;
   }
 
@@ -83,7 +83,6 @@ static int PLOS_CreateWindow(_THIS, SDL_Window *window) {
     return -1;
   }
 
-  
   data->window =
       create_window("SDL2_Window", 0, 0, window->w + 2, window->h + 21);
   data->deviceData = (SDL_VideoData *)_this->driverdata; /* 指向设备数据 */
@@ -261,7 +260,13 @@ static void PLOS_DeleteDevice(SDL_VideoDevice *device) { SDL_free(device); }
  * @param   devindex    Unused
  * @return  Initialized device if successful, NULL otherwise
  */
-enum { MOUSE_STAY = 1, MOUSE_CLICK_LEFT, MOUSE_CLICK_RIGHT, CLOSE_WINDOW };
+enum {
+  MOUSE_STAY = 1,
+  MOUSE_CLICK_LEFT,
+  MOUSE_CLICK_RIGHT,
+  CLOSE_WINDOW,
+  MOUSE_WHEEL
+};
 static int f = 0;
 char keytable[0x54] = { // 按下Shift
     0,    0x01, '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_',  '+',
@@ -492,6 +497,7 @@ void PLOS_PumpEvents(_THIS) {
 
   if (data->wnd) {
     if (window_get_key_press_status(data->wnd)) {
+      SDL_SetKeyboardFocus(data->window);
       int i = window_get_key_press_data(data->wnd);
       if (i == 0xe0) {
         while (!window_get_key_press_status(data->wnd))
@@ -522,11 +528,12 @@ void PLOS_PumpEvents(_THIS) {
         }
         if (s[0])
           SDL_SendKeyboardText(s);
-      } else {
-        SDL_SendKeyboardKey(SDL_PRESSED, scancode);
       }
+
+      SDL_SendKeyboardKey(SDL_PRESSED, scancode);
     }
     if (window_get_key_up_status(data->wnd)) {
+      SDL_SetKeyboardFocus(data->window);
       int i = window_get_key_up_data(data->wnd);
       if (i == 0xe0) {
         while (!window_get_key_up_status(data->wnd))
@@ -551,19 +558,19 @@ void PLOS_PumpEvents(_THIS) {
     if (i == -1)
       return;
     if (i == MOUSE_CLICK_LEFT) {
-      
+
       int j = window_get_event(data->wnd);
-      
+
       SDL_SendMouseMotion(data->window, 0, 0, (j >> 16) - 2, (j & 0xffff) - 21);
-      if(f != 1)
+      if (f != 1)
         SDL_SendMouseButton(data->window, 0, SDL_PRESSED, SDL_BUTTON_LEFT);
       f = 1;
     }
     if (i == MOUSE_CLICK_RIGHT) {
-      
+
       int j = window_get_event(data->wnd);
       SDL_SendMouseMotion(data->window, 0, 0, (j >> 16) - 2, (j & 0xffff) - 21);
-      if(f != 2)
+      if (f != 2)
         SDL_SendMouseButton(data->window, 0, SDL_PRESSED, SDL_BUTTON_RIGHT);
       f = 2;
     }
@@ -586,12 +593,20 @@ void PLOS_PumpEvents(_THIS) {
                             (j & 0xffff) - 21);
       }
     }
-
+    if (i == MOUSE_WHEEL) {
+      int j = window_get_event(data->wnd);
+      SDL_SendMouseMotion(data->window, 0, 0, (j >> 16) - 2, (j & 0xffff) - 21);
+      int k = window_get_event(data->wnd);
+      float x = 0.0f, y = 0.0f;
+      y = (k == 1) ? 0 + 1.0f : 0 - 1.0f;
+      SDL_SendMouseWheel(data->window, 0, x, y, SDL_MOUSEWHEEL_NORMAL);
+    }
     if (i == CLOSE_WINDOW) {
       SDL_SendWindowEvent(data->window, SDL_WINDOWEVENT_CLOSE, 0, 0);
     }
   }
 }
+SDL_bool PLOS_HasScreenKeyboardSupport(_THIS) { return SDL_FALSE; }
 static SDL_VideoDevice *PLOS_CreateDevice(int devindex) {
   SDL_VideoDevice *device;
 
@@ -636,7 +651,7 @@ static SDL_VideoDevice *PLOS_CreateDevice(int devindex) {
   device->StartTextInput = PLOS_StartTextInput;
   device->StopTextInput = PLOS_StopTextInput;
   device->SetTextInputRect = PLOS_SetTextInputRect;
-
+  device->HasScreenKeyboardSupport = PLOS_HasScreenKeyboardSupport;
   device->free = PLOS_DeleteDevice;
   return device;
 }

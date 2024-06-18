@@ -187,6 +187,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
     }
   } else if (eax == 0x10) { // mouse_support
     extern mtask *mouse_use_task;
+    logk("%d\n",running_mode == POWERINTDOS && mouse_use_task == NULL);
     reg[EAX] = running_mode == POWERINTDOS && mouse_use_task == NULL;
   } else if (eax == 0x16) {
     if (ebx == 0x01) {
@@ -540,6 +541,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
   } else if (eax == 0x35) {
     unsigned start_addr = task->alloc_addr + *(task->alloc_size);
     for (int i = 0; i < (ebx / 0x1000); i++) {
+    //  logk("LINK %08x\n", start_addr + (i) * 0x1000);
       page_link_share(start_addr + (i) * 0x1000);
     }
     // page_links(start_addr,ebx / 0x1000);
@@ -635,6 +637,8 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
   } else if (eax == 0x55) {
     extern int disable_flag;
     disable_flag = 1;
+    extern mtask* keyboard_use_task;
+    keyboard_use_task = task;
   } else if (eax == 0x56) {
     if (!custom_handler) {
       custom_handler = ebx;
@@ -657,12 +661,23 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
     }
     io_sti();
   } else if (eax == 0x58) {
+    io_cli();
     mtask *t = get_task(ebx);
+    if(t->urgent) {
+      io_sti();
+      return;
+    }
     t->urgent = 1;
     t->timeout = 5;
+    t->running = 0;
+    io_sti();
   } else if (eax == 0x59) {
+    io_cli();
     mtask *t = get_task(ebx);
     t->timeout = 1;
+    t->running = 0;
+    t->urgent = 0;
+    io_sti();
   }
   return;
 }

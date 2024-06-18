@@ -630,6 +630,7 @@ void page_set_physics_attr_pde(uint32_t vaddr, void *paddr, uint32_t attr,
   flush_tlb((unsigned)pte);
   flush_tlb(vaddr);
 }
+extern struct TSS32 tss;
 void PF(unsigned edi, unsigned esi, unsigned ebp, unsigned esp, unsigned ebx,
         unsigned edx, unsigned ecx, unsigned eax, unsigned gs, unsigned fs,
         unsigned es, unsigned ds, unsigned error, unsigned eip, unsigned cs,
@@ -638,7 +639,6 @@ void PF(unsigned edi, unsigned esi, unsigned ebp, unsigned esp, unsigned ebx,
   io_cli();
   set_cr3(PDE_ADDRESS); // 设置一个安全的页表
   void *line_address = (void *)get_cr2();
-
   if (!(page_get_attr((unsigned)line_address) & PG_P) ||     // 不存在
       (!(page_get_attr((unsigned)line_address) & PG_USU))) { // 用户不可写
 

@@ -46,6 +46,17 @@ int rw_vdisk(char drive, unsigned int lba, unsigned char *buffer,
     return 0; // 失败
   }
 }
+int get_vdisk_type(char drive) {
+  int indx = drive - ('A');
+  if (indx > 10) {
+    return 0; // 失败
+  }
+  if (vdisk_ctl[indx].flag) {
+    return vdisk_ctl[indx].flag;
+  } else {
+    return 0; // 失败
+  }
+}
 bool have_vdisk(char drive) {
   int indx = drive - 'A';
   // printk("drive=%c\n",drive);
@@ -66,6 +77,7 @@ void Disk_Read(unsigned int lba, unsigned int number, void *buffer,
     for (int i = 0; i < number; i += SECTORS_ONCE) {
       int sectors =
           ((number - i) >= SECTORS_ONCE) ? SECTORS_ONCE : (number - i);
+          printk("Reading\n");
       rw_vdisk(drive, lba + i, buffer + i * 512, sectors, 1);
     }
   }

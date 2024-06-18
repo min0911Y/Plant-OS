@@ -4,11 +4,11 @@
 // env
 MST_Object* env;
 void env_init(void) {
-  if (vfs_filesize("/sys.cfg") == -1) {
-    vfs_createfile("/sys.cfg");
+  if (vfs_filesize("sys.cfg") == -1) {
+    vfs_createfile("sys.cfg");
   }
-  char* buff = (char*)malloc(vfs_filesize("/sys.cfg") + 1);
-  vfs_readfile("/sys.cfg", buff);
+  char* buff = (char*)malloc(vfs_filesize("sys.cfg") + 1);
+  vfs_readfile("sys.cfg", buff);
   env = Init_MstObj(buff);
   if (env->err) {
     printk("config parse err:%s\n", MST_strerror(env));

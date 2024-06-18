@@ -125,6 +125,7 @@ struct window {
   void (*handle_right)(window_t *window, gmouse_t *gmouse);
   void (*handle_stay)(window_t *window, gmouse_t *gmouse);
   void (*handle_left_for_api)(window_t *window, gmouse_t *gmouse);
+  void (*handle_mouse_wheel)(window_t *window, gmouse_t *gmouse,unsigned val);
   void (*close)(window_t *window);
 };
 
@@ -164,6 +165,7 @@ struct gmouse {
   window_t *click_left;
   window_t *click_right;
   window_t *stay;
+  window_t *wheel;
   button_t *click_button_last;
   textbox_t *click_textbox_last;
 };

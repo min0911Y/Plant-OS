@@ -508,6 +508,7 @@ bool ahci_read(HBA_PORT *port, uint32_t startl, uint32_t starth, uint32_t count,
   // 8K bytes (16 sectors) per PRDT
   int i;
   for (i = 0; i < cmdheader->prdtl - 1; i++) {
+    flush_cache(buf);
     cmdtbl->prdt_entry[i].dba = (uint32_t)buf;
     cmdtbl->prdt_entry[i].dbau = 0;
     cmdtbl->prdt_entry[i].dbc =
@@ -572,6 +573,7 @@ bool ahci_read(HBA_PORT *port, uint32_t startl, uint32_t starth, uint32_t count,
     return false;
   }
 
+  flush_cache(buf);
   return true;
 }
 
@@ -661,6 +663,7 @@ bool ahci_write(HBA_PORT *port, uint32_t startl, uint32_t starth,
   // 8K bytes (16 sectors) per PRDT
   int i;
   for (i = 0; i < cmdheader->prdtl - 1; i++) {
+    flush_cache(buf);
     cmdtbl->prdt_entry[i].dba = (uint32_t)buf;
     cmdtbl->prdt_entry[i].dbau = 0;
     cmdtbl->prdt_entry[i].dbc =
@@ -724,7 +727,7 @@ bool ahci_write(HBA_PORT *port, uint32_t startl, uint32_t starth,
     logk("Write disk error\n");
     return false;
   }
-
+  flush_cache(buf);
   return true;
 }
 // Find a free command list slot
@@ -773,7 +776,36 @@ void port_rebase(HBA_PORT *port, int portno) {
 
   start_cmd(port); // Start command engine
 }
+static inline void cpuid(uint32_t leaf, uint32_t subleaf, uint32_t *regs) {
+  asm volatile("cpuid"
+               : "=a"(regs[0]), "=b"(regs[1]), "=c"(regs[2]), "=d"(regs[3])
+               : "a"(leaf), "c"(subleaf));
+}
 
+// 获取缓存行大小
+uint32_t get_cache_line_size() {
+  uint32_t regs[4] = {0};
+  cpuid(0x00000001, 0, regs);
+
+  // EAX寄存器的第8-11位包含缓存行的字节数
+  return (regs[1] >> 8) & 0xFF;
+}
+
+#define PAGE_SIZE 4096
+int cache_line_size = 0;
+// 刷新缓存函数
+void flush_cache(void *addr) {
+  uintptr_t address = (uintptr_t)addr;
+
+  // 计算需要刷新的页的起始地址
+  uintptr_t page_start = address & ~(PAGE_SIZE - 1);
+
+  // 遍历并刷新整页的所有缓存行
+  for (uintptr_t cache_line = page_start; cache_line < page_start + PAGE_SIZE;
+       cache_line += cache_line_size) {
+    asm volatile("clflush (%0)" : : "r"(cache_line) : "memory");
+  }
+}
 void ahci_init() {
   int i, j, k;
   int flag = 0;
@@ -800,6 +832,8 @@ OK:
     logk("Couldn't find AHCI Controller\n");
     return;
   }
+  cache_line_size = get_cache_line_size();
+  logk("cache line size = %d\n", cache_line_size);
   hba_mem_address = (HBA_MEM *)read_bar_n(ahci_bus, ahci_slot, ahci_func, 5);
   logk("HBA Address has been Mapped in %08x ", hba_mem_address);
   // 设置允许中断产生
@@ -816,8 +850,7 @@ OK:
 
   ahci_ports_base_addr = page_malloc(1048576);
 
-  cache = page_malloc_one_no_mark();
-  page_set_physics_attr(cache,cache,PG_P | PG_PCD | PG_RWW | (1 << 3) | (1 << 8));
+  cache = page_malloc(1048576);
   logk("AHCI port base address has been alloced in 0x%08x!\n",
        ahci_ports_base_addr);
   logk("The Useable Ports:");
@@ -845,38 +878,47 @@ OK:
     drive_mapping[drive] = ports[i];
   }
 }
+void io_delay(uint32_t delay_cycles) {
+  volatile uint32_t i;
 
+  for (i = 0; i < delay_cycles; ++i) {
+    // 添加一些无用的操作来占用时间
+    asm volatile("nop");
+  }
+}
 static void ahci_vdisk_read(char drive, unsigned char *buffer,
                             unsigned int number, unsigned int lba) {
-  memset(cache,0,0x1000);
   int i;
   for (i = 0; i < 5; i++)
     if (ahci_read(&(hba_mem_address->ports[drive_mapping[drive]]), lba, 0,
-                  number,
-                  cache)) {
+                  number, cache)) {
       break;
     }
   if (i == 5) {
-      printk("AHCI Read Error! Read %d %d\n",number,lba);
-      for (;;)
-        ;
+    printk("AHCI Read Error! Read %d %d\n", number, lba);
+    for (;;)
+      ;
   }
-  memcpy(buffer,cache,number*512);
+  flush_cache(cache);
+  flush_cache(cache + 0x1000);
+  memcpy(buffer, cache, number * 512);
 }
+void usleep(unsigned long long ns);
 static void ahci_vdisk_write(char drive, unsigned char *buffer,
                              unsigned int number, unsigned int lba) {
-  memset(cache,0,0x1000);
   memcpy(cache, buffer, number * 512);
+  flush_cache(cache);
+  flush_cache(cache + 0x1000);
+
   int i;
   for (i = 0; i < 5; i++)
     if (ahci_write(&(hba_mem_address->ports[drive_mapping[drive]]), lba, 0,
-                   number,
-                   cache)) {
+                   number, cache)) {
       break;
     }
   if (i == 5) {
-      printk("AHCI Write Error!\n");
-      for (;;)
-        ;
+    printk("AHCI Write Error!\n");
+    for (;;)
+      ;
   }
 }

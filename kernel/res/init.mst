@@ -5,10 +5,6 @@
     },
     {
         "action" = "run"
-        "path" = "other/uname.bin -a"
-    },
-    {
-        "action" = "run"
         "path" = "psh.bin"
     }
 ]

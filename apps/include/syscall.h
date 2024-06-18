@@ -122,6 +122,7 @@ void set_custom_handler(unsigned handler);
 void mem_map(unsigned a1,unsigned sz,unsigned a_pde,unsigned b1,unsigned b_pde);
 void task_set_level_higher(unsigned tid);
 void task_set_level_normal(unsigned tid);
+void use_keyboard();
 #ifdef __cplusplus
 }
 #endif

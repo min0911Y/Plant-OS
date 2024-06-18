@@ -3,6 +3,8 @@ default : Makefile
 	make -r -C zlib
 	make -r -C libtcc1
 	make -r -C miniset
+	make -r -C sdl2
+	make -r -C sdl2_old
 	make -r -C bainian
 	make -r -C bitz
 	make -r -C calc
@@ -40,6 +42,14 @@ default : Makefile
 	make -r -C duktape
 	make -r -C mmake
 	make -r -C init
+	make -r -C libutf
+	make -r -C gui
+	make -r -C nk
+	make -r -C lite-1.11
+	make -r -C nasm-master
+	make -r -C hexview
+	make -r -C kcube
+	make -r -C invader
 clean :
 	rm libs/*
 	rm out/*
