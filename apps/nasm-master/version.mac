@@ -1,0 +1,7 @@
+STD: version
+%define __?NASM_MAJOR?__ 2
+%define __?NASM_MINOR?__ 16
+%define __?NASM_SUBMINOR?__ 99
+%define __?NASM_PATCHLEVEL?__ 90
+%define __?NASM_VERSION_ID?__ 00210635Ah
+%define __?NASM_VER?__ "2.17rc0"
