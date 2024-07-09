@@ -18,12 +18,15 @@ void printchar(char ch) {
     task->TTY->print(task->TTY, ch1);
   }
 }
+void t_putchar(struct tty *res,char ch) {
+  res->putchar(res, ch);
+}
 void putchar(char ch) {
   mtask *task = current_task();
   if (task->TTY->using1 != 1) {
-    tty_default->putchar(tty_default, ch);
+    t_putchar(tty_default,ch);
   } else {
-    task->TTY->putchar(task->TTY, ch);
+    t_putchar(task->TTY, ch);
   }
 }
 void screen_ne() {

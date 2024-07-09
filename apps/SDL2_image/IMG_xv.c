@@ -1,6 +1,6 @@
 /*
   SDL_image:  An example image loading library for use with SDL
-  Copyright (C) 1997-2024 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2019 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -28,7 +28,7 @@
 static int get_line(SDL_RWops *src, char *line, int size)
 {
     while ( size > 0 ) {
-        if ( !SDL_RWread(src, line, 1, 1) ) {
+        if ( SDL_RWread(src, line, 1, 1) <= 0 ) {
             return -1;
         }
         if ( *line == '\r' ) {
@@ -118,7 +118,7 @@ SDL_Surface *IMG_LoadXV_RW(SDL_RWops *src)
     }
 
     /* Create the 3-3-2 indexed palette surface */
-    surface = SDL_CreateRGBSurfaceWithFormat(0, w, h, 0, SDL_PIXELFORMAT_RGB332);
+    surface = SDL_CreateRGBSurface(SDL_SWSURFACE, w, h, 8, 0xe0, 0x1c, 0x03, 0);
     if ( surface == NULL ) {
         error = "Out of memory";
         goto done;
@@ -126,7 +126,7 @@ SDL_Surface *IMG_LoadXV_RW(SDL_RWops *src)
 
     /* Load the image data */
     for ( pixels = (Uint8 *)surface->pixels; h > 0; --h ) {
-        if ( !SDL_RWread(src, pixels, w, 1) ) {
+        if ( SDL_RWread(src, pixels, w, 1) <= 0 ) {
             error = "Couldn't read image data";
             goto done;
         }
@@ -146,9 +146,6 @@ done:
 }
 
 #else
-#if _MSC_VER >= 1300
-#pragma warning(disable : 4100) /* warning C4100: 'op' : unreferenced formal parameter */
-#endif
 
 /* See if an image is contained in a data source */
 int IMG_isXV(SDL_RWops *src)

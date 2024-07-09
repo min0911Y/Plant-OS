@@ -25,22 +25,15 @@
 #ifndef NANOSVGRAST_H
 #define NANOSVGRAST_H
 
-#ifndef NSVG_EXPORT
-#define NSVG_EXPORT
-#endif
-
-#ifndef NANOSVGRAST_CPLUSPLUS
 #ifdef __cplusplus
 extern "C" {
-#endif
 #endif
 
 typedef struct NSVGrasterizer NSVGrasterizer;
 
 /* Example Usage:
 	// Load SVG
-	NSVGimage* image;
-	image = nsvgParseFromFile("test.svg", "px", 96);
+	struct SNVGImage* image = nsvgParseFromFile("test.svg.");
 
 	// Create rasterizer (can be used to render multiple images).
 	struct NSVGrasterizer* rast = nsvgCreateRasterizer();
@@ -51,7 +44,7 @@ typedef struct NSVGrasterizer NSVGrasterizer;
 */
 
 // Allocated rasterizer context.
-NSVG_EXPORT NSVGrasterizer* nsvgCreateRasterizer(void);
+NSVGrasterizer* nsvgCreateRasterizer(void);
 
 // Rasterizes SVG image, returns RGBA image (non-premultiplied alpha)
 //   r - pointer to rasterizer context
@@ -62,19 +55,19 @@ NSVG_EXPORT NSVGrasterizer* nsvgCreateRasterizer(void);
 //   w - width of the image to render
 //   h - height of the image to render
 //   stride - number of bytes per scaleline in the destination buffer
-NSVG_EXPORT void nsvgRasterize(NSVGrasterizer* r,
-		               NSVGimage* image, float tx, float ty, float scale,
-		               unsigned char* dst, int w, int h, int stride);
+void nsvgRasterize(NSVGrasterizer* r,
+				   NSVGimage* image, float tx, float ty, float scale,
+				   unsigned char* dst, int w, int h, int stride);
 
 // Deletes rasterizer context.
-NSVG_EXPORT void nsvgDeleteRasterizer(NSVGrasterizer*);
+void nsvgDeleteRasterizer(NSVGrasterizer*);
 
 
-#ifndef NANOSVGRAST_CPLUSPLUS
 #ifdef __cplusplus
 }
 #endif
-#endif
+
+#endif // NANOSVGRAST_H
 
 #ifdef NANOSVGRAST_IMPLEMENTATION
 
@@ -116,7 +109,7 @@ typedef struct NSVGmemPage {
 } NSVGmemPage;
 
 typedef struct NSVGcachedPaint {
-	signed char type;
+	char type;
 	char spread;
 	float xform[6];
 	unsigned int colors[256];
@@ -152,7 +145,7 @@ struct NSVGrasterizer
 	int width, height, stride;
 };
 
-NSVG_EXPORT NSVGrasterizer* nsvgCreateRasterizer(void)
+NSVGrasterizer* nsvgCreateRasterizer()
 {
 	NSVGrasterizer* r = (NSVGrasterizer*)malloc(sizeof(NSVGrasterizer));
 	if (r == NULL) goto error;
@@ -168,7 +161,7 @@ error:
 	return NULL;
 }
 
-NSVG_EXPORT void nsvgDeleteRasterizer(NSVGrasterizer* r)
+void nsvgDeleteRasterizer(NSVGrasterizer* r)
 {
 	NSVGmemPage* p;
 
@@ -333,18 +326,16 @@ static float nsvg__normalize(float *x, float* y)
 }
 
 static float nsvg__absf(float x) { return x < 0 ? -x : x; }
-static float nsvg__roundf(float x) { return (x >= 0) ? floorf(x + 0.5) : ceilf(x - 0.5); }
 
 static void nsvg__flattenCubicBez(NSVGrasterizer* r,
 								  float x1, float y1, float x2, float y2,
 								  float x3, float y3, float x4, float y4,
 								  int level, int type)
 {
-	const int max_level = 10;
 	float x12,y12,x23,y23,x34,y34,x123,y123,x234,y234,x1234,y1234;
 	float dx,dy,d2,d3;
 
-	if (level > max_level) return;
+	if (level > 10) return;
 
 	x12 = (x1+x2)*0.5f;
 	y12 = (y1+y2)*0.5f;
@@ -357,23 +348,21 @@ static void nsvg__flattenCubicBez(NSVGrasterizer* r,
 
 	dx = x4 - x1;
 	dy = y4 - y1;
-	d2 = nsvg__absf((x2 - x4) * dy - (y2 - y4) * dx);
-	d3 = nsvg__absf((x3 - x4) * dy - (y3 - y4) * dx);
+	d2 = nsvg__absf(((x2 - x4) * dy - (y2 - y4) * dx));
+	d3 = nsvg__absf(((x3 - x4) * dy - (y3 - y4) * dx));
 
 	if ((d2 + d3)*(d2 + d3) < r->tessTol * (dx*dx + dy*dy)) {
 		nsvg__addPathPoint(r, x4, y4, type);
 		return;
 	}
-	++level;
-	if (level > max_level) return;
 
 	x234 = (x23+x34)*0.5f;
 	y234 = (y23+y34)*0.5f;
 	x1234 = (x123+x234)*0.5f;
 	y1234 = (y123+y234)*0.5f;
 
-	nsvg__flattenCubicBez(r, x1,y1, x12,y12, x123,y123, x1234,y1234, level, 0);
-	nsvg__flattenCubicBez(r, x1234,y1234, x234,y234, x34,y34, x4,y4, level, type);
+	nsvg__flattenCubicBez(r, x1,y1, x12,y12, x123,y123, x1234,y1234, level+1, 0);
+	nsvg__flattenCubicBez(r, x1234,y1234, x234,y234, x34,y34, x4,y4, level+1, type);
 }
 
 static void nsvg__flattenShape(NSVGrasterizer* r, NSVGshape* shape, float scale)
@@ -849,8 +838,7 @@ static void nsvg__flattenShapeStroke(NSVGrasterizer* r, NSVGshape* shape, float 
 	}
 }
 
-static int SDLCALL
-nsvg__cmpEdge(const void *p, const void *q)
+static int nsvg__cmpEdge(const void *p, const void *q)
 {
 	const NSVGedge* a = (const NSVGedge*)p;
 	const NSVGedge* b = (const NSVGedge*)q;
@@ -880,10 +868,10 @@ static NSVGactiveEdge* nsvg__addActive(NSVGrasterizer* r, NSVGedge* e, float sta
 //	STBTT_assert(e->y0 <= start_point);
 	// round dx down to avoid going too far
 	if (dxdy < 0)
-		z->dx = (int)(-nsvg__roundf(NSVG__FIX * -dxdy));
+		z->dx = (int)(-floorf(NSVG__FIX * -dxdy));
 	else
-		z->dx = (int)nsvg__roundf(NSVG__FIX * dxdy);
-	z->x = (int)nsvg__roundf(NSVG__FIX * (e->x0 + dxdy * (startPoint - e->y0)));
+		z->dx = (int)floorf(NSVG__FIX * dxdy);
+	z->x = (int)floorf(NSVG__FIX * (e->x0 + dxdy * (startPoint - e->y0)));
 //	z->x -= off_x * FIX;
 	z->ey = e->y1;
 	z->next = 0;
@@ -966,7 +954,7 @@ static float nsvg__clampf(float a, float mn, float mx) { return a < mn ? mn : (a
 
 static unsigned int nsvg__RGBA(unsigned char r, unsigned char g, unsigned char b, unsigned char a)
 {
-	return ((unsigned int)r) | ((unsigned int)g << 8) | ((unsigned int)b << 16) | ((unsigned int)a << 24);
+	return (r) | (g << 8) | (b << 16) | (a << 24);
 }
 
 static unsigned int nsvg__lerpRGBA(unsigned int c0, unsigned int c1, float u)
@@ -1290,10 +1278,9 @@ static void nsvg__initPaint(NSVGcachedPaint* cache, NSVGpaint* paint, float opac
 	if (grad->nstops == 0) {
 		for (i = 0; i < 256; i++)
 			cache->colors[i] = 0;
-	} else if (grad->nstops == 1) {
-		unsigned int color = nsvg__applyOpacity(grad->stops[0].color, opacity);
+	} if (grad->nstops == 1) {
 		for (i = 0; i < 256; i++)
-			cache->colors[i] = color;
+			cache->colors[i] = nsvg__applyOpacity(grad->stops[i].color, opacity);
 	} else {
 		unsigned int ca, cb = 0;
 		float ua, ub, du, u;
@@ -1373,7 +1360,7 @@ static void dumpEdges(NSVGrasterizer* r, const char* name)
 }
 */
 
-NSVG_EXPORT void nsvgRasterize(NSVGrasterizer* r,
+void nsvgRasterize(NSVGrasterizer* r,
 				   NSVGimage* image, float tx, float ty, float scale,
 				   unsigned char* dst, int w, int h, int stride)
 {
@@ -1417,8 +1404,7 @@ NSVG_EXPORT void nsvgRasterize(NSVGrasterizer* r,
 			}
 
 			// Rasterize edges
-			if (r->nedges != 0)
-				qsort(r->edges, r->nedges, sizeof(NSVGedge), nsvg__cmpEdge);
+			qsort(r->edges, r->nedges, sizeof(NSVGedge), nsvg__cmpEdge);
 
 			// now, traverse the scanlines and find the intersections on each scanline, use non-zero rule
 			nsvg__initPaint(&cache, &shape->fill, shape->opacity);
@@ -1444,8 +1430,7 @@ NSVG_EXPORT void nsvgRasterize(NSVGrasterizer* r,
 			}
 
 			// Rasterize edges
-			if (r->nedges != 0)
-				qsort(r->edges, r->nedges, sizeof(NSVGedge), nsvg__cmpEdge);
+			qsort(r->edges, r->nedges, sizeof(NSVGedge), nsvg__cmpEdge);
 
 			// now, traverse the scanlines and find the intersections on each scanline, use non-zero rule
 			nsvg__initPaint(&cache, &shape->stroke, shape->opacity);
@@ -1462,6 +1447,4 @@ NSVG_EXPORT void nsvgRasterize(NSVGrasterizer* r,
 	r->stride = 0;
 }
 
-#endif // NANOSVGRAST_IMPLEMENTATION
-
-#endif // NANOSVGRAST_H
+#endif

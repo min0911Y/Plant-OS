@@ -6,8 +6,7 @@
 	Description: 行阅读器
 */
 
-#ifndef LINEREADER_HPP
-#define LINEREADER_HPP
+#pragma once
 
 #include"Exception.hpp"
 #include"String.hpp"
@@ -105,5 +104,3 @@ class LineReader {
 };
 
 #undef FILE_ERR
-
-#endif

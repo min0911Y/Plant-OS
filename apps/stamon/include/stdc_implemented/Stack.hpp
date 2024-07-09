@@ -5,8 +5,7 @@
 	Date: 17/01/23 18:06
 	Description: 栈库，基于stack.h
 */
-#ifndef STACK_CPP
-#define STACK_CPP
+#pragma once
 
 #include"stack.h"
 
@@ -78,5 +77,3 @@ int Stack<T>::traverse(STACK_VISIT visit)
 {
 	return StackTraverse(stack,visit);
 }
-
-#endif

@@ -1,6 +1,6 @@
 /*
   SDL_image:  An example image loading library for use with SDL
-  Copyright (C) 1997-2024 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2019 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -88,6 +88,10 @@ SDL_Surface *IMG_LoadPCX_RW(SDL_RWops *src)
 {
     Sint64 start;
     struct PCXheader pcxh;
+    Uint32 Rmask;
+    Uint32 Gmask;
+    Uint32 Bmask;
+    Uint32 Amask;
     SDL_Surface *surface = NULL;
     int width, height;
     int y, bpl;
@@ -96,7 +100,6 @@ SDL_Surface *IMG_LoadPCX_RW(SDL_RWops *src)
     int bits, src_bits;
     int count = 0;
     Uint8 ch;
-    Uint32 format;
 
     if ( !src ) {
         /* The error message has been set in SDL_RWFromFile */
@@ -131,19 +134,28 @@ SDL_Surface *IMG_LoadPCX_RW(SDL_RWops *src)
     /* Create the surface of the appropriate type */
     width = (pcxh.Xmax - pcxh.Xmin) + 1;
     height = (pcxh.Ymax - pcxh.Ymin) + 1;
+    Rmask = Gmask = Bmask = Amask = 0;
     src_bits = pcxh.BitsPerPixel * pcxh.NPlanes;
     if((pcxh.BitsPerPixel == 1 && pcxh.NPlanes >= 1 && pcxh.NPlanes <= 4)
        || (pcxh.BitsPerPixel == 8 && pcxh.NPlanes == 1)) {
         bits = 8;
-        format = SDL_PIXELFORMAT_INDEX8;
     } else if(pcxh.BitsPerPixel == 8 && pcxh.NPlanes == 3) {
         bits = 24;
-        format = SDL_PIXELFORMAT_RGB24;
+#if SDL_BYTEORDER == SDL_LIL_ENDIAN
+            Rmask = 0x000000FF;
+            Gmask = 0x0000FF00;
+            Bmask = 0x00FF0000;
+#else
+            Rmask = 0xFF0000;
+            Gmask = 0x00FF00;
+            Bmask = 0x0000FF;
+#endif
     } else {
         error = "unsupported PCX format";
         goto done;
     }
-    surface = SDL_CreateRGBSurfaceWithFormat(0, width, height, 0, format);
+    surface = SDL_CreateRGBSurface(SDL_SWSURFACE, width, height,
+                   bits, Rmask, Gmask, Bmask, Amask);
     if ( surface == NULL ) {
         goto done;
     }
@@ -208,21 +220,18 @@ SDL_Surface *IMG_LoadPCX_RW(SDL_RWops *src)
         } else if ( src_bits == 24 ) {
             /* de-interlace planes */
             Uint8 *innerSrc = buf;
-            Uint8 *end1 = buf+bpl;
             int plane;
             for ( plane = 0; plane < pcxh.NPlanes; plane++ ) {
                 int x;
                 Uint8 *dst = row + plane;
-                Uint8 *end2= row + surface->pitch;
                 for ( x = 0; x < width; x++ ) {
-                    if ( (innerSrc + x) >= end1 || dst >= end2 ) {
+                    if ( dst >= row+surface->pitch ) {
                         error = "decoding out of bounds (corrupt?)";
                         goto done;
                     }
-                    *dst = innerSrc[x];
+                    *dst = *innerSrc++;
                     dst += pcxh.NPlanes;
                 }
-                innerSrc += pcxh.BytesPerLine;
             }
         }
 
@@ -274,9 +283,6 @@ done:
 }
 
 #else
-#if _MSC_VER >= 1300
-#pragma warning(disable : 4100) /* warning C4100: 'op' : unreferenced formal parameter */
-#endif
 
 /* See if an image is contained in a data source */
 int IMG_isPCX(SDL_RWops *src)

@@ -11,27 +11,24 @@
     * 数列这种数据结构很大程度上使得这个虚拟机可以兼容更多的语言，而且它的实现也并非难事
 */
 
-#ifndef SEQUENCETYPE_CPP
-#define SEQUENCETYPE_CPP
+#pragma once
 
 #include"DataType.hpp"
 #include"ArrayList.hpp"
 
-namespace stamon {
-	namespace datatype {
-		class SequenceType : public DataType {
-			public:
-				ArrayList<Variable*> sequence;
-				SequenceType(int length) : DataType(SequenceTypeID), sequence(ArrayList<Variable*>(length)) {
-				}
-				SequenceType(ArrayList<Variable*> value) : DataType(SequenceTypeID) {
-					sequence = value;
-				}
-				virtual ArrayList<Variable*> getVal() const {
-					return sequence;
-				}
-		};
-	}
-}
-
-#endif
+namespace stamon::datatype {
+	class SequenceType : public DataType {
+		public:
+			ArrayList<Variable*> sequence;
+			SequenceType(int length) 
+			: DataType(SequenceTypeID), sequence(ArrayList<Variable*>(length)) {
+			}
+			SequenceType(ArrayList<Variable*> value) : DataType(SequenceTypeID) {
+				sequence = value;
+			}
+			virtual ArrayList<Variable*> getVal() const {
+				return sequence;
+			}
+			virtual ~SequenceType() = default;
+	};
+} //namespace stamon::datatype

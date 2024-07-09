@@ -6,8 +6,7 @@
 	Description: 二进制写入器
 */
 
-#ifndef BINARYWRITER_HPP
-#define BINARYWRITER_HPP
+#pragma once
 
 #define FILE_ERROR { THROW("file opening error") return; }
 
@@ -16,9 +15,8 @@
 
 class BinaryWriter {
     public:
-        STMException* ex;
 
-        BinaryWriter();
+        BinaryWriter() {}
         BinaryWriter(STMException* e, String filename);
 
         void write(char b);
@@ -28,4 +26,4 @@ class BinaryWriter {
         void close();
 };
 
-#endif
+#undef FILE_ERROR

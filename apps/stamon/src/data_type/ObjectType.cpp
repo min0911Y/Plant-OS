@@ -8,27 +8,24 @@
     * 这里就写上了ObjectType的定义
 */
 
-#ifndef OBJECT_CPP
-#define OBJECT_CPP
+#pragma once
 
 #include"DataType.hpp"
 #include"NumberMap.hpp"
 
-namespace stamon {
-	namespace datatype {
-		class ObjectType : public DataType {
-				NumberMap<Variable> vals;  //由于STVM内部以数字来代替标识符，所以采用NumberMap
-			public:
-				ObjectType(NumberMap<Variable> value)
-					: DataType(ObjectTypeID), vals(NumberMap<Variable>()) {
-					vals = value;
-				}
-				virtual NumberMap<Variable> getVal() const {
-					return vals;
-				}
-		};
+namespace stamon::datatype {
+	class ObjectType : public DataType {
+			NumberMap<Variable> vals;  
+			//由于STVM内部以数字来代替标识符，所以采用NumberMap
+		public:
+			ObjectType(NumberMap<Variable> value)
+				: DataType(ObjectTypeID), vals(NumberMap<Variable>()) {
+				vals = value;
+			}
+			virtual NumberMap<Variable> getVal() const {
+				return vals;
+			}
+			virtual ~ObjectType() = default;
+	};
 
-	}
-}
-
-#endif
+} //namespace stamon::datatype

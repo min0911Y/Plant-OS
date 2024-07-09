@@ -10,50 +10,48 @@
         using namespace stamon::datatype;
 */
 
-#ifndef DATATYPE_HPP
-#define DATATYPE_HPP
+#pragma once
 
-namespace stamon {
-	namespace datatype {
-		enum _DataTypeID {
-		    DataTypeID = 0,
-		    NullTypeID,
-		    IntegerTypeID,
-		    FloatTypeID,
-		    DoubleTypeID,
-		    StringTypeID,
-		    SequenceTypeID,
-		    ClassTypeID,
-		    MethodTypeID,
-		    ObjectTypeID
-		};
+namespace stamon::datatype {
+	enum _DataTypeID {
+	    DataTypeID = 0,
+	    NullTypeID,
+	    IntegerTypeID,
+	    FloatTypeID,
+	    DoubleTypeID,
+	    StringTypeID,
+	    SequenceTypeID,
+	    ClassTypeID,
+	    MethodTypeID,
+	    ObjectTypeID
+	};
 
-		class DataType;
-		class Variable;
-		class NullType;
-		class IntegerType;
-		class FloatType;
-		class DoubleType;
-		class StringType;
-		class SequenceType;
-		class ClassType;
-		class MethodType;
-		class ObjectType;
+	class DataType;
+	class Variable;
+	class NullType;
+	class IntegerType;
+	class FloatType;
+	class DoubleType;
+	class StringType;
+	class SequenceType;
+	class ClassType;
+	class MethodType;
+	class ObjectType;
 
-		class DataType {
-				int type;
-			public:
-				bool gc_flag = false;	//用于在GC时标记这个值是否被遍历到
+	class DataType {
+			int type;
+		public:
+			bool gc_flag = false;	//用于在GC时标记这个值是否被遍历到
 
-				DataType(int type_id) {
-					type = type_id;
-				}
-				virtual int getType() const {
-					return type;
-				}
-		};
-	}
-}
+			DataType(int type_id) {
+				type = type_id;
+			}
+			virtual int getType() const {
+				return type;
+			}
+			virtual ~DataType() = default;	//等价于~DataType() {}
+	};
+} //namespace stamon::datatype
 
 #include"Variable.cpp"
 #include"NullType.cpp"
@@ -63,5 +61,3 @@ namespace stamon {
 #include"ClassType.cpp"
 #include"MethodType.cpp"
 #include"ObjectType.cpp"
-
-#endif

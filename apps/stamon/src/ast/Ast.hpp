@@ -10,8 +10,7 @@
         using namespace stamon::ast;
 */
 
-#ifndef AST_HPP
-#define AST_HPP
+#pragma once
 
 #include "ArrayList.hpp"
 #include "String.hpp"
@@ -114,6 +113,8 @@ namespace stamon {
 					//获得节点类型
 					return AstNodeType;
 				}
+
+				virtual ~AstNode() = default;
 		};
 	}
 }
@@ -122,5 +123,3 @@ namespace stamon {
 #include "ExprAst.cpp"
 #include "LeafAst.cpp"
 #include "SfnAst.cpp"
-
-#endif

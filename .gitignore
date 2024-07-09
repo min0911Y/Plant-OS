@@ -10,6 +10,5 @@ apps/sdl2/*.o
 apps/sdl2_old/*.o
 !apps/out/.gitkeep
 kernel/*.img
-!apps/nasm-master/Makefile.dep
 c.py
 cloc.exe

@@ -6,8 +6,7 @@
 	Description: 以文件为键的map
 */
 
-#ifndef FILEMAP_HPP
-#define FILEMAP_HPP
+#pragma once
 
 #include"stdlib.h"
 #include"Exception.hpp"
@@ -42,5 +41,3 @@ class FileMap {
 			return map.containsKey(filename);
 		}
 };
-
-#endif

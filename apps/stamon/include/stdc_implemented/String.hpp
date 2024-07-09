@@ -5,8 +5,7 @@
 	Date: 29/07/23 12:59
 	Description: 字符串库
 */
-#ifndef STRING
-#define STRING
+#pragma once
 
 /*
  * 一些网络上的大牛，他们告诉我，我必须在一些函数的结尾加上const限定符，才能支持
@@ -29,6 +28,7 @@ class String {
 		bool isUseCache = false;
 		char* str;
 		char cache[32] = {0};
+
 		void* StrCalloc(int size, int count) {
 			if(size*count<=32) {
 				isUseCache = true;
@@ -56,13 +56,11 @@ class String {
 		}			   //初始化为空字符串
 
 		String(char *s) {
-			
 			str = (char*)StrCalloc(strlen(s)+1, 1);
 			strcpy(str, s);
 		}	   //初始化，将s复制到this
 
 		String(const String& s) {
-			printf("fuck here\n");
 			str = s.c_arr();
 		}
 
@@ -157,7 +155,6 @@ class String {
 		}	//返回str，为了内存安全，建议使用c_arr，如果你只需要一个只读用的char*字符串，getstr函数足矣
 
 		char* c_arr() const {
-			printf("%p\n",str);
 			char* rst = (char*)calloc(strlen(str)+1, 1);
 			strcpy(rst, str);
 			return rst;
@@ -248,5 +245,3 @@ class String {
 			StrFree();
 		}
 };
-
-#endif

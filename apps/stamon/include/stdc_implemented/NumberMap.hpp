@@ -6,8 +6,7 @@
 	Description: 整数map
 */
 
-#ifndef NUMBERMAP_HPP
-#define NUMBERMAP_HPP
+#pragma once
 
 #include"stmlib.hpp"
 #include"strie.h"
@@ -75,5 +74,3 @@ class NumberMap {
 		}
 
 };
-
-#endif

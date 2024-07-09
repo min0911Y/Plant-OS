@@ -1,6 +1,6 @@
 /*
   SDL_image:  An example image loading library for use with SDL
-  Copyright (C) 1997-2024 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2019 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -151,10 +151,17 @@ SDL_Surface *IMG_LoadPNM_RW(SDL_RWops *src)
 
     if(kind == PPM) {
         /* 24-bit surface in R,G,B byte order */
-        surface = SDL_CreateRGBSurfaceWithFormat(0, width, height, 0, SDL_PIXELFORMAT_RGB24);
+        surface = SDL_CreateRGBSurface(SDL_SWSURFACE, width, height, 24,
+#if SDL_BYTEORDER == SDL_LIL_ENDIAN
+                       0x000000ff, 0x0000ff00, 0x00ff0000,
+#else
+                       0x00ff0000, 0x0000ff00, 0x000000ff,
+#endif
+                       0);
     } else {
         /* load PBM/PGM as 8-bit indexed images */
-        surface = SDL_CreateRGBSurfaceWithFormat(0, width, height, 0, SDL_PIXELFORMAT_INDEX8);
+        surface = SDL_CreateRGBSurface(SDL_SWSURFACE, width, height, 8,
+                       0, 0, 0, 0);
     }
     if ( surface == NULL )
         ERROR("Out of memory");
@@ -237,9 +244,6 @@ done:
 }
 
 #else
-#if _MSC_VER >= 1300
-#pragma warning(disable : 4100) /* warning C4100: 'op' : unreferenced formal parameter */
-#endif
 
 /* See if an image is contained in a data source */
 int IMG_isPNM(SDL_RWops *src)

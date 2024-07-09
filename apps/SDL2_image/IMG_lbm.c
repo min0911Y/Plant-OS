@@ -1,6 +1,6 @@
 /*
   SDL_image:  An example image loading library for use with SDL
-  Copyright (C) 1997-2024 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2019 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -188,7 +188,7 @@ SDL_Surface *IMG_LoadLBM_RW( SDL_RWops *src )
                 goto done;
             }
 
-            if ( !SDL_RWread( src, colormap, size, 1 ) )
+            if ( !SDL_RWread( src, &colormap, size, 1 ) )
             {
                 error="error reading CMAP chunk";
                 goto done;
@@ -224,7 +224,7 @@ SDL_Surface *IMG_LoadLBM_RW( SDL_RWops *src )
         }
     }
 
-    /* compute some useful values, based on the bitmap header */
+    /* compute some usefull values, based on the bitmap header */
 
     width = ( bmhd.w + 15 ) & 0xFFFFFFF0;  /* Width in pixels modulo 16 */
 
@@ -241,7 +241,7 @@ SDL_Surface *IMG_LoadLBM_RW( SDL_RWops *src )
     stencil = (bmhd.mask & 1);   /* There is a mask ( 'stencil' ) */
 
     /* Allocate memory for a temporary buffer ( used for
-       decompression/deinterleaving ) */
+           decompression/deinterleaving ) */
 
     MiniBuf = (Uint8 *)SDL_malloc( bytesperline * (nbplanes + stencil) );
     if ( MiniBuf == NULL )
@@ -250,24 +250,13 @@ SDL_Surface *IMG_LoadLBM_RW( SDL_RWops *src )
         goto done;
     }
 
-    {
-       Uint32 format = SDL_PIXELFORMAT_INDEX8;
-       if (nbplanes == 24 || flagHAM == 1) {
-#if SDL_BYTEORDER == SDL_BIG_ENDIAN
-          format = SDL_PIXELFORMAT_RGB24;
-#else
-          format = SDL_PIXELFORMAT_BGR24;
-#endif
-       }
-        if ((Image = SDL_CreateRGBSurfaceWithFormat(0, width, bmhd.h, 0, format)) == NULL){
-            goto done;
-        }
-    }
+    if ( ( Image = SDL_CreateRGBSurface( SDL_SWSURFACE, width, bmhd.h, (nbplanes==24 || flagHAM==1)?24:8, 0, 0, 0, 0 ) ) == NULL )
+       goto done;
 
     if ( bmhd.mask & 2 )               /* There is a transparent color */
         SDL_SetColorKey( Image, SDL_TRUE, bmhd.tcolor );
 
-    /* Update palette information */
+    /* Update palette informations */
 
     /* There is no palette in 24 bits ILBM file */
     if ( nbcolors>0 && flagHAM==0 )
@@ -462,13 +451,13 @@ SDL_Surface *IMG_LoadLBM_RW( SDL_RWops *src )
                             finalcolor = pixelcolor;
                         }
 #if SDL_BYTEORDER == SDL_LIL_ENDIAN
-                        *ptr++ = (Uint8)(finalcolor>>16);
-                        *ptr++ = (Uint8)(finalcolor>>8);
-                        *ptr++ = (Uint8)(finalcolor);
+                            *ptr++ = (Uint8)(finalcolor>>16);
+                            *ptr++ = (Uint8)(finalcolor>>8);
+                            *ptr++ = (Uint8)(finalcolor);
 #else
-                        *ptr++ = (Uint8)(finalcolor);
-                        *ptr++ = (Uint8)(finalcolor>>8);
-                        *ptr++ = (Uint8)(finalcolor>>16);
+                            *ptr++ = (Uint8)(finalcolor);
+                            *ptr++ = (Uint8)(finalcolor>>8);
+                            *ptr++ = (Uint8)(finalcolor>>16);
 #endif
                         maskBit = maskBit>>1;
                     }
@@ -495,9 +484,6 @@ done:
 }
 
 #else /* LOAD_LBM */
-#if _MSC_VER >= 1300
-#pragma warning(disable : 4100) /* warning C4100: 'op' : unreferenced formal parameter */
-#endif
 
 /* See if an image is contained in a data source */
 int IMG_isLBM(SDL_RWops *src)

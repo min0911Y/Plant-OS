@@ -59,14 +59,14 @@ extern "C" void __cxa_pure_virtual()
 void *operator new(size_t size)
 {
     void *p = malloc(size);
-    logkf("mother fucker %d %p\n",size,p);
+ //   logkf("mother fucker %d %p\n",size,p);
     return p;
 }
  
 void *operator new[](size_t size)
 {
     void *p = malloc(size);
-    logkf("mother fucker %d %p\n",size,p);
+  //  logkf("mother fucker %d %p\n",size,p);
     return p;
 }
  

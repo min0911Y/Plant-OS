@@ -6,8 +6,7 @@
 	Description: 字符串map
 */
 
-#ifndef STRINGMAP_CPP
-#define STRINGMAP_CPP
+#pragma once
 
 #include"strie.h"
 #include"String.hpp"
@@ -108,5 +107,3 @@ ArrayList<list_T> StringMap<T>::getValList() {
 
 	return result;
 }
-
-#endif

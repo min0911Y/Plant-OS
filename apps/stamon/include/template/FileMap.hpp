@@ -6,31 +6,28 @@
 	Description: 以文件为键的map
 */
 
-#ifndef FILEMAP_HPP
-#define FILEMAP_HPP
+#pragma once
 
-#include"String.hpp"
 #include"Exception.hpp"
+#include"StringMap.hpp"
 #include"LineReader.hpp"
+#include"String.hpp"
 
 class FileMap {
 	public:
 		STMException* ex;
 
-		FileMap();
+		FileMap() {}
 
 		FileMap(STMException* e) {
 			ex = e;
 		}
 
-		LineReader mark(String filename);
-
+		LineReader mark(const String& filename);
 		/*
-		 * 将该文件标记，并且返回打开该文件后的LineReader
-		 * 如果该文件不存在或出错，抛出异常
-		 */
+			* 将该文件标记，并且返回打开该文件后的LineReader
+			* 如果该文件不存在或出错，抛出异常
+		*/
 
-		bool exist(String filename);	//某个文件是否已经被标记过
+		bool exist(const String& filename);
 };
-
-#endif

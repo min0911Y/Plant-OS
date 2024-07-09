@@ -6,18 +6,14 @@
 	Description: 空值数据类型定义
 */
 
-#ifndef NULLTYPE_CPP
-#define NULLTYPE_CPP
+#pragma once
 
 #include"DataType.hpp"
 
-namespace stamon {
-	namespace datatype {
-		class NullType : public DataType {
-			public:
-				NullType() : DataType(NullTypeID) {}
-		};
-	}
-}
-
-#endif
+namespace stamon::datatype {
+	class NullType : public DataType {
+		public:
+			NullType() : DataType(NullTypeID) {}
+			virtual ~NullType() = default;
+	};
+} //namespace stamon::datatype

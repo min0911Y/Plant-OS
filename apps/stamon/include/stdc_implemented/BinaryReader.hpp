@@ -6,8 +6,7 @@
 	Description: 二进制写入器
 */
 
-#ifndef BINARYREADER_HPP
-#define BINARYREADER_HPP
+#pragma once
 
 #define FILE_ERR { THROW("file opening error") return; }
 
@@ -58,5 +57,3 @@ class BinaryReader {
 };
 
 #undef FILE_ERROR
-
-#endif

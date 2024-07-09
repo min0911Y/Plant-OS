@@ -1,6 +1,6 @@
 /*
   SDL_image:  An example image loading library for use with SDL
-  Copyright (C) 1997-2024 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2019 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -25,10 +25,6 @@
 #include "SDL_image.h"
 
 #ifdef LOAD_XCF
-
-#ifndef SDL_SIZE_MAX
-#define SDL_SIZE_MAX ((size_t)-1)
-#endif
 
 #if DEBUG
 static char prop_names [][30] = {
@@ -164,8 +160,8 @@ typedef struct {
   char * name;
   xcf_prop * properties;
 
-  Uint64 hierarchy_file_offset;
-  Uint64 layer_mask_offset;
+  Uint32 hierarchy_file_offset;
+  Uint32 layer_mask_offset;
 
   Uint32 offset_x;
   Uint32 offset_y;
@@ -178,7 +174,7 @@ typedef struct {
   char * name;
   xcf_prop * properties;
 
-  Uint64 hierarchy_file_offset;
+  Uint32 hierarchy_file_offset;
 
   Uint32 color;
   Uint32 opacity;
@@ -191,19 +187,19 @@ typedef struct {
   Uint32 height;
   Uint32 bpp;
 
-  Uint64 * level_file_offsets;
+  Uint32 * level_file_offsets;
 } xcf_hierarchy;
 
 typedef struct {
   Uint32 width;
   Uint32 height;
 
-  Uint64 * tile_file_offsets;
+  Uint32 * tile_file_offsets;
 } xcf_level;
 
 typedef unsigned char * xcf_tile;
 
-typedef unsigned char * (*load_tile_type) (SDL_RWops *, Uint64, int, int, int);
+typedef unsigned char * (* load_tile_type) (SDL_RWops *, Uint32, int, int, int);
 
 
 /* See if an image is contained in a data source */
@@ -325,10 +321,7 @@ static xcf_header * read_xcf_header (SDL_RWops * src) {
   h->width       = SDL_ReadBE32 (src);
   h->height      = SDL_ReadBE32 (src);
   h->image_type  = SDL_ReadBE32 (src);
-  if (h->sign[9] == 'v' && h->sign[10] >= '0' && h->sign[10] <= '9' && h->sign[11] >= '0' && h->sign[11] <= '9' && h->sign[12] >= '0' && h->sign[12] <= '9')
-    h->file_version = (h->sign[10] - '0') * 100 + (h->sign[11] - '0') * 10 + (h->sign[12] - '0');
-  else
-    h->file_version = 0;
+  h->file_version = (h->sign[10] - '0') * 100 + (h->sign[11] - '0') * 10 + (h->sign[12] - '0');
 #ifdef DEBUG
   printf ("XCF signature : %.14s (version %u)\n", h->sign, h->file_version);
   printf (" (%u,%u) type=%u\n", h->width, h->height, h->image_type);
@@ -482,7 +475,7 @@ static xcf_hierarchy * read_xcf_hierarchy (SDL_RWops * src, const xcf_header * h
   h->level_file_offsets = NULL;
   i = 0;
   do {
-    h->level_file_offsets = (Uint64 *) SDL_realloc (h->level_file_offsets, sizeof (*h->level_file_offsets) * (i+1));
+    h->level_file_offsets = (Uint32 *) SDL_realloc (h->level_file_offsets, sizeof (Uint32) * (i+1));
     h->level_file_offsets [i] = read_offset (src, head);
   } while (h->level_file_offsets [i++]);
 
@@ -505,7 +498,7 @@ static xcf_level * read_xcf_level (SDL_RWops * src, const xcf_header * h) {
   l->tile_file_offsets = NULL;
   i = 0;
   do {
-    l->tile_file_offsets = (Uint64 *) SDL_realloc (l->tile_file_offsets, sizeof (*l->tile_file_offsets) * (i+1));
+    l->tile_file_offsets = (Uint32 *) SDL_realloc (l->tile_file_offsets, sizeof (Uint32) * (i+1));
     l->tile_file_offsets [i] = read_offset (src, h);
   } while (l->tile_file_offsets [i++]);
 
@@ -516,32 +509,30 @@ static void free_xcf_tile (unsigned char * t) {
   SDL_free (t);
 }
 
-static unsigned char * load_xcf_tile_none (SDL_RWops * src, Uint64 len, int bpp, int x, int y) {
-  unsigned char * load = NULL;
+static unsigned char * load_xcf_tile_none (SDL_RWops * src, Uint32 len, int bpp, int x, int y) {
+  unsigned char * load;
 
-  if (len <= (Uint64)SDL_SIZE_MAX) {
-    load = (unsigned char *) SDL_malloc ((size_t)len); // expect this is okay
-  }
+  load = (unsigned char *) SDL_malloc (len); // expect this is okay
   if (load != NULL)
-    SDL_RWread (src, load, (size_t)len, 1);
+    SDL_RWread (src, load, len, 1);
 
   return load;
 }
 
-static unsigned char * load_xcf_tile_rle (SDL_RWops * src, Uint64 len, int bpp, int x, int y) {
+static unsigned char * load_xcf_tile_rle (SDL_RWops * src, Uint32 len, int bpp, int x, int y) {
   unsigned char * load, * t, * data, * d;
+  Uint32 reallen;
   int i, size, count, j, length;
   unsigned char val;
 
-  if (len == 0 || len > (Uint64)SDL_SIZE_MAX) {  /* probably bogus data. */
+  if (len == 0) {  /* probably bogus data. */
     return NULL;
   }
 
-  t = load = (unsigned char *) SDL_malloc ((size_t)len);
+  t = load = (unsigned char *) SDL_malloc (len);
   if (load == NULL)
     return NULL;
-
-  SDL_RWread (src, t, 1, (size_t)len); /* reallen */
+  reallen = SDL_RWread (src, t, 1, len);
 
   data = (unsigned char *) SDL_calloc (1, x*y*bpp);
   for (i = 0; i < bpp; i++) {
@@ -639,11 +630,12 @@ do_layer_surface(SDL_Surface * surface, SDL_RWops * src, xcf_header * head, xcf_
     xcf_level      *level;
     unsigned char  *tile;
     Uint8          *p8;
+    Uint16         *p16;
     Uint32         *p;
     int            i, j;
     Uint32         x, y, tx, ty, ox, oy;
     Uint32         *row;
-    Uint64         length;
+    Uint32         length;
 
     SDL_RWseek(src, layer->hierarchy_file_offset, RW_SEEK_SET);
     hierarchy = read_xcf_hierarchy(src, head);
@@ -691,9 +683,10 @@ do_layer_surface(SDL_Surface * surface, SDL_RWops * src, xcf_header * head, xcf_
             }
 
             p8 = tile;
+            p16 = (Uint16 *) p8;
             p = (Uint32 *) p8;
             for (y = ty; y < ty + oy; y++) {
-                if ((y >= (Uint32)surface->h) || ((tx+ox) > (Uint32)surface->w)) {
+                if ((y >= surface->h) || ((tx+ox) > surface->w)) {
                     break;
                 }
                 row = (Uint32 *) ((Uint8 *) surface->pixels + y * surface->pitch + tx * 4);
@@ -806,7 +799,7 @@ SDL_Surface *IMG_LoadXCF_RW(SDL_RWops *src)
   int chnls, i, offsets;
   Sint64 offset, fp;
 
-  unsigned char * (* load_tile) (SDL_RWops *, Uint64, int, int, int);
+  unsigned char * (* load_tile) (SDL_RWops *, Uint32, int, int, int);
 
   if (!src) {
     /* The error message has been set in SDL_RWFromFile */
@@ -836,7 +829,8 @@ SDL_Surface *IMG_LoadXCF_RW(SDL_RWops *src)
   }
 
   /* Create the surface of the appropriate type */
-  surface = SDL_CreateRGBSurfaceWithFormat(0, head->width, head->height, 0, SDL_PIXELFORMAT_ARGB8888);
+  surface = SDL_CreateRGBSurface(SDL_SWSURFACE, head->width, head->height, 32,
+                 0x00FF0000,0x0000FF00,0x000000FF,0xFF000000);
 
   if ( surface == NULL ) {
     error = "Out of memory";
@@ -852,7 +846,8 @@ SDL_Surface *IMG_LoadXCF_RW(SDL_RWops *src)
   }
   fp = SDL_RWtell (src);
 
-  lays = SDL_CreateRGBSurfaceWithFormat(0, head->width, head->height, 0, SDL_PIXELFORMAT_ARGB8888);
+  lays = SDL_CreateRGBSurface(SDL_SWSURFACE, head->width, head->height, 32,
+              0x00FF0000,0x0000FF00,0x000000FF,0xFF000000);
 
   if ( lays == NULL ) {
     error = "Out of memory";
@@ -902,7 +897,8 @@ SDL_Surface *IMG_LoadXCF_RW(SDL_RWops *src)
   if (chnls) {
     SDL_Surface * chs;
 
-    chs = SDL_CreateRGBSurfaceWithFormat(0, head->width, head->height, 0, SDL_PIXELFORMAT_ARGB8888);
+    chs = SDL_CreateRGBSurface(SDL_SWSURFACE, head->width, head->height, 32,
+               0x00FF0000,0x0000FF00,0x000000FF,0xFF000000);
 
     if (chs == NULL) {
       error = "Out of memory";
@@ -936,9 +932,6 @@ done:
 }
 
 #else
-#if _MSC_VER >= 1300
-#pragma warning(disable : 4100) /* warning C4100: 'op' : unreferenced formal parameter */
-#endif
 
 /* See if an image is contained in a data source */
 int IMG_isXCF(SDL_RWops *src)

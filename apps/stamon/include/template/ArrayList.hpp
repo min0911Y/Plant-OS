@@ -6,47 +6,40 @@
 	Description: 动态数组
 */
 
-#ifndef ARRAYLIST
-#define ARRAYLIST
+#pragma once
 
-#include"stdlib.h"
+#include"stmlib.hpp"
 
-using namespace std;
-
-template <typename T>
+template<typename T>
 class ArrayList {
 	public:
 		/*值得注意的是：正常的ArrayList赋值，实际上是引用传递*/
-	
-		ArrayList();//创建一个空列表
 
-		ArrayList(int size);//创建size个元素的列表
+		ArrayList();		// 创建一个空列表
 
-		void add(const T& value); //末尾添加值
+		ArrayList(int size);// 创建size个元素的列表
 
-		void insert(int index, const T& value);	//将value插入到[index]
+		void add(const T &value);	// 末尾添加值
 
-		void erase(int index);	//删除[index]
+		void insert(int index, const T &value);	// 将value插入到[index]
 
-		T at(int index) const ;		//获取[index]
+		void erase(int index); // 删除[index]
 
-		bool empty() const ;	//判断是否为空
+		T at(int index) const ; // 获取[index]
 
-		void clear() ;	//清除列表
+		bool empty() const ; // 判断是否为空
 
-		int size() const ;	//获得元素个数
+		void clear(); // 清除列表
 
-		ArrayList<T> clone();	//克隆一个ArrayList
+		int size() const ;  // 获得元素个数
 
-		ArrayList<T> operator+(ArrayList<T> src);	//将两个ArrayList拼接
+		ArrayList<T> clone(); // 复制一个相同的ArrayList
+
+		ArrayList<T> operator+(ArrayList<T> src);
 
 		ArrayList<T> operator+=(ArrayList<T> src);
 
-		T& operator[](int index);	//取下标
+		T &operator[](int index);
 
-		T operator[](int index) const ;	//取下标
-
-
+		T operator[](int index) const ;
 };
-
-#endif

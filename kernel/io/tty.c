@@ -3,12 +3,13 @@ struct List *tty_list;
 struct tty *tty_default;
 void mtask_stop();
 void mtask_start();
+void t_putchar(struct tty *res,char ch);
 static void tty_print(struct tty *res, const char *string) {
   for (int i = 0; i < strlen(string); i++) {
     if (res->y == res->ysize && res->x >= res->xsize) {
       res->screen_ne(res);
     }
-    res->putchar(res, ((unsigned char *)string)[i]);
+    t_putchar(res, ((unsigned char *)string)[i]);
   }
 }
 static void tty_gotoxy(struct tty *res, int x, int y) {

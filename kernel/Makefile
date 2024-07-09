@@ -188,7 +188,7 @@ Mimg : $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $(OUTPATH)
 		mcopy -i $(IMGPATH)res.img $(RESPATH)huaji.jpg ::/res
 		mcopy -i $(IMGPATH)res.img $(RESPATH)load.jpg ::/res
 		mcopy -i $(IMGPATH)res.img $(RESPATH)io.bas ::/res
-		mcopy -i $(IMGPATH)res.img $(RESPATH)shot.png ::/res
+		mcopy -i $(IMGPATH)res.img $(RESPATH)th.svg ::/res
 		mcopy -i $(IMGPATH)res.img $(RESPATH)shot1.png ::/res
 		mcopy -i $(IMGPATH)res.img $(RESPATH)test.htm ::/res
 		mcopy -i $(IMGPATH)res.img $(RESPATH)test1.htm ::/res
@@ -255,7 +255,7 @@ img_run :
 	$(MAKE) -C $(NETPATH)
 	$(MAKE) -C $(MSTPATH)
 	$(MAKE) Mimg
-	sudo qemu-system-i386 -enable-kvm -net nic,model=pcnet -net user -serial stdio -device sb16 -device floppy -fda ./img/Powerint_DOS_386.img -hda ./img/Disk2.img -hdb ./img/Disk3.img -hdc ./img/tcc.img \
+	sudo qemu-system-i386 -net nic,model=pcnet -net user -serial stdio -device sb16 -device floppy -fda ./img/Powerint_DOS_386.img -hda ./img/Disk2.img -hdb ./img/Disk3.img -hdc ./img/res.img \
 	-hdd disk.img \
 	 -boot a -m 4096
 full :

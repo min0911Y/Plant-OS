@@ -6,8 +6,7 @@
 	Description: 字符串map
 */
 
-#ifndef STRINGMAP_CPP
-#define STRINGMAP_CPP
+#pragma once
 
 #include"String.hpp"
 
@@ -15,10 +14,10 @@ template <typename T>
 class StringMap {
 	public:
 		StringMap();							//构造方法
-		int put(String s, T* data); 			//设置键值
-		int del(String s, T* data);			//删除键值
-		T* get(String s);					//获取值
-		bool containsKey(String s);				//是否存在该键
+		int put(const String& s, T* data); 			//设置键值
+		int del(const String& s, T* data);			//删除键值
+		T* get(const String& s);					//获取值
+		bool containsKey(const String& s);				//是否存在该键
 		int clear();							//清空
 		int destroy();							//销毁
 		bool empty();							//是否为空
@@ -27,5 +26,3 @@ class StringMap {
 		template<typename list_T>
 		ArrayList<list_T> getValList();			/*将所有值汇总成一个指定类型的列表*/
 };
-
-#endif

@@ -85,7 +85,7 @@ LIBS_PATH := ../libs
 INCLUDE_PATH := ../include
 include ../defs.mk
 NASM = nasm
-CPPFLAGS = -m32 -I$(INCLUDE_PATH) -nostdinc -nolibc -nostdlib -fno-stack-protector -Qn -fno-pic -fno-pie -fomit-frame-pointer -finput-charset=UTF-8 -fexec-charset=GB2312 -Qn -march=pentium -w
+CPPFLAGS =  -m32 -I$(INCLUDE_PATH) -nostdinc -nolibc -nostdlib -ffreestanding -fno-exceptions -fno-stack-protector -Qn -fno-pic -fno-pie -fno-asynchronous-unwind-tables -Qn -O3 -march=pentium -fno-rtti -w
 release_plos:
 	#	编译Plant OS版本
 	$(CPP) src/Main.cpp \

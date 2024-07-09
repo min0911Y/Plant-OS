@@ -1,6 +1,6 @@
 /*
   SDL_image:  An example image loading library for use with SDL
-  Copyright (C) 1997-2024 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2019 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -252,7 +252,16 @@ static SDL_Surface* WIC_LoadImage(SDL_RWops *src)
     DONE_IF_FAILED(IWICBitmapFrameDecode_GetSize(bitmapFrame, &width, &height));
 #undef DONE_IF_FAILED
 
-    surface = SDL_CreateRGBSurfaceWithFormat(0, width, height, 0, SDL_PIXELFORMAT_ABGR8888);
+    surface = SDL_CreateRGBSurface(
+        0,
+        width,
+        height,
+        32,
+        0x000000FF,
+        0x0000FF00,
+        0x00FF0000,
+        0xFF000000
+    );
     IWICFormatConverter_CopyPixels(
         formatConverter,
         NULL,

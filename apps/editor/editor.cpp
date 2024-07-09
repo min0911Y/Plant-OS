@@ -1212,6 +1212,8 @@ public:
         set_cons_color(0x70);
         scan(buf, 100);
         set_cons_color(c);
+        clear();
+        r->r_clean();
         r->showAll();
         if (strncmp("to ", buf, 3) == 0) {
           n->To(strtol(buf + 3, nullptr, 10));
@@ -1224,6 +1226,8 @@ public:
         } else {
           setState("Bad Command!");
           getch();
+          clear();
+          r->r_clean();
         }
       } else if (ch == -1) {
         n->up();

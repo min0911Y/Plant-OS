@@ -24,7 +24,7 @@
 #include "SDL_assert.h"
 #include "SDL_plosdata.h"
 #include <stdio.h>
-
+static void PLOS_DestroyWindow(_THIS, SDL_Window *window);
 int PLOS_GetCurrentVideoMode(SDL_DisplayMode *mode) {
   mode->w = 1024;
   mode->h = 768;
@@ -60,7 +60,12 @@ static int PLOS_VideoInit(_THIS) {
   return 0;
 }
 
-static void PLOS_VideoQuit(_THIS) {}
+static void PLOS_VideoQuit(_THIS) {
+  SDL_VideoData *data = (SDL_VideoData *)_this->driverdata;
+  if(data->window)
+    PLOS_DestroyWindow(_this,data->window);
+}
+
 
 /**
  * Creates a new native Screen window and associates it with the given SDL

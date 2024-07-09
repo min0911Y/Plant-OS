@@ -21,3 +21,10 @@ def System;
 
 //字符串库定义
 def str;
+
+//外部调用库定义
+def native;
+
+//文件处理库定义
+def File;
+def open;

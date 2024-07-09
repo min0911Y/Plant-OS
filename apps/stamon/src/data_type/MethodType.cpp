@@ -8,32 +8,31 @@
     * 这里就写上了MethodType的定义
 */
 
-#ifndef METHODTYPE_CPP
-#define METHODTYPE_CPP
+#pragma once
 
 #include"DataType.hpp"
 #include"Ast.hpp"
 
-namespace stamon {
-	namespace datatype {
-		class MethodType : public DataType {
-				ast::AstAnonFunc* val;
-			public:
-				ObjectType* container; //容器
-				int id;	//函数的名字，如果是匿名函数，则该值为-1
-				MethodType(int iden, ast::AstAnonFunc* value, ObjectType* father) : DataType(MethodTypeID) {
-					id = iden;
-					val = value;
-					container = father;
-				}
-				virtual ast::AstAnonFunc* getVal() const {
-					return val;
-				}
-				virtual ObjectType* getContainer() const {
-					return container;
-				}
-		};
-	}
-}
-
-#endif
+namespace stamon::datatype {
+	class MethodType : public DataType {
+			ast::AstAnonFunc* val;
+		public:
+			ObjectType* container; //容器
+			int id;	//函数的名字，如果是匿名函数，则该值为-1
+			MethodType(
+			    int iden, ast::AstAnonFunc* value,
+			    ObjectType* father
+			) : DataType(MethodTypeID) {
+				id = iden;
+				val = value;
+				container = father;
+			}
+			virtual ast::AstAnonFunc* getVal() const {
+				return val;
+			}
+			virtual ObjectType* getContainer() const {
+				return container;
+			}
+			virtual ~MethodType() = default;
+	};
+} //namespace stamon::datatype

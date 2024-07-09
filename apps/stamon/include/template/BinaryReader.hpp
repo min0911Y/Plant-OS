@@ -6,26 +6,21 @@
 	Description: 二进制写入器
 */
 
-#ifndef BINARYREADER_HPP
-#define BINARYREADER_HPP
+#pragma once
 
-#define FILE_ERROR { THROW("file opening error") return; }
+#define FILE_ERR { THROW("file opening error") return; }
 
-#include"Exception.hpp"
 #include"String.hpp"
+#include"Exception.hpp"
 
 class BinaryReader {
 	public:
-		STMException* ex;
-
 		BinaryReader() {}
 		BinaryReader(STMException* e, String filename);
 
-		char* read() ;
+		char* read();
 
 		void close();
 };
 
 #undef FILE_ERROR
-
-#endif

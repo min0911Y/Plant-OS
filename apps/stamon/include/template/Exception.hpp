@@ -5,8 +5,7 @@
 	Date: 24/08/23 18:09
 	Description: 异常处理的实现
 */
-#ifndef EXCEPTION
-#define EXCEPTION
+#pragma once
 
 #include"stmlib.hpp"
 #include"String.hpp"
@@ -54,5 +53,3 @@ class STMException {
 		}
 		
 };
-
-#endif

@@ -1,6 +1,6 @@
 /*
   SDL_image:  An example image loading library for use with SDL
-  Copyright (C) 1997-2024 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2019 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -35,7 +35,7 @@ static struct {
     TIFF* (*TIFFClientOpen)(const char*, const char*, thandle_t, TIFFReadWriteProc, TIFFReadWriteProc, TIFFSeekProc, TIFFCloseProc, TIFFSizeProc, TIFFMapFileProc, TIFFUnmapFileProc);
     void (*TIFFClose)(TIFF*);
     int (*TIFFGetField)(TIFF*, ttag_t, ...);
-    int (*TIFFReadRGBAImageOriented)(TIFF*, Uint32, Uint32, Uint32*, int, int);
+    int (*TIFFReadRGBAImageOriented)(TIFF*, uint32, uint32, uint32*, int, int);
     TIFFErrorHandler (*TIFFSetErrorHandler)(TIFFErrorHandler);
 } lib;
 
@@ -60,7 +60,7 @@ int IMG_InitTIF()
         FUNCTION_LOADER(TIFFClientOpen, TIFF * (*)(const char*, const char*, thandle_t, TIFFReadWriteProc, TIFFReadWriteProc, TIFFSeekProc, TIFFCloseProc, TIFFSizeProc, TIFFMapFileProc, TIFFUnmapFileProc))
         FUNCTION_LOADER(TIFFClose, void (*)(TIFF*))
         FUNCTION_LOADER(TIFFGetField, int (*)(TIFF*, ttag_t, ...))
-        FUNCTION_LOADER(TIFFReadRGBAImageOriented, int (*)(TIFF*, Uint32, Uint32, Uint32*, int, int))
+        FUNCTION_LOADER(TIFFReadRGBAImageOriented, int (*)(TIFF*, uint32, uint32, uint32*, int, int))
         FUNCTION_LOADER(TIFFSetErrorHandler, TIFFErrorHandler (*)(TIFFErrorHandler))
     }
     ++lib.loaded;
@@ -163,6 +163,7 @@ SDL_Surface* IMG_LoadTIF_RW(SDL_RWops* src)
     TIFF* tiff = NULL;
     SDL_Surface* surface = NULL;
     Uint32 img_width, img_height;
+    Uint32 Rmask, Gmask, Bmask, Amask;
 
     if ( !src ) {
         /* The error message has been set in SDL_RWFromFile */
@@ -184,11 +185,16 @@ SDL_Surface* IMG_LoadTIF_RW(SDL_RWops* src)
     lib.TIFFGetField(tiff, TIFFTAG_IMAGEWIDTH, &img_width);
     lib.TIFFGetField(tiff, TIFFTAG_IMAGELENGTH, &img_height);
 
-    surface = SDL_CreateRGBSurfaceWithFormat(0, img_width, img_height, 0, SDL_PIXELFORMAT_ABGR8888);
+    Rmask = 0x000000FF;
+    Gmask = 0x0000FF00;
+    Bmask = 0x00FF0000;
+    Amask = 0xFF000000;
+    surface = SDL_CreateRGBSurface(SDL_SWSURFACE, img_width, img_height, 32,
+        Rmask, Gmask, Bmask, Amask);
     if(!surface)
         goto error;
 
-    if(!lib.TIFFReadRGBAImageOriented(tiff, img_width, img_height, (Uint32 *)surface->pixels, ORIENTATION_TOPLEFT, 0))
+    if(!lib.TIFFReadRGBAImageOriented(tiff, img_width, img_height, (uint32 *)surface->pixels, ORIENTATION_TOPLEFT, 0))
         goto error;
 
     lib.TIFFClose(tiff);
@@ -207,9 +213,6 @@ error:
 }
 
 #else
-#if _MSC_VER >= 1300
-#pragma warning(disable : 4100) /* warning C4100: 'op' : unreferenced formal parameter */
-#endif
 
 int IMG_InitTIF()
 {

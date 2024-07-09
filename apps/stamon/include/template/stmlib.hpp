@@ -9,8 +9,7 @@
 //这个库原本叫做clib.h
 //由于需要引入c++代码，所以后缀改为hpp，顺便把文件名改为stmlib
 
-#ifndef STMLIB_HPP
-#define STMLIB_HPP
+#pragma once
 
 #include"String.hpp"
 
@@ -37,9 +36,17 @@ T cast_func(F f) {
 }
 
 String toString(int x);
+
 String toStringX(int x);
+
 String toString(float x);
+
 String toString(double x);
+
 String toString(bool x);
 
-#endif
+#define MACRO_START do {
+
+#define MACRO_END \
+	} \
+	while (0)
