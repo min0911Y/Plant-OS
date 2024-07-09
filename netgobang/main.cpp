@@ -74,7 +74,7 @@ vector<string> spilt(string str, string delimiter) {
 int findSame(Register r) {
 	for (int i = 0; i < usr.size(); i++) {
 		if (r.usr == usr[i].usr) {
-			//printk("a");
+			//printf("a");
 			return i;
 		} else {
 			//cout << "NO:\n";
@@ -101,10 +101,10 @@ bool log(SOCKET sk, Register r) {
 		if (r.usr == right.usr && r.pass == right.pass) {
 			client.push_back(sk);
 			usr[findSame(r)].ns = sk;
-			printk("OK\n");
+			printf("OK\n");
 			return true;
 		} else {
-			printk("NOK\n");
+			printf("NOK\n");
 			return false;
 		}
 	}
@@ -264,7 +264,7 @@ DWORD WINAPI ServerThread(LPVOID lpParameter) {
 		RecvBuf[receByt] = 0;
 		if (receByt > 0) {
 			if (strcmp(RecvBuf, "TEST") == 0) {
-				printk("A Client Send TEST Command.\n");
+				printf("A Client Send TEST Command.\n");
 				strcpy(SendBuf, "OK");
 				send(*ClientSocket, SendBuf, sizeof(SendBuf), 0);
 			} else if (strcmp(RecvBuf, "GETUID") == 0) {
@@ -284,7 +284,7 @@ DWORD WINAPI ServerThread(LPVOID lpParameter) {
 				sprintf(SendBuf, "%s", res.c_str());
 				send(*ClientSocket, SendBuf, sizeof(SendBuf), 0);
 			} else if (strcmp(RecvBuf, "EXIT") == 0) {
-				printk("一个玩家想要退出房间\n");
+				printf("A Player Want to exit\n");
 				for (int i = 0; i < rooms.size(); i++) {
 					if (rooms[i].player[0] == *ClientSocket) {
 						rooms[i].player[0] = rooms[i].player[1];
@@ -339,7 +339,7 @@ DWORD WINAPI ServerThread(LPVOID lpParameter) {
 					Register r;
 					r.usr = sv[1];
 					r.pass = sv[2];
-					cout << "注册：" << r.usr << " " << r.pass << endl;
+					cout << "REGISTER：" << r.usr << " " << r.pass << endl;
 					if (reg(r)) {
 
 						strcpy(SendBuf, "OK");
@@ -360,12 +360,12 @@ DWORD WINAPI ServerThread(LPVOID lpParameter) {
 						send(*ClientSocket, SendBuf, sizeof(SendBuf), 0);
 					}
 				} else if (sv[0] == "CRT") {
-					printk("创建房间\n");
+					printf("Create Room\n");
 					CreateROOM(*ClientSocket, sv[1]);
 					strcpy(SendBuf, "0");
 					send(*ClientSocket, SendBuf, sizeof(SendBuf), 0);
 				} else if (sv[0] == "GETPL") {
-					printk("GETPL-->\n");
+					printf("GETPL-->\n");
 					Register r = GetPlayerFromUID(atoi(sv[1].c_str()));
 					sprintf(SendBuf, "%s %d", r.usr.c_str(), r.uid);
 					send(*ClientSocket, SendBuf, sizeof(SendBuf), 0);
@@ -395,12 +395,12 @@ DWORD WINAPI ServerThread(LPVOID lpParameter) {
 					strcpy(SendBuf, "Err:404");
 					send(*ClientSocket, SendBuf, sizeof(SendBuf), 0);
 				} else if (sv[0] == "U") {
-					printk("落子\n");
+					printf("down\n");
 					int i;
 					int x, y;
 					x = atoi(sv[1].c_str());
 					y = atoi(sv[2].c_str());
-					printk("X:%d,Y:%d\n", x, y);
+					printf("X:%d,Y:%d\n", x, y);
 					for (i = 0; i < rooms.size(); i++) {
 						if (rooms[i].ready1 + rooms[i].ready2 != 2) {
 							if (rooms[i].player[0] == *ClientSocket || rooms[i].player[1] == *ClientSocket) {
@@ -415,7 +415,7 @@ DWORD WINAPI ServerThread(LPVOID lpParameter) {
 
 								int r = Win(rooms[i]);
 								if (r != 0) {
-									printk("A Win\n");
+									printf("A Win\n");
 									int uid = GetPlayerFromSocket(rooms[i].player[r - 1]).uid;
 									rooms[i].now = 0;
 									rooms[i].ready1 = 0;
@@ -430,7 +430,7 @@ DWORD WINAPI ServerThread(LPVOID lpParameter) {
 									send(rooms[i].player[1], SendBuf, sizeof(SendBuf), 0);
 								} else {
 									sprintf(SendBuf, "Y %d %d", x, y);
-									printk("(!(rooms[i].now))=%d\n", (!(rooms[i].now)));
+									printf("(!(rooms[i].now))=%d\n", (!(rooms[i].now)));
 									send(rooms[i].player[(!(rooms[i].now))], SendBuf, sizeof(SendBuf), 0);
 									rooms[i].now = !rooms[i].now;
 								}
@@ -472,7 +472,7 @@ int main() {
 		cout << "Bind failed" << endl;
 		return -1;
 	} else {
-		cout << "OK" << PORT << endl;
+		cout << "OK\n" << PORT << endl;
 	}
 	int l = listen(ListenSocket, 20);
 	cout << "Server OK" << endl;

@@ -50,6 +50,10 @@ default : Makefile
 	make -r -C hexview
 	make -r -C kcube
 	make -r -C invader
+	make -r -C libpng
+	make -r -C jpeg
+	make -r -C sdl2_image
+	make -r -C chat
 clean :
 	rm libs/*
 	rm out/*

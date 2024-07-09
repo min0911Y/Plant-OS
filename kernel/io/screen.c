@@ -1,5 +1,6 @@
-#include <io.h>
 #include <dos.h>
+#include <io.h>
+
 extern struct tty *tty_default;
 void clear() {
   mtask *task = current_task();
@@ -18,13 +19,100 @@ void printchar(char ch) {
     task->TTY->print(task->TTY, ch1);
   }
 }
-void t_putchar(struct tty *res,char ch) {
+static char eos[] = {
+    'A', 'B', 'C', 'D', 'E', 'F', 'G',
+    'H', 'f', 'J', 'K', 'S', 'T', 'm'}; // end of string,
+                                        // vt100控制字符中可能的结束符号
+
+static int t_isdigit(int c) { return (c >= '0' && c <= '9'); }
+static int t_is_eos(char ch) {
+  for (int i = 0; i < sizeof(eos); i++) {
+    if (ch == eos[i])
+      return 1;
+  }
+  return 0;
+}
+static int parse_vt100(struct tty *res, char *string) {
+  switch (res->mode) {
+  case MODE_A: {
+    char dig_string[81] = {0};
+    for (int i = 2, j = 0; string[i]; i++) {
+      if (t_is_eos(string[i]))
+        break;
+      if (!t_isdigit(string[i]))
+        return 0;
+      dig_string[j++] = string[i];
+    }
+    res->gotoxy(res, res->x, res->y - strtol(dig_string, NULL, 10));
+    return 1;
+  }
+  case MODE_B: {
+    char dig_string[81] = {0};
+    for (int i = 2, j = 0; string[i]; i++) {
+      if (t_is_eos(string[i]))
+        break;
+      if (!t_isdigit(string[i]))
+        return 0;
+      dig_string[j++] = string[i];
+    }
+    res->gotoxy(res, res->x, res->y + strtol(dig_string, NULL, 10));
+    return 1;
+  }
+  default:
+    break;
+  }
+  return 0;
+}
+void t_putchar(struct tty *res, char ch) {
+  if (ch == '\033' && res->vt100 == 0) {
+    memset(res->buffer, 0, 81);
+    res->buf_p = 0;
+    res->buffer[res->buf_p++] = '\033';
+    res->vt100 = 1;
+    res->done = 0;
+    return;
+  } else if (res->vt100 && res->buf_p == 1) {
+    if (ch == '[') {
+      res->buffer[res->buf_p++] = ch;
+      return;
+    } else {
+      res->vt100 = 0;
+      for (int i = 0; i < res->buf_p; i++) {
+        res->putchar(res, res->buffer[i]);
+      }
+    }
+  } else if (res->vt100 && res->buf_p == 81) {
+    for (int i = 0; i < res->buf_p; i++) {
+      res->putchar(res, res->buffer[i]);
+    }
+    res->vt100 = 0;
+  } else if (res->vt100) {
+    res->buffer[res->buf_p++] = ch;
+    if (t_is_eos(ch)) {
+      res->mode = (vt100_mode_t)ch;
+      if (!parse_vt100(res, res->buffer)) { // 失败了
+        for (int i = 0; i < res->buf_p; i++) {
+          res->putchar(res, res->buffer[i]);
+        }
+      }
+      res->vt100 = 0;
+      return;
+    } else if (!t_isdigit(ch) && ch != ';') {
+      for (int i = 0; i < res->buf_p; i++) {
+        res->putchar(res, res->buffer[i]);
+      }
+      res->vt100 = 0;
+      return;
+    }
+
+    return;
+  }
   res->putchar(res, ch);
 }
 void putchar(char ch) {
   mtask *task = current_task();
   if (task->TTY->using1 != 1) {
-    t_putchar(tty_default,ch);
+    t_putchar(tty_default, ch);
   } else {
     t_putchar(task->TTY, ch);
   }

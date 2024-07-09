@@ -5,7 +5,7 @@ import socket
 import threading
 import time
 
-from torch import addr
+#from torch import addr
 s1=None
 def thread():
   global s1

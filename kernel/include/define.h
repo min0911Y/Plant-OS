@@ -445,6 +445,22 @@ typedef struct {
 } regs16_t;
 
 /* io.h */
+typedef enum {
+  MODE_A = 'A',
+  MODE_B = 'B',
+  MODE_C = 'C',
+  MODE_D = 'D',
+  MODE_E = 'E',
+  MODE_F = 'F',
+  MODE_G = 'G',
+  MODE_H = 'H',
+  MODE_f = 'f',
+  MODE_J = 'J',
+  MODE_K = 'K',
+  MODE_S = 'S',
+  MODE_T = 'T',
+  MODE_m = 'm'
+} vt100_mode_t;
 struct tty {
   int using1;                              // 使用标志
   void *vram;                              // 显存（也可以当做图层）
@@ -464,6 +480,14 @@ struct tty {
   int (*fifo_status)(struct tty *res);
   int (*fifo_get)(struct tty *res);
   unsigned int reserved[4]; // 保留项
+
+  //////////////实现VT100需要的//////////////////
+
+  int vt100;         // 是否检测到标志
+  char buffer[81];   // 缓冲区
+  int buf_p;         // 缓冲区指针
+  int done;          // 这个东西读取完毕没有？
+  vt100_mode_t mode; // 控制模式
 };
 struct Input_StacK {
   char **Stack;
@@ -872,7 +896,7 @@ struct ICMPMessage {
   uint16_t ID;
   uint16_t sequence;
 } __attribute__((packed));
-#define PING_WAITTIME 2000
+#define PING_WAITTIME 200
 #define PING_ID 0x0038
 #define PING_SEQ 0x2115
 #define PING_DATA 0x38
@@ -991,9 +1015,9 @@ struct DNS_Answer {
 } __attribute__((packed));
 // TCP
 #define TCP_PROTOCOL 6
-#define TCP_CONNECT_WAITTIME 10000
+#define TCP_CONNECT_WAITTIME 1000
 #define MSS_Default 1460
-#define TCP_SEG_WAITTIME 100
+#define TCP_SEG_WAITTIME 10
 struct TCPPesudoHeader {
   uint32_t srcIP;
   uint32_t dstIP;

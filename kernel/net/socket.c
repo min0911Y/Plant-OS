@@ -12,16 +12,17 @@ void socket_init() {
   }
 }
 
-void usleep(uint64_t ns);
 static void socket_tcp_send(struct Socket *socket, uint8_t *data,
                             uint32_t size) {
-  while(socket->state != SOCKET_TCP_ESTABLISHED);
-  uint32_t s = size;
-  tcp_provider_send(socket->remoteIP, socket->localIP, socket->remotePort,
-                    socket->localPort, socket->seqNum, socket->ackNum, 0, 1, 0,
-                    0, 0, 0, 0, 0, data, s);
-  socket->seqNum += s;
-  //io_delay();
+  for (int i = 0; i * socket->MSS < size; i++){
+    uint32_t s = ((int32_t)i * socket->MSS >= (int32_t)(size - socket->MSS))
+	             ? (size - i * socket->MSS) : socket->MSS;
+    tcp_provider_send(socket->remoteIP, socket->localIP, socket->remotePort,
+                      socket->localPort, socket->seqNum, socket->ackNum, 0, 1, 0,
+                      0, 0, 0, 0, 0, data + i * socket->MSS, s);
+    socket->seqNum += s;
+    sleep(TCP_SEG_WAITTIME);
+  }
 }
 static int socket_tcp_connect(struct Socket *socket) {
   // printk("send first shake.\n");

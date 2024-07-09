@@ -1,8 +1,4 @@
 #include <dos.h>
-static struct Socket *wait[10] = {NULL, NULL, NULL, NULL, NULL,
-                                  NULL, NULL, NULL, NULL, NULL};
-static void *data[10];
-static uint32_t size[10] = {0};
 static void handler_udp(struct Socket *socket, void *base) {
   struct IPV4Message *ipv4 =
       (struct IPV4Message *)(base + sizeof(struct EthernetFrame_head));
@@ -13,15 +9,10 @@ static void handler_udp(struct Socket *socket, void *base) {
               sizeof(struct IPV4Message) + sizeof(struct UDPMessage);
   uint32_t total_size = swap16(ipv4->totalLength) - sizeof(struct IPV4Message) -
                         sizeof(struct UDPMessage);
-  for (uint32_t i = 0; i != 10; i++) {
-    if (!wait[i]) {
-      wait[i] = socket;
-      data[i] = malloc(total_size);
-      size[i] = total_size;
-      uint32_t size0 = total_size;
-      memcpy(data[i], dat, size0);
-      break;
-    }
+  if(socket->flag == 0) {
+    memcpy(socket->buf,dat,total_size);
+    socket->size = total_size;
+    socket->flag = 1;
   }
 }
 static void handler_tcp(struct Socket *socket, void *base) {
@@ -79,7 +70,6 @@ void net_api(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
         reg[EAX] = 0;
         return;
       }
-     // printk("%d\n",s->flag);
       if(s->flag) {
         break;
       }
@@ -93,7 +83,6 @@ void net_api(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
     reg[EAX] = sz;
     memcpy((void *)(ds_base + ecx), s->buf, sz);
     s->flag = 0;
-
   } else if (eax == 0x05) {
     struct Socket *socket = (struct Socket *)ebx;
     Socket_Init(socket, ecx, edx, esi, edi);
@@ -105,5 +94,9 @@ void net_api(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
   } else if (eax == 0x08) {
     struct Socket *socket = (struct Socket *)ebx;
     socket->Listen(socket);
+  } else if (eax == 0x09) {
+	struct Socket *socket = (struct Socket *)ebx;
+	if (socket->protocol == TCP_PROTOCOL)
+	  reg[EAX] = socket->Connect(socket);
   }
 }

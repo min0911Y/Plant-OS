@@ -90,6 +90,11 @@ struct tty *tty_alloc(void *vram, int xsize, int ysize,
   res->fifo_get = fifo_get;
   res->color = 0x07;
   res->cur_moving = 1;
+  res->vt100 = 0;
+  res->buf_p = 0;
+  memset(res->buffer,0,sizeof(res->buffer));
+  res->done = 0;
+  res->mode = 0;
   AddVal((int)res, tty_list);
   return res;
 }

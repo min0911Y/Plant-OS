@@ -116,6 +116,8 @@ Mimg : $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $(OUTPATH)
 		mcopy -i ./disk.img $(APPSOUTPATH)hexview.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)kcube.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)invader.bin ::
+		mcopy -i ./disk.img $(APPSOUTPATH)chat.bin ::
+		mcopy -i ./disk.img $(APPSOUTPATH)netgobang.bin ::
 		mcopy -i ./disk.img $(RESPATH)init.mst ::
 
 		mmd -i ./disk.img data
