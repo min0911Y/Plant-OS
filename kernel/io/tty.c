@@ -13,6 +13,7 @@ static void tty_print(struct tty *res, const char *string) {
   }
 }
 static void tty_gotoxy(struct tty *res, int x, int y) {
+  if(res->x == x && res->y == y) return;
   if (x >= 0 && y >= 0) {
     int x2 = x;
     int y2 = y;
@@ -95,6 +96,7 @@ struct tty *tty_alloc(void *vram, int xsize, int ysize,
   memset(res->buffer,0,sizeof(res->buffer));
   res->done = 0;
   res->mode = 0;
+  res->color_saved = -1;
   AddVal((int)res, tty_list);
   return res;
 }

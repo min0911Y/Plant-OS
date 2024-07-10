@@ -61,9 +61,6 @@ void init() {
     running_mode = POWERINTDOS;
   }
 
-  printk("\033[12Ahello\033[12Bhello");
-  // printk("\033[12Bhello");
-for(;;);
   FILE *fp = fopen("/other/font.bin", "r");
   ascfont = fp->buffer;
   fp = fopen("/other/hzk16", "r");

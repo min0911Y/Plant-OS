@@ -488,6 +488,7 @@ struct tty {
   int buf_p;         // 缓冲区指针
   int done;          // 这个东西读取完毕没有？
   vt100_mode_t mode; // 控制模式
+  int color_saved;   // 保存的颜色
 };
 struct Input_StacK {
   char **Stack;
