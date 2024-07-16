@@ -1,4 +1,6 @@
 default : Makefile
+  mkdir libs
+  mkdir out
 	make -r -C libp
 	make -r -C zlib
 	make -r -C libtcc1
@@ -55,6 +57,6 @@ default : Makefile
 	make -r -C sdl2_image
 	make -r -C chat
 clean :
-	rm libs/*
-	rm out/*
+	rm -r ./libs
+	rm -r ./out
 

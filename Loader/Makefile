@@ -12,6 +12,7 @@ OBJS_BOOTPACK = $(OUTPATH)8295a.o $(OUTPATH)asmfunc.obj $(OUTPATH)BasicVideo.o $
 				$(OUTPATH)mm.o $(OUTPATH)vfs.o $(OUTPATH)other.o $(OUTPATH)pfs.o $(OUTPATH)str.o $(OUTPATH)ahci.o $(OUTPATH)pci.o
 
 default :
+  mkdir out
 	$(MAKE) -C $(DOSPATH)
 	$(MAKE) -C $(DRVPATH)
 	$(MAKE) -C $(FSPATH)
@@ -21,4 +22,4 @@ $(OUTPATH)dosldr.bin : $(OBJS_BOOTPACK) Makefile
 	ld -m elf_i386 -static -Ttext 0x100000 -e loader_main $(OBJS_BOOTPACK) -o $(OUTPATH)dosldr.bin
 
 clean :
-	rm out/*
+	rm -r ./out

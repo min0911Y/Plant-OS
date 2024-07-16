@@ -1,14 +1,22 @@
-kernel/obj/*
-!kernel/obj/.gitkeep
-kernel/img/*
-!kernel/img/.gitkeep
-Loader/out/*
-!Loader/out/.gitkeep
-apps/out/*
+# /apps
+apps/out
+apps/libs
 apps/doomgeneric/*.o
 apps/sdl2/*.o
 apps/sdl2_old/*.o
-!apps/out/.gitkeep
-kernel/*.img
+
+# /
+.vscode
 c.py
 cloc.exe
+
+Loader/out
+
+fattools/fattools
+
+# /kernel
+kernel/*.img
+kernel/*.log
+kernel/disk.vhd
+kernel/obj
+kernel/img

@@ -43,8 +43,7 @@ OBJS_BOOTPACK = $(OUTPATH)kernelc.o $(OUTPATH)screen.o $(OUTPATH)command.o $(OUT
 				$(OUTPATH)rtc.o $(OUTPATH)ahci.o $(OUTPATH)farcall.o $(OUTPATH)fartty.o $(OUTPATH)iso9660.o
 
 # 默认动作
-
-default :
+default : make_dir
 	$(MAKE) -C $(DOSPATH)
 	$(MAKE) -C $(IOPATH)
 	$(MAKE) -C $(FSPATH)
@@ -54,9 +53,8 @@ default :
 	$(MAKE) -C $(NETPATH)
 	$(MAKE) -C $(MSTPATH)
 	$(MAKE) Mimg
-	
-# 镜像文件生成
 
+# 镜像文件生成
 $(OUTPATH)boot.bin : $(BOOTPATH)boot.asm Makefile
 	$(NASM) $(BOOTPATH)boot.asm -o $(OUTPATH)boot.bin
 $(OUTPATH)boot_pfs.bin : $(BOOTPATH)boot_pfs.asm Makefile
@@ -67,8 +65,11 @@ $(OUTPATH)boot32.bin : $(BOOTPATH)boot32.asm Makefile
 $(OUTPATH)kernel.bin : $(OBJS_BOOTPACK) Makefile
 	ld -m elf_i386 -static -Ttext 0x280000 -e KernelMain $(OBJS_BOOTPACK) ../apps/libs/libtcc1.a -o $(OUTPATH)kernel.bin
 
-make_img:
-	mkdir -p img
+make_dir:
+  mkdir img
+  mkdir obj
+
+make_img: make_dir
 	qemu-img create $(IMGPATH)Powerint_DOS_386.img 1474560
 	qemu-img create $(IMGPATH)Disk2.img 1474560
 	qemu-img create $(IMGPATH)Disk3.img 1474560
@@ -91,7 +92,7 @@ make_img:
 	mformat -f 1440 -B $(OUTPATH)boot.bin -i $(IMGPATH)doom2.img
 	mformat -t 64 -h 64 -s 16 -B $(OUTPATH)boot.bin -i ./disk.img
 	mformat -t 64 -h 64 -i ./big_disk.img
-Mimg : $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $(OUTPATH)boot32.bin Makefile
+Mimg : make_dir $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $(OUTPATH)boot32.bin Makefile
 	$(MAKE) make_img
 		mcopy -i ./disk.img $(LOADERPATH)dosldr.bin ::
 		mcopy -i ./disk.img $(OUTPATH)kernel.bin ::
@@ -260,7 +261,7 @@ img_run :
 	sudo qemu-system-i386 -enable-kvm -net nic,model=pcnet -net user -serial stdio -device sb16 -device floppy -fda ./img/Powerint_DOS_386.img -hda ./img/Disk2.img -hdb ./img/Disk3.img -hdc ./img/res.img \
 	-hdd disk.img \
 	 -boot a -m 4096
-full :
+full : make_dir
 	$(MAKE) -C $(DOSPATH)
 	$(MAKE) -C $(IOPATH)
 	$(MAKE) -C $(FSPATH)
@@ -285,5 +286,6 @@ full_run:
 	$(MAKE) Mimg
 	qemu-system-i386 -net nic,model=pcnet -net user -serial stdio -device sb16 -device floppy -fda ./img/Powerint_DOS_386.img -drive id=disk,file=disk.img,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -hdb ./img/Disk2.img -hdc ./img/Disk3.img -hdd ./img/res.img -boot a -m 512 -enable-kvm
 clean :
-	rm obj/*
+	rm -r ./obj
+	rm -r ./img
 	$(MAKE) -C $(APPSPATH) clean
