@@ -1,0 +1,7 @@
+
+
+SRC			:= *.c
+
+default : 
+	gcc -m32 -I../freetype/include  -I../include -I../sdl2/include -I../sdl2/SDL2 -I../sdl2/src/video/yuv2rgb -I../jpeg -I../libpng -nostdinc -nostdlib -fno-builtin -ffreestanding -fno-stack-protector -Qn -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fomit-frame-pointer -march=pentium -O2 -w -c $(SRC)
+	ar rv ../libs/sdl2_ttf.a *.o

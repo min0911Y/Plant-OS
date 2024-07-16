@@ -223,7 +223,7 @@ int run(char *line) {
       free(s);
       return 1;
     }
-    char *p = (char *)malloc(filesize(s));
+    unsigned char *p = (char *)malloc(filesize(s));
     api_ReadFile(s, p);
     for (int i = 0; i != filesize(s); i++) {
       printf("%c", p[i]);

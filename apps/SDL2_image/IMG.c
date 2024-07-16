@@ -128,7 +128,6 @@ void IMG_Quit()
 /* Load an image from a file */
 SDL_Surface *IMG_Load(const char *file)
 {
-    printf("IMG LOAD %s\n",file);
 #if __EMSCRIPTEN__
     int w, h;
     char *data;
@@ -144,7 +143,6 @@ SDL_Surface *IMG_Load(const char *file)
         return surf;
     }
 #endif
-    printf("SDL_RWFromFile\n");
     SDL_RWops *src = SDL_RWFromFile(file, "rb");
     const char *ext = SDL_strrchr(file, '.');
     if(ext) {
