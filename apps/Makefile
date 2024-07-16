@@ -1,12 +1,14 @@
 default : Makefile
+	mkdir -p libs
+	mkdir -p out
 	make -r -C libp
 	make -r -C zlib
 	make -r -C libtcc1
 	make -r -C miniset
-	make -r -C sdl2
-	make -r -C sdl2_old
+# make -r -C sdl2
+# make -r -C sdl2_old
+	make -r -C SDL2_image
 	make -r -C bainian
-	make -r -C bitz
 	make -r -C calc
 	make -r -C aigobang
 	make -r -C randnum
@@ -52,9 +54,10 @@ default : Makefile
 	make -r -C invader
 	make -r -C libpng
 	make -r -C jpeg
-	make -r -C sdl2_image
+	make -r -C bitz
 	make -r -C chat
+	make -r -C netgobang
 clean :
-	rm libs/*
-	rm out/*
+	rm -r ./libs
+	rm -r ./out
 
