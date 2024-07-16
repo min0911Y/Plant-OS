@@ -119,6 +119,7 @@ Mimg : make_dir $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $
 		mcopy -i ./disk.img $(APPSOUTPATH)invader.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)chat.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)netgobang.bin ::
+		mcopy -i ./disk.img $(APPSOUTPATH)minewep.bin ::
 		mcopy -i ./disk.img $(RESPATH)init.mst ::
 
 		mmd -i ./disk.img data
@@ -126,10 +127,12 @@ Mimg : make_dir $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $
 		mmd -i ./disk.img data/fonts
 		mmd -i ./disk.img data/plugins
 		mmd -i ./disk.img data/user
+		mmd -i ./disk.img pngs
 		mcopy -i ./disk.img ../apps/lite-1.11/data/core/* ::/data/core
 		mcopy -i ./disk.img ../apps/lite-1.11/data/fonts/* ::/data/fonts
 		mcopy -i ./disk.img ../apps/lite-1.11/data/plugins/* ::/data/plugins
 		mcopy -i ./disk.img ../apps/lite-1.11/data/user/* ::/data/user
+		mcopy -i ./disk.img ../apps/minewep/pngs/* ::/pngs
 #		mmd -i ./disk.img stamon
 #		mmd -i ./disk.img stamon/bin
 #		mmd -i ./disk.img stamon/bin/include

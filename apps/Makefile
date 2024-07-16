@@ -1,4 +1,6 @@
 default : Makefile
+	mkdir -p libs
+	mkdir -p out
 	make -r -C libp
 	make -r -C zlib
 	make -r -C libtcc1
