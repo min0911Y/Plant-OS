@@ -9,17 +9,31 @@
 - 该项目是关于操作系统的，Zhou Zhihao将其命名为“Powerint”，意思是我们可以使用的强大中断。经过大约一年的编码，操作系统具有与 MS-DOS 类似的正常功能，但它仍处于 16 位实模式。
 - 2021 年 12 月，Simple OS 的作者Qiu Chenjun与Zhou Zhihao合作。他们帮助 Plant OS 过渡到一个新世界，32 位保护模式，并将其更名为 Plant OS。
 - 经过一年多的编码，Plant OS 在不断改进。
+
 **无论如何，你应该知道 Plant OS 是为学习计算机工作原理而制作的，它不能成为你日常工作的操作系统。而且 Plant OS 仍有许多错误，如果您愿意并且能够，您可以修复这些错误并发出拉取请求，我们会合并。顺便说一句，操作系统可能永远处于保护模式，因为我们仍然是学生，我们没有足够的时间来改进操作系统，请原谅我们。另外，如果你发现一些错误，你可以提出问题，我们会尽快修复它（如果我们有足够的能力修复）**
 
 ## 构建
 
-**注意：在构建之前，你可能需要安装 nasm、gcc、g++、mtools 和 qemu**
+**注意：在构建之前，你需要安装 nasm、gcc、g++、mtools、qemu、cmake**
 
-首先，你必须克隆 repo，如下所示：
+首先，你必须克隆此储存库并进入项目目录：
 
 ```cmd
 git clone https://github.com/min0911Y/Plant-OS.git
+cd Plant-OS.git
 ```
+
+之后分为两种构建方法
+
+### 新的构建方法
+
+你只需要运行 build.sh 即可完成编译
+
+```sh
+./build.sh
+```
+
+### 旧的构建方法
 
 其次，转到 apps 文件夹：
 
@@ -86,6 +100,8 @@ qemu-system-i386 -net nic,model=pcnet -net user -serial stdio -device sb16 -devi
 - zhouzhihao <https://github.com/ZhouZhihaos>
 
 - min0911_ <https://github.com/min0911Y>
+
+- copi143 <https://github.com/copi143>
 
 ## 谢谢
 
