@@ -120,6 +120,7 @@ Mimg : make_dir $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $
 		mcopy -i ./disk.img $(APPSOUTPATH)chat.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)netgobang.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)minewep.bin ::
+		mcopy -i ./disk.img $(APPSOUTPATH)plui.bin ::
 		mcopy -i ./disk.img $(RESPATH)init.mst ::
 
 		mmd -i ./disk.img data

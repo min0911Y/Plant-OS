@@ -1,6 +1,5 @@
 # /apps
 apps/nasm-master/config.log
-apps/nasm-master/config.status
 apps/nasm-master/configure.lineno
 apps/*/*.o
 apps/*/*.obj

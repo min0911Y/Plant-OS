@@ -1,0 +1,5 @@
+add_subdirectory(c)
+add_subdirectory(cpp)
+add_subdirectory(pl2d)
+add_subdirectory(plui)
+add_subdirectory(plds)

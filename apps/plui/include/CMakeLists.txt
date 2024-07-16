@@ -1,0 +1,6 @@
+mkheader_h_recurse(c)
+mkheader_hpp_recurse(cpp)
+mkheader_hpp_recurse(pl2d)
+mkheader_hpp_recurse(plds)
+mkheader_hpp_recurse(plui)
+add_subdirectory(plds) 

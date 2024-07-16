@@ -1,0 +1,31 @@
+# plui 头文件模板
+# 文件后缀为 .plht.yaml
+# 根据其中的内容生成对应的 C 和 C++ 头文件
+
+# 默认在根命名空间中
+
+enum.PixFmt: # 创建一个枚举类型，名叫 PixFmt
+  - ?type=u32 # 设置其数据类型为 u32，不是必须，C 语言中忽略
+  - RGB # 设置枚举项
+  - BGR
+  - RGBA
+  - BGRA
+
+# 在 C++ 中导出时名称为 命名空间::枚举类名称::枚举项
+# 在 C 中导出时名称为 命名空间_枚举类名称_枚举项
+
+ns.pl2d: # 创建一个命名空间，名叫 pl2d
+  c.name: PL2D # 在 C 语言中导出时命名空间使用的前缀，默认使用 ns.xxx 中定义的 xxx
+  enum.MyEnum: # 在命名空间 pl2d 中创建一个枚举类型，名叫 MyEnum
+    - ?type=i32 # 设置其数据类型为 i32，不是必须
+    - Node1 # 设置枚举项
+    - Node2 = 3 # 设置枚举项的值
+  .if:
+    if: A
+    enum.A:
+      - A
+      - B
+      - C
+
+MY_MACRO: 内容 # 定义一个宏，不是必须大写
+MY_ANOTHER_MACRO: 内容 ?if=defined(MY_MACRO) # 条件定义宏

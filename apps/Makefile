@@ -2,8 +2,9 @@ default : Makefile
 	mkdir -p libs
 	mkdir -p out
 	make -r -C libp
-	make -r -C zlib
 	make -r -C libtcc1
+	make -r -C plui
+	make -r -C zlib
 	make -r -C miniset
 	make -r -C sdl2
 	make -r -C sdl2_old
@@ -45,7 +46,7 @@ default : Makefile
 	make -r -C duktape
 	make -r -C mmake
 	make -r -C init
-	make -r -C libutf
+	cd libutf && make && cd ..
 	make -r -C gui
 	make -r -C nk
 	make -r -C lite-1.11
@@ -55,7 +56,7 @@ default : Makefile
 	make -r -C invader
 	make -r -C libpng
 	make -r -C jpeg
-	make -r -C sdl2_image
+	make -r -C SDL2_image
 	make -r -C chat
 	make -r -C paint
 	make -r -C minewep

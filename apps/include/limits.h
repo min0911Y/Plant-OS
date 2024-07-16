@@ -79,3 +79,5 @@
 #define _I64_MAX LONG_LONG_MAX
 #define _UI64_MAX ULONG_LONG_MAX
 #endif /* not _LIMITS_H_ */
+
+#include <type.h>
