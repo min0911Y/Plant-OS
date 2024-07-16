@@ -66,8 +66,8 @@ $(OUTPATH)kernel.bin : $(OBJS_BOOTPACK) Makefile
 	ld -m elf_i386 -static -Ttext 0x280000 -e KernelMain $(OBJS_BOOTPACK) ../apps/libs/libtcc1.a -o $(OUTPATH)kernel.bin
 
 make_dir:
-  mkdir img
-  mkdir obj
+	mkdir -p img
+	mkdir -p obj
 
 make_img: make_dir
 	qemu-img create $(IMGPATH)Powerint_DOS_386.img 1474560

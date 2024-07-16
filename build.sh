@@ -48,13 +48,13 @@ if [ $? -ne 0 ]; then
   exit
 fi
 
-cd ../Loader && make
+cd ../Loader && make -j
 if [ $? -ne 0 ]; then
   echo "在 Loader 目录中构建失败"
   exit
 fi
 
-cd ../kernel && make
+cd ../kernel && make -j
 if [ $? -ne 0 ]; then
   echo "在 kernel 目录中构建失败"
   exit

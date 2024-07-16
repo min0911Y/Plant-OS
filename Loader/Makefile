@@ -12,7 +12,7 @@ OBJS_BOOTPACK = $(OUTPATH)8295a.o $(OUTPATH)asmfunc.obj $(OUTPATH)BasicVideo.o $
 				$(OUTPATH)mm.o $(OUTPATH)vfs.o $(OUTPATH)other.o $(OUTPATH)pfs.o $(OUTPATH)str.o $(OUTPATH)ahci.o $(OUTPATH)pci.o
 
 default :
-  mkdir out
+	mkdir -p out
 	$(MAKE) -C $(DOSPATH)
 	$(MAKE) -C $(DRVPATH)
 	$(MAKE) -C $(FSPATH)

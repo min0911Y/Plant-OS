@@ -1,4 +1,10 @@
 # /apps
+apps/nasm-master/config.log
+apps/nasm-master/config.status
+apps/nasm-master/configure.lineno
+apps/*/*.o
+apps/*/*.obj
+apps/*/*/*.o
 apps/out
 apps/libs
 apps/doomgeneric/*.o
