@@ -11,7 +11,7 @@
 
 static cf128     fftl_wn[64] = {};
 static cf128     aft_wn[64]  = {};
-static atomic bool fftl_inited = false;
+static _Atomic bool fftl_inited = false;
 
 static void fftl_init() {
   if (atom_tas(&fftl_inited)) return;

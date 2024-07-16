@@ -9,7 +9,7 @@
 
 static cf32      fftf_wn[64] = {};
 static cf32      aft_wn[64]  = {};
-static atomic bool fftf_inited = false;
+static _Atomic bool fftf_inited = false;
 
 static void fftf_init() {
   if (atom_tas(&fftf_inited)) return;

@@ -43,9 +43,6 @@ float __math_divzerof(uint32_t sign)
 {
 	return fp_barrierf(sign ? -1.0f : 1.0f) / 0.0f;
 }
-typedef unsigned int uintmax_t;
-typedef uintmax_t uintptr_t;
-typedef int intmax_t;
 
 #define SZ_4K 0x1000
 int GetMouse_x(int mouse)
