@@ -1,26 +1,22 @@
 #include <dos.h>
 #include <drivers.h>
 #define KEYCMD_SENDTO_MOUSE 0xd4
-#define MOUSECMD_ENABLE 0xf4
+#define MOUSECMD_ENABLE     0xf4
 typedef unsigned char byte;
-mtask *mouse_use_task = NULL;
-void mouse_wait(byte a_type) // unsigned char
+mtask                *mouse_use_task = NULL;
+void                  mouse_wait(byte a_type) // unsigned char
 {
   unsigned int _time_out = 100000; // unsigned int
   if (a_type == 0) {
     while (_time_out--) // Data
     {
-      if ((io_in8(0x64) & 1) == 1) {
-        return;
-      }
+      if ((io_in8(0x64) & 1) == 1) { return; }
     }
     return;
   } else {
     while (_time_out--) // Signal
     {
-      if ((io_in8(0x64) & 2) == 0) {
-        return;
-      }
+      if ((io_in8(0x64) & 2) == 0) { return; }
     }
     return;
   }
@@ -44,7 +40,9 @@ byte mouse_read() {
   return io_in8(0x60);
 }
 lock_t mouse_l;
-void mouse_reset() { mouse_write(0xff); }
+void   mouse_reset() {
+  mouse_write(0xff);
+}
 void enable_mouse(struct MOUSE_DEC *mdec) {
   lock_init(&mouse_l);
   /* 激活鼠标 */
@@ -66,13 +64,13 @@ void enable_mouse(struct MOUSE_DEC *mdec) {
 
 void mouse_sleep(struct MOUSE_DEC *mdec) {
   mouse_use_task = NULL;
-  mdec->sleep = 1;
+  mdec->sleep    = 1;
   return;
 }
 
 void mouse_ready(struct MOUSE_DEC *mdec) {
   mouse_use_task = current_task();
-  mdec->sleep = 0;
+  mdec->sleep    = 0;
   return;
 }
 int mouse_decode(struct MOUSE_DEC *mdec, unsigned char dat) {
@@ -81,29 +79,25 @@ int mouse_decode(struct MOUSE_DEC *mdec, unsigned char dat) {
       return 0;
     }
     mdec->buf[0] = dat;
-    mdec->phase = 2;
+    mdec->phase  = 2;
     return 0;
   } else if (mdec->phase == 2) {
     mdec->buf[1] = dat;
-    mdec->phase = 3;
+    mdec->phase  = 3;
     return 0;
   } else if (mdec->phase == 3) {
     mdec->buf[2] = dat;
-    mdec->phase = 4;
+    mdec->phase  = 4;
     return 0;
   } else if (mdec->phase == 4) {
     // printk("已经收集了四个字节\n");
     mdec->buf[3] = dat;
-    mdec->phase = 1;
-    mdec->btn = mdec->buf[0] & 0x07;
-    mdec->x = mdec->buf[1]; // x
-    mdec->y = mdec->buf[2]; // y
-    if ((mdec->buf[0] & 0x10) != 0) {
-      mdec->x |= 0xffffff00;
-    }
-    if ((mdec->buf[0] & 0x20) != 0) {
-      mdec->y |= 0xffffff00;
-    }
+    mdec->phase  = 1;
+    mdec->btn    = mdec->buf[0] & 0x07;
+    mdec->x      = mdec->buf[1]; // x
+    mdec->y      = mdec->buf[2]; // y
+    if ((mdec->buf[0] & 0x10) != 0) { mdec->x |= 0xffffff00; }
+    if ((mdec->buf[0] & 0x20) != 0) { mdec->y |= 0xffffff00; }
     mdec->y = -mdec->y; //
     if (mdec->buf[3] == 0xff) {
       mdec->roll = MOUSE_ROLL_UP;
@@ -120,7 +114,7 @@ int mouse_decode(struct MOUSE_DEC *mdec, unsigned char dat) {
 unsigned m_cr3 = 0;
 unsigned m_eip = 0;
 unsigned times = 0;
-void inthandler2c(int *esp) {
+void     inthandler2c(int *esp) {
   // logk("2c\n");
   unsigned char data;
   io_out8(PIC1_OCW2, 0x64);
@@ -129,16 +123,15 @@ void inthandler2c(int *esp) {
   times++;
   if (times == 4) {
     times = 0;
-    if (mouse_use_task != NULL || !mouse_use_task->fifosleep ||
-        mouse_use_task->state == 1) {
+    if (mouse_use_task != NULL || !mouse_use_task->fifosleep || mouse_use_task->state == 1) {
       //   logk("put %08x\n",task_get_mouse_fifo(mouse_use_task));
       fifo8_put(task_get_mouse_fifo(mouse_use_task), data);
 
       if (current_task() != mouse_use_task) {
-      //   logk("SET 1\n");
+        //   logk("SET 1\n");
         mouse_use_task->timeout = 5;
-        mouse_use_task->ready = 1;
-        mouse_use_task->urgent = 1;
+        mouse_use_task->ready   = 1;
+        mouse_use_task->urgent  = 1;
         mouse_use_task->running = 0;
         mtask_run_now(mouse_use_task);
         task_next();
@@ -147,8 +140,7 @@ void inthandler2c(int *esp) {
       }
     }
   } else {
-    if (mouse_use_task != NULL || !mouse_use_task->fifosleep ||
-        mouse_use_task->state == 1) {
+    if (mouse_use_task != NULL || !mouse_use_task->fifosleep || mouse_use_task->state == 1) {
       //   logk("put %08x\n",task_get_mouse_fifo(mouse_use_task));
       fifo8_put(task_get_mouse_fifo(mouse_use_task), data);
     }

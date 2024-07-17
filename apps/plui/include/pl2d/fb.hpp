@@ -72,41 +72,42 @@ constexpr PixFmt texture_pixfmt = PixFmt::RGBA;
 #endif
 
 struct FrameBuffer {
-  union {                          //
-    void *pix[4] = {};             //
-    u8   *pix8[4];                 //
-    u16  *pix16[4];                //
-    u32  *pix32[4];                //
-    struct {                       //
-      byte *plane1;                //
-      byte *plane2;                //
-      byte *plane3;                //
-      byte *plane4;                //
-    };                             //
-  };                               // 缓冲区
-  union {                          //
-    u32 plane_size[4] = {};        //
-    struct {                       //
-      u32 plane1_size;             //
-      u32 plane2_size;             //
-      u32 plane3_size;             //
-      u32 plane4_size;             //
-    };                             //
-  };                               // 缓冲区大小
-  u32   *pal     = null;           // 调色板
-  u32    width   = 0;              // 宽度（可自动计算） width = pitch / size_of_pixel
-  u32    height  = 0;              // 高度
-  u32    pitch   = 0;              // pitch = width * size_of_pixel
-  u32    size    = 0;              // pitch * height
-  u16    bpp     = 0;              // 像素深度（可自动计算） size_of_pixel * 8
-  u8     padding = 0;              // 按多少字节对齐
-  u8     channel = 0;              //
-  PixFmt pixfmt  = texture_pixfmt; // 像素格式
-  PalFmt palfmt  = PalFmt::None;   // 像素格式
-  bool   alpha   = false;          // 是否有alpha通道（可自动计算）
-  bool   plane   = false;          // 是否通道分离
-  bool   ready   = false;          //
-  void (*cb_flushed)();            //
+  union {                             //
+    void *pix[4] = {};                //
+    u8   *pix8[4];                    //
+    u16  *pix16[4];                   //
+    u32  *pix32[4];                   //
+    struct {                          //
+      byte *plane1;                   //
+      byte *plane2;                   //
+      byte *plane3;                   //
+      byte *plane4;                   //
+    };                                //
+  };                                  // 缓冲区
+  union {                             //
+    u32 plane_size[4] = {};           //
+    struct {                          //
+      u32 plane1_size;                //
+      u32 plane2_size;                //
+      u32 plane3_size;                //
+      u32 plane4_size;                //
+    };                                //
+  };                                  // 缓冲区大小
+  u32      *pal     = null;           // 调色板
+  u32       width   = 0;              // 宽度（可自动计算） width = pitch / size_of_pixel
+  u32       height  = 0;              // 高度
+  u32       pitch   = 0;              // pitch = width * size_of_pixel
+  u32       size    = 0;              // pitch * height
+  u16       bpp     = 0;              // 像素深度（可自动计算） size_of_pixel * 8
+  u8        padding = 0;              // 按多少字节对齐
+  u8        channel = 0;              //
+  PixFmt    pixfmt  = texture_pixfmt; // 像素格式
+  PalFmt    palfmt  = PalFmt::None;   // 像素格式
+  bool      alpha   = false;          // 是否有alpha通道（可自动计算）
+  bool      plane   = false;          // 是否通道分离
+  bool      ready   = false;          //
+  TextureB *tex_b   = null;           // 不使用
+  TextureB *tex_f   = null;           // 不使用
 
   FrameBuffer() = default;
   FrameBuffer(void *data, u32 width, u32 height, PixFmt pixfmt)
@@ -130,20 +131,20 @@ struct FrameBuffer {
   void clear(byte b); // 全部数据设置为指定值
 
   // rect 是要更新的区域
-  auto flush(const pl2d::TextureB &tex) -> int;
-  auto flush(const pl2d::TextureF &tex) -> int;
-  auto flush(const pl2d::TextureB &tex, const pl2d::Rect &rect) -> int;
-  auto flush(const pl2d::TextureF &tex, const pl2d::Rect &rect) -> int;
+  auto flush(const TextureB &tex) -> int;
+  auto flush(const TextureF &tex) -> int;
+  auto flush(const TextureB &tex, const Rect &rect) -> int;
+  auto flush(const TextureF &tex, const Rect &rect) -> int;
 
-  auto copy_to(pl2d::TextureB &tex) const -> int;
-  auto copy_to(pl2d::TextureF &tex) const -> int;
-  auto copy_to(pl2d::TextureB &tex, const pl2d::Rect &rect) const -> int;
-  auto copy_to(pl2d::TextureF &tex, const pl2d::Rect &rect) const -> int;
+  auto copy_to(TextureB &tex) const -> int;
+  auto copy_to(TextureF &tex) const -> int;
+  auto copy_to(TextureB &tex, const Rect &rect) const -> int;
+  auto copy_to(TextureF &tex, const Rect &rect) const -> int;
 
-  void init_texture(pl2d::TextureB &tex);
-  void init_texture(pl2d::TextureF &tex);
-  auto new_texture_b() -> pl2d::TextureB *;
-  auto new_texture_f() -> pl2d::TextureF *;
+  void init_texture(TextureB &tex);
+  void init_texture(TextureF &tex);
+  auto new_texture_b() -> TextureB *;
+  auto new_texture_f() -> TextureF *;
 };
 
 } // namespace pl2d

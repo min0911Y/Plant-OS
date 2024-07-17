@@ -1,25 +1,24 @@
 #include <rand.h>
 #include <time.h>
-time_t time(time_t timer) { return RAND(); }
+time_t time(time_t timer) {
+  return RAND();
+}
 struct tm *tm_ = NULL;
 // TODO: wday
-#define JAN_1970 0x83aa7e80
+#define JAN_1970        0x83aa7e80
 #define COMMON_YEAR_SEC 31536000
-#define LEAP_YEAR_SEC 31622400
-#define DAY_SEC 86400
+#define LEAP_YEAR_SEC   31622400
+#define DAY_SEC         86400
 static int table1[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
 static int table2[12] = {31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-void UnTimeStamp(uint32_t timestamp, uint32_t *year, uint32_t *month,
-                 uint32_t *day, uint32_t *hour, uint32_t *min, uint32_t *sec,
-                 uint32_t *yday, uint32_t *mday, uint32_t *wday) {
-  timestamp += 28800;
-  uint32_t y = 1970;
+void UnTimeStamp(uint32_t timestamp, uint32_t *year, uint32_t *month, uint32_t *day, uint32_t *hour,
+                 uint32_t *min, uint32_t *sec, uint32_t *yday, uint32_t *mday, uint32_t *wday) {
+  timestamp  += 28800;
+  uint32_t y  = 1970;
   for (;; y++) {
     if ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0) {
       timestamp -= LEAP_YEAR_SEC;
-      if (timestamp <= COMMON_YEAR_SEC) {
-        break;
-      }
+      if (timestamp <= COMMON_YEAR_SEC) { break; }
     } else {
       timestamp -= COMMON_YEAR_SEC;
       if (timestamp <= COMMON_YEAR_SEC ||
@@ -29,7 +28,7 @@ void UnTimeStamp(uint32_t timestamp, uint32_t *year, uint32_t *month,
       }
     }
   }
-  *year = y + 1;
+  *year           = y + 1;
   uint32_t month0 = 1;
   if ((*year % 4 == 0 && *year % 100 != 0) || *year % 400 == 0) {
     for (; timestamp > table2[month0 - 1] * DAY_SEC; month0++) {
@@ -40,13 +39,13 @@ void UnTimeStamp(uint32_t timestamp, uint32_t *year, uint32_t *month,
       timestamp -= table1[month0 - 1] * DAY_SEC;
     }
   }
-  *month = month0;
-  *day = timestamp / DAY_SEC + 1;
+  *month    = month0;
+  *day      = timestamp / DAY_SEC + 1;
   timestamp = timestamp % DAY_SEC;
-  *hour = timestamp / 3600;
+  *hour     = timestamp / 3600;
   timestamp = timestamp % 3600;
-  *min = timestamp / 60;
-  *sec = timestamp % 60;
+  *min      = timestamp / 60;
+  *sec      = timestamp % 60;
 
   // 计算一年中的第几天
   int days = 0;
@@ -59,13 +58,13 @@ void UnTimeStamp(uint32_t timestamp, uint32_t *year, uint32_t *month,
       days += table1[i];
     }
   }
-  days += *day;
-  *yday = days;
+  days  += *day;
+  *yday  = days;
 
   // 计算一个月中的第几天
-  *mday = *day;
-  int totalDays = *yday; // 一年中的第几天，从0开始计数
-  int startYear = 1970;
+  *mday            = *day;
+  int totalDays    = *yday; // 一年中的第几天，从0开始计数
+  int startYear    = 1970;
   int startWeekday = 1; // 1970年1月1日是星期一
   for (int year1 = startYear; year1 <= *year; year1++) {
     if ((year1 % 4 == 0 && year1 % 100 != 0) || year1 % 400 == 0) {
@@ -75,33 +74,38 @@ void UnTimeStamp(uint32_t timestamp, uint32_t *year, uint32_t *month,
     }
   }
   int weekday = (startWeekday + totalDays) % 7;
-  *wday = weekday;
+  *wday       = weekday;
   return;
 }
 struct tm *localtime(time_t *t1) {
   time_t t = *t1;
-  if (!tm_) {
-    tm_ = malloc(sizeof(struct tm));
-  }
-  UnTimeStamp(t, &(tm_->tm_year), &(tm_->tm_mon), &(tm_->tm_mday),
-              &(tm_->tm_hour), &(tm_->tm_min), &(tm_->tm_sec), &(tm_->tm_yday),
-              &(tm_->tm_mday),&(tm_->tm_wday));
+  if (!tm_) { tm_ = malloc(sizeof(struct tm)); }
+  UnTimeStamp(t, &(tm_->tm_year), &(tm_->tm_mon), &(tm_->tm_mday), &(tm_->tm_hour), &(tm_->tm_min),
+              &(tm_->tm_sec), &(tm_->tm_yday), &(tm_->tm_mday), &(tm_->tm_wday));
   tm_->tm_year -= 1970;
   tm_->tm_mon--;
   return tm_;
 }
 
-void clock_gettime(int *sec1, int *usec1) {
-  int b = clock() * 10;
-  *sec1 = b / 1000;
-  *usec1 = (b % 1000) * 1000;
+clock_t clock() {
+  time_ns_t time_ns;
+  gettime_ns(&time_ns);
+  return time_ns.sec * 1000 + time_ns.nsec / 1000000;
 }
-double difftime(time_t t1, time_t t0) { return t1 - t0; }
+
+void clock_gettime(int *sec1, int *usec1) {
+  time_ns_t time_ns;
+  gettime_ns(&time_ns);
+  if (sec1) *sec1 = time_ns.sec;
+  if (usec1) *usec1 = time_ns.nsec / 1000;
+}
+
+double difftime(time_t t1, time_t t0) {
+  return t1 - t0;
+}
 time_t mktime(struct tm *tm) {
   // 判断年份是否在有效范围内（1970年以后）
-  if (tm->tm_year < 70) {
-    return (time_t)-1;
-  }
+  if (tm->tm_year < 70) { return (time_t)-1; }
 
   // 将月份调整为从 0 开始（0 表示一月，1 表示二月，以此类推）
   tm->tm_mon -= 1;
@@ -111,7 +115,7 @@ time_t mktime(struct tm *tm) {
   int monthDays[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
 
   leapYearCount = (tm->tm_year - 69) / 4; // 计算闰年的个数
-  year = 70 + tm->tm_year;
+  year          = 70 + tm->tm_year;
 
   int totalDays = 0;
   for (int i = 70; i < year; i++) {
@@ -128,16 +132,13 @@ time_t mktime(struct tm *tm) {
   }
 
   // 若是闰年且过了2月，则总天数加一
-  if (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) && tm->tm_mon > 1) {
-    totalDays += 1;
-  }
+  if (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) && tm->tm_mon > 1) { totalDays += 1; }
 
   // 加上日期差值
   totalDays += tm->tm_mday - 1;
 
   // 计算总的秒数
-  time_t seconds = totalDays * 24 * 60 * 60 + tm->tm_hour * 60 * 60 +
-                   tm->tm_min * 60 + tm->tm_sec;
+  time_t seconds = totalDays * 24 * 60 * 60 + tm->tm_hour * 60 * 60 + tm->tm_min * 60 + tm->tm_sec;
 
   return seconds;
 }

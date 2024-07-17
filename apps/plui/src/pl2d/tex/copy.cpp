@@ -11,11 +11,9 @@ auto BaseTexture<T>::copy() -> BaseTexture<T> * {
   return d;
 }
 
-BaseTextureInstantiation
-
-    template <typename T>
-    template <typename T2>
-    auto BaseTexture<T>::copy_from(const BaseTexture<T2> &d) -> bool {
+template <typename T>
+template <typename T2>
+auto BaseTexture<T>::copy_from(const BaseTexture<T2> &d) -> bool {
   if (d.width != width || d.height != height) return false;
   if constexpr (std::is_same_v<T, T2>) {
     if (&d == this) return true;
@@ -50,5 +48,7 @@ template auto BaseTexture<PixelD>::copy_from(const BaseTexture<PixelB> &d) -> bo
 template auto BaseTexture<PixelD>::copy_from(const BaseTexture<PixelS> &d) -> bool;
 template auto BaseTexture<PixelD>::copy_from(const BaseTexture<PixelF> &d) -> bool;
 template auto BaseTexture<PixelD>::copy_from(const BaseTexture<PixelD> &d) -> bool;
+
+BaseTextureInstantiation
 
 } // namespace pl2d

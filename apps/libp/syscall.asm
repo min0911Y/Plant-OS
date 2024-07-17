@@ -9,7 +9,7 @@ GLOBAL input_char_inSM,api_beep,RAND,GetCmdline,Get_System_Version,Copy,_kbhit
 GLOBAL mkdir,mkfile,Edit_File,SwitchTo320X200X256_BIOS,SwitchToText8025_BIOS
 GLOBAL TaskForever,SendMessage,GetMessage,MessageLength,NowTaskID,exec
 GLOBAL _exit,key_press_status,key_up_status,get_key_press,get_key_up,sbrk,api_getcwd
-GLOBAL timer_alloc,timer_settime,timer_out,timer_free,clock,start_keyboard_message,clear
+GLOBAL timer_alloc,timer_settime,timer_out,timer_free,gettime_ns,start_keyboard_message,clear
 GLOBAL haveMsg,PhyMemGetByte,GetMessageAll,PhyMemSetByte,format,api_heapsize,api_current_drive
 GLOBAL get_hour_hex,get_min_hex,get_sec_hex,get_day_of_month,get_day_of_week,get_mon_hex,get_year,AddThread,init_float
 GLOBAL TaskLock,TaskUnlock,SubThread,set_mode,VBEDraw_Px,VBEGet_Px,VBEGetBuffer,VBESetBuffer,roll,VBEDraw_Box,api_listfile
@@ -925,9 +925,12 @@ get_cons_color:
 	int 36h
 	pop ebx
 	ret
-clock:
+gettime_ns:
+	push edi
+	mov edi, [esp + 8]
 	mov eax,0x2e
 	int 36h
+	pop edi
 	ret
 init_float:
 	pushad

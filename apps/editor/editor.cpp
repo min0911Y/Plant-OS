@@ -11,8 +11,8 @@ int mLine(char *buffer, int len);
 #define T_DrawBox(x, y, w, h, c) Text_Draw_Box((y), (x), (h) + y, (w) + x, (c))
 extern "C" int tty_get_xsize();
 extern "C" int tty_get_ysize();
-int max_line, max_char_a_line;
-#define MAX_LINE max_line
+int            max_line, max_char_a_line;
+#define MAX_LINE        max_line
 #define MAX_CHAR_A_LINE max_char_a_line
 // Editor处理超过最大行的文件的方式：
 /*
@@ -20,13 +20,13 @@ int max_line, max_char_a_line;
   比喻为摄像机（其实是一个base结构体，存储着一些信息：比如buffer之类的）
  */
 struct Camera {
-  int y;                          // 摄像机高度
-  int curser_pos_x, curser_pos_y; // 光标位置
-  int index;                      // 光标指向位置的index
-  char *buffer;                   // 缓冲区
-  int array_len;                  // 缓冲区长度（已malloc） =>
-                 // 如果字符数量超过这个数，就会调用realloc
-  int len; // 字符总长
+  int   y;                          // 摄像机高度
+  int   curser_pos_x, curser_pos_y; // 光标位置
+  int   index;                      // 光标指向位置的index
+  char *buffer;                     // 缓冲区
+  int   array_len;                  // 缓冲区长度（已malloc） =>
+                                    // 如果字符数量超过这个数，就会调用realloc
+  int   len;                        // 字符总长
 #if VIEW_LINE
   int ml; // 行数
 #endif
@@ -34,14 +34,14 @@ struct Camera {
 // Editor利用这两个结构体描述当前渲染的结果，以便render类输出到屏幕
 // 由Parse类控制这两个结构体
 struct Char {
-  int index; // 在buffer中的index
+  int           index; // 在buffer中的index
   unsigned char ch;
 };
 struct Line {
-  int line_flag;   // 是不是回车敲出的行
-  Char *line;      // 一整行
-  int len;         // 这个行有几个字符
-  int start_index; // 行首索引
+  int   line_flag;   // 是不是回车敲出的行
+  Char *line;        // 一整行
+  int   len;         // 这个行有几个字符
+  int   start_index; // 行首索引
 };
 struct StringStyle {
   char *start;
@@ -49,23 +49,21 @@ struct StringStyle {
 };
 /* 如果要实现高亮，需要使用这些变量 */
 MST_Object *mst_obj;
-SPACE *comment_config;
-SPACE *number_config;
-Array *keymap;
-Array *string_style;
-bool number;
-int number_color;
+SPACE      *comment_config;
+SPACE      *number_config;
+Array      *keymap;
+Array      *string_style;
+bool        number;
+int         number_color;
 struct km_style {
   char *key;
-  int color;
+  int   color;
 };
 ///////////////高亮依赖///////////////
 // 转换大写
 void strtoupper(char *str) {
   while (*str != '\0') {
-    if (*str >= 'a' && *str <= 'z') {
-      *str -= 32;
-    }
+    if (*str >= 'a' && *str <= 'z') { *str -= 32; }
     str++;
   }
 }
@@ -86,7 +84,7 @@ void get_next(char *T, int next[]) {
 
 int kmp(char *str_main, char *str_branch) {
   int next[100];
-  int str_main_len = strlen(str_main);
+  int str_main_len   = strlen(str_main);
   int str_branch_len = strlen(str_branch);
   int i, j;
   get_next(str_branch, next);
@@ -123,23 +121,12 @@ void convert(char *str) {
     if (str[i] == '\\') {
       i++;
       switch (str[i]) {
-      case 'n':
-        str[j] = '\n';
-        break;
-      case 't':
-        str[j] = '\t';
-        break;
-      case 'r':
-        str[j] = '\r';
-        break;
-      case '\"':
-        str[j] = '\"';
-        break;
-      case '\\':
-        str[j] = '\\';
-        break;
-      default:
-        str[j] = str[i];
+      case 'n': str[j] = '\n'; break;
+      case 't': str[j] = '\t'; break;
+      case 'r': str[j] = '\r'; break;
+      case '\"': str[j] = '\"'; break;
+      case '\\': str[j] = '\\'; break;
+      default: str[j] = str[i];
       }
     } else
       str[j] = str[i];
@@ -148,21 +135,25 @@ void convert(char *str) {
 }
 
 // EVector C++-style的数组实现
-template <typename T> class EVector {
+template <typename T>
+class EVector {
 public:
   EVector() : _size(0), _capacity(1), _data(new T[1]) {}
 
-  EVector(int capacity)
-      : _size(0), _capacity(capacity), _data(new T[capacity]) {}
+  EVector(int capacity) : _size(0), _capacity(capacity), _data(new T[capacity]) {}
 
   ~EVector() {
     clear();
     delete[] _data;
   }
 
-  int size() const { return _size; }
+  int size() const {
+    return _size;
+  }
 
-  bool empty() const { return _size == 0; }
+  bool empty() const {
+    return _size == 0;
+  }
 
   T &operator[](int index) {
     // assert(index >= 0 && index < _size);
@@ -182,9 +173,7 @@ public:
   }
 
   void push_back(const T &value) {
-    if (_size >= _capacity) {
-      reserve(_capacity * 2);
-    }
+    if (_size >= _capacity) { reserve(_capacity * 2); }
     new (_data + _size) T(value);
     _size++;
   }
@@ -197,9 +186,7 @@ public:
 
   void insert(int index, const T &value) {
     // assert(index >= 0 && index <= _size);
-    if (_size >= _capacity) {
-      reserve(_capacity * 2);
-    }
+    if (_size >= _capacity) { reserve(_capacity * 2); }
     for (int i = _size; i > index; i--) {
       new (_data + i) T(_data[i - 1]);
       _data[i - 1].~T();
@@ -219,26 +206,24 @@ public:
   }
 
   void reserve(int capacity) {
-    if (capacity <= _capacity) {
-      return;
-    }
+    if (capacity <= _capacity) { return; }
     T *newData = new T[capacity];
     for (int i = 0; i < _size; i++) {
       new (newData + i) T(_data[i]);
       _data[i].~T();
     }
     delete[] _data;
-    _data = newData;
+    _data     = newData;
     _capacity = capacity;
   }
 
 private:
   int _size;
   int _capacity;
-  T *_data;
+  T  *_data;
 };
 EVector<StringStyle> string_vector;
-EVector<km_style> key_map;
+EVector<km_style>    key_map;
 
 ////////////////高亮结束/////////////////////
 
@@ -252,25 +237,26 @@ void putSpace(int x, int y, int w, int h) {
     }
   }
 }
+
 // 显示状态栏
 void setState(char *msg) {
-  short bx, by;
+  short    bx, by;
   unsigned cons = get_cons_color();
   set_cons_color(0x70);
   putSpace(0, MAX_LINE, MAX_CHAR_A_LINE, 1); // 先清空最下面那行
   goto_xy(0, MAX_LINE);                      // 然后控制光标到那边
-  print(msg); // 然后咱们把信息打印出来
+  print(msg);                                // 然后咱们把信息打印出来
   set_cons_color(cons);
 }
+
 // 插入一个字符
 void insert_char(char *str, int pos, char ch, Camera *c) {
   // 如果我们已经malloc的字节数小于添加字符后字符总数的大小（存不下了），我们就要进行realloc
   // realloc需要干两件事：1. realloc本身 2. 重新设置c->buffer和array_len
   if (c->len + 1 > c->array_len) {
-    str = (char *)realloc(
-        c->buffer,
-        c->array_len + 100); // 多malloc 100还是别的 可以自行选择，我选100
-    c->buffer = str;
+    str           = (char *)realloc(c->buffer,
+                                    c->array_len + 100); // 多malloc 100还是别的 可以自行选择，我选100
+    c->buffer     = str;
     c->array_len += 100;
   }
   // 好了，没有后顾之忧了，咱们插入字符
@@ -281,12 +267,14 @@ void insert_char(char *str, int pos, char ch, Camera *c) {
   str[pos] = ch;
   c->len++;
 }
+
 // 插入一个字符串，就是循环调用上面这个函数
 void insert_str(char *str, int pos, Camera *c) {
   for (int i = 0; i < c->len; i++) {
     insert_char(c->buffer, pos++, str[i], c);
   }
 }
+
 // 删除某个字符串
 void delete_char(char *str, int pos, Camera *c) {
   int i;
@@ -300,14 +288,13 @@ void delete_char(char *str, int pos, Camera *c) {
   str[l - 1] = 0; // 设置一下字符串结束符
   c->len--;
 }
+
 // 获取向上n行的第一个字符的索引
 int get_index_of_nth_last_line(int n, char *buf, int pos, int len) {
-  int line_count = 0;
-  int i = pos - 1;
+  int line_count    = 0;
+  int i             = pos - 1;
   int start_of_line = -1;
-  if (buf[i] == '\n') {
-    i--;
-  }
+  if (buf[i] == '\n') { i--; }
   while (i >= 0) {
     if (buf[i] == '\n') {
       line_count++;
@@ -321,11 +308,9 @@ int get_index_of_nth_last_line(int n, char *buf, int pos, int len) {
   if (start_of_line == -1) {
     int s;
     start_of_line = 0;
-    s = start_of_line;
+    s             = start_of_line;
     for (; start_of_line < pos - 1; start_of_line++) {
-      if (buf[start_of_line] == '\n') {
-        break;
-      }
+      if (buf[start_of_line] == '\n') { break; }
     }
     // printf("r = %d\n", start_of_line - s);
     if (start_of_line - s > MAX_CHAR_A_LINE) {
@@ -336,9 +321,7 @@ int get_index_of_nth_last_line(int n, char *buf, int pos, int len) {
     int s;
     s = start_of_line;
     for (; start_of_line < pos - 1; start_of_line++) {
-      if (buf[start_of_line] == '\n') {
-        break;
-      }
+      if (buf[start_of_line] == '\n') { break; }
     }
     // printf("r = %d\n", start_of_line - s);
     if (start_of_line - s > MAX_CHAR_A_LINE) {
@@ -347,25 +330,22 @@ int get_index_of_nth_last_line(int n, char *buf, int pos, int len) {
     return s;
   }
 }
+
 // 获取向下n个字符的索引
 int get_index_of_nth_next_line(int n, char *buf, int pos, int len) {
-  int i = 0;
-  int j = 0;
+  int i      = 0;
+  int j      = 0;
   int f_flag = 0;
   for (; pos < len; pos++) {
     if (i == n) {
-      if (f_flag) {
-        pos--;
-      }
+      if (f_flag) { pos--; }
       return pos;
     }
     f_flag = 0;
     if (buf[pos] == '\n' || j == MAX_CHAR_A_LINE) {
       i++;
       j = 0;
-      if (j == MAX_CHAR_A_LINE) {
-        f_flag = 1;
-      }
+      if (j == MAX_CHAR_A_LINE) { f_flag = 1; }
     } else {
       j++;
     }
@@ -395,11 +375,13 @@ public:
       在用户输入、删除缓冲区中的内容时，cf会置为1,所以cf是用来记录这个缓冲区有没有改变，
       以此用来判断是否需要Set，没有改变就不需要Set，减少遍历次数
     */
-    ny = 0;
+    ny   = 0;
     nidx = 0;
-    cf = 1; // 调用构造函数时，布局为空，必须要设置为1才能正常加载
+    cf   = 1; // 调用构造函数时，布局为空，必须要设置为1才能正常加载
   }
-  void SetUse() { cf = 1; } // 这里就是用来告诉parse类，缓冲区修改过了
+  void SetUse() {
+    cf = 1;
+  } // 这里就是用来告诉parse类，缓冲区修改过了
   // 核心函数：设置布局
   void Set() {
     // 首先，要判断到底需不需要重新设置布局
@@ -424,94 +406,91 @@ public:
       sl ----> 没用
       i ----> 索引
     */
-    int l = 0;
-    int sc = 0;
-    int f = 0;
-    int nl = 0;
+    int l   = 0;
+    int sc  = 0;
+    int f   = 0;
+    int nl  = 0;
     int len = 0;
-    int sl = 0;
+    int sl  = 0;
     int i;
     // 首先，重新设置nidx，控制nidx到当前摄像机高度下的第一个字符
     if (ny == camera->y) { // 摄像机高度没变，所以不用设置
       i = nidx;
       l = ny;
     } else if (ny > camera->y) { // ny > 摄像机高度，说明用户往前移动了几行
-      nidx = get_index_of_nth_last_line(ny - camera->y, camera->buffer, nidx,
-                                        camera->len);
-      i = nidx;
-      l = camera->y;
-      ny = l;
+      nidx = get_index_of_nth_last_line(ny - camera->y, camera->buffer, nidx, camera->len);
+      i    = nidx;
+      l    = camera->y;
+      ny   = l;
     } else { // ny < 摄像机高度， 说明用户向下移动了几行
-      i = get_index_of_nth_next_line(camera->y - ny, camera->buffer, nidx,
-                                     camera->len);
+      i    = get_index_of_nth_next_line(camera->y - ny, camera->buffer, nidx, camera->len);
       nidx = i;
-      ny = camera->y;
+      ny   = camera->y;
     }
     for (; i < camera->len && nl < MAX_LINE; i++) { // 开始解析
       if (sc == 0) {                                // sl == 0 处于行开头
         this->l[nl].start_index = i;                // 设置行开始的index
       }
-      if (camera->buffer[i] == '\n' ||
-          sc == MAX_CHAR_A_LINE) { // 是否需要进行换行？
-        this->l[nl].line_flag =
-            1; // 此行不是空白行（即有东西记录，如字符、换行符等）
+      if (camera->buffer[i] == '\n' || sc == MAX_CHAR_A_LINE) { // 是否需要进行换行？
+        this->l[nl].line_flag = 1; // 此行不是空白行（即有东西记录，如字符、换行符等）
         this->l[nl].len = len; // 设置长度
         // reset(全部归零，nl自增，换下一行)
         len = 0;
-        sl = 0;
+        sl  = 0;
         nl++;
-        f = sc == MAX_CHAR_A_LINE ? 1 : 0;
+        f  = sc == MAX_CHAR_A_LINE ? 1 : 0;
         sc = 0;
       } else {
         // 设置字符
-        this->l[nl].line[sc++].ch = camera->buffer[i];
+        this->l[nl].line[sc++].ch      = camera->buffer[i];
         this->l[nl].line[sc - 1].index = i; // 设置索引
         len++;
         // 如果满MAX_CHAR_A_LINE个字符，就在这里换行
         if (sc == MAX_CHAR_A_LINE) {
           if (i + 1 < camera->len &&
-              camera->buffer[i + 1] ==
-                  '\n') { // 后面还有东西，说明不是一个超过屏幕长度的行
+              camera->buffer[i + 1] == '\n') { // 后面还有东西，说明不是一个超过屏幕长度的行
             i++;
           }
           this->l[nl].len = MAX_CHAR_A_LINE; // 设置长度
           // reset
           nl++;
-          f = sc == MAX_CHAR_A_LINE ? 1 : 0;
-          sc = 0;
+          f   = sc == MAX_CHAR_A_LINE ? 1 : 0;
+          sc  = 0;
           len = 0;
         }
       }
     }
     // 最后一行会遗漏，这里补上
-    f = sc == MAX_CHAR_A_LINE ? 1 : 0;
+    f  = sc == MAX_CHAR_A_LINE ? 1 : 0;
     sc = 0;
     if (sc == 0) {
-      this->l[nl].line_flag = 1;
-      this->l[nl].len = len;
+      this->l[nl].line_flag   = 1;
+      this->l[nl].len         = len;
       this->l[nl].start_index = i;
-      len = 0;
-      sl = 0;
+      len                     = 0;
+      sl                      = 0;
     }
   }
-  Line *getBuf() { return l; }
+  Line *getBuf() {
+    return l;
+  }
 
 private:
-  Camera *camera;
-  Line *l;
+  Camera      *camera;
+  Line        *l;
   unsigned int wtf; // 编译器抽风了，这里不加一个变量，ny就会自动无限置1
   // 下面的变量在上面解释过
   unsigned int ny;
-  int nidx;
-  int cf;
-  void clean() { // 重置
+  int          nidx;
+  int          cf;
+  void         clean() { // 重置
     for (int i = 0; i < MAX_LINE; i++) {
-      l[i].line_flag = 0;
-      l[i].len = 0;
+      l[i].line_flag   = 0;
+      l[i].len         = 0;
       l[i].start_index = 0;
       for (int j = 0; j < MAX_CHAR_A_LINE; j++) {
         l[i].line[j].index = 0;
-        l[i].line[j].ch = 0;
+        l[i].line[j].ch    = 0;
       }
     }
   }
@@ -526,12 +505,12 @@ class render {
     buffer_screen ---- 用于记录当前屏幕已经被显示的字符
     buf_x/y ---- not used
   */
-  char *buf;
-  parse *p;
+  char   *buf;
+  parse  *p;
   Camera *camera;
-  char *filename;
-  char **buffer_screen;
-  int buf_x, buf_y;
+  char   *filename;
+  char  **buffer_screen;
+  int     buf_x, buf_y;
 
 public:
   render(char *buffer, Camera *c, parse *_p, char *fm) {
@@ -545,22 +524,22 @@ public:
     }
     r_clean(); // 清空
     r_check(); // check一下，确保都到位了（有时候会出现写了但没写上去的情况，这里检查一下，实际上不检查也可以）
-    buf = buffer;
-    p = _p;
-    camera = c;
+    buf      = buffer;
+    p        = _p;
+    camera   = c;
     filename = fm;
-    buf_x = 0;
-    buf_y = 0;
+    buf_x    = 0;
+    buf_y    = 0;
   }
   /* 高效的打印字符，空间换时间 */
   void r_putch(int ch) {
     // 获取当前光标的xy,那么我们就不用再去记录光标的位置了
     short bx, by;
-    int r = get_xy();
-    bx = r >> 16;
-    by = r & 0x0000ffff;
+    int   r = get_xy();
+    bx      = r >> 16;
+    by      = r & 0x0000ffff;
     if (buffer_screen[by][bx] != ch) { // 如果说不一样？
-      buffer_screen[by][bx] = ch; // 那就重新设置一下 然后覆盖输出
+      buffer_screen[by][bx] = ch;      // 那就重新设置一下 然后覆盖输出
       putch(ch);
     } else { // 一样的话还管啥啊
       goto_xy(bx + 1, by);
@@ -589,7 +568,7 @@ public:
   ///////////////显示////////////////////
   void showAll() {
     Line *l = p->getBuf(); // 获取布局信息
-    char buf[90];
+    char  buf[90];
     tty_stop_cur_moving(); // 暂停光标移动
     goto_xy(0, 0);         // 将下一个字符的显示位置移动到原点
     for (int i = 0; i < MAX_LINE; i++) {
@@ -715,9 +694,8 @@ public:
     sprintf(buf0, "COL %d LINE %d      %s | Text", camera->index,
             camera->y + camera->curser_pos_y + 1, filename);
 #endif
-    if (camera->len != 0) { // 分母不是0
-      int d = (int)(((float)camera->index / (float)camera->len) *
-                    100); // 算出百分比
+    if (camera->len != 0) {                                               // 分母不是0
+      int   d = (int)(((float)camera->index / (float)camera->len) * 100); // 算出百分比
       char *s;
       // 计算之后需要的间隔
       if (d == 100) {
@@ -750,28 +728,24 @@ private:
 };
 // 暂时没用，这里不写说明
 bool Need_Sroll(Line *l) {
-  if (l[MAX_LINE - 1].line_flag == 1 || l[MAX_LINE - 1].line[0].ch != '\0') {
-    return true;
-  }
+  if (l[MAX_LINE - 1].line_flag == 1 || l[MAX_LINE - 1].line[0].ch != '\0') { return true; }
   return false;
 }
 // 最大可显示行数
 int Show_Line_Max(Line *l) {
   int i;
   for (i = 0; i < MAX_LINE; i++) {
-    if (l[i].line[0].ch == '\0' && l[i].line_flag != 1) {
-      return i;
-    }
+    if (l[i].line[0].ch == '\0' && l[i].line_flag != 1) { return i; }
   }
   return i;
 }
 class Note {
   Camera *camera;
-  parse *p;
+  parse  *p;
 
 public:
   int maxLine() {
-    int l = 0;
+    int l  = 0;
     int sc = 0;
     for (int i = 0; i < camera->len; i++) {
       if (camera->buffer[i] == '\n' || sc == MAX_CHAR_A_LINE) {
@@ -786,7 +760,7 @@ public:
 
   Note(Camera *c, parse *_p) {
     camera = c;
-    p = _p;
+    p      = _p;
   }
   void Insert(char ch) {
 #if VIEW_LINE
@@ -799,19 +773,15 @@ public:
       char *s = (char *)(camera->index + (uint32_t)camera->buffer);
       for (; s > camera->buffer && *s != '\n'; s--)
         ;
-      if (*s == '\n') {
-        s++;
-      }
+      if (*s == '\n') { s++; }
       int a = 0;
       for (; a < (camera->len + (s - camera->buffer)) && s[a] != '\n'; a++)
         ;
-      if (a != 0 && a % MAX_CHAR_A_LINE == 0) {
-        camera->ml++;
-      }
+      if (a != 0 && a % MAX_CHAR_A_LINE == 0) { camera->ml++; }
     }
 #endif
     insert_char(camera->buffer, camera->index, ch, camera); // 直接插入
-    p->SetUse(); // 标记修改过了
+    p->SetUse();                                            // 标记修改过了
   }
   void Delete() {
     /* 判断3“0”情况 */
@@ -825,15 +795,11 @@ public:
       char *s = (char *)(camera->index + (uint32_t)camera->buffer);
       for (; s > camera->buffer && *s != '\n'; s--)
         ;
-      if (s != camera->buffer) {
-        s++;
-      }
+      if (s != camera->buffer) { s++; }
       int a = 0;
       for (; a < camera->len && s[a] != '\n'; a++)
         ;
-      if (a != 0 && (a - 1) != 0 && (a - 1) % MAX_CHAR_A_LINE == 0) {
-        camera->ml--;
-      }
+      if (a != 0 && (a - 1) != 0 && (a - 1) % MAX_CHAR_A_LINE == 0) { camera->ml--; }
     }
 #endif
     delete_char(camera->buffer, camera->index, camera); // 直接删除
@@ -857,15 +823,10 @@ public:
       if (l[line - camera->y - 1].len == 0) {
         camera->index = l[line - camera->y - 1].start_index;
       } else {
-        camera->index = l[line - camera->y - 1]
-                            .line[l[line - camera->y - 1].len - 1]
-                            .index +
-                        1;
+        camera->index = l[line - camera->y - 1].line[l[line - camera->y - 1].len - 1].index + 1;
       }
-      if (camera->buffer[l[line - camera->y - 1]
-                             .line[l[line - camera->y - 1].len - 1]
-                             .index +
-                         1] != '\n' &&
+      if (camera->buffer[l[line - camera->y - 1].line[l[line - camera->y - 1].len - 1].index + 1] !=
+              '\n' &&
           l[line - camera->y - 1].len == MAX_CHAR_A_LINE) {
         camera->curser_pos_x = l[line - camera->y - 1].len - 1;
         camera->index--;
@@ -879,19 +840,14 @@ public:
       } else {
         camera->y = line - 1;
         p->Set();
-        l = p->getBuf();
+        l                    = p->getBuf();
         camera->curser_pos_y = line - camera->y - 1;
         if (l[line - camera->y - 1].len == 0) {
           camera->index = l[line - camera->y - 1].start_index;
         } else {
-          camera->index = l[line - camera->y - 1]
-                              .line[l[line - camera->y - 1].len - 1]
-                              .index +
-                          1;
+          camera->index = l[line - camera->y - 1].line[l[line - camera->y - 1].len - 1].index + 1;
         }
-        if (camera->buffer[l[line - camera->y - 1]
-                               .line[l[line - camera->y - 1].len - 1]
-                               .index +
+        if (camera->buffer[l[line - camera->y - 1].line[l[line - camera->y - 1].len - 1].index +
                            1] != '\n' &&
             l[line - camera->y - 1].len == MAX_CHAR_A_LINE) {
           camera->curser_pos_x = l[line - camera->y - 1].len - 1;
@@ -905,19 +861,15 @@ public:
   void Click(int x, int y) {
     p->Set();
     Line *l = p->getBuf(); // 获取当前行布局
-    if (y >= MAX_LINE) {
-      return;
-    }
-    if (l[y].line[0].ch == '\0' && l[y].line_flag == 0) {
-      return;
-    }
+    if (y >= MAX_LINE) { return; }
+    if (l[y].line[0].ch == '\0' && l[y].line_flag == 0) { return; }
     if (l[y].len < x) {
       x = l[y].len - 1;
       if (l[y].len == 0) {
-        camera->index = l[y].start_index;
+        camera->index        = l[y].start_index;
         camera->curser_pos_x = 0;
       } else {
-        camera->index = l[y].line[x].index + 1;
+        camera->index        = l[y].line[x].index + 1;
         camera->curser_pos_x = x + 1;
       }
       camera->curser_pos_y = y;
@@ -939,9 +891,7 @@ public:
       // 移不了了，就什么都不干
       return;
     }
-    if (camera->curser_pos_y == 0) {
-      camera->y--;
-    }
+    if (camera->curser_pos_y == 0) { camera->y--; }
     p->Set();
     Line *l = p->getBuf(); // 获取当前行布局
     if (camera->curser_pos_y == 0) {
@@ -950,10 +900,8 @@ public:
       } else {
         camera->index = l[0].line[l[0].len - 1].index + 1;
       }
-      if (camera->buffer[l[camera->curser_pos_y]
-                             .line[l[camera->curser_pos_y].len - 1]
-                             .index +
-                         1] != '\n' &&
+      if (camera->buffer[l[camera->curser_pos_y].line[l[camera->curser_pos_y].len - 1].index + 1] !=
+              '\n' &&
           l[camera->curser_pos_y].len == MAX_CHAR_A_LINE) {
         camera->curser_pos_x = l[camera->curser_pos_y].len - 1;
         camera->index--;
@@ -966,15 +914,10 @@ public:
       if (l[camera->curser_pos_y].len == 0) {
         camera->index = l[camera->curser_pos_y].start_index;
       } else {
-        camera->index = l[camera->curser_pos_y]
-                            .line[l[camera->curser_pos_y].len - 1]
-                            .index +
-                        1;
+        camera->index = l[camera->curser_pos_y].line[l[camera->curser_pos_y].len - 1].index + 1;
       }
-      if (camera->buffer[l[camera->curser_pos_y]
-                             .line[l[camera->curser_pos_y].len - 1]
-                             .index +
-                         1] != '\n' &&
+      if (camera->buffer[l[camera->curser_pos_y].line[l[camera->curser_pos_y].len - 1].index + 1] !=
+              '\n' &&
           l[camera->curser_pos_y].len == MAX_CHAR_A_LINE) {
         camera->curser_pos_x = l[camera->curser_pos_y].len - 1;
         camera->index--;
@@ -987,7 +930,7 @@ public:
   int down() {
     Line *l;
     p->Set();
-    l = p->getBuf();
+    l      = p->getBuf();
     int ml = maxLine();
     if (camera->curser_pos_y != MAX_LINE - 1) {
       if (l[camera->curser_pos_y + 1].line[0].ch == '\0' &&
@@ -999,9 +942,7 @@ public:
         return 0; // failed
       }
     }
-    if (camera->curser_pos_y == MAX_LINE - 1) {
-      camera->y++;
-    }
+    if (camera->curser_pos_y == MAX_LINE - 1) { camera->y++; }
     p->Set();
     l = p->getBuf(); // 获取当前行布局
     if (camera->curser_pos_y == MAX_LINE - 1) {
@@ -1010,10 +951,8 @@ public:
       } else {
         camera->index = l[MAX_LINE - 1].line[l[MAX_LINE - 1].len - 1].index + 1;
       }
-      if (camera->buffer[l[camera->curser_pos_y]
-                             .line[l[camera->curser_pos_y].len - 1]
-                             .index +
-                         1] != '\n' &&
+      if (camera->buffer[l[camera->curser_pos_y].line[l[camera->curser_pos_y].len - 1].index + 1] !=
+              '\n' &&
           l[camera->curser_pos_y].len == MAX_CHAR_A_LINE) {
         camera->curser_pos_x = l[camera->curser_pos_y].len - 1;
         camera->index--;
@@ -1027,15 +966,10 @@ public:
       if (l[camera->curser_pos_y].len == 0) {
         camera->index = l[camera->curser_pos_y].start_index;
       } else {
-        camera->index = l[camera->curser_pos_y]
-                            .line[l[camera->curser_pos_y].len - 1]
-                            .index +
-                        1;
+        camera->index = l[camera->curser_pos_y].line[l[camera->curser_pos_y].len - 1].index + 1;
       }
-      if (camera->buffer[l[camera->curser_pos_y]
-                             .line[l[camera->curser_pos_y].len - 1]
-                             .index +
-                         1] != '\n' &&
+      if (camera->buffer[l[camera->curser_pos_y].line[l[camera->curser_pos_y].len - 1].index + 1] !=
+              '\n' &&
           l[camera->curser_pos_y].len == MAX_CHAR_A_LINE) {
         camera->curser_pos_x = l[camera->curser_pos_y].len - 1;
         camera->index--;
@@ -1076,7 +1010,7 @@ public:
         } else {
           // 正常输入的
           camera->curser_pos_x = 1;
-          camera->index = l[camera->curser_pos_y].start_index + 1;
+          camera->index        = l[camera->curser_pos_y].start_index + 1;
         }
       }
     } else {
@@ -1099,18 +1033,16 @@ void m_thread(void *s);
 
 class Editor {
 public:
-  parse *prse;
-  Note *n;
+  parse  *prse;
+  Note   *n;
   Camera *c;
   render *r;
-  void Click(int x, int y) {
+  void    Click(int x, int y) {
     n->Click(x, y);
     r->showAll();
   }
   void Up() {
-    if (c->y == 0) {
-      return;
-    }
+    if (c->y == 0) { return; }
     c->curser_pos_x = 0;
     c->curser_pos_y = 0;
 
@@ -1118,8 +1050,8 @@ public:
     r->showAll();
   }
   void Down() {
-    int temp_x = c->curser_pos_x;
-    int temp_y = c->curser_pos_y;
+    int temp_x      = c->curser_pos_x;
+    int temp_y      = c->curser_pos_y;
     c->curser_pos_x = 0;
     c->curser_pos_y = MAX_LINE - 1;
     if (n->down() == 0) {
@@ -1130,67 +1062,61 @@ public:
   }
   char *Main(char *filename) {
     system("cls");
-    c = (Camera *)malloc(sizeof(Camera));
-    c->buffer = (char *)malloc(filesize(filename) + 1000);
-    char *bf2 = (char *)malloc(filesize(filename) + 1000);
+    c            = (Camera *)malloc(sizeof(Camera));
+    c->buffer    = (char *)malloc(filesize(filename) + 1000);
+    char *bf2    = (char *)malloc(filesize(filename) + 1000);
     c->array_len = filesize(filename) + 1000;
-    c->len = 0;
+    c->len       = 0;
 #if VIEW_LINE
     c->ml = 0;
 #endif
-    c->y = 0;
+    c->y            = 0;
     c->curser_pos_x = 0;
     c->curser_pos_y = 0;
-    c->index = 0;
+    c->index        = 0;
 
     if (filesize(filename) != -1) {
       api_ReadFile(filename, bf2);
       int fsz = filesize(filename);
       for (int i = 0, j = 0; i < fsz + 1000; i++) {
-        if (bf2[i] != '\r') {
-          c->buffer[j++] = bf2[i];
-        }
+        if (bf2[i] != '\r') { c->buffer[j++] = bf2[i]; }
       }
     } else {
       mkfile(filename);
     }
     free(bf2);
     c->len = strlen(c->buffer);
-    prse = new parse(c);
+    prse   = new parse(c);
     prse->Set();
-    n = new Note(c, prse);
+    n       = new Note(c, prse);
     Line *l = prse->getBuf();
-    r = new render(c->buffer, c, prse, filename);
+    r       = new render(c->buffer, c, prse, filename);
 #if VIEW_LINE
     c->ml = n->maxLine();
 #endif
-    char *stack = (char *)malloc(16 * 1024);
-    stack += 16 * 1024 - 4;
-    unsigned int *s = (unsigned int *)(stack);
-    *s = (unsigned int)this;
-    if (mouse_support())
-      AddThread("mouse", (unsigned int)&m_thread, (unsigned int)stack - 4);
+    char *stack      = (char *)malloc(16 * 1024);
+    stack           += 16 * 1024 - 4;
+    unsigned int *s  = (unsigned int *)(stack);
+    *s               = (unsigned int)this;
+    if (mouse_support()) AddThread("mouse", (unsigned int)&m_thread, (unsigned int)stack - 4);
     r->showAll();
     int times = 0;
-    int tap = 0;
-    int flag = 0;
+    int tap   = 0;
+    int flag  = 0;
     for (;;) {
       int ch = getch();
-      if (ch == 0) {
-        continue;
-      }
+      if (ch == 0) { continue; }
       if (ch == '\n') {
         if (!flag)
           for (tap = 0; tap < MAX_CHAR_A_LINE; tap++) {
-            if (l[c->curser_pos_y].line[tap].ch != ' ')
-              break;
+            if (l[c->curser_pos_y].line[tap].ch != ' ') break;
           }
         n->Insert('\n');
         n->down();
         // l = prse->getBuf();
         if (c->curser_pos_x != 0) {
           c->curser_pos_x = 0;
-          c->index = l[c->curser_pos_y].line[0].index; // Holy Fuck
+          c->index        = l[c->curser_pos_y].line[0].index; // Holy Fuck
         }
         if (!flag)
           for (int i = 0; i < tap; i++) {
@@ -1208,7 +1134,7 @@ public:
         setState("");
         goto_xy(0, MAX_LINE);
         char buf[100];
-        int c = get_cons_color();
+        int  c = get_cons_color();
         set_cons_color(0x70);
         scan(buf, 100);
         set_cons_color(c);
@@ -1264,9 +1190,7 @@ void m_thread(void *s) {
 int mLine(char *buffer, int len) {
   int l = 0;
   for (int i = 0; i < len; i++) {
-    if (buffer[i] == '\n') {
-      l++;
-    }
+    if (buffer[i] == '\n') { l++; }
   }
   return l;
 }
@@ -1280,15 +1204,13 @@ int main(int argc, char **argv) {
     print("\n");
     return 0;
   }
-  max_line = tty_get_ysize() - 1;
+  max_line        = tty_get_ysize() - 1;
   max_char_a_line = tty_get_xsize();
   mst_obj == nullptr;
   char ext_str[100];
-  int q;
+  int  q;
   for (q = 0; q < strlen(argv[1]); q++) {
-    if (argv[1][q] == '.') {
-      break;
-    }
+    if (argv[1][q] == '.') { break; }
   }
   strcpy(ext_str, argv[1] + q);
   strtoupper(ext_str);
@@ -1301,8 +1223,8 @@ int main(int argc, char **argv) {
   printf("Copyright (C) 2023 min0911_\n");
   printf("Build in %s %s\n", __DATE__, __TIME__);
   Editor *e = new Editor();
-  char *c = e->Main(argv[1]);
-  int l = strlen(c);
+  char   *c = e->Main(argv[1]);
+  int     l = strlen(c);
   clear();
   char *bb = (char *)malloc(strlen(c) + 1 + mLine(c, l));
   for (int i = 0, j = 0; i < l; i++) {
