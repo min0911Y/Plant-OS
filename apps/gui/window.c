@@ -1,18 +1,16 @@
 #include "gui.h"
 
 void display_window(window_t *window, int x, int y, int pos) {
-  window->x = x;
-  window->y = y;
-  window->using1 = true;
+  window->x        = x;
+  window->y        = y;
+  window->is_using = true;
   sheet_slide(window->sht, x, y);
-  if (window->sht->height != pos) {
-    sheet_updown(window->sht, pos);
-  }
+  if (window->sht->height != pos) { sheet_updown(window->sht, pos); }
   // sheet_refresh(window->sht, 0, 0, window->xsize, window->ysize);
 }
 
 void hide_window(window_t *window) {
-  // window->using1 = false;
+  // window->is_using = false;
   // sheet_updown(window->sht, -1);
 }
 
@@ -37,9 +35,8 @@ void close_window(window_t *window) {
   // free((void *)window);
 }
 
-void draw_window(window_t *window, int x, int y, int x1, int y1,
-                 color_t color) {
-                  logkf("vram is %p\n",window->vram);
+void draw_window(window_t *window, int x, int y, int x1, int y1, color_t color) {
+  logkf("vram is %p\n", window->vram);
   SDraw_Box(window->vram, x, y, x1, y1, color, window->xsize);
   sheet_refresh(window->sht, x, y, x1, y1);
 }
@@ -51,48 +48,45 @@ void puts_window(window_t *window, char *s, int x, int y, color_t color) {
 extern void (*drop)();
 window_t *backup_w;
 gmouse_t *backup_gmouse;
-void w_drop() {
-  if (Collision(backup_w->x + 3, backup_w->y + 3, backup_w->xsize - 37, 20,
-                backup_gmouse->x, backup_gmouse->y)) {
+void      w_drop() {
+  if (Collision(backup_w->x + 3, backup_w->y + 3, backup_w->xsize - 37, 20, backup_gmouse->x,
+                     backup_gmouse->y)) {
     // 移动
     int oldx;
-    oldx = backup_w->x;
+    oldx         = backup_w->x;
     backup_w->x += mdec.x;
     backup_w->y += mdec.y;
-    backup_w->display(backup_w, (backup_w->x + 2) & ~3, backup_w->y,
-                      backup_w->sht->ctl->top - 1);
-    int x = (backup_w->x + 2) & ~3;
-    x -= oldx;
-    mdec.x = x;
+    backup_w->display(backup_w, (backup_w->x + 2) & ~3, backup_w->y, backup_w->sht->ctl->top - 1);
+    int x   = (backup_w->x + 2) & ~3;
+    x      -= oldx;
+    mdec.x  = x;
   } else {
     drop = NULL;
   }
 }
 void handle_left_window(window_t *window, gmouse_t *gmouse) {
-  if (!window->using1)
-    return;
-  if (Collision(window->x + 3, window->y + 3, window->xsize - 37, 20, gmouse->x,
-                gmouse->y)) {
+  if (!window->is_using) return;
+  if (Collision(window->x + 3, window->y + 3, window->xsize - 37, 20, gmouse->x, gmouse->y)) {
     // 移动
-    window->x += mdec.x;
-    window->y += mdec.y;
-    backup_w = window;
-    backup_gmouse = gmouse;
-    drop = w_drop;
+    window->x     += mdec.x;
+    window->y     += mdec.y;
+    backup_w       = window;
+    backup_gmouse  = gmouse;
+    drop           = w_drop;
     return;
-  } else if (Collision(window->x + window->xsize - 21, window->y + 5, 16, 19,
-                       gmouse->x, gmouse->y)) {
+  } else if (Collision(window->x + window->xsize - 21, window->y + 5, 16, 19, gmouse->x,
+                       gmouse->y)) {
     // 关闭
     window->close(window);
     // printk("You close a window.\n");
     return;
-  } else if (Collision(window->x + window->xsize - 37, window->y + 5, 16, 19,
-                       gmouse->x, gmouse->y)) {
+  } else if (Collision(window->x + window->xsize - 37, window->y + 5, 16, 19, gmouse->x,
+                       gmouse->y)) {
     window->hide(window);
     // printk("You hide a window.\n");
     return;
   }
-  if(window->sht->height != window->sht->ctl->top - 1)
+  if (window->sht->height != window->sht->ctl->top - 1)
     window->display(window, window->x, window->y, window->sht->ctl->top - 1);
   if (window->console != NULL) {
     if (window->console->handle_left != NULL) {
@@ -103,48 +97,44 @@ void handle_left_window(window_t *window, gmouse_t *gmouse) {
       window->super_window->handle_left(window->super_window, gmouse);
     }
   }
-  if(window->handle_left_for_api)
-    window->handle_left_for_api(window,gmouse);
+  if (window->handle_left_for_api) window->handle_left_for_api(window, gmouse);
 }
 
-window_t *create_window(desktop_t *desktop, char *title, int xsize, int ysize,
-                        unsigned tid) {
+window_t *create_window(desktop_t *desktop, char *title, int xsize, int ysize, unsigned tid) {
   window_t *res = (window_t *)malloc(sizeof(window_t));
-  res->desktop = desktop;
-  res->vram = (vram_t *)malloc(xsize * ysize * sizeof(vram_t));
-  res->xsize = xsize;
-  res->ysize = ysize;
-  res->title = malloc(strlen(title) + 1);
+  res->desktop  = desktop;
+  res->vram     = (vram_t *)malloc(xsize * ysize * sizeof(vram_t));
+  res->xsize    = xsize;
+  res->ysize    = ysize;
+  res->title    = malloc(strlen(title) + 1);
   strcpy(res->title, title);
-  res->sht = sheet_alloc(desktop->shtctl);
-  res->tid = 0;
-  res->display = display_window;
-  res->hide = hide_window;
-  res->draw = draw_window;
-  res->puts = puts_window;
-  res->handle_left = handle_left_window;
+  res->sht                 = sheet_alloc(desktop->shtctl);
+  res->tid                 = 0;
+  res->display             = display_window;
+  res->hide                = hide_window;
+  res->draw                = draw_window;
+  res->puts                = puts_window;
+  res->handle_left         = handle_left_window;
   res->handle_left_for_api = NULL;
-  res->handle_right = NULL;
-  res->handle_stay = NULL;
-  res->close = close_window;
-  res->console = NULL;
-  res->super_window = NULL;
-  res->sht->wnd = res;
+  res->handle_right        = NULL;
+  res->handle_stay         = NULL;
+  res->close               = close_window;
+  res->console             = NULL;
+  res->super_window        = NULL;
+  res->sht->wnd            = res;
   list_add_val((uintptr_t)res, desktop->window_list);
 
   sheet_setbuf(res->sht, res->vram, xsize, ysize, -1);
 
-  static char *closebtn[14] = {
-      "OOOOOOOOOOOOOOO@", "OQQQQQQQQQQQQQ$@", "OQQQQQQQQQQQQQ$@",
-      "OQQQ@@QQQQ@@QQ$@", "OQQQQ@@QQ@@QQQ$@", "OQQQQQ@@@@QQQQ$@",
-      "OQQQQQQ@@QQQQQ$@", "OQQQQQ@@@@QQQQ$@", "OQQQQ@@QQ@@QQQ$@",
-      "OQQQ@@QQQQ@@QQ$@", "OQQQQQQQQQQQQQ$@", "OQQQQQQQQQQQQQ$@",
-      "O$$$$$$$$$$$$$$@", "@@@@@@@@@@@@@@@@"};
+  static char *closebtn[14] = {"OOOOOOOOOOOOOOO@", "OQQQQQQQQQQQQQ$@", "OQQQQQQQQQQQQQ$@",
+                               "OQQQ@@QQQQ@@QQ$@", "OQQQQ@@QQ@@QQQ$@", "OQQQQQ@@@@QQQQ$@",
+                               "OQQQQQQ@@QQQQQ$@", "OQQQQQ@@@@QQQQ$@", "OQQQQ@@QQ@@QQQ$@",
+                               "OQQQ@@QQQQ@@QQ$@", "OQQQQQQQQQQQQQ$@", "OQQQQQQQQQQQQQ$@",
+                               "O$$$$$$$$$$$$$$@", "@@@@@@@@@@@@@@@@"};
   static char *smallbtn[14] = {
-      "OOOOOOOOOOOOOOO@", "OQQQQQQQQQQQQQ$@", "OQQQQQQQQQQQQQ$@",
-      "OQQQQQQQQQQQQQ$@", "OQQQQQQQQQQQQQ$@", "OQQQQQQQQQQQQQ$@",
-      "OQQQQQQQQQQQQQ$@", "OQQQQQQQQQQQQQ$@", "OQQQQQQQQQQQQQ$@",
-      "OQQ@@@@@@@@@QQ$@", "OQQ@@@@@@@@@QQ$@", "OQQQQQQQQQQQQQ$@",
+      "OOOOOOOOOOOOOOO@", "OQQQQQQQQQQQQQ$@", "OQQQQQQQQQQQQQ$@", "OQQQQQQQQQQQQQ$@",
+      "OQQQQQQQQQQQQQ$@", "OQQQQQQQQQQQQQ$@", "OQQQQQQQQQQQQQ$@", "OQQQQQQQQQQQQQ$@",
+      "OQQQQQQQQQQQQQ$@", "OQQ@@@@@@@@@QQ$@", "OQQ@@@@@@@@@QQ$@", "OQQQQQQQQQQQQQ$@",
       "O$$$$$$$$$$$$$$@", "@@@@@@@@@@@@@@@@",
   };
   color_t c;
@@ -163,7 +153,7 @@ window_t *create_window(desktop_t *desktop, char *title, int xsize, int ysize,
       res->vram[j + i * xsize] = color;
       if (count == times && (color & 0xff) != 255) {
         color += 0x00010101;
-        count = 0;
+        count  = 0;
       }
     }
   }

@@ -4,11 +4,11 @@
 extern "C" {
 #endif
 #include <stdarg.h>
-int printk(const char* format, ...);
-int sprintf(char* s, const char* format, ...);
-int vsprintf(char* s, const char* format, va_list arg);
-int vsnprintf(char* str, unsigned int size, const char* format, va_list ap);
-int snprintf(char* str, unsigned int size, const char* format, ...);
+int printk(const char *format, ...);
+int sprintf(char *s, const char *format, ...);
+int vsprintf(char *s, const char *format, va_list arg);
+int vsnprintf(char *str, unsigned int size, const char *format, va_list ap);
+int snprintf(char *str, unsigned int size, const char *format, ...);
 #ifdef __cplusplus
 }
 #endif

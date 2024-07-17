@@ -11,21 +11,20 @@ uint64_t __udivmoddi4(uint64_t num, uint64_t den, uint64_t *rem_p) {
 
   /* Left-justify denominator and count shift */
   while ((int64_t)den >= 0) {
-    den <<= 1;
+    den  <<= 1;
     qbit <<= 1;
   }
 
   while (qbit) {
     if (den <= num) {
-      num -= den;
+      num  -= den;
       quot += qbit;
     }
-    den >>= 1;
+    den  >>= 1;
     qbit >>= 1;
   }
 
-  if (rem_p)
-    *rem_p = num;
+  if (rem_p) *rem_p = num;
 
   return quot;
 }
@@ -39,21 +38,20 @@ int64_t __divmoddi4(int64_t num, int64_t den, int64_t *rem_p) {
 
   /* Left-justify denominator and count shift */
   while ((int64_t)den >= 0) {
-    den <<= 1;
+    den  <<= 1;
     qbit <<= 1;
   }
 
   while (qbit) {
     if (den <= num) {
-      num -= den;
+      num  -= den;
       quot += qbit;
     }
-    den >>= 1;
+    den  >>= 1;
     qbit >>= 1;
   }
 
-  if (rem_p)
-    *rem_p = num;
+  if (rem_p) *rem_p = num;
 
   return quot;
 }
@@ -68,27 +66,26 @@ int64_t __divmoddi4(int64_t num, int64_t den, int64_t *rem_p) {
 #include <string.h>
 
 #ifdef DEBUG
-#define ASSERT(b)                                                              \
-  if (!(b))                                                                    \
-    assert_failed();
+#  define ASSERT(b)                                                                                \
+    if (!(b)) assert_failed();
 #else
-#define ASSERT(b) /* empty */
+#  define ASSERT(b) /* empty */
 #endif
 
 #if WORDSZ == 2
-#define ptrint int
+#  define ptrint int
 #else
-#define ptrint long
+#  define ptrint long
 #endif
 
 #if WORDSZ == 2
-#define BRKSIZE 1024
+#  define BRKSIZE 1024
 #else
-#define BRKSIZE 4096
+#  define BRKSIZE 4096
 #endif
-#define PTRSIZE ((int)sizeof(void *))
+#define PTRSIZE     ((int)sizeof(void *))
 #define Align(x, a) (((x) + (a - 1)) & ~(a - 1))
-#define NextSlot(p) (*(void **)((p)-PTRSIZE))
+#define NextSlot(p) (*(void **)((p) - PTRSIZE))
 #define NextFree(p) (*(void **)(p))
 
 #ifdef DEBUG
@@ -111,8 +108,8 @@ static void assert_failed() {
  * user visable part, so just after the next-slot pointer.
  * Free slots are merged together by free().
  */
-static void *_bottom, *_top, *_empty;
-unsigned alloc_start_addr;
+static void    *_bottom, *_top, *_empty;
+unsigned        alloc_start_addr;
 static unsigned sz;
 static unsigned sz_left = 0;
 static unsigned msbrk(unsigned size) {
@@ -129,11 +126,11 @@ static unsigned msbrk(unsigned size) {
 }
 void abi_alloc_init() {
   alloc_start_addr = api_malloc(1);
-  sz = 0;
-  sz_left = api_heapsize();
-  _bottom = NULL;
-  _top = NULL;
-  _empty = NULL;
+  sz               = 0;
+  sz_left          = api_heapsize();
+  _bottom          = NULL;
+  _top             = NULL;
+  _empty           = NULL;
 }
 static int grow(size_t len) {
   register char *p;
@@ -144,28 +141,25 @@ static int grow(size_t len) {
       msbrk(p - (sz + alloc_start_addr)) == 0)
     return (0);
   NextSlot((char *)_top) = p;
-  NextSlot(p) = 0;
+  NextSlot(p)            = 0;
   free(_top);
   _top = p;
   return 1;
 }
 
 void *malloc(size_t size) {
-  register char *prev, *p, *next, *new;
+  register char    *prev, *p, *next, *new;
   register unsigned len, ntries;
 
-  if (size == 0)
-    return NULL;
+  if (size == 0) return NULL;
   for (ntries = 0; ntries < 2; ntries++) {
-    if ((len = Align(size, PTRSIZE) + PTRSIZE) < 2 * PTRSIZE)
-      return NULL;
+    if ((len = Align(size, PTRSIZE) + PTRSIZE) < 2 * PTRSIZE) return NULL;
     if (_bottom == 0) {
-      if ((p = msbrk(2 * PTRSIZE)) == (char *)-1)
-        return NULL;
-      p = (char *)Align((ptrint)p, PTRSIZE);
-      p += PTRSIZE;
+      if ((p = msbrk(2 * PTRSIZE)) == (char *)-1) return NULL;
+      p     = (char *)Align((ptrint)p, PTRSIZE);
+      p    += PTRSIZE;
       _top = _bottom = p;
-      NextSlot(p) = 0;
+      NextSlot(p)    = 0;
     }
 #ifdef SLOWDEBUG
     for (p = _bottom; (next = NextSlot(p)) != 0; p = next)
@@ -174,15 +168,14 @@ void *malloc(size_t size) {
 #endif
     for (prev = 0, p = _empty; p != 0; prev = p, p = NextFree(p)) {
       next = NextSlot(p);
-      new = p + len; /* easily overflows!! */
-      if (new > next || new <= p)
-        continue;                 /* too small */
-      if (new + PTRSIZE < next) { /* too big, so split */
+      new  = p + len;                       /* easily overflows!! */
+      if (new > next || new <= p) continue; /* too small */
+      if (new + PTRSIZE < next) {           /* too big, so split */
         /* + PTRSIZE avoids tiny slots on free list */
         NextSlot(new) = next;
-        NextSlot(p) = new;
+        NextSlot(p)   = new;
         NextFree(new) = NextFree(p);
-        NextFree(p) = new;
+        NextFree(p)   = new;
       }
       if (prev)
         NextFree(prev) = NextFree(p);
@@ -193,16 +186,15 @@ void *malloc(size_t size) {
       __builtin_memset(p, 0, size);
       return p;
     }
-    if (grow(len) == 0)
-      break;
+    if (grow(len) == 0) break;
   }
   ASSERT(ntries != 2);
   return NULL;
 }
 
 void *realloc(void *oldp, size_t size) {
-  register char *prev, *p, *next, *new;
-  char *old = oldp;
+  register char  *prev, *p, *next, *new;
+  char           *old = oldp;
   register size_t len, n;
 
   if (!old)
@@ -211,15 +203,14 @@ void *realloc(void *oldp, size_t size) {
     free(oldp);
     return NULL;
   }
-  len = Align(size, PTRSIZE) + PTRSIZE;
+  len  = Align(size, PTRSIZE) + PTRSIZE;
   next = NextSlot(old);
-  n = (int)(next - old); /* old length */
+  n    = (int)(next - old); /* old length */
   /*
    * extend old if there is any free space just behind it
    */
   for (prev = 0, p = _empty; p != 0; prev = p, p = NextFree(p)) {
-    if (p > next)
-      break;
+    if (p > next) break;
     if (p == next) { /* 'next' is a free slot: merge */
       NextSlot(old) = NextSlot(p);
       if (prev)
@@ -252,15 +243,13 @@ void *realloc(void *oldp, size_t size) {
 
 void free(void *ptr) {
   register char *prev, *next;
-  char *p = ptr;
+  char          *p = ptr;
 
-  if (!p)
-    return;
+  if (!p) return;
 
   ASSERT((char *)NextSlot(p) > p);
   for (prev = 0, next = _empty; next != 0; prev = next, next = NextFree(next))
-    if (p < next)
-      break;
+    if (p < next) break;
   NextFree(p) = next;
   if (prev)
     NextFree(prev) = p;
@@ -285,12 +274,13 @@ void free(void *ptr) {
 /**
  * Only call malloc, boundary not used, it's not a good idea.
  */
-void *memalign(size_t boundary, size_t size) { return malloc(size); }
+void *memalign(size_t boundary, size_t size) {
+  return malloc(size);
+}
 
 void *calloc(int num, size_t size) {
   void *p;
   p = malloc(num * size);
-  if (p)
-    memset(p, 0, num * size);
+  if (p) memset(p, 0, num * size);
   return p;
 }
