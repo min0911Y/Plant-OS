@@ -513,7 +513,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
     reg[EAX] = UTCTimeStamp(get_year(), get_mon_hex(), get_day_of_month(), get_hour_hex(),
                             get_min_hex(), get_sec_hex());
   } else if (eax == 0x2e) {
-    reg[EAX] = timerctl.count * 10;
+    gettime_ns((time_ns_t *)edi);
   } else if (eax == 0x2f) {
     task->fpu_flag = 0;
   } else if (eax == 0x30) {

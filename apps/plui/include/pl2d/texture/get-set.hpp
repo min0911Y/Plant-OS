@@ -1,5 +1,5 @@
-#include <c.h>
-#include <pl2d.hpp>
+#pragma once
+#include "texture.hpp"
 
 namespace pl2d {
 
@@ -66,7 +66,5 @@ auto BaseTexture<T>::set(i32 x, i32 y, f32 r, f32 g, f32 b, f32 a) -> BaseTextur
   pixels[y * pitch + x] = PixelF{r, g, b, a};
   return *this;
 }
-
-BaseTextureInstantiation
 
 } // namespace pl2d

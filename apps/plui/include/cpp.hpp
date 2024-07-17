@@ -3,6 +3,7 @@
 #pragma once
 #include "cpp/exch.hpp"
 #include "cpp/gaussian-blur.hpp"
+#include "cpp/io/file.hpp"
 #include "cpp/io/mstream.hpp"
 #include "cpp/list.hpp"
 #include "cpp/math/base.hpp"

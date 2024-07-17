@@ -1,35 +1,26 @@
 #include <drivers.h>
 #define PCI_COMMAND_PORT 0xCF8
-#define PCI_DATA_PORT 0xCFC
-#define mem_mapping 0
-#define input_output 1
+#define PCI_DATA_PORT    0xCFC
+#define mem_mapping      0
+#define input_output     1
 typedef struct base_address_register {
-  int prefetchable;
-  uint8_t* address;
+  int      prefetchable;
+  uint8_t *address;
   uint32_t size;
-  int type;
+  int      type;
 } base_address_register;
-uint32_t read_pci(uint8_t bus,
-                  uint8_t device,
-                  uint8_t function,
-                  uint8_t registeroffset) {
+uint32_t read_pci(uint8_t bus, uint8_t device, uint8_t function, uint8_t registeroffset) {
   uint32_t id = 1 << 31 | ((bus & 0xff) << 16) | ((device & 0x1f) << 11) |
                 ((function & 0x07) << 8) | (registeroffset & 0xfc);
   io_out32(PCI_COMMAND_PORT, id);
   uint32_t result = io_in32(PCI_DATA_PORT);
   return result >> (8 * (registeroffset % 4));
 }
-uint32_t read_bar_n(uint8_t bus,
-                     uint8_t device,
-                     uint8_t function,
-                     uint8_t bar_n) {
-    uint32_t bar_offset = 0x10 + 4 * bar_n;
-    return read_pci(bus, device, function, bar_offset);
+uint32_t read_bar_n(uint8_t bus, uint8_t device, uint8_t function, uint8_t bar_n) {
+  uint32_t bar_offset = 0x10 + 4 * bar_n;
+  return read_pci(bus, device, function, bar_offset);
 }
-void write_pci(uint8_t bus,
-               uint8_t device,
-               uint8_t function,
-               uint8_t registeroffset,
+void write_pci(uint8_t bus, uint8_t device, uint8_t function, uint8_t registeroffset,
                uint32_t value) {
   uint32_t id = 1 << 31 | ((bus & 0xff) << 16) | ((device & 0x1f) << 11) |
                 ((function & 0x07) << 8) | (registeroffset & 0xfc);
@@ -40,37 +31,31 @@ uint32_t pci_read_command_status(uint8_t bus, uint8_t slot, uint8_t func) {
   return read_pci(bus, slot, func, 0x04);
 }
 // write command status register
-void pci_write_command_status(uint8_t bus,
-                              uint8_t slot,
-                              uint8_t func,
-                              uint32_t value) {
+void pci_write_command_status(uint8_t bus, uint8_t slot, uint8_t func, uint32_t value) {
   write_pci(bus, slot, func, 0x04, value);
 }
-base_address_register get_base_address_register(uint8_t bus,
-                                           uint8_t device,
-                                           uint8_t function,
-                                           uint8_t bar) {
+base_address_register get_base_address_register(uint8_t bus, uint8_t device, uint8_t function,
+                                                uint8_t bar) {
   base_address_register result;
 
   uint32_t headertype = read_pci(bus, device, function, 0x0e) & 0x7e;
-  int max_bars = 6 - 4 * headertype;
-  if (bar >= max_bars)
-    return result;
+  int      max_bars   = 6 - 4 * headertype;
+  if (bar >= max_bars) return result;
 
   uint32_t bar_value = read_pci(bus, device, function, 0x10 + 4 * bar);
-  result.type = (bar_value & 1) ? input_output : mem_mapping;
+  result.type        = (bar_value & 1) ? input_output : mem_mapping;
 
   if (result.type == mem_mapping) {
     switch ((bar_value >> 1) & 0x3) {
-      case 0:  // 32
-      case 1:  // 20
-      case 2:  // 64
-        break;
+    case 0: // 32
+    case 1: // 20
+    case 2: // 64
+      break;
     }
-    result.address = (uint8_t*)(bar_value & ~0x3);
+    result.address      = (uint8_t *)(bar_value & ~0x3);
     result.prefetchable = 0;
   } else {
-    result.address = (uint8_t*)(bar_value & ~0x3);
+    result.address      = (uint8_t *)(bar_value & ~0x3);
     result.prefetchable = 0;
   }
   return result;
@@ -80,29 +65,23 @@ uint8_t pci_get_drive_irq(uint8_t bus, uint8_t slot, uint8_t func) {
 }
 uint32_t pci_get_port_base(uint8_t bus, uint8_t slot, uint8_t func) {
   uint32_t io_port = 0;
-  for(int i = 0;i<6;i++) {
-    base_address_register bar = get_base_address_register(bus,slot,func,i);
-    if(bar.type == input_output) {
-      io_port = (uint32_t)bar.address;
-    }
+  for (int i = 0; i < 6; i++) {
+    base_address_register bar = get_base_address_register(bus, slot, func, i);
+    if (bar.type == input_output) { io_port = (uint32_t)bar.address; }
   }
   return io_port;
 }
-void PCI_GET_DEVICE(uint16_t vendor_id,
-                    uint16_t device_id,
-                    uint8_t* bus,
-                    uint8_t* slot,
-                    uint8_t* func) {
-  extern int PCI_ADDR_BASE;
-  unsigned char* pci_drive = PCI_ADDR_BASE;
+void PCI_GET_DEVICE(uint16_t vendor_id, uint16_t device_id, uint8_t *bus, uint8_t *slot,
+                    uint8_t *func) {
+  extern int     PCI_ADDR_BASE;
+  unsigned char *pci_drive = PCI_ADDR_BASE;
   for (;; pci_drive += 0x110 + 4) {
     if (pci_drive[0] == 0xff) {
-      struct pci_config_space_public* pci_config_space_puclic;
-      pci_config_space_puclic =
-          (struct pci_config_space_public*)(pci_drive + 0x0c);
+      struct pci_config_space_public *pci_config_space_puclic;
+      pci_config_space_puclic = (struct pci_config_space_public *)(pci_drive + 0x0c);
       if (pci_config_space_puclic->VendorID == vendor_id &&
           pci_config_space_puclic->DeviceID == device_id) {
-        *bus = pci_drive[1];
+        *bus  = pci_drive[1];
         *slot = pci_drive[2];
         *func = pci_drive[3];
         return;
@@ -112,22 +91,19 @@ void PCI_GET_DEVICE(uint16_t vendor_id,
     }
   }
 }
-void pci_config(unsigned int bus,
-                       unsigned int f,
-                       unsigned int equipment,
-                       unsigned int adder) {
+void pci_config(unsigned int bus, unsigned int f, unsigned int equipment, unsigned int adder) {
   unsigned int cmd = 0;
-  cmd = 0x80000000 + (unsigned int)adder + ((unsigned int)f << 8) +
+  cmd              = 0x80000000 + (unsigned int)adder + ((unsigned int)f << 8) +
         ((unsigned int)equipment << 11) + ((unsigned int)bus << 16);
   // cmd = cmd | 0x01;
   io_out32(PCI_COMMAND_PORT, cmd);
 }
 void init_PCI(unsigned int adder_Base) {
-  unsigned int i, BUS, Equipment, F, ADDER, *i1;
+  unsigned int   i, BUS, Equipment, F, ADDER, *i1;
   unsigned char *PCI_DATA = adder_Base, *PCI_DATA1;
-  for (BUS = 0; BUS < 256; BUS++) {                     //查询总线
-    for (Equipment = 0; Equipment < 32; Equipment++) {  //查询设备
-      for (F = 0; F < 8; F++) {                         //查询功能
+  for (BUS = 0; BUS < 256; BUS++) {                    //查询总线
+    for (Equipment = 0; Equipment < 32; Equipment++) { //查询设备
+      for (F = 0; F < 8; F++) {                        //查询功能
         pci_config(BUS, F, Equipment, 0);
         if (io_in32(PCI_DATA_PORT) != 0xFFFFFFFF) {
           //当前插槽有设备
@@ -137,31 +113,30 @@ void init_PCI(unsigned int adder_Base) {
             //此配置表为空
             // printk("PCI_DATA:%x\n", PCI_DATA);
             // getch();
-            PCI_DATA1 = PCI_DATA;
-            *PCI_DATA1 = 0xFF;  //表占用标志
+            PCI_DATA1  = PCI_DATA;
+            *PCI_DATA1 = 0xFF; //表占用标志
             PCI_DATA1++;
-            *PCI_DATA1 = BUS;  //总线号
+            *PCI_DATA1 = BUS; //总线号
             PCI_DATA1++;
-            *PCI_DATA1 = Equipment;  //设备号
+            *PCI_DATA1 = Equipment; //设备号
             PCI_DATA1++;
-            *PCI_DATA1 = F;  //功能号
+            *PCI_DATA1 = F; //功能号
             PCI_DATA1++;
             PCI_DATA1 = PCI_DATA1 + 8;
             //写入寄存器配置
             for (ADDER = 0; ADDER < 256; ADDER = ADDER + 4) {
               pci_config(BUS, F, Equipment, ADDER);
-              i = io_in32(PCI_DATA_PORT);
+              i  = io_in32(PCI_DATA_PORT);
               i1 = i;
               //*i1 = PCI_DATA1;
               memcpy(PCI_DATA1, &i, 4);
               PCI_DATA1 = PCI_DATA1 + 4;
             }
             for (uint8_t barNum = 0; barNum < 6; barNum++) {
-              base_address_register bar =
-                  get_base_address_register(BUS, Equipment, F, barNum);
+              base_address_register bar = get_base_address_register(BUS, Equipment, F, barNum);
               if (bar.address && (bar.type == input_output)) {
                 PCI_DATA1 += 4;
-                int i = ((uint32_t)(bar.address));
+                int i      = ((uint32_t)(bar.address));
                 memcpy(PCI_DATA1, &i, 4);
               }
             }
@@ -229,7 +204,7 @@ void init_PCI(unsigned int adder_Base) {
             }
             printk("\n");*/
             PCI_DATA = PCI_DATA + 0x110 + 4;
-            key = 0;
+            key      = 0;
           }
         }
       }
@@ -237,16 +212,13 @@ void init_PCI(unsigned int adder_Base) {
   }
   //函数执行完PCI_DATA就是PCI设备表的结束地址
 }
-void PCI_ClassCode_Print(
-    struct pci_config_space_public* pci_config_space_puclic) {
-  unsigned char* pci_drive = (unsigned char*)pci_config_space_puclic - 12;
+void PCI_ClassCode_Print(struct pci_config_space_public *pci_config_space_puclic) {
+  unsigned char *pci_drive = (unsigned char *)pci_config_space_puclic - 12;
   printk("BUS:%02x ", pci_drive[1]);
   printk("EQU:%02x ", pci_drive[2]);
   printk("F:%02x ", pci_drive[3]);
-  printk("IO Port:%08x ",
-         pci_get_port_base(pci_drive[1], pci_drive[2], pci_drive[3]));
-  printk("IRQ Line:%02x ",
-         pci_get_drive_irq(pci_drive[1], pci_drive[2], pci_drive[3]));
+  printk("IO Port:%08x ", pci_get_port_base(pci_drive[1], pci_drive[2], pci_drive[3]));
+  printk("IRQ Line:%02x ", pci_get_drive_irq(pci_drive[1], pci_drive[2], pci_drive[3]));
   if (pci_config_space_puclic->BaseClass == 0x0) {
     printk("Nodefined ");
     if (pci_config_space_puclic->SubClass == 0x0)
@@ -323,8 +295,7 @@ void PCI_ClassCode_Print(
       printk("EISA Bridge\n");
     else if (pci_config_space_puclic->SubClass == 0x3)
       printk("MCA Bridge\n");
-    else if (pci_config_space_puclic->SubClass == 0x4 ||
-             pci_config_space_puclic->SubClass == 0x9)
+    else if (pci_config_space_puclic->SubClass == 0x4 || pci_config_space_puclic->SubClass == 0x9)
       printk("PCI-to-PCI Bridge\n");
     else if (pci_config_space_puclic->SubClass == 0x5)
       printk("PCMCIA Bridge\n");

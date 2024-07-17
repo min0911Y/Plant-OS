@@ -1,6 +1,6 @@
 #pragma once
 #include "pixel.hpp"
-#include "points/rect.hpp"
+#include "points.hpp"
 #include "texture.hpp"
 
 namespace pl2d {
