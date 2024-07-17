@@ -7,9 +7,9 @@
 
 #include <dos.h>
 char dat[255];
-int send_ipc_message(int to_tid, void *data, unsigned int size, char type) {
+int  send_ipc_message(int to_tid, void *data, unsigned int size, char type) {
   lock(&(get_task(to_tid)->ipc_header.l));
-  IPC_Header *ipc = &(get_task(to_tid)->ipc_header);
+  IPC_Header *ipc     = &(get_task(to_tid)->ipc_header);
   IPCMessage *ipc_msg = NULL;
   for (int i = 0; i < MAX_IPC_MESSAGE; i++) {
     if (ipc->messages[i].flag1 + ipc->messages[i].flag2 == 0) {
@@ -24,7 +24,7 @@ int send_ipc_message(int to_tid, void *data, unsigned int size, char type) {
   ipc_msg->size = size;
   ipc_msg->data = (void *)page_malloc(size);
   memcpy(ipc_msg->data, data, size);
-  ipc_msg->flag1 = 1;
+  ipc_msg->flag1    = 1;
   ipc_msg->from_tid = get_tid(current_task());
   if (type == synchronous) {
     ipc_msg->flag2 = 1;
@@ -42,8 +42,7 @@ int send_ipc_message(int to_tid, void *data, unsigned int size, char type) {
   }
   return 0;
 }
-int send_ipc_message_by_name(char *tname, void *data, unsigned int size,
-                             char type) {
+int send_ipc_message_by_name(char *tname, void *data, unsigned int size, char type) {
   // struct TASK *to_task = get_task_by_name(tname);
   // return send_ipc_message((to_task->sel / 8) - 103, data, size, type);
 }
@@ -54,7 +53,7 @@ int get_ipc_message(void *data, int from_tid) {
     unlock(&(current_task()->ipc_header.l));
     return -1;
   }
-  IPC_Header *ipc = &(current_task()->ipc_header);
+  IPC_Header *ipc     = &(current_task()->ipc_header);
   IPCMessage *ipc_msg = NULL;
   for (int i = 0; i < MAX_IPC_MESSAGE; i++) {
     if (ipc->messages[i].flag1 == 1 && ipc->messages[i].from_tid == from_tid) {
@@ -76,14 +75,16 @@ int get_ipc_message_by_name(void *data, char *tname) {
   // mtask *from_task = get_task_by_name(tname);
   // return get_ipc_message(data, (from_task->sel / 8) - 103);
 }
-int ipc_message_status() { return 1; }
+int ipc_message_status() {
+  return 1;
+}
 unsigned int ipc_message_len(int from_tid) {
   lock(&(current_task()->ipc_header.l));
   if (current_task()->ipc_header.now == 0) {
     unlock(&(current_task()->ipc_header.l));
     return -1;
   }
-  IPC_Header *ipc = &(current_task()->ipc_header);
+  IPC_Header *ipc     = &(current_task()->ipc_header);
   IPCMessage *ipc_msg = NULL;
   for (int i = 0; i < MAX_IPC_MESSAGE; i++) {
     if (ipc->messages[i].flag1 == 1 && ipc->messages[i].from_tid == from_tid) {
@@ -130,12 +131,10 @@ unsigned int ipc_message_len(int from_tid) {
 // }
 bool have_msg() {
   lock(&(current_task()->ipc_header.l));
-  IPC_Header *ipc = &(current_task()->ipc_header);
+  IPC_Header *ipc     = &(current_task()->ipc_header);
   IPCMessage *ipc_msg = NULL;
   for (int i = 0; i < MAX_IPC_MESSAGE; i++) {
-    if (ipc->messages[i].flag1 == 1) {
-      ipc_msg = &(ipc->messages[i]);
-    }
+    if (ipc->messages[i].flag1 == 1) { ipc_msg = &(ipc->messages[i]); }
   }
   if (!ipc_msg) {
     unlock(&(current_task()->ipc_header.l));
@@ -146,12 +145,10 @@ bool have_msg() {
 }
 int get_msg_all(void *data) {
   lock(&(current_task()->ipc_header.l));
-  IPC_Header *ipc = &(current_task()->ipc_header);
+  IPC_Header *ipc     = &(current_task()->ipc_header);
   IPCMessage *ipc_msg = NULL;
   for (int i = 0; i < MAX_IPC_MESSAGE; i++) {
-    if (ipc->messages[i].flag1 == 1) {
-      ipc_msg = &(ipc->messages[i]);
-    }
+    if (ipc->messages[i].flag1 == 1) { ipc_msg = &(ipc->messages[i]); }
   }
   if (!ipc_msg) {
     unlock(&(current_task()->ipc_header.l));

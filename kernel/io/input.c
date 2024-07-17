@@ -1,6 +1,8 @@
 #include <io.h>
+
 extern char keytable[];
 extern char keytable1[];
+
 void input(char *ptr, int len) {
   /**
    * 别问我为什么这么写，我也不知道为什么
@@ -10,7 +12,7 @@ void input(char *ptr, int len) {
 
   int i;
   int BNOW = input_stack_get_now();
-  int NOW = input_stack_get_now() - 1;
+  int NOW  = input_stack_get_now() - 1;
   // int rf = 0; //右方向键按下过吗？
   int Bmx, Bmy;
   Bmx = get_x();
@@ -160,8 +162,7 @@ void input(char *ptr, int len) {
       for (int j = 0; j < strlen(ptr) - i; j++) {
         printchar(' ');
       }
-      if (bx == get_xsize())
-        bx = 0;
+      if (bx == get_xsize()) bx = 0;
 
       int BMPX = get_x();
       int BMPY = get_y();
@@ -171,8 +172,8 @@ void input(char *ptr, int len) {
       insert_char(ptr, i, in);
 
       print(ptr);
-      int NX = get_x();
-      int NY = get_y();
+      int NX  = get_x();
+      int NY  = get_y();
       int RNy = get_raw_y();
       if (NY >= get_ysize() - 1) {
         if (BMPY == NY && NX <= BMPX) {
@@ -203,10 +204,11 @@ void input(char *ptr, int len) {
     input_stack_set_now(BNOW - 1); // Now-1
   }
 }
+
 void input_no_endl(char *ptr, int len) {
   int i;
   int BNOW = input_stack_get_now();
-  int NOW = input_stack_get_now();
+  int NOW  = input_stack_get_now();
   int Bmx, Bmy;
   Bmx = get_x();
   Bmy = get_y();
@@ -329,8 +331,7 @@ void input_no_endl(char *ptr, int len) {
       for (int j = 0; j < strlen(ptr) - i; j++) {
         printchar(' ');
       }
-      if (bx == get_xsize())
-        bx = 0;
+      if (bx == get_xsize()) bx = 0;
 
       int BMPX = get_x();
       int BMPY = get_y();
@@ -339,8 +340,8 @@ void input_no_endl(char *ptr, int len) {
       }
       insert_char(ptr, i, in);
       print(ptr);
-      int NX = get_x();
-      int NY = get_y();
+      int NX  = get_x();
+      int NY  = get_y();
       int RNy = get_raw_y();
       if (NY >= get_ysize() - 1) {
         if (BMPY == NY && NX <= BMPX) {

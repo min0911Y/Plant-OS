@@ -1,29 +1,25 @@
 #include <dos.h>
 #include <drivers.h>
 #define KEYSTA_SEND_NOTREADY 0x02
-#define KEYCMD_WRITE_MODE 0x60
-#define KBC_MODE 0x47
+#define KEYCMD_WRITE_MODE    0x60
+#define KBC_MODE             0x47
 static int caps_lock, shift, e0_flag = 0, ctrl = 0;
-char keytable[0x54] = { // 按下Shift
-    0,    0x01, '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_',  '+',
-    '\b', '\t', 'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '{',  '}',
-    10,   0,    'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ':', '\"', '~',
-    0,    '|',  'Z', 'X', 'C', 'V', 'B', 'N', 'M', '<', '>', '?', 0,    '*',
-    0,    ' ',  0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,    0,
-    0,    '7',  'D', '8', '-', '4', '5', '6', '+', '1', '2', '3', '0',  '.'};
-char keytable1[0x54] = { // 未按下Shift
-    0,    0x01, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-',  '=',
-    '\b', '\t', 'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[',  ']',
-    10,   0,    'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', '\'', '`',
-    0,    '\\', 'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/', 0,    '*',
-    0,    ' ',  0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,    0,
-    0,    '7',  '8', '9', '-', '4', '5', '6', '+', '1', '2', '3', '0',  '.'};
-void wait_KBC_sendready(void) {
+char       keytable[0x54]  = { // 按下Shift
+    0,   0x01, '!', '@', '#', '$', '%',  '^', '&', '*', '(', ')', '_', '+', '\b', '\t', 'Q',
+    'W', 'E',  'R', 'T', 'Y', 'U', 'I',  'O', 'P', '{', '}', 10,  0,   'A', 'S',  'D',  'F',
+    'G', 'H',  'J', 'K', 'L', ':', '\"', '~', 0,   '|', 'Z', 'X', 'C', 'V', 'B',  'N',  'M',
+    '<', '>',  '?', 0,   '*', 0,   ' ',  0,   0,   0,   0,   0,   0,   0,   0,    0,    0,
+    0,   0,    0,   '7', 'D', '8', '-',  '4', '5', '6', '+', '1', '2', '3', '0',  '.'};
+char       keytable1[0x54] = { // 未按下Shift
+    0,   0x01, '1', '2', '3', '4', '5',  '6', '7', '8',  '9', '0', '-', '=', '\b', '\t', 'q',
+    'w', 'e',  'r', 't', 'y', 'u', 'i',  'o', 'p', '[',  ']', 10,  0,   'a', 's',  'd',  'f',
+    'g', 'h',  'j', 'k', 'l', ';', '\'', '`', 0,   '\\', 'z', 'x', 'c', 'v', 'b',  'n',  'm',
+    ',', '.',  '/', 0,   '*', 0,   ' ',  0,   0,   0,    0,   0,   0,   0,   0,    0,    0,
+    0,   0,    0,   '7', '8', '9', '-',  '4', '5', '6',  '+', '1', '2', '3', '0',  '.'};
+void       wait_KBC_sendready(void) {
   /* 等待键盘控制电路准备完毕 */
   for (;;) {
-    if ((io_in8(PORT_KEYSTA) & KEYSTA_SEND_NOTREADY) == 0) {
-      break;
-    }
+    if ((io_in8(PORT_KEYSTA) & KEYSTA_SEND_NOTREADY) == 0) { break; }
   }
   return;
 }
@@ -52,9 +48,7 @@ int getch() {
     }
   }
   // 返回扫描码（keytable之内）对应的ASCII码
-  if (keytable[ch] == 0x00) {
-    return 0;
-  }
+  if (keytable[ch] == 0x00) { return 0; }
   if (shift == 0 && caps_lock == 0) {
     return keytable1[ch];
   } else if (shift == 1 || caps_lock == 1) {
@@ -64,9 +58,9 @@ int getch() {
   }
 }
 extern struct tty *tty_default;
-int tty_fifo_status() {
+int                tty_fifo_status() {
   mtask *task = current_task();
-  if (task->TTY->using1 != 1) {
+  if (task->TTY->is_using != 1) {
     return tty_default->fifo_status(tty_default);
   } else {
     return task->TTY->fifo_status(task->TTY);
@@ -74,14 +68,14 @@ int tty_fifo_status() {
 }
 int tty_fifo_get() {
   mtask *task = current_task();
-  if (task->TTY->using1 != 1) {
+  if (task->TTY->is_using != 1) {
     return tty_default->fifo_get(tty_default);
   } else {
     return task->TTY->fifo_get(task->TTY);
   }
 }
 int input_char_inSM() {
-  int i;
+  int    i;
   mtask *task = current_task();
   while (1) {
     if ((tty_fifo_status() == 0)) {
@@ -92,9 +86,7 @@ int input_char_inSM() {
     } else {
       // 返回扫描码
       i = tty_fifo_get(); // 从FIFO缓冲区中取出扫描码
-      if (i != -1) {
-        break;
-      }
+      if (i != -1) { break; }
     }
   }
   return i;
@@ -118,9 +110,7 @@ int sc2a(int sc) {
       return -4;
     }
   }
-  if (keytable[ch] == 0x00) {
-    return 0;
-  }
+  if (keytable[ch] == 0x00) { return 0; }
   if (shift == 0 && caps_lock == 0) {
     return keytable1[ch];
   } else if (shift == 1 || caps_lock == 1) {
@@ -129,9 +119,9 @@ int sc2a(int sc) {
     return keytable1[ch];
   }
 }
-int disable_flag = 0;
+int    disable_flag      = 0;
 mtask *keyboard_use_task = NULL;
-void inthandler21(int *esp) {
+void   inthandler21(int *esp) {
   // 键盘中断处理函数
   unsigned char data, s[4];
   io_out8(PIC0_OCW2, 0x61);
@@ -159,12 +149,8 @@ void inthandler21(int *esp) {
   // 快捷键处理
   if (data == 0x2e && ctrl) {
     for (int i = 0; i < 255; i++) {
-      if (!get_task(i)) {
-        continue;
-      }
-      if (get_task(i)->sigint_up) {
-        get_task(i)->signal |= SIGMASK(SIGINT);
-      }
+      if (!get_task(i)) { continue; }
+      if (get_task(i)->sigint_up) { get_task(i)->signal |= SIGMASK(SIGINT); }
     }
     // return;
   }
@@ -186,16 +172,13 @@ void inthandler21(int *esp) {
     if (disable_flag && keyboard_use_task) {
       if (keyboard_use_task->keyboard_release != NULL) {
         // TASK结构体中有对按下键特殊处理的
-        if (e0_flag) {
-          keyboard_use_task->keyboard_release(0xe0, keyboard_use_task->tid);
-        }
-        keyboard_use_task->keyboard_release(
-            data, keyboard_use_task->tid); // 处理按下键
+        if (e0_flag) { keyboard_use_task->keyboard_release(0xe0, keyboard_use_task->tid); }
+        keyboard_use_task->keyboard_release(data, keyboard_use_task->tid); // 处理按下键
       }
       if (current_task() != keyboard_use_task) {
         keyboard_use_task->timeout = 5;
-        keyboard_use_task->ready = 1;
-        keyboard_use_task->urgent = 1;
+        keyboard_use_task->ready   = 1;
+        keyboard_use_task->urgent  = 1;
         keyboard_use_task->running = 0;
         mtask_run_now(keyboard_use_task);
         task_next();
@@ -204,38 +187,30 @@ void inthandler21(int *esp) {
       }
     } else
       for (int i = 0; i < 255; i++) {
-        if (!get_task(i)) {
-          continue;
-        }
+        if (!get_task(i)) { continue; }
         if (get_task(i)->keyboard_release != NULL) {
           // TASK结构体中有对松开键特殊处理的
-          if (e0_flag) {
-            get_task(i)->keyboard_release(0xe0, i);
-          }
+          if (e0_flag) { get_task(i)->keyboard_release(0xe0, i); }
           get_task(i)->keyboard_release(data, i); // 处理松开键
 
-          if (disable_flag) {
-          }
+          if (disable_flag) {}
         }
       }
-    if (e0_flag == 1)
-      e0_flag = 0;
+    if (e0_flag == 1) e0_flag = 0;
     return;
   }
   if (disable_flag && keyboard_use_task) {
     if (keyboard_use_task->keyboard_press != NULL) {
       // TASK结构体中有对按下键特殊处理的
-      if (e0_flag) {
-        keyboard_use_task->keyboard_press(0xe0, keyboard_use_task->tid);
-      }
+      if (e0_flag) { keyboard_use_task->keyboard_press(0xe0, keyboard_use_task->tid); }
       keyboard_use_task->keyboard_press(data,
-                                        keyboard_use_task->tid); // 处理按下键
+                                          keyboard_use_task->tid); // 处理按下键
     }
     if (current_task() != keyboard_use_task) {
       //   logk("SET 1\n");
       keyboard_use_task->timeout = 5;
-      keyboard_use_task->ready = 1;
-      keyboard_use_task->urgent = 1;
+      keyboard_use_task->ready   = 1;
+      keyboard_use_task->urgent  = 1;
       keyboard_use_task->running = 0;
       mtask_run_now(keyboard_use_task);
       task_next();
@@ -245,40 +220,29 @@ void inthandler21(int *esp) {
   } else
     for (int i = 0; i < 255; i++) {
       // printk("up\n");
-      if (!get_task(i)) {
-        continue;
-      }
+      if (!get_task(i)) { continue; }
       if (get_task(i)->keyboard_press != NULL) {
         // TASK结构体中有对按下键特殊处理的
-        if (e0_flag) {
-          get_task(i)->keyboard_press(0xe0, i);
-        }
+        if (e0_flag) { get_task(i)->keyboard_press(0xe0, i); }
         get_task(i)->keyboard_press(data, i); // 处理按下键
       }
     }
   if (disable_flag == 0)
     for (int i = 0; i < 255; i++) {
-      if (!get_task(i)) {
-        continue;
-      }
+      if (!get_task(i)) { continue; }
       // 按下键通常处理
       mtask *task = get_task(i); // 每个进程都处理一遍
       if (task->state != RUNNING || task->fifosleep) {
-        if (task->state == WAITING && task->waittid == -1) {
-          goto THROUGH;
-        }
+        if (task->state == WAITING && task->waittid == -1) { goto THROUGH; }
         // 如果进程正在休眠或被锁了
         continue;
       }
       // 一般进程
     THROUGH:
       //    logk("send\n");
-      if (e0_flag) {
-        fifo8_put(task_get_key_fifo(task), 0xe0);
-      }
+      if (e0_flag) { fifo8_put(task_get_key_fifo(task), 0xe0); }
       fifo8_put(task_get_key_fifo(task), data);
     }
-  if (e0_flag == 1)
-    e0_flag = 0;
+  if (e0_flag == 1) e0_flag = 0;
   return;
 }

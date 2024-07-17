@@ -13,9 +13,6 @@ static inline float eval_as_float(float x) {
 }
 
 #define SZ_4K 0x1000
-typedef unsigned int uintmax_t;
-typedef uintmax_t uintptr_t;
-typedef int intmax_t;
 int __rem_pio2f(float x, double *y);
 int errno = 0;
 FILE *stdout;

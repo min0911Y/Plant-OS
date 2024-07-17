@@ -22,56 +22,52 @@ typedef struct intr_frame1_t {
 } signal_frame_t;
 void b2() {
 
-
-  for(;;);
+  for (;;)
+    ;
   return;
 }
 // TODO: 给GUI接管
 void signal_deal() {
-  if (!current_task())
-    return;
-  if(current_task()->signal_disable) {
-    return;
-  }
+  if (!current_task()) return;
+  if (current_task()->signal_disable) { return; }
   mtask *task;
   task = current_task();
   //logk("B %d\n",task->signal);
   int sig = -1;
   if (task->signal & SIGMASK(SIGINT)) {
-    sig = 0;
+    sig           = 0;
     task->signal &= ~SIGMASK(SIGINT);
     if (task->handler[SIGINT]) {
-      intr_frame_t *i = task->top - sizeof(intr_frame_t);
+      intr_frame_t   *i     = task->top - sizeof(intr_frame_t);
       signal_frame_t *frame = (unsigned *)(i->esp - sizeof(signal_frame_t));
-      frame->edi = i->edi;
-      frame->esi = i->esi;
-      frame->ebp = i->ebp;
-      frame->esp_dummy = i->esp_dummy;
-      frame->ebx = i->ebx;
-      frame->ecx = i->ecx;
-      frame->edx = i->edx;
-      frame->eax = i->eax;
-      frame->gs = i->gs;
-      frame->fs = i->fs;
-      frame->es = i->es;
-      frame->ds = i->ds;
-      frame->eip = i->eip;
-      frame->eip1 = task->ret_to_app;
-      i->eip = task->handler[SIGINT];
-      i->esp = frame;
-      asm volatile ("xchg %bx,%bx");
+      frame->edi            = i->edi;
+      frame->esi            = i->esi;
+      frame->ebp            = i->ebp;
+      frame->esp_dummy      = i->esp_dummy;
+      frame->ebx            = i->ebx;
+      frame->ecx            = i->ecx;
+      frame->edx            = i->edx;
+      frame->eax            = i->eax;
+      frame->gs             = i->gs;
+      frame->fs             = i->fs;
+      frame->es             = i->es;
+      frame->ds             = i->ds;
+      frame->eip            = i->eip;
+      frame->eip1           = task->ret_to_app;
+      i->eip                = task->handler[SIGINT];
+      i->esp                = frame;
+      asm volatile("xchg %bx,%bx");
       return;
     } else {
 
-     // task_exit(0);
+      // task_exit(0);
     }
   } else if (task->signal & SIGMASK(SIGKIL)) {
     task_exit(0);
-  }
-  else {
+  } else {
     return;
   }
 }
-void set_signal_handler(unsigned sig,unsigned handler) {
+void set_signal_handler(unsigned sig, unsigned handler) {
   current_task()->handler[sig] = handler;
 }

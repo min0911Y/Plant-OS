@@ -7,110 +7,98 @@ void showPage(void);
 void wav_player_test(void);
 /* 一些函数或结构体声明 */
 typedef struct {
-  char path[50];
+  char  path[50];
   char *buf;
 } HttpFile;
 List *httpFileList;
 extern struct ide_device {
-  unsigned char Reserved;      // 0 (Empty) or 1 (This Drive really exists).
-  unsigned char Channel;       // 0 (Primary Channel) or 1 (Secondary Channel).
-  unsigned char Drive;         // 0 (Master Drive) or 1 (Slave Drive).
+  unsigned char  Reserved;     // 0 (Empty) or 1 (This Drive really exists).
+  unsigned char  Channel;      // 0 (Primary Channel) or 1 (Secondary Channel).
+  unsigned char  Drive;        // 0 (Master Drive) or 1 (Slave Drive).
   unsigned short Type;         // 0: ATA, 1:ATAPI.
   unsigned short Signature;    // Drive Signature
   unsigned short Capabilities; // Features.
-  unsigned int CommandSets;    // Command Sets Supported.
-  unsigned int Size;           // Size in Sectors.
-  unsigned char Model[41];     // Model in string.
+  unsigned int   CommandSets;  // Command Sets Supported.
+  unsigned int   Size;         // Size in Sectors.
+  unsigned char  Model[41];    // Model in string.
 } ide_devices[4];
 unsigned char *ramdisk;
 typedef struct base_address_register {
-  int prefetchable;
+  int      prefetchable;
   uint8_t *address;
   uint32_t size;
-  int type;
+  int      type;
 } base_address_register;
-base_address_register get_base_address_register(uint8_t bus, uint8_t device,
-                                           uint8_t function, uint8_t bar);
+base_address_register get_base_address_register(uint8_t bus, uint8_t device, uint8_t function,
+                                                uint8_t bar);
 /* vdisk的RW测试函数 */
-void TestRead(char drive, unsigned char *buffer, unsigned int number,
-              unsigned int lba) {
+void TestRead(char drive, unsigned char *buffer, unsigned int number, unsigned int lba) {
   // printk("TestRW:Read Lba %d,Read Sectors number %d\n", lba, number);
   memcpy(buffer, ramdisk + lba * 512, number * 512);
 }
-void TestWrite(char drive, unsigned char *buffer, unsigned int number,
-               unsigned int lba) {
+void TestWrite(char drive, unsigned char *buffer, unsigned int number, unsigned int lba) {
   // printk("TestRW:Write Lba %d,Write Sectors number %d\n", lba, number);
   memcpy(ramdisk + lba * 512, buffer, number * 512);
 }
 // socket测试例子
 static void TCP_Socket_Handler(struct Socket *socket, void *base) {
   struct TCPMessage *tcp =
-      (struct TCPMessage *)(base + sizeof(struct EthernetFrame_head) +
-                            sizeof(struct IPV4Message));
-  uint8_t *data = base + sizeof(struct EthernetFrame_head) +
-                  sizeof(struct IPV4Message) + (tcp->headerLength * 4);
-  printk("\nTCP Recv from %d.%d.%d.%d:%d:%s\n",
-         (uint8_t)(socket->remoteIP >> 24), (uint8_t)(socket->remoteIP >> 16),
-         (uint8_t)(socket->remoteIP >> 8), (uint8_t)(socket->remoteIP),
-         socket->remotePort, data);
+      (struct TCPMessage *)(base + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message));
+  uint8_t *data = base + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message) +
+                  (tcp->headerLength * 4);
+  printk("\nTCP Recv from %d.%d.%d.%d:%d:%s\n", (uint8_t)(socket->remoteIP >> 24),
+         (uint8_t)(socket->remoteIP >> 16), (uint8_t)(socket->remoteIP >> 8),
+         (uint8_t)(socket->remoteIP), socket->remotePort, data);
 }
 static void UDP_Socket_Handler(struct Socket *socket, void *base) {
-  uint8_t *data = base + sizeof(struct EthernetFrame_head) +
-                  sizeof(struct IPV4Message) + sizeof(struct UDPMessage);
-  printk("\nUDP Recv from %d.%d.%d.%d:%d:%s\n",
-         (uint8_t)(socket->remoteIP >> 24), (uint8_t)(socket->remoteIP >> 16),
-         (uint8_t)(socket->remoteIP >> 8), (uint8_t)(socket->remoteIP),
-         socket->remotePort, data);
+  uint8_t *data = base + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message) +
+                  sizeof(struct UDPMessage);
+  printk("\nUDP Recv from %d.%d.%d.%d:%d:%s\n", (uint8_t)(socket->remoteIP >> 24),
+         (uint8_t)(socket->remoteIP >> 16), (uint8_t)(socket->remoteIP >> 8),
+         (uint8_t)(socket->remoteIP), socket->remotePort, data);
 }
 /* 如果开启了HTTP命令，那么接收到HTTP请求会调用这个函数 */
 static unsigned char *html_file;
-static void HTTP_Socket_Handler(struct Socket *socket, void *base) {
+static void           HTTP_Socket_Handler(struct Socket *socket, void *base) {
   /* 声明，获取各个协议的标头和数据 */
-  struct IPV4Message *ipv4 =
-      (struct IPV4Message *)(base + sizeof(struct EthernetFrame_head));
-  struct TCPMessage *tcp =
-      (struct TCPMessage *)(base + sizeof(struct EthernetFrame_head) +
-                            sizeof(struct IPV4Message));
-  uint16_t size = swap16(ipv4->totalLength) - sizeof(struct IPV4Message) -
+  struct IPV4Message *ipv4 = (struct IPV4Message *)(base + sizeof(struct EthernetFrame_head));
+  struct TCPMessage  *tcp =
+      (struct TCPMessage *)(base + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message));
+  uint16_t size = swap16(ipv4->totalLength) - sizeof(struct IPV4Message) - (tcp->headerLength * 4);
+  uint8_t *data = base + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message) +
                   (tcp->headerLength * 4);
-  uint8_t *data = base + sizeof(struct EthernetFrame_head) +
-                  sizeof(struct IPV4Message) + (tcp->headerLength * 4);
   if (http_check(data, size).ok) { // 是HTTP GetHeader
     /* 标头信息 */
-    unsigned char head[500] = "HTTP/1.1 200 OK\r\n";
+    unsigned char head[500]      = "HTTP/1.1 200 OK\r\n";
     unsigned char content_type[] = "Content-Type: text/html\r\n";
     unsigned char content_length[100];
     unsigned char date[100];
     printk("Is Http get header!\n");
     if (strlen(http_check(data, size).path) == 1) { // 只有一个字符，那只能是"/"
       printk("root\n");                             // 根目录
-      HttpFile *f = (HttpFile *)FindForCount(1, httpFileList)
-                        ->val; // 第一个文件就是根目录
+      HttpFile *f = (HttpFile *)FindForCount(1, httpFileList)->val; // 第一个文件就是根目录
       printk("f->path = %s\n", f->path);
       html_file = (unsigned char *)f->buf; // 设置html_file的地址
     } else {
       printk("Not root.\n"); // 不是根目录
       for (int i = 1; FindForCount(i, httpFileList) != NULL; i++) {
         HttpFile *f = (HttpFile *)FindForCount(i, httpFileList)->val;
-        if (strcmp(f->path, http_check(data, size).path + 1) ==
-            0) { // 判断网站是否有这个文件
-          html_file = (unsigned char *)f->buf; // 有，直接返回
+        if (strcmp(f->path, http_check(data, size).path + 1) == 0) { // 判断网站是否有这个文件
+          html_file = (unsigned char *)f->buf;                       // 有，直接返回
           goto OK;
         }
       }
-      html_file =
-          (unsigned char
-               *)("<html><head><title>404 Not Found</title></head><body "
-                  "bgcolor= white"
-                  "><center><h1>404 Not "
-                  "Found</h1></center><hr><center>Powerint DOS "
-                  "HTTP Server</center></body></html>"); // 啊，没有呢，那就只能给404页面了
+      html_file = (unsigned char
+                       *)("<html><head><title>404 Not Found</title></head><body "
+                                    "bgcolor= white"
+                                    "><center><h1>404 Not "
+                                    "Found</h1></center><hr><center>Powerint DOS "
+                                    "HTTP Server</center></body></html>"); // 啊，没有呢，那就只能给404页面了
       strcpy((char *)head, "HTTP/1.1 404 Not Found\r\n"); // 顺便修改一下head
     }
   OK:
 
-    sprintf((char *)content_length, "Content-Length: %d\r\n",
-            strlen((char *)html_file));
+    sprintf((char *)content_length, "Content-Length: %d\r\n", strlen((char *)html_file));
     strcat((char *)head, (char *)content_type);
     strcat((char *)head, (char *)content_length);
     GetNowDate((char *)date);
@@ -120,21 +108,19 @@ static void HTTP_Socket_Handler(struct Socket *socket, void *base) {
     printk("%s", (char *)head);
     // unsigned char *head = "HTTP/1.1 200 OK\r\n";
     unsigned char *packet = (unsigned char *)page_malloc(
-        strlen((char *)head) + strlen((char *)html_file) +
-        1); // 声明最终的packet发送的数据
+        strlen((char *)head) + strlen((char *)html_file) + 1); // 声明最终的packet发送的数据
     memcpy((void *)packet, (void *)head, strlen((char *)head)); // HTTP 标头
     memcpy((void *)(packet + strlen((char *)head)), (void *)html_file,
-           strlen((char *)html_file)); // html文件数据
+                     strlen((char *)html_file)); // html文件数据
     packet[strlen((char *)head) + strlen((char *)html_file) + 1] =
         0; // 字符串结束符（为了下面调用的strlen函数）
     socket->Send(socket, packet,
-                 strlen((char *)packet) + 1); // 调用Socket API发送
+                           strlen((char *)packet) + 1); // 调用Socket API发送
   } else {
     printk("isn't http get header\n"); // 不是HTTP get header
   }
 }
-static void
-SocketServerLoop(struct SocketServer *server) { // Socket Server（Http）的循环
+static void SocketServerLoop(struct SocketServer *server) { // Socket Server（Http）的循环
   /* 检测哪个socket已经与客户端断开连接了，重新设置状态，不然无法连接其他客户端（一次性socket）
    */
   static bool flags[SOCKET_SERVER_MAX_CONNECT];
@@ -143,10 +129,9 @@ SocketServerLoop(struct SocketServer *server) { // Socket Server（Http）的循
     for (int i = 0; i < SOCKET_SERVER_MAX_CONNECT; i++) {
       if (server->socket[i]->state == SOCKET_TCP_CLOSED) {
         printk("server->socket[%d] close.\n", i);
-        flags[i] = false;
+        flags[i]                 = false;
         server->socket[i]->state = SOCKET_TCP_LISTEN;
-      } else if (server->socket[i]->state == SOCKET_TCP_ESTABLISHED &&
-                 flags[i] == false) {
+      } else if (server->socket[i]->state == SOCKET_TCP_ESTABLISHED && flags[i] == false) {
         printk("server->socket[%d] connect.\n", i);
         flags[i] = true;
       }
@@ -154,19 +139,17 @@ SocketServerLoop(struct SocketServer *server) { // Socket Server（Http）的循
   }
 }
 /* 用UDP协议传输文件 */
-static unsigned int fudp_size;
+static unsigned int   fudp_size;
 static unsigned char *fudp_buffer;
-static void FUDP_Socket_Handler(struct Socket *socket, void *base) {
+static void           FUDP_Socket_Handler(struct Socket *socket, void *base) {
   /* 获取数据并拷贝到fudp_buffer中 */
-  struct IPV4Message *ipv4 =
-      (struct IPV4Message *)(base + sizeof(struct EthernetFrame_head));
+  struct IPV4Message *ipv4 = (struct IPV4Message *)(base + sizeof(struct EthernetFrame_head));
   (void)(ipv4);
   struct UDPMessage *udp =
-      (struct UDPMessage *)(base + sizeof(struct EthernetFrame_head) +
-                            sizeof(struct IPV4Message));
-  uint8_t *data = base + sizeof(struct EthernetFrame_head) +
-                  sizeof(struct IPV4Message) + sizeof(struct UDPMessage);
-  fudp_size = swap16(udp->length) - sizeof(struct UDPMessage);
+      (struct UDPMessage *)(base + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message));
+  uint8_t *data = base + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message) +
+                  sizeof(struct UDPMessage);
+  fudp_size   = swap16(udp->length) - sizeof(struct UDPMessage);
   fudp_buffer = malloc(fudp_size);
   memcpy((void *)fudp_buffer, (void *)data, fudp_size);
 }
@@ -181,7 +164,7 @@ int abs(int n) {
 
 int command_run(char *cmdline) {
   char *line = (char *)malloc(strlen(cmdline) + 100);
-  sprintf(line,"pfs.bin -c \"%s\"",cmdline);
+  sprintf(line, "psh.bin -c \"%s\"", cmdline);
   int status = os_execute_shell(line);
   free(line);
   return status;
@@ -894,18 +877,16 @@ void show_heap(memory *mem) {
   freeinfo *finf = mem->freeinf;
   while (finf) {
     for (int i = 0; i < FREE_MAX_NUM; i++) {
-      if (finf->f[i].start == 0 && finf->f[i].end == 0) {
-        break;
-      }
-      printk("START: %08x END: %08x SIZE: %08x Bytes\n", finf->f[i].start,
-             finf->f[i].end, finf->f[i].end - finf->f[i].start);
+      if (finf->f[i].start == 0 && finf->f[i].end == 0) { break; }
+      printk("START: %08x END: %08x SIZE: %08x Bytes\n", finf->f[i].start, finf->f[i].end,
+             finf->f[i].end - finf->f[i].start);
     }
     finf = finf->next;
   }
 }
 
 void pci_list() {
-  extern int PCI_ADDR_BASE;
+  extern int     PCI_ADDR_BASE;
   unsigned char *pci_drive = (unsigned char *)PCI_ADDR_BASE;
   //输出PCI表的内容
   for (int line = 0;; pci_drive += 0x110 + 4, line++) {
@@ -919,8 +900,8 @@ void pci_list() {
 void cmd_dir(char **args) {
   vfs_file *file = vfs_fileinfo(args[0]);
   if (file != NULL) {
-    printk("%s  %d  %04d-%02d-%02d %02d:%02d  ", file->name, file->size,
-           file->year, file->month, file->day, file->hour, file->minute);
+    printk("%s  %d  %04d-%02d-%02d %02d:%02d  ", file->name, file->size, file->year, file->month,
+           file->day, file->hour, file->minute);
     if (file->type == FLE) {
       printk("FILE");
     } else if (file->type == RDO) {
@@ -935,8 +916,8 @@ void cmd_dir(char **args) {
   } else {
     List *list_of_file = vfs_listfile(args[0]);
     for (int i = 1; FindForCount(i, list_of_file) != NULL; i++) {
-      vfs_file *d = (vfs_file *)FindForCount(i, list_of_file)->val;
-      int color = now_tty()->color;
+      vfs_file *d     = (vfs_file *)FindForCount(i, list_of_file)->val;
+      int       color = now_tty()->color;
       if (d->type == DIR) {
         now_tty()->color = 0x0a;
         printk("%s ", d->name);
@@ -969,13 +950,13 @@ void cmd_dir(char **args) {
 void type_deal(char *cmdline) {
   // type命令的实现
   char *name = cmdline + 5;
-  int size = vfs_filesize(cmdline + 5);
+  int   size = vfs_filesize(cmdline + 5);
   if (size == -1) {
     print(name);
     print(" not found!\n\n");
   } else {
     FILE *fp = fopen(name, "r");
-    char *p = (char *)fp->buffer;
+    char *p  = (char *)fp->buffer;
     for (int i = 0; i != size; i++) {
       printchar(p[i]);
     }
@@ -987,18 +968,18 @@ void type_deal(char *cmdline) {
 
 void pcinfo() {
   char cpu[100] = {0};
-  int cpuid[3] = {get_cpu1(), get_cpu3(), get_cpu2()};
+  int  cpuid[3] = {get_cpu1(), get_cpu3(), get_cpu2()};
   //根据CPUID信息打印出来
-  cpu[0] = cpuid[0] & 0xff;
-  cpu[1] = (cpuid[0] >> 8) & 0xff;
-  cpu[2] = (cpuid[0] >> 16) & 0xff;
-  cpu[3] = (cpuid[0] >> 24) & 0xff;
-  cpu[4] = cpuid[1] & 0xff;
-  cpu[5] = (cpuid[1] >> 8) & 0xff;
-  cpu[6] = (cpuid[1] >> 16) & 0xff;
-  cpu[7] = (cpuid[1] >> 24) & 0xff;
-  cpu[8] = cpuid[2] & 0xff;
-  cpu[9] = (cpuid[2] >> 8) & 0xff;
+  cpu[0]  = cpuid[0] & 0xff;
+  cpu[1]  = (cpuid[0] >> 8) & 0xff;
+  cpu[2]  = (cpuid[0] >> 16) & 0xff;
+  cpu[3]  = (cpuid[0] >> 24) & 0xff;
+  cpu[4]  = cpuid[1] & 0xff;
+  cpu[5]  = (cpuid[1] >> 8) & 0xff;
+  cpu[6]  = (cpuid[1] >> 16) & 0xff;
+  cpu[7]  = (cpuid[1] >> 24) & 0xff;
+  cpu[8]  = cpuid[2] & 0xff;
+  cpu[9]  = (cpuid[2] >> 8) & 0xff;
   cpu[10] = (cpuid[2] >> 16) & 0xff;
   cpu[11] = (cpuid[2] >> 24) & 0xff;
   cpu[12] = 0;
@@ -1012,8 +993,7 @@ void mem() {
   int free = 0;
   for (int i = 0; i != 1024 * 768; i++) {
     extern struct PAGE_INFO *pages;
-    if (pages[i].count == 0)
-      free++;
+    if (pages[i].count == 0) free++;
   }
   printk("free vpages:%d free kpages:%d\nfree:%dKB\n", free,
          free - (1024 * 768 - memsize / (4 * 1024)),
@@ -1036,4 +1016,6 @@ void cmd_tl() {
   //   }
   // }
 }
-void cmd_vbetest() { get_all_mode(); }
+void cmd_vbetest() {
+  get_all_mode();
+}

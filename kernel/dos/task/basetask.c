@@ -1,18 +1,18 @@
 #include <dos.h>
-int init_ok_flag = 0;
+int                 init_ok_flag = 0;
 extern unsigned int PCI_ADDR_BASE;
-char *shell_data;
-extern unsigned base_count;
-float f_cpu_usage;
-unsigned ret_to_app;
-void idle() {
+char               *shell_data;
+extern unsigned     base_count;
+float               f_cpu_usage;
+unsigned            ret_to_app;
+void                idle() {
   while (1) {
-    unsigned c = timerctl.count;
+    unsigned c     = timerctl.count;
     unsigned count = 0;
     while (timerctl.count - c < 100) {
       count++;
     }
-    f_cpu_usage = (float)(base_count - count) / (float)base_count;
+    f_cpu_usage  = (float)(base_count - count) / (float)base_count;
     f_cpu_usage *= 100.0f;
   }
 }
@@ -20,8 +20,7 @@ void return_to_app();
 void init() {
   ret_to_app = page_malloc_one_no_mark();
   memcpy(ret_to_app, return_to_app, 0x1000);
-  page_set_physics_attr(ret_to_app, ret_to_app,
-                        page_get_attr(ret_to_app) | PG_USU);
+  page_set_physics_attr(ret_to_app, ret_to_app, page_get_attr(ret_to_app) | PG_USU);
   logk("init task has been started!\n");
 
   PCI_ADDR_BASE = (unsigned int)page_malloc(1 * 1024 * 1024);
@@ -61,10 +60,10 @@ void init() {
     running_mode = POWERINTDOS;
   }
 
-  FILE *fp = fopen("/other/font.bin", "r");
-  ascfont = fp->buffer;
-  fp = fopen("/other/hzk16", "r");
-  hzkfont = fp->buffer;
+  FILE *fp     = fopen("/other/font.bin", "r");
+  ascfont      = fp->buffer;
+  fp           = fopen("/other/hzk16", "r");
+  hzkfont      = fp->buffer;
   init_ok_flag = 1;
   extern struct tty *tty_default;
   tty_set(current_task(), tty_default);

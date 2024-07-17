@@ -1,19 +1,15 @@
 #include <dos.h>
+
 void MoveCursor_TextMode(struct tty *res, int x, int y) {
   res->x = x;
   res->y = y;
-  if(!res->cur_moving)
-    return;
+  if (!res->cur_moving) return;
   int i = y * res->xsize + x;
-  if (res->vram == 0xb8000) {
-    ASM_call(i);
-  }
+  if (res->vram == 0xb8000) { ASM_call(i); }
 }
 
 void putchar_TextMode(struct tty *res, int c) {
-  if (res->x == res->xsize) {
-    res->gotoxy(res, 0, res->y + 1);
-  }
+  if (res->x == res->xsize) { res->gotoxy(res, 0, res->y + 1); }
   if (c == '\n') {
     if (res->y == res->ysize - 1) {
       res->screen_ne(res);
@@ -26,14 +22,12 @@ void putchar_TextMode(struct tty *res, int c) {
   } else if (c == '\b') {
     if (res->x == 0) {
       res->MoveCursor(res, res->xsize - 1, res->y - 1);
-      *(unsigned char *)(res->vram + res->y * res->xsize * 2 + res->x * 2) = ' ';
-      *(unsigned char *)(res->vram + res->y * res->xsize * 2 + res->x * 2 - 2 + 1) =
-          res->color;
+      *(unsigned char *)(res->vram + res->y * res->xsize * 2 + res->x * 2)         = ' ';
+      *(unsigned char *)(res->vram + res->y * res->xsize * 2 + res->x * 2 - 2 + 1) = res->color;
       return;
     }
-    *(unsigned char *)(res->vram + res->y * res->xsize * 2 + res->x * 2 - 2) = ' ';
-    *(unsigned char *)(res->vram + res->y * res->xsize * 2 + res->x * 2 - 2 + 1) =
-        res->color;
+    *(unsigned char *)(res->vram + res->y * res->xsize * 2 + res->x * 2 - 2)     = ' ';
+    *(unsigned char *)(res->vram + res->y * res->xsize * 2 + res->x * 2 - 2 + 1) = res->color;
     res->MoveCursor(res, res->x - 1, res->y);
     return;
   } else if (c == '\t') {
@@ -43,7 +37,7 @@ void putchar_TextMode(struct tty *res, int c) {
   } else if (c == '\r') {
     return;
   }
-  *(unsigned char *)(res->vram + res->y * res->xsize * 2 + res->x * 2) = c;
+  *(unsigned char *)(res->vram + res->y * res->xsize * 2 + res->x * 2)     = c;
   *(unsigned char *)(res->vram + res->y * res->xsize * 2 + res->x * 2 + 1) = res->color;
   res->MoveCursor(res, res->x + 1, res->y);
 }
@@ -58,9 +52,8 @@ void screen_ne_TextMode(struct tty *res) {
     }
   }
   for (int i = 0; i < res->xsize * 2; i += 2) {
-    *(unsigned char *)(res->vram + (res->ysize - 1) * res->xsize * 2 + i) = ' ';
-    *(unsigned char *)(res->vram + (res->ysize - 1) * res->xsize * 2 + i + 1) =
-        res->color;
+    *(unsigned char *)(res->vram + (res->ysize - 1) * res->xsize * 2 + i)     = ' ';
+    *(unsigned char *)(res->vram + (res->ysize - 1) * res->xsize * 2 + i + 1) = res->color;
   }
   res->gotoxy(res, 0, res->ysize - 1);
   res->Raw_y++;
@@ -69,21 +62,21 @@ void screen_ne_TextMode(struct tty *res) {
 void clear_TextMode(struct tty *res) {
   for (int i = 0; i < res->xsize * 2; i += 2) {
     for (int j = 0; j < res->ysize; j++) {
-      *(unsigned char *)(res->vram + j * res->xsize * 2 + i) = ' ';
+      *(unsigned char *)(res->vram + j * res->xsize * 2 + i)     = ' ';
       *(unsigned char *)(res->vram + j * res->xsize * 2 + i + 1) = res->color;
     }
   }
   res->gotoxy(res, 0, 0);
   res->Raw_y = 0;
 }
-void Draw_Box_TextMode(struct tty *res, int x, int y, int x1, int y1,
-                       unsigned char color) {
+void Draw_Box_TextMode(struct tty *res, int x, int y, int x1, int y1, unsigned char color) {
   for (int i = y; i < y1; i++) {
     for (int j = x; j < x1; j++) {
       *(unsigned char *)(res->vram + i * 160 + j * 2 + 1) = color;
     }
   }
 }
+
 void AddShell_TextMode() {
   // char *vram = page_malloc(160 * 25);
   // struct tty *ntty =
@@ -110,6 +103,7 @@ void AddShell_TextMode() {
   // ntty->clear(ntty);
   // io_sti();
 }
+
 void SwitchShell_TextMode(int i) {
   // io_cli();
   // extern struct List *tty_list;
@@ -143,7 +137,7 @@ void SwitchShell_TextMode(int i) {
   //     if (task->fifosleep == 3) {
   //       task->fifosleep = 0;
   //     }
-  //   } else if ((task->TTY == n || task->TTY->using1 != 1) &&
+  //   } else if ((task->TTY == n || task->TTY->is_using != 1) &&
   //              (strcmp("Shell", task->name) == 0 ||
   //               (task->app == 1 && task->forever == 0))) {
   //     if (task->fifosleep == 0) {
@@ -158,6 +152,7 @@ void SwitchShell_TextMode(int i) {
   // t->MoveCursor(t, t->x, t->y);
   // io_sti();
 }
+
 bool now_tty_TextMode(struct tty *res) {
   if (res->vram == 0xb8000) {
     return true;

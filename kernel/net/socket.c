@@ -1,10 +1,9 @@
 #include <dos.h>
 // Socket
 static struct Socket sockets[MAX_SOCKET_NUM];
-static void socket_udp_send(struct Socket *socket, uint8_t *data,
-                            uint32_t size) {
-  udp_provider_send(socket->remoteIP, socket->localIP, socket->remotePort,
-                    socket->localPort, data, size);
+static void          socket_udp_send(struct Socket *socket, uint8_t *data, uint32_t size) {
+  udp_provider_send(socket->remoteIP, socket->localIP, socket->remotePort, socket->localPort, data,
+                             size);
 }
 void socket_init() {
   for (int i = 0; i < MAX_SOCKET_NUM; i++) {
@@ -12,14 +11,14 @@ void socket_init() {
   }
 }
 
-static void socket_tcp_send(struct Socket *socket, uint8_t *data,
-                            uint32_t size) {
-  for (int i = 0; i * socket->MSS < size; i++){
+static void socket_tcp_send(struct Socket *socket, uint8_t *data, uint32_t size) {
+  for (int i = 0; i * socket->MSS < size; i++) {
     uint32_t s = ((int32_t)i * socket->MSS >= (int32_t)(size - socket->MSS))
-	             ? (size - i * socket->MSS) : socket->MSS;
-    tcp_provider_send(socket->remoteIP, socket->localIP, socket->remotePort,
-                      socket->localPort, socket->seqNum, socket->ackNum, 0, 1, 0,
-                      0, 0, 0, 0, 0, data + i * socket->MSS, s);
+                     ? (size - i * socket->MSS)
+                     : socket->MSS;
+    tcp_provider_send(socket->remoteIP, socket->localIP, socket->remotePort, socket->localPort,
+                      socket->seqNum, socket->ackNum, 0, 1, 0, 0, 0, 0, 0, 0,
+                      data + i * socket->MSS, s);
     socket->seqNum += s;
     sleep(TCP_SEG_WAITTIME);
   }
@@ -29,17 +28,14 @@ static int socket_tcp_connect(struct Socket *socket) {
   // printk("socket->state: SOCKET_TCP_CLOSED -> SOCKET_TCP_SYN_SENT\n");
   socket->ackNum = 0;
   socket->seqNum = 0;
-  socket->state = SOCKET_TCP_SYN_SENT;
-  tcp_provider_send(socket->remoteIP, socket->localIP, socket->remotePort,
-                    socket->localPort, socket->seqNum, socket->ackNum, 0, 0, 0,
-                    0, 1, 0, 0, 0, 0, 0);
+  socket->state  = SOCKET_TCP_SYN_SENT;
+  tcp_provider_send(socket->remoteIP, socket->localIP, socket->remotePort, socket->localPort,
+                    socket->seqNum, socket->ackNum, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0);
   socket->seqNum++;
   extern struct TIMERCTL timerctl;
-  uint32_t time = timerctl.count;
+  uint32_t               time = timerctl.count;
   while (socket->state != SOCKET_TCP_ESTABLISHED) {
-    if (timerctl.count - time > TCP_CONNECT_WAITTIME) {
-      return -1;
-    }
+    if (timerctl.count - time > TCP_CONNECT_WAITTIME) { return -1; }
   }
   return 0;
 }
@@ -47,9 +43,8 @@ static void socket_tcp_disconnect(struct Socket *socket) {
   // printk("send first wave.\n");
   // printk("socket->state: SOCKET_TCP_ESTABLISHED -> SOCKET_TCP_FIN_WAIT1\n");
   socket->state = SOCKET_TCP_FIN_WAIT1;
-  tcp_provider_send(socket->remoteIP, socket->localIP, socket->remotePort,
-                    socket->localPort, socket->seqNum, socket->ackNum, 0, 1, 0,
-                    0, 0, 1, 0, 0, 0, 0);
+  tcp_provider_send(socket->remoteIP, socket->localIP, socket->remotePort, socket->localPort,
+                    socket->seqNum, socket->ackNum, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0);
   socket->seqNum++;
   while (socket->state != SOCKET_TCP_CLOSED)
     ;
@@ -61,8 +56,7 @@ static void socket_tcp_listen(struct Socket *socket) {
   while (socket->state != SOCKET_TCP_ESTABLISHED)
     ;
 }
-static void SocketServer_Send(struct SocketServer *server, uint8_t *data,
-                              uint32_t size) {
+static void SocketServer_Send(struct SocketServer *server, uint8_t *data, uint32_t size) {
   for (int i = 0; i != SOCKET_SERVER_MAX_CONNECT; i++) {
     if (server->socket[i]->state == SOCKET_TCP_ESTABLISHED) {
       server->socket[i]->Send(server->socket[i], data, size);
@@ -73,20 +67,20 @@ struct Socket *socket_alloc(uint8_t protocol) {
   for (int i = 0; i != MAX_SOCKET_NUM; i++) {
     if (sockets[i].state == SOCKET_FREE) {
       if (protocol == UDP_PROTOCOL) { // UDP
-        sockets[i].state = SOCKET_ALLOC;
+        sockets[i].state    = SOCKET_ALLOC;
         sockets[i].protocol = UDP_PROTOCOL;
-        sockets[i].Send = socket_udp_send;
-        sockets[i].Handler = NULL;
+        sockets[i].Send     = socket_udp_send;
+        sockets[i].Handler  = NULL;
         return (struct Socket *)&sockets[i];
       } else if (protocol == TCP_PROTOCOL) { // TCP
-        sockets[i].state = SOCKET_TCP_CLOSED;
-        sockets[i].protocol = TCP_PROTOCOL;
-        sockets[i].Send = socket_tcp_send;
-        sockets[i].Connect = socket_tcp_connect;
+        sockets[i].state      = SOCKET_TCP_CLOSED;
+        sockets[i].protocol   = TCP_PROTOCOL;
+        sockets[i].Send       = socket_tcp_send;
+        sockets[i].Connect    = socket_tcp_connect;
         sockets[i].Disconnect = socket_tcp_disconnect;
-        sockets[i].Listen = socket_tcp_listen;
-        sockets[i].Handler = NULL;
-        sockets[i].MSS = MSS_Default;
+        sockets[i].Listen     = socket_tcp_listen;
+        sockets[i].Handler    = NULL;
+        sockets[i].MSS        = MSS_Default;
         return (struct Socket *)&sockets[i];
       }
     }
@@ -101,38 +95,34 @@ void socket_free(struct Socket *socket) {
     }
   }
 }
-void Socket_Init(struct Socket *socket, uint32_t remoteIP, uint16_t remotePort,
-                 uint32_t localIP, uint16_t localPort) {
-  socket->remoteIP = remoteIP;
+void Socket_Init(struct Socket *socket, uint32_t remoteIP, uint16_t remotePort, uint32_t localIP,
+                 uint16_t localPort) {
+  socket->remoteIP   = remoteIP;
   socket->remotePort = remotePort;
-  socket->localIP = localIP;
-  socket->localPort = localPort;
+  socket->localIP    = localIP;
+  socket->localPort  = localPort;
 }
-void Socket_Bind(struct Socket *socket,
-                 void (*Handler)(struct Socket *socket, void *base)) {
+void Socket_Bind(struct Socket *socket, void (*Handler)(struct Socket *socket, void *base)) {
   socket->Handler = Handler;
 }
-struct Socket *Socket_Find(uint32_t dstIP, uint16_t dstPort, uint32_t srcIP,
-                           uint16_t srcPort, uint8_t protocol) {
+struct Socket *Socket_Find(uint32_t dstIP, uint16_t dstPort, uint32_t srcIP, uint16_t srcPort,
+                           uint8_t protocol) {
   for (int i = 0; i != MAX_SOCKET_NUM; i++) {
     if (srcIP == sockets[i].localIP && dstIP == sockets[i].remoteIP &&
         srcPort == sockets[i].localPort && dstPort == sockets[i].remotePort &&
         protocol == sockets[i].protocol && sockets[i].state != SOCKET_FREE) {
       return (struct Socket *)&sockets[i];
     } else if (srcIP == sockets[i].localIP && srcPort == sockets[i].localPort &&
-               protocol == sockets[i].protocol &&
-               sockets[i].state == SOCKET_TCP_LISTEN) {
+               protocol == sockets[i].protocol && sockets[i].state == SOCKET_TCP_LISTEN) {
       return (struct Socket *)&sockets[i];
     }
   }
   return -1;
 }
 
-struct SocketServer *
-SocketServer_Alloc(void (*Handler)(struct Socket *socket, void *base),
-                   uint32_t srcIP, uint16_t srcPort, uint8_t protocol) {
-  struct SocketServer *server =
-      (struct SocketServer *)malloc(sizeof(struct SocketServer));
+struct SocketServer *SocketServer_Alloc(void (*Handler)(struct Socket *socket, void *base),
+                                        uint32_t srcIP, uint16_t srcPort, uint8_t protocol) {
+  struct SocketServer *server = (struct SocketServer *)malloc(sizeof(struct SocketServer));
   for (int i = 0; i < SOCKET_SERVER_MAX_CONNECT; i++) {
     if (protocol == TCP_PROTOCOL) {
       server->socket[i] = socket_alloc(TCP_PROTOCOL);
@@ -151,11 +141,8 @@ SocketServer_Alloc(void (*Handler)(struct Socket *socket, void *base),
 
 void SocketServer_Free(struct SocketServer *server, uint8_t protocol) {
   for (int i = 0; i < SOCKET_SERVER_MAX_CONNECT; i++) {
-    if (server->socket[i] != NULL &&
-        server->socket[i]->state == SOCKET_TCP_ESTABLISHED) {
-      if (protocol == TCP_PROTOCOL) {
-        server->socket[i]->Disconnect(server->socket[i]);
-      }
+    if (server->socket[i] != NULL && server->socket[i]->state == SOCKET_TCP_ESTABLISHED) {
+      if (protocol == TCP_PROTOCOL) { server->socket[i]->Disconnect(server->socket[i]); }
       socket_free(server->socket[i]);
     }
   }
@@ -165,9 +152,7 @@ void SocketServer_Free(struct SocketServer *server, uint8_t protocol) {
 uint32_t SocketServer_Status(struct SocketServer *server, uint8_t state) {
   uint32_t count = 0;
   for (int i = 0; i < SOCKET_SERVER_MAX_CONNECT; i++) {
-    if (server->socket[i]->state == state) {
-      count++;
-    }
+    if (server->socket[i]->state == state) { count++; }
   }
   return count;
 }

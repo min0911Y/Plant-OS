@@ -42,7 +42,7 @@ if [ -n "$pkg_manager_update" ]; then
   fi
 fi
 
-cd ./apps && make
+cd ./apps && make -j
 if [ $? -ne 0 ]; then
   echo "在 apps 目录中构建失败"
   exit
