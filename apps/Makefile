@@ -62,7 +62,7 @@ default : Makefile
 	make -r -C minewep
 	make -r -C bitz
 	make -r -C netgobang
-	makr -r -C bfpp
+	make -r -C bfpp
 clean :
 	rm libs/*
 	rm out/*
