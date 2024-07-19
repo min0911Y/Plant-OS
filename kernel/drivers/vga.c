@@ -209,8 +209,8 @@ void SwitchTo320X200X256() {
 void pokeb(int setmentaddr, int offset, char value) {
   *(char *)(setmentaddr * 0x10 + offset) = value;
 }
-void pokew(int setmentaddr, int offset, short value) {
-  *(short *)(setmentaddr * 0x10 + offset) = value;
+void pokew(int setmentaddr, int offset, i16 value) {
+  *(i16 *)(setmentaddr * 0x10 + offset) = value;
 }
 static void set_plane(unsigned p) {
   u8 pmask;

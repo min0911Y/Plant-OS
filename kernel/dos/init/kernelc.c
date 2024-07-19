@@ -2,10 +2,10 @@
 // Copyright (C) 2021-2022 zhouzhihao & min0911
 #include <dos.h>
 #include <mst.h>
-uint32_t running_mode = POWERINTDOS; // 运行模式
-uint32_t Path_Addr;
-u8      *font, *ascfont, *hzkfont;
-u8      *IVT;
+u32 running_mode = POWERINTDOS; // 运行模式
+u32 Path_Addr;
+u8 *font, *ascfont, *hzkfont;
+u8 *IVT;
 
 void c_pgui_main(void);
 void shell(void) {
@@ -52,7 +52,7 @@ void shell(void) {
   //   printk("2. HighTextMode 128 * 48\n");
   //   printk("Input:");
   //   u8 choice;
-  //   for (;;) {
+  //   while (true) {
   //     choice = getch();
   //     if (choice == '1') {
   //       running_mode = POWERINTDOS;
@@ -153,9 +153,9 @@ void com_input(char *ptr, int len) {
 void task_sr2() {
   // SleepTask(current_task());
 
-  // for (;;) {
+  // while (true) {
   // }
-  // for (;;) {
+  // while (true) {
   //   printk("Debug> ");
   //   char buf[150];
   //   com_input(buf, 150);

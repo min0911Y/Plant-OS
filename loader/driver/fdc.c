@@ -41,6 +41,7 @@ typedef struct DrvGeom {
 #define CMD_FORMAT  (0x4d) /* 格式化磁道 */
 #define CMD_SEEK    (0x0f) /* 寻找磁道 */
 #define CMD_VERSION (0x10) /* 获取软盘驱动器的版本 */
+
 /**globals*/
 static volatile int done      = 0;
 static int          dchange   = 0;
@@ -85,6 +86,7 @@ void init_floppy() {
   vd.flag  = 1;
   register_vdisk(vd);
 }
+
 void flint(int *esp) {
   /**
    * 软盘中断服务程序（C语言），这个中断的入口在nasmfunc.asm中
@@ -93,7 +95,7 @@ void flint(int *esp) {
   floppy_int_count = 1; // 设置中断计数器为1，代表中断已经发生（或者是系统已经收到了中断）
   io_out8(0x20, 0x20); // 发送EOI信号，告诉PIC，我们已经处理完了这个中断
 }
-void reset(void) {
+void reset() {
   /* 停止软盘电机并禁用IRQ和DMA传输 */
   io_out8(FDC_DOR, 0);
 

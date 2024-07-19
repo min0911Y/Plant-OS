@@ -9,10 +9,10 @@
 #define COMMON_YEAR_SEC 31536000
 #define LEAP_YEAR_SEC   31622400
 #define DAY_SEC         86400
-static int      table1[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-static int      table2[12] = {31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-static uint32_t NTPTime;
-static void     ntp_handler(struct Socket *socket, void *base) {
+static int  table1[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+static int  table2[12] = {31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+static u32  NTPTime;
+static void ntp_handler(struct Socket *socket, void *base) {
   // printk("Recv: ");
   struct NTPMessage *ntp =
       (struct NTPMessage *)(base + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message) +
@@ -22,9 +22,9 @@ static void     ntp_handler(struct Socket *socket, void *base) {
   // }
   NTPTime = swap32(ntp->Transmission_Timestamp);
 }
-uint32_t ntp_get_server_time(uint32_t NTPServerIP) {
-  struct Socket  *socket = socket_alloc(UDP_PROTOCOL);
-  extern uint32_t ip;
+u32 ntp_get_server_time(u32 NTPServerIP) {
+  struct Socket *socket = socket_alloc(UDP_PROTOCOL);
+  extern u32     ip;
   Socket_Init(socket, NTPServerIP, 123, ip, 123);
   Socket_Bind(socket, ntp_handler);
   struct NTPMessage *ntp      = (struct NTPMessage *)malloc(sizeof(struct NTPMessage));
@@ -40,7 +40,7 @@ uint32_t ntp_get_server_time(uint32_t NTPServerIP) {
       get_year(), get_mon_hex(), get_day_of_month(), get_hour_hex(), get_min_hex(), get_sec_hex()));
   NTPTime                     = NULL;
   while (!NTPTime) {
-    socket->Send(socket, (uint8_t *)ntp, sizeof(struct NTPMessage));
+    socket->Send(socket, (u8 *)ntp, sizeof(struct NTPMessage));
     sleep(400);
   }
   // printk("SENDING: ");
@@ -51,13 +51,12 @@ uint32_t ntp_get_server_time(uint32_t NTPServerIP) {
   socket_free(socket);
   return NTPTime;
 }
-uint32_t ntp_time_stamp(uint32_t year, uint32_t month, uint32_t day, uint32_t hour, uint32_t min,
-                        uint32_t sec) {
-  uint32_t leap = 0;
+u32 ntp_time_stamp(u32 year, u32 month, u32 day, u32 hour, u32 min, u32 sec) {
+  u32 leap = 0;
   for (int y = 1900; y != year; y++) {
     if ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0) { leap++; }
   }
-  uint32_t s = 0;
+  u32 s = 0;
   if ((year % 4 == 0 && year % 100 != 0) || year % 400 == 0) {
     for (int i = 0; i != month - 1; i++) {
       s += table2[i] * DAY_SEC;
@@ -70,13 +69,12 @@ uint32_t ntp_time_stamp(uint32_t year, uint32_t month, uint32_t day, uint32_t ho
   s += (day - 1) * DAY_SEC + hour * 60 * 60 + min * 60 + sec;
   return leap * LEAP_YEAR_SEC + (year - 1900 - leap) * COMMON_YEAR_SEC + s - 28800;
 }
-uint32_t UTCTimeStamp(uint32_t year, uint32_t month, uint32_t day, uint32_t hour, uint32_t min,
-                      uint32_t sec) {
-  uint32_t leap = 0;
+u32 UTCTimeStamp(u32 year, u32 month, u32 day, u32 hour, u32 min, u32 sec) {
+  u32 leap = 0;
   for (int y = 1970; y != year; y++) {
     if ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0) { leap++; }
   }
-  uint32_t s = 0;
+  u32 s = 0;
   if ((year % 4 == 0 && year % 100 != 0) || year % 400 == 0) {
     for (int i = 0; i != month - 1; i++) {
       s += table2[i] * DAY_SEC;
@@ -89,10 +87,9 @@ uint32_t UTCTimeStamp(uint32_t year, uint32_t month, uint32_t day, uint32_t hour
   s += (day - 1) * DAY_SEC + hour * 60 * 60 + min * 60 + sec;
   return leap * LEAP_YEAR_SEC + (year - 1970 - leap) * COMMON_YEAR_SEC + s - 28800;
 }
-void UnNTPTimeStamp(uint32_t timestamp, uint32_t *year, uint32_t *month, uint32_t *day,
-                    uint32_t *hour, uint32_t *min, uint32_t *sec) {
-  timestamp  += 28800;
-  uint32_t y  = 1900;
+void UnNTPTimeStamp(u32 timestamp, u32 *year, u32 *month, u32 *day, u32 *hour, u32 *min, u32 *sec) {
+  timestamp += 28800;
+  u32 y      = 1900;
   for (;; y++) {
     if ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0) {
       timestamp -= LEAP_YEAR_SEC;
@@ -106,8 +103,8 @@ void UnNTPTimeStamp(uint32_t timestamp, uint32_t *year, uint32_t *month, uint32_
       }
     }
   }
-  *year           = y + 1;
-  uint32_t month0 = 1;
+  *year      = y + 1;
+  u32 month0 = 1;
   if ((*year % 4 == 0 && *year % 100 != 0) || *year % 400 == 0) {
     for (; timestamp > table2[month0 - 1] * DAY_SEC; month0++) {
       timestamp -= table2[month0 - 1] * DAY_SEC;
@@ -126,7 +123,6 @@ void UnNTPTimeStamp(uint32_t timestamp, uint32_t *year, uint32_t *month, uint32_
   *sec      = timestamp % 60;
   return;
 }
-void UnUTCTimeStamp(uint32_t timestamp, uint32_t *year, uint32_t *month, uint32_t *day,
-                    uint32_t *hour, uint32_t *min, uint32_t *sec) {
+void UnUTCTimeStamp(u32 timestamp, u32 *year, u32 *month, u32 *day, u32 *hour, u32 *min, u32 *sec) {
   return UnNTPTimeStamp(timestamp + JAN_1970, year, month, day, hour, min, sec);
 }

@@ -21,22 +21,22 @@ typedef enum {
 } l9660_status;
 
 typedef struct {
-  uint8_t le[2];
+  u8 le[2];
 } l9660_luint16;
 typedef struct {
-  uint8_t be[2];
+  u8 be[2];
 } l9660_buint16;
 typedef struct {
-  uint8_t le[2], be[2];
+  u8 le[2], be[2];
 } l9660_duint16;
 typedef struct {
-  uint8_t le[4];
+  u8 le[4];
 } l9660_luint32;
 typedef struct {
-  uint8_t be[4];
+  u8 be[4];
 } l9660_buint32;
 typedef struct {
-  uint8_t le[4], be[4];
+  u8 le[4], be[4];
 } l9660_duint32;
 
 /* Descriptor time format */
@@ -51,24 +51,24 @@ typedef struct {
 
 /* Directory entry */
 typedef struct {
-  uint8_t        length;
-  uint8_t        xattr_length;
+  u8             length;
+  u8             xattr_length;
   l9660_duint32  sector;
   l9660_duint32  size;
   l9660_filetime time;
-  uint8_t        flags;
-  uint8_t        unit_size;
-  uint8_t        gap_size;
+  u8             flags;
+  u8             unit_size;
+  u8             gap_size;
   l9660_duint16  vol_seq_number;
-  uint8_t        name_len;
+  u8             name_len;
   char           name[/*name_len*/];
 } l9660_dirent;
 
 /* Volume descriptor header */
 typedef struct {
-  uint8_t type;
-  char    magic[5];
-  uint8_t version;
+  u8   type;
+  char magic[5];
+  u8   version;
 } l9660_vdesc_header;
 
 /* Primary volume descriptor */
@@ -99,7 +99,7 @@ typedef struct {
   char           abstract_file[36];
   char           bibliography_file[37];
   l9660_desctime volume_created, volume_modified, volume_expires, volume_effective;
-  uint8_t        file_structure_version;
+  u8             file_structure_version;
   char           pad4[1];
   char           app_reserved[512];
   char           reserved[653];
@@ -125,7 +125,7 @@ typedef struct l9660_fs {
 #endif
 
   /* read_sector func */
-  bool (*read_sector)(struct l9660_fs *fs, void *buf, uint32_t sector);
+  bool (*read_sector)(struct l9660_fs *fs, void *buf, u32 sector);
   int disk_number;
 } l9660_fs;
 
@@ -135,9 +135,9 @@ typedef struct {
   char buf[2048];
 #endif
   l9660_fs *fs;
-  uint32_t  first_sector;
-  uint32_t  position;
-  uint32_t  length;
+  u32       first_sector;
+  u32       position;
+  u32       length;
 } l9660_file;
 
 typedef struct {
@@ -159,19 +159,18 @@ typedef struct l9660_fs_status {
 void *malloc(int size);
 void  free(void *p);
 
-uint32_t     l9660_tell(l9660_file *f);
+u32          l9660_tell(l9660_file *f);
 l9660_status l9660_read(l9660_file *f, void *buf, size_t size, size_t *read);
 l9660_status l9660_seek(l9660_file *f, int whence, int32_t offset);
 l9660_status l9660_openat(l9660_file *child, l9660_dir *parent, const char *name);
 l9660_status l9660_readdir(l9660_dir *dir, l9660_dirent **pdirent);
 l9660_status l9660_opendirat(l9660_dir *dir, l9660_dir *parent, const char *path);
 l9660_status l9660_fs_open_root(l9660_dir *dir, l9660_fs *fs);
-l9660_status l9660_openfs(l9660_fs *fs,
-                          bool (*read_sector)(l9660_fs *fs, void *buf, uint32_t sector),
-                          uint8_t disk_number);
+l9660_status l9660_openfs(l9660_fs *fs, bool (*read_sector)(l9660_fs *fs, void *buf, u32 sector),
+                          u8        disk_number);
 bool         CDROM_Read(u32 lba, u32 number, void *buffer, char drive);
 
-bool read_sector(l9660_fs *fs, void *buf, uint32_t sector);
+bool read_sector(l9660_fs *fs, void *buf, u32 sector);
 #define l9660_seekdir(dir, pos) (l9660_seek(&(dir)->file, L9660_SEEK_SET, (pos)))
 #define l9660_telldir(dir)      (l9660_tell(&(dir)->file))
 
@@ -215,21 +214,20 @@ static char *strchrnul(const char *s, int c) {
   return (char *)s;
 }
 
-static inline uint16_t fsectoff(l9660_file *f) {
+static inline u16 fsectoff(l9660_file *f) {
   return f->position % 2048;
 }
 
-static inline uint32_t fsector(l9660_file *f) {
+static inline u32 fsector(l9660_file *f) {
   return f->position / 2048;
 }
 
-static inline uint32_t fnextsectpos(l9660_file *f) {
+static inline u32 fnextsectpos(l9660_file *f) {
   return (f->position + 2047) & ~2047;
 }
 
-l9660_status l9660_openfs(l9660_fs *fs,
-                          bool (*read_sector)(l9660_fs *fs, void *buf, uint32_t sector),
-                          uint8_t disk_number) {
+l9660_status l9660_openfs(l9660_fs *fs, bool (*read_sector)(l9660_fs *fs, void *buf, u32 sector),
+                          u8        disk_number) {
   fs->read_sector = read_sector;
   fs->disk_number = disk_number;
 #ifndef L9660_SINGLEBUFFER
@@ -238,8 +236,8 @@ l9660_status l9660_openfs(l9660_fs *fs,
   last_file                   = NULL;
   l9660_vdesc_primary *pvd    = PVD(gbuf);
 #endif
-  uint32_t idx = 0x10;
-  for (;;) {
+  u32 idx = 0x10;
+  while (true) {
     // Read next sector
     if (!read_sector(fs, pvd, idx)) return L9660_EIO;
 
@@ -312,7 +310,7 @@ static l9660_status openat_raw(l9660_file *child, l9660_dir *parent, const char 
       seglen = 1;
     }
 
-    for (;;) {
+    while (true) {
       if ((rv = l9660_readdir(parent, &dent))) return rv;
 
       /* EOD */
@@ -395,7 +393,7 @@ l9660_status l9660_openat(l9660_file *child, l9660_dir *parent, const char *name
 /*! Seek the file to \p offset from \p whence */
 l9660_status l9660_seek(l9660_file *f, int whence, int32_t offset) {
   l9660_status rv;
-  uint32_t     cursect = fsector(f);
+  u32          cursect = fsector(f);
 
   switch (whence) {
   case SEEK_SET: f->position = offset; break;
@@ -412,7 +410,7 @@ l9660_status l9660_seek(l9660_file *f, int whence, int32_t offset) {
   return L9660_OK;
 }
 
-uint32_t l9660_tell(l9660_file *f) {
+u32 l9660_tell(l9660_file *f) {
   return f->position;
 }
 
@@ -421,7 +419,7 @@ l9660_status l9660_read(l9660_file *f, void *buf, size_t size, size_t *read) {
 
   if ((rv = prebuffer(f))) return rv;
 
-  uint16_t rem = 2048 - fsectoff(f);
+  u16 rem = 2048 - fsectoff(f);
   if (rem > f->length - f->position) rem = f->length - f->position;
   if (rem < size) size = rem;
 
@@ -438,11 +436,11 @@ char *strdup(const char *s) {
   if (!d) return NULL;
   return memcpy(d, s, l + 1);
 }
-bool read_sector(l9660_fs *fs, void *buf, uint32_t sector) {
+bool read_sector(l9660_fs *fs, void *buf, u32 sector) {
   return CDROM_Read(sector, 1, buf, fs->disk_number);
 }
 
-bool ISO_Check(uint8_t disk_number) {
+bool ISO_Check(u8 disk_number) {
   u8  *buffer = malloc(2049); // 假设扇区大小为 2048 字节
   bool ok     = CDROM_Read(16, 1, buffer, disk_number);
 
@@ -456,7 +454,7 @@ bool ISO_Check(uint8_t disk_number) {
   }
 }
 
-void ISO_InitFs(struct vfs_t *vfs, uint8_t disk_number) {
+void ISO_InitFs(struct vfs_t *vfs, u8 disk_number) {
   l9660_fs_status_t *fs_m;
   fs_m = (l9660_fs_status_t *)malloc(sizeof(l9660_fs_status_t));
 
@@ -536,7 +534,7 @@ RE:
     }
     return false; // not found
   }
-  for (;;) {
+  while (true) {
     size_t read;
     l9660_read(&file, buffer, 128, &read);
     if (read == 0) break;
@@ -569,7 +567,7 @@ List *ISO_ListFile(struct vfs_t *vfs, char *dictpath) {
   }
 
   List *result = NewList();
-  for (;;) {
+  while (true) {
     l9660_dirent *dent;
     l9660_readdir(&finfo, &dent);
 

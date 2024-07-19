@@ -74,7 +74,7 @@ void Disk_Read(u32 lba, u32 number, void *buffer, char drive) {
   if (have_vdisk(drive)) {
     for (int i = 0; i < number; i += SECTORS_ONCE) {
       int sectors = ((number - i) >= SECTORS_ONCE) ? SECTORS_ONCE : (number - i);
-      printk("Reading\n");
+      // printf("Reading\n");
       rw_vdisk(drive, lba + i, buffer + i * 512, sectors, 1);
     }
   }
@@ -85,7 +85,7 @@ int disk_Size(char drive) {
     int indx = drive1 - 'A';
     return vdisk_ctl[indx].size;
   } else {
-    printk("Disk Not Ready.\n");
+    printf("Disk Not Ready.\n");
     return 0;
   }
 

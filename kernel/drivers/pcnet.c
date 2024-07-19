@@ -37,20 +37,20 @@ void PCNET_ASM_INTHANDLER(void);
 #define RESET32 0x18
 #define BDP32   0x1c
 
-extern uint32_t gateway, submask, dns, ip, dhcp_ip;
+extern u32 gateway, submask, dns, ip, dhcp_ip;
 
 struct InitializationBlock initBlock;
-uint8_t                    mac0, mac1, mac2, mac3, mac4, mac5;
+u8                         mac0, mac1, mac2, mac3, mac4, mac5;
 
 static int                      io_base = 0;
 static struct BufferDescriptor *sendBufferDesc;
-static uint8_t                  sendBufferDescMemory[2048 + 15];
-static uint8_t                  sendBuffers[8][2048 + 15];
-static uint8_t                  currentSendBuffer;
+static u8                       sendBufferDescMemory[2048 + 15];
+static u8                       sendBuffers[8][2048 + 15];
+static u8                       currentSendBuffer;
 static struct BufferDescriptor *recvBufferDesc;
-static uint8_t                  recvBufferDescMemory[2048 + 15];
-static uint8_t                  recvBuffers[8][2048 + 15];
-static uint8_t                  currentRecvBuffer;
+static u8                       recvBufferDescMemory[2048 + 15];
+static u8                       recvBuffers[8][2048 + 15];
+static u8                       currentRecvBuffer;
 
 static void set_handler(int IRQ, int addr) {
   // 注册中断
@@ -63,8 +63,8 @@ void into_32bitsRW() {
   // 此时还处于16位读写模式
   // 读取BCR18
   io_out16(io_base + RAP16, BCR18);
-  uint16_t tmp  = io_in16(io_base + BDP16);
-  tmp          |= 0x80; // DWIO（bit7）=1
+  u16 tmp  = io_in16(io_base + BDP16);
+  tmp     |= 0x80; // DWIO（bit7）=1
   // 写入BCR18
   io_out16(io_base + RAP16, BCR18);
   io_out16(io_base + BDP16, tmp);
@@ -73,8 +73,8 @@ void into_32bitsRW() {
 void into_16bitsRW() {
   // 切换到16位读写模式 与切换到32位读写模式相反
   io_out32(io_base + RAP32, BCR18);
-  uint32_t tmp  = io_in32(io_base + BDP32);
-  tmp          &= ~0x80;
+  u32 tmp  = io_in32(io_base + BDP32);
+  tmp     &= ~0x80;
   io_out32(io_base + RAP32, BCR18);
   io_out32(io_base + BDP32, tmp);
 }
@@ -90,7 +90,7 @@ void Activate() {
   io_out16(io_base + RDP16, 0x41);
 
   io_out16(io_base + RAP16, CSR4);
-  uint32_t temp = io_in16(io_base + RDP16);
+  u32 temp = io_in16(io_base + RDP16);
   io_out16(io_base + RAP16, CSR4);
   io_out16(io_base + RDP16, temp | 0xc00);
 
@@ -137,20 +137,18 @@ static void init_Card_all() {
   initBlock.reserved3               = 0;
   initBlock.logicalAddress          = 0;
 
-  sendBufferDesc =
-      (struct BufferDescriptor *)(((uint32_t)&sendBufferDescMemory[0] + 15) & 0xfffffff0);
-  initBlock.sendBufferDescAddress = (uint32_t)sendBufferDesc;
-  recvBufferDesc =
-      (struct BufferDescriptor *)(((uint32_t)&recvBufferDescMemory[0] + 15) & 0xfffffff0);
-  initBlock.recvBufferDescAddress = (uint32_t)recvBufferDesc;
+  sendBufferDesc = (struct BufferDescriptor *)(((u32)&sendBufferDescMemory[0] + 15) & 0xfffffff0);
+  initBlock.sendBufferDescAddress = (u32)sendBufferDesc;
+  recvBufferDesc = (struct BufferDescriptor *)(((u32)&recvBufferDescMemory[0] + 15) & 0xfffffff0);
+  initBlock.recvBufferDescAddress = (u32)recvBufferDesc;
 
-  for (uint8_t i = 0; i < 8; i++) {
-    sendBufferDesc[i].address = (((uint32_t)&sendBuffers[i] + 15) & 0xfffffff0);
+  for (u8 i = 0; i < 8; i++) {
+    sendBufferDesc[i].address = (((u32)&sendBuffers[i] + 15) & 0xfffffff0);
     sendBufferDesc[i].flags   = 0xf7ff;
     sendBufferDesc[i].flags2  = 0;
     sendBufferDesc[i].avail   = 0;
 
-    recvBufferDesc[i].address = (((uint32_t)&recvBuffers[i] + 15) & 0xfffffff0);
+    recvBufferDesc[i].address = (((u32)&recvBuffers[i] + 15) & 0xfffffff0);
     recvBufferDesc[i].flags   = 0xf7ff | 0x80000000;
     recvBufferDesc[i].flags2  = 0;
     recvBufferDesc[i].avail   = 0;
@@ -158,9 +156,9 @@ static void init_Card_all() {
   }
   // CSR1,CSR2赋值（initBlock地址
   io_out16(io_base + RAP16, CSR1);
-  io_out16(io_base + RDP16, (uint16_t)&initBlock);
+  io_out16(io_base + RDP16, (u16)&initBlock);
   io_out16(io_base + RAP16, CSR2);
-  io_out16(io_base + RDP16, (uint32_t)&initBlock >> 16);
+  io_out16(io_base + RDP16, (u32)&initBlock >> 16);
 
   Activate();
 
@@ -184,8 +182,8 @@ static void init_Card_all() {
   //   "来自Powerint DOS 386的消息：我是周志昊！！！", strlen("来自Powerint DOS
   //   386的消息：我是周志昊！！！"));
 }
-uint8_t bus = 255, dev = 255, func = 255;
-bool    pcnet_find_card() {
+u8   bus = 255, dev = 255, func = 255;
+bool pcnet_find_card() {
   //printk("pcnet_find:");
   PCI_GET_DEVICE(CARD_VENDOR_ID, CARD_DEVICE_ID, &bus, &dev, &func);
   if (bus == 255) {
@@ -200,9 +198,9 @@ void init_pcnet_card() {
   // 1.注册中断
   set_handler(pci_get_drive_irq(bus, dev, func), (int)PCNET_ASM_INTHANDLER);
   // 2,写COMMAND和STATUS寄存器
-  uint32_t conf  = pci_read_command_status(bus, dev, func);
-  conf          &= 0xffff0000; // 保留STATUS寄存器，清除COMMAND寄存器
-  conf          |= 0x7;        // 设置第0~2位（允许PCNET网卡产生中断
+  u32 conf  = pci_read_command_status(bus, dev, func);
+  conf     &= 0xffff0000; // 保留STATUS寄存器，清除COMMAND寄存器
+  conf     |= 0x7;        // 设置第0~2位（允许PCNET网卡产生中断
   pci_write_command_status(bus, dev, func, conf);
   io_base = pci_get_port_base(bus, dev, func);
   init_Card_all();
@@ -215,10 +213,10 @@ void Recv() {
        currentRecvBuffer = (currentRecvBuffer + 1) % 8) {
     if (!(recvBufferDesc[currentRecvBuffer].flags & 0x40000000) &&
         (recvBufferDesc[currentRecvBuffer].flags & 0x03000000) == 0x03000000) {
-      uint32_t size = recvBufferDesc[currentRecvBuffer].flags & 0xfff;
+      u32 size = recvBufferDesc[currentRecvBuffer].flags & 0xfff;
       if (size > 128) size -= 4;
 
-      uint8_t *buffer = (uint8_t *)(recvBufferDesc[currentRecvBuffer].address);
+      u8 *buffer = (u8 *)(recvBufferDesc[currentRecvBuffer].address);
       for (int i = 0; i < (size > 128 ? 128 : size); i++) {
         //printk("%02x ", buffer[i]);
       }
@@ -234,7 +232,7 @@ void Recv() {
   }
   currentRecvBuffer = 0;
 }
-void PcnetSend(uint8_t *buffer, int size) {
+void PcnetSend(u8 *buffer, int size) {
   while (recv)
     ;
   int sendDesc      = currentSendBuffer;
@@ -243,8 +241,7 @@ void PcnetSend(uint8_t *buffer, int size) {
   if (size > MTU + sizeof(struct EthernetFrame_head) + sizeof(struct EthernetFrame_tail))
     size = MTU + sizeof(struct EthernetFrame_head) + sizeof(struct EthernetFrame_tail);
 
-  for (uint8_t *src = buffer + size - 1,
-               *dst = (uint8_t *)(sendBufferDesc[sendDesc].address + size - 1);
+  for (u8 *src = buffer + size - 1, *dst = (u8 *)(sendBufferDesc[sendDesc].address + size - 1);
        src >= buffer; src--, dst--)
     *dst = *src;
 
@@ -254,7 +251,7 @@ void PcnetSend(uint8_t *buffer, int size) {
   }
   //printk("\n");
   sendBufferDesc[sendDesc].avail  = 0;
-  sendBufferDesc[sendDesc].flags  = 0x8300f000 | ((uint16_t)((-size) & 0xfff));
+  sendBufferDesc[sendDesc].flags  = 0x8300f000 | ((u16)((-size) & 0xfff));
   sendBufferDesc[sendDesc].flags2 = 0;
 
   io_out16(io_base + RAP16, CSR0);
@@ -267,7 +264,7 @@ void PCNET_IRQ(int *esp) {
   // func)));
 
   io_out16(io_base + RAP16, CSR0);
-  uint16_t temp = io_in16(io_base + RDP16);
+  u16 temp = io_in16(io_base + RDP16);
 
   // if ((temp & 0x8000) == 0x8000)
   //   printk("PCNET ERROR\n");

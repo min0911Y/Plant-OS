@@ -72,15 +72,15 @@ freeinfo *make_next_freeinfo(memory *mem) {
   freeinfo *fi   = NULL;
   freeinfo *finf = mem->freeinf;
   freeinfo *old  = NULL;
-  uint32_t  s, n;
+  u32       s, n;
   while (finf) {
     old = finf;
     for (int i = 0; i < FREE_MAX_NUM; i++) {
       if (finf->f[i].start + finf->f[i].end == 0) { break; }
       if (finf->f[i].end - finf->f[i].start >= size) {
-        uint32_t start = finf->f[i].start;
-        s              = finf->f[i].start;
-        n              = finf->f[i].end;
+        u32 start = finf->f[i].start;
+        s         = finf->f[i].start;
+        n         = finf->f[i].end;
         mem_delete(i, finf);
         fi = (freeinfo *)start;
         break;
@@ -99,7 +99,7 @@ freeinfo *make_next_freeinfo(memory *mem) {
     finf = finf->next;
   }
   old->next = fi;
-  fi->f     = (free_member *)((uint32_t)fi + sizeof(freeinfo));
+  fi->f     = (free_member *)((u32)fi + sizeof(freeinfo));
   for (int i = 0; i < FREE_MAX_NUM; i++) {
     fi->f[i].start = 0;
     fi->f[i].end   = 0;
@@ -122,7 +122,7 @@ free_member *mem_insert(int pos, freeinfo *finf) {
     unsigned debug2 = (unsigned)(&(finf->f[i]));
     if (!debug1 || !debug2) {
       printk("error!\n");
-      for (;;)
+      while (true)
         ;
     }
     finf->f[i + 1] = finf->f[i];
@@ -149,7 +149,7 @@ void mem_delete(int pos, freeinfo *finf) {
   finf->f[i].start = 0;
   finf->f[i].end   = 0;
 }
-uint32_t mem_get_all_finf(freeinfo *finf) {
+u32 mem_get_all_finf(freeinfo *finf) {
   for (int i = 0; i < FREE_MAX_NUM; i++) {
     if (finf->f[i].start + finf->f[i].end == 0) { return i; }
   }
@@ -183,7 +183,7 @@ void mem_defragmenter(freeinfo *finf) {
     }
   }
 }
-int mem_free_finf(memory *mem, freeinfo *finf, void *p, uint32_t size) {
+int mem_free_finf(memory *mem, freeinfo *finf, void *p, u32 size) {
   quicksort(finf->f, 0, mem_get_all_finf(finf) - 1);
   mem_defragmenter(finf);
   free_member *tmp1 = NULL, // 第一（二）个连续的内存 其limit与start相等
@@ -212,7 +212,7 @@ int mem_free_finf(memory *mem, freeinfo *finf, void *p, uint32_t size) {
     if (!n) return 0;
     // 配置这个格子
     n->start = p;
-    n->end   = (uint32_t)p + size;
+    n->end   = (u32)p + size;
     quicksort(finf->f, 0, mem_get_all_finf(finf) - 1);
     mem_defragmenter(finf);
     return 1;
@@ -241,7 +241,7 @@ int mem_free_finf(memory *mem, freeinfo *finf, void *p, uint32_t size) {
 
   return 1;
 }
-void *mem_alloc_finf(memory *mem, freeinfo *finf, uint32_t size, freeinfo *if_nomore) {
+void *mem_alloc_finf(memory *mem, freeinfo *finf, u32 size, freeinfo *if_nomore) {
   free_member *choice       = NULL;
   int          choice_index = 0;
   for (int i = 0; i < FREE_MAX_NUM; i++) {
@@ -263,8 +263,8 @@ void *mem_alloc_finf(memory *mem, freeinfo *finf, uint32_t size, freeinfo *if_no
     mem->memerrno = ERRNO_NO_ENOGHT_MEMORY;
     return NULL;
   }
-  uint32_t start  = choice->start;
-  choice->start  += size;
+  u32 start      = choice->start;
+  choice->start += size;
   if (choice->end - choice->start == 0) { mem_delete(choice_index, finf); }
   mem->memerrno = ERRNO_NOPE;
   mem_defragmenter(finf);
@@ -272,7 +272,7 @@ void *mem_alloc_finf(memory *mem, freeinfo *finf, uint32_t size, freeinfo *if_no
 
   return (void *)start;
 }
-void *mem_alloc(memory *mem, uint32_t size) {
+void *mem_alloc(memory *mem, u32 size) {
   freeinfo *finf      = mem->freeinf;
   int       flag      = 0;
   freeinfo *if_nomore = NULL;
@@ -305,7 +305,7 @@ void *mem_alloc(memory *mem, uint32_t size) {
   }
   return NULL;
 }
-void mem_free(memory *mem, void *p, uint32_t size) {
+void mem_free(memory *mem, void *p, u32 size) {
   freeinfo *finf = mem->freeinf;
   while (finf) {
     if (mem_free_finf(mem, finf, p, size)) { return; }
@@ -327,14 +327,14 @@ void show_mem(memory *mem) {
   }
   printk("----------------\n");
 }
-memory *memory_init(uint32_t start, uint32_t size) {
+memory *memory_init(u32 start, u32 size) {
   memory *mem;
   mem    = (memory *)start;
   start += sizeof(memory);
   size  -= sizeof(memory);
   if (size < 0) {
     printk("mm init error.\n");
-    for (;;)
+    while (true)
       ;
   }
   mem->freeinf  = (freeinfo *)start;
@@ -342,7 +342,7 @@ memory *memory_init(uint32_t start, uint32_t size) {
   size         -= sizeof(freeinfo);
   if (size < 0) {
     printk("mm init error.\n");
-    for (;;)
+    while (true)
       ;
   }
   mem->freeinf->next  = 0;
@@ -351,7 +351,7 @@ memory *memory_init(uint32_t start, uint32_t size) {
   size               -= FREE_MAX_NUM * sizeof(free_member);
   if ((int)size < 0) {
     printk("mm init error.\n");
-    for (;;)
+    while (true)
       ;
   }
   for (int i = 0; i < FREE_MAX_NUM; i++) {
@@ -375,7 +375,7 @@ void free(void *p) {
   int size = *(int *)(p - sizeof(int));
   mem_free(public_heap, (char *)p - sizeof(int), size + sizeof(int));
 }
-void *realloc(void *ptr, uint32_t size) {
+void *realloc(void *ptr, u32 size) {
   void *new = malloc(size);
   if (ptr) {
     memcpy(new, ptr, *(int *)((int)ptr - 4));
@@ -396,7 +396,7 @@ void kfree(void *p) {
   int size = *(int *)(p - sizeof(int));
   page_free((char *)p - sizeof(int), size + sizeof(int));
 }
-void *krealloc(void *ptr, uint32_t size) {
+void *krealloc(void *ptr, u32 size) {
   void *new = kmalloc(size);
   if (ptr) {
     memcpy(new, ptr, *(int *)((int)ptr - 4));

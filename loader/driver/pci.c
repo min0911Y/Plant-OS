@@ -4,46 +4,44 @@
 #define mem_mapping      0
 #define input_output     1
 typedef struct base_address_register {
-  int      prefetchable;
-  uint8_t *address;
-  uint32_t size;
-  int      type;
+  int prefetchable;
+  u8 *address;
+  u32 size;
+  int type;
 } base_address_register;
-uint32_t read_pci(uint8_t bus, uint8_t device, uint8_t function, uint8_t registeroffset) {
-  uint32_t id = 1 << 31 | ((bus & 0xff) << 16) | ((device & 0x1f) << 11) |
-                ((function & 0x07) << 8) | (registeroffset & 0xfc);
+u32 read_pci(u8 bus, u8 device, u8 function, u8 registeroffset) {
+  u32 id = 1 << 31 | ((bus & 0xff) << 16) | ((device & 0x1f) << 11) | ((function & 0x07) << 8) |
+           (registeroffset & 0xfc);
   io_out32(PCI_COMMAND_PORT, id);
-  uint32_t result = io_in32(PCI_DATA_PORT);
+  u32 result = io_in32(PCI_DATA_PORT);
   return result >> (8 * (registeroffset % 4));
 }
-uint32_t read_bar_n(uint8_t bus, uint8_t device, uint8_t function, uint8_t bar_n) {
-  uint32_t bar_offset = 0x10 + 4 * bar_n;
+u32 read_bar_n(u8 bus, u8 device, u8 function, u8 bar_n) {
+  u32 bar_offset = 0x10 + 4 * bar_n;
   return read_pci(bus, device, function, bar_offset);
 }
-void write_pci(uint8_t bus, uint8_t device, uint8_t function, uint8_t registeroffset,
-               uint32_t value) {
-  uint32_t id = 1 << 31 | ((bus & 0xff) << 16) | ((device & 0x1f) << 11) |
-                ((function & 0x07) << 8) | (registeroffset & 0xfc);
+void write_pci(u8 bus, u8 device, u8 function, u8 registeroffset, u32 value) {
+  u32 id = 1 << 31 | ((bus & 0xff) << 16) | ((device & 0x1f) << 11) | ((function & 0x07) << 8) |
+           (registeroffset & 0xfc);
   io_out32(PCI_COMMAND_PORT, id);
   io_out32(PCI_DATA_PORT, value);
 }
-uint32_t pci_read_command_status(uint8_t bus, uint8_t slot, uint8_t func) {
+u32 pci_read_command_status(u8 bus, u8 slot, u8 func) {
   return read_pci(bus, slot, func, 0x04);
 }
 // write command status register
-void pci_write_command_status(uint8_t bus, uint8_t slot, uint8_t func, uint32_t value) {
+void pci_write_command_status(u8 bus, u8 slot, u8 func, u32 value) {
   write_pci(bus, slot, func, 0x04, value);
 }
-base_address_register get_base_address_register(uint8_t bus, uint8_t device, uint8_t function,
-                                                uint8_t bar) {
+base_address_register get_base_address_register(u8 bus, u8 device, u8 function, u8 bar) {
   base_address_register result;
 
-  uint32_t headertype = read_pci(bus, device, function, 0x0e) & 0x7e;
-  int      max_bars   = 6 - 4 * headertype;
+  u32 headertype = read_pci(bus, device, function, 0x0e) & 0x7e;
+  int max_bars   = 6 - 4 * headertype;
   if (bar >= max_bars) return result;
 
-  uint32_t bar_value = read_pci(bus, device, function, 0x10 + 4 * bar);
-  result.type        = (bar_value & 1) ? input_output : mem_mapping;
+  u32 bar_value = read_pci(bus, device, function, 0x10 + 4 * bar);
+  result.type   = (bar_value & 1) ? input_output : mem_mapping;
 
   if (result.type == mem_mapping) {
     switch ((bar_value >> 1) & 0x3) {
@@ -52,22 +50,22 @@ base_address_register get_base_address_register(uint8_t bus, uint8_t device, uin
     case 2: // 64
       break;
     }
-    result.address      = (uint8_t *)(bar_value & ~0x3);
+    result.address      = (u8 *)(bar_value & ~0x3);
     result.prefetchable = 0;
   } else {
-    result.address      = (uint8_t *)(bar_value & ~0x3);
+    result.address      = (u8 *)(bar_value & ~0x3);
     result.prefetchable = 0;
   }
   return result;
 }
-uint8_t pci_get_drive_irq(uint8_t bus, uint8_t slot, uint8_t func) {
-  return (uint8_t)read_pci(bus, slot, func, 0x3c);
+u8 pci_get_drive_irq(u8 bus, u8 slot, u8 func) {
+  return (u8)read_pci(bus, slot, func, 0x3c);
 }
-uint32_t pci_get_port_base(uint8_t bus, uint8_t slot, uint8_t func) {
-  uint32_t io_port = 0;
+u32 pci_get_port_base(u8 bus, u8 slot, u8 func) {
+  u32 io_port = 0;
   for (int i = 0; i < 6; i++) {
     base_address_register bar = get_base_address_register(bus, slot, func, i);
-    if (bar.type == input_output) { io_port = (uint32_t)bar.address; }
+    if (bar.type == input_output) { io_port = (u32)bar.address; }
   }
   return io_port;
 }
@@ -79,7 +77,7 @@ void pci_config(u32 bus, u32 f, u32 equipment, u32 adder) {
 }
 void init_PCI(u32 adder_Base) {
   u32 i, BUS, Equipment, F, ADDER, *i1;
-  u8 *PCI_DATA = adder_Base, *PCI_DATA1;
+  u8 *PCI_DATA = (u8 *)adder_Base, *PCI_DATA1;
   for (BUS = 0; BUS < 256; BUS++) {                    //查询总线
     for (Equipment = 0; Equipment < 32; Equipment++) { //查询设备
       for (F = 0; F < 8; F++) {                        //查询功能
@@ -90,7 +88,7 @@ void init_PCI(u32 adder_Base) {
           int key = 1;
           while (key) {
             //此配置表为空
-            // printk("PCI_DATA:%x\n", PCI_DATA);
+            // printf("PCI_DATA:%x\n", PCI_DATA);
             // getch();
             PCI_DATA1  = PCI_DATA;
             *PCI_DATA1 = 0xFF; //表占用标志
@@ -106,82 +104,82 @@ void init_PCI(u32 adder_Base) {
             for (ADDER = 0; ADDER < 256; ADDER = ADDER + 4) {
               pci_config(BUS, F, Equipment, ADDER);
               i  = io_in32(PCI_DATA_PORT);
-              i1 = i;
+              i1 = (u32 *)i;
               //*i1 = PCI_DATA1;
               memcpy(PCI_DATA1, &i, 4);
               PCI_DATA1 = PCI_DATA1 + 4;
             }
-            for (uint8_t barNum = 0; barNum < 6; barNum++) {
+            for (u8 barNum = 0; barNum < 6; barNum++) {
               base_address_register bar = get_base_address_register(BUS, Equipment, F, barNum);
               if (bar.address && (bar.type == input_output)) {
                 PCI_DATA1 += 4;
-                int i      = ((uint32_t)(bar.address));
+                int i      = ((u32)(bar.address));
                 memcpy(PCI_DATA1, &i, 4);
               }
             }
             /*PCI_DATA += 12;
             struct PCI_CONFIG_SPACE_PUCLIC *PCI_CONFIG_SPACE = (struct
             PCI_CONFIG_SPACE_PUCLIC *)PCI_DATA; PCI_DATA -= 12;
-            printk("PCI_CONFIG_SPACE:%08x\n", PCI_CONFIG_SPACE);
-            printk("PCI_CONFIG_SPACE->VendorID:%08x\n",
+            printf("PCI_CONFIG_SPACE:%08x\n", PCI_CONFIG_SPACE);
+            printf("PCI_CONFIG_SPACE->VendorID:%08x\n",
             PCI_CONFIG_SPACE->VendorID);
-            printk("PCI_CONFIG_SPACE->DeviceID:%08x\n",
+            printf("PCI_CONFIG_SPACE->DeviceID:%08x\n",
             PCI_CONFIG_SPACE->DeviceID);
-            printk("PCI_CONFIG_SPACE->Command:%08x\n",
+            printf("PCI_CONFIG_SPACE->Command:%08x\n",
             PCI_CONFIG_SPACE->Command);
-            printk("PCI_CONFIG_SPACE->Status:%08x\n", PCI_CONFIG_SPACE->Status);
-            printk("PCI_CONFIG_SPACE->RevisionID:%08x\n",
+            printf("PCI_CONFIG_SPACE->Status:%08x\n", PCI_CONFIG_SPACE->Status);
+            printf("PCI_CONFIG_SPACE->RevisionID:%08x\n",
             PCI_CONFIG_SPACE->RevisionID);
-            printk("PCI_CONFIG_SPACE->ProgIF:%08x\n", PCI_CONFIG_SPACE->ProgIF);
-            printk("PCI_CONFIG_SPACE->SubClass:%08x\n",
+            printf("PCI_CONFIG_SPACE->ProgIF:%08x\n", PCI_CONFIG_SPACE->ProgIF);
+            printf("PCI_CONFIG_SPACE->SubClass:%08x\n",
             PCI_CONFIG_SPACE->SubClass);
-            printk("PCI_CONFIG_SPACE->BaseCode:%08x\n",
+            printf("PCI_CONFIG_SPACE->BaseCode:%08x\n",
             PCI_CONFIG_SPACE->BaseClass);
-            printk("PCI_CONFIG_SPACE->CacheLineSize:%08x\n",
+            printf("PCI_CONFIG_SPACE->CacheLineSize:%08x\n",
             PCI_CONFIG_SPACE->CacheLineSize);
-            printk("PCI_CONFIG_SPACE->LatencyTimer:%08x\n",
+            printf("PCI_CONFIG_SPACE->LatencyTimer:%08x\n",
             PCI_CONFIG_SPACE->LatencyTimer);
-            printk("PCI_CONFIG_SPACE->HeaderType:%08x\n",
+            printf("PCI_CONFIG_SPACE->HeaderType:%08x\n",
             PCI_CONFIG_SPACE->HeaderType);
-            printk("PCI_CONFIG_SPACE->BIST:%08x\n", PCI_CONFIG_SPACE->BIST);
-            printk("PCI_CONFIG_SPACE->BaseAddr0:%08x\n",
+            printf("PCI_CONFIG_SPACE->BIST:%08x\n", PCI_CONFIG_SPACE->BIST);
+            printf("PCI_CONFIG_SPACE->BaseAddr0:%08x\n",
             PCI_CONFIG_SPACE->BaseAddr[0]);
-            printk("PCI_CONFIG_SPACE->BaseAddr1:%08x\n",
+            printf("PCI_CONFIG_SPACE->BaseAddr1:%08x\n",
             PCI_CONFIG_SPACE->BaseAddr[1]);
-            printk("PCI_CONFIG_SPACE->BaseAddr2:%08x\n",
+            printf("PCI_CONFIG_SPACE->BaseAddr2:%08x\n",
             PCI_CONFIG_SPACE->BaseAddr[2]);
-            printk("PCI_CONFIG_SPACE->BaseAddr3:%08x\n",
+            printf("PCI_CONFIG_SPACE->BaseAddr3:%08x\n",
             PCI_CONFIG_SPACE->BaseAddr[3]);
-            printk("PCI_CONFIG_SPACE->BaseAddr4:%08x\n",
+            printf("PCI_CONFIG_SPACE->BaseAddr4:%08x\n",
             PCI_CONFIG_SPACE->BaseAddr[4]);
-            printk("PCI_CONFIG_SPACE->BaseAddr5:%08x\n",
+            printf("PCI_CONFIG_SPACE->BaseAddr5:%08x\n",
             PCI_CONFIG_SPACE->BaseAddr[5]);
-            printk("PCI_CONFIG_SPACE->CardbusCISPtr:%08x\n",
+            printf("PCI_CONFIG_SPACE->CardbusCISPtr:%08x\n",
             PCI_CONFIG_SPACE->CardbusCIS);
-            printk("PCI_CONFIG_SPACE->SubsystemVendorID:%08x\n",
+            printf("PCI_CONFIG_SPACE->SubsystemVendorID:%08x\n",
             PCI_CONFIG_SPACE->SubVendorID);
-            printk("PCI_CONFIG_SPACE->SubsystemID:%08x\n",
+            printf("PCI_CONFIG_SPACE->SubsystemID:%08x\n",
             PCI_CONFIG_SPACE->SubSystemID);
-            printk("PCI_CONFIG_SPACE->ExpansionROMBaseAddr:%08x\n",
+            printf("PCI_CONFIG_SPACE->ExpansionROMBaseAddr:%08x\n",
             PCI_CONFIG_SPACE->ROMBaseAddr);
-            printk("PCI_CONFIG_SPACE->CapabilitiesPtr:%08x\n",
+            printf("PCI_CONFIG_SPACE->CapabilitiesPtr:%08x\n",
             PCI_CONFIG_SPACE->CapabilitiesPtr);
-            printk("PCI_CONFIG_SPACE->Reserved1:%08x\n",
+            printf("PCI_CONFIG_SPACE->Reserved1:%08x\n",
             PCI_CONFIG_SPACE->Reserved[0]);
-            printk("PCI_CONFIG_SPACE->Reserved2:%08x\n",
+            printf("PCI_CONFIG_SPACE->Reserved2:%08x\n",
             PCI_CONFIG_SPACE->Reserved[1]);
-            printk("PCI_CONFIG_SPACE->InterruptLine:%08x\n",
+            printf("PCI_CONFIG_SPACE->InterruptLine:%08x\n",
             PCI_CONFIG_SPACE->InterruptLine);
-            printk("PCI_CONFIG_SPACE->InterruptPin:%08x\n",
+            printf("PCI_CONFIG_SPACE->InterruptPin:%08x\n",
             PCI_CONFIG_SPACE->InterruptPin);
-            printk("PCI_CONFIG_SPACE->MinGrant:%08x\n",
+            printf("PCI_CONFIG_SPACE->MinGrant:%08x\n",
             PCI_CONFIG_SPACE->MinGrant);
-            printk("PCI_CONFIG_SPACE->MaxLatency:%08x\n",
+            printf("PCI_CONFIG_SPACE->MaxLatency:%08x\n",
             PCI_CONFIG_SPACE->MaxLatency); for (int i = 0; i < 272+4; i++)
             {
-                printk("%02x ", PCI_DATA[i]);
+                printf("%02x ", PCI_DATA[i]);
             }
-            printk("\n");*/
+            printf("\n");*/
             PCI_DATA = PCI_DATA + 0x110 + 4;
             key      = 0;
           }
@@ -193,117 +191,117 @@ void init_PCI(u32 adder_Base) {
 }
 void PCI_ClassCode_Print(struct pci_config_space_public *pci_config_space_puclic) {
   u8 *pci_drive = (u8 *)pci_config_space_puclic - 12;
-  printk("BUS:%02x ", pci_drive[1]);
-  printk("EQU:%02x ", pci_drive[2]);
-  printk("F:%02x ", pci_drive[3]);
-  printk("IO Port:%08x ", pci_get_port_base(pci_drive[1], pci_drive[2], pci_drive[3]));
-  printk("IRQ Line:%02x ", pci_get_drive_irq(pci_drive[1], pci_drive[2], pci_drive[3]));
+  printf("BUS:%02x ", pci_drive[1]);
+  printf("EQU:%02x ", pci_drive[2]);
+  printf("F:%02x ", pci_drive[3]);
+  printf("IO Port:%08x ", pci_get_port_base(pci_drive[1], pci_drive[2], pci_drive[3]));
+  printf("IRQ Line:%02x ", pci_get_drive_irq(pci_drive[1], pci_drive[2], pci_drive[3]));
   if (pci_config_space_puclic->BaseClass == 0x0) {
-    printk("Nodefined ");
+    printf("Nodefined ");
     if (pci_config_space_puclic->SubClass == 0x0)
-      printk("Non-VGA-Compatible Unclassified Device\n");
+      printf("Non-VGA-Compatible Unclassified Device\n");
     else if (pci_config_space_puclic->SubClass == 0x1)
-      printk("VGA-Compatible Unclassified Device\n");
+      printf("VGA-Compatible Unclassified Device\n");
   } else if (pci_config_space_puclic->BaseClass == 0x1) {
-    printk("Mass Storage Controller ");
+    printf("Mass Storage Controller ");
     if (pci_config_space_puclic->SubClass == 0x0)
-      printk("SCSI Bus Controller\n");
+      printf("SCSI Bus Controller\n");
     else if (pci_config_space_puclic->SubClass == 0x1)
-      printk("IDE Controller\n");
+      printf("IDE Controller\n");
     else if (pci_config_space_puclic->SubClass == 0x2)
-      printk("Floppy Disk Controller\n");
+      printf("Floppy Disk Controller\n");
     else if (pci_config_space_puclic->SubClass == 0x3)
-      printk("IPI Bus Controller\n");
+      printf("IPI Bus Controller\n");
     else if (pci_config_space_puclic->SubClass == 0x4)
-      printk("RAID Controller\n");
+      printf("RAID Controller\n");
     else if (pci_config_space_puclic->SubClass == 0x5)
-      printk("ATA Controller\n");
+      printf("ATA Controller\n");
     else if (pci_config_space_puclic->SubClass == 0x6)
-      printk("Serial ATA Controller\n");
+      printf("Serial ATA Controller\n");
     else if (pci_config_space_puclic->SubClass == 0x7)
-      printk("Serial Attached SCSI Controller\n");
+      printf("Serial Attached SCSI Controller\n");
     else if (pci_config_space_puclic->SubClass == 0x8)
-      printk("Non-Volatile Memory Controller\n");
+      printf("Non-Volatile Memory Controller\n");
     else
-      printk("\n");
+      printf("\n");
   } else if (pci_config_space_puclic->BaseClass == 0x2) {
-    printk("Network Controller ");
+    printf("Network Controller ");
     if (pci_config_space_puclic->SubClass == 0x0)
-      printk("Ethernet Controller\n");
+      printf("Ethernet Controller\n");
     else if (pci_config_space_puclic->SubClass == 0x1)
-      printk("Token Ring Controller\n");
+      printf("Token Ring Controller\n");
     else if (pci_config_space_puclic->SubClass == 0x2)
-      printk("FDDI Controller\n");
+      printf("FDDI Controller\n");
     else if (pci_config_space_puclic->SubClass == 0x3)
-      printk("ATM Controller\n");
+      printf("ATM Controller\n");
     else if (pci_config_space_puclic->SubClass == 0x4)
-      printk("ISDN Controller\n");
+      printf("ISDN Controller\n");
     else if (pci_config_space_puclic->SubClass == 0x5)
-      printk("WorldFip Controller\n");
+      printf("WorldFip Controller\n");
     else if (pci_config_space_puclic->SubClass == 0x6)
-      printk("PICMG 2.14 Multi Computing Controller\n");
+      printf("PICMG 2.14 Multi Computing Controller\n");
     else if (pci_config_space_puclic->SubClass == 0x7)
-      printk("Infiniband Controller\n");
+      printf("Infiniband Controller\n");
     else if (pci_config_space_puclic->SubClass == 0x8)
-      printk("Fabric Controller\n");
+      printf("Fabric Controller\n");
     else
-      printk("\n");
+      printf("\n");
   } else if (pci_config_space_puclic->BaseClass == 0x3) {
-    printk("Display Controller ");
+    printf("Display Controller ");
     if (pci_config_space_puclic->SubClass == 0x0)
-      printk("VGA Compatible Controller\n");
+      printf("VGA Compatible Controller\n");
     else if (pci_config_space_puclic->SubClass == 0x1)
-      printk("XGA Controller\n");
+      printf("XGA Controller\n");
     else if (pci_config_space_puclic->SubClass == 0x2)
-      printk("3D Controller (Not VGA-Compatible)\n");
+      printf("3D Controller (Not VGA-Compatible)\n");
     else
-      printk("\n");
+      printf("\n");
   } else if (pci_config_space_puclic->BaseClass == 0x4) {
-    printk("Multimedia Controller ");
-    printk("\n");
+    printf("Multimedia Controller ");
+    printf("\n");
   } else if (pci_config_space_puclic->BaseClass == 0x5) {
-    printk("Memory Controller ");
-    printk("\n");
+    printf("Memory Controller ");
+    printf("\n");
   } else if (pci_config_space_puclic->BaseClass == 0x6) {
-    printk("Bridge ");
+    printf("Bridge ");
     if (pci_config_space_puclic->SubClass == 0x0)
-      printk("Host Bridge\n");
+      printf("Host Bridge\n");
     else if (pci_config_space_puclic->SubClass == 0x1)
-      printk("ISA Bridge\n");
+      printf("ISA Bridge\n");
     else if (pci_config_space_puclic->SubClass == 0x2)
-      printk("EISA Bridge\n");
+      printf("EISA Bridge\n");
     else if (pci_config_space_puclic->SubClass == 0x3)
-      printk("MCA Bridge\n");
+      printf("MCA Bridge\n");
     else if (pci_config_space_puclic->SubClass == 0x4 || pci_config_space_puclic->SubClass == 0x9)
-      printk("PCI-to-PCI Bridge\n");
+      printf("PCI-to-PCI Bridge\n");
     else if (pci_config_space_puclic->SubClass == 0x5)
-      printk("PCMCIA Bridge\n");
+      printf("PCMCIA Bridge\n");
     else if (pci_config_space_puclic->SubClass == 0x6)
-      printk("NuBus Bridge\n");
+      printf("NuBus Bridge\n");
     else if (pci_config_space_puclic->SubClass == 0x7)
-      printk("CardBus Bridge\n");
+      printf("CardBus Bridge\n");
     else if (pci_config_space_puclic->SubClass == 0x8)
-      printk("RACEway Bridge\n");
+      printf("RACEway Bridge\n");
     else if (pci_config_space_puclic->SubClass == 0xA)
-      printk("InfiniBand-to-PCI Host Bridge\n");
+      printf("InfiniBand-to-PCI Host Bridge\n");
     else
-      printk("\n");
+      printf("\n");
   } else if (pci_config_space_puclic->BaseClass == 0x7) {
-    printk("Simple Communication Controller ");
-    printk("\n");
+    printf("Simple Communication Controller ");
+    printf("\n");
   } else if (pci_config_space_puclic->BaseClass == 0x8) {
-    printk("Base System Peripheral ");
-    printk("\n");
+    printf("Base System Peripheral ");
+    printf("\n");
   } else if (pci_config_space_puclic->BaseClass == 0x9) {
-    printk("Input Device Controller ");
-    printk("\n");
+    printf("Input Device Controller ");
+    printf("\n");
   } else if (pci_config_space_puclic->BaseClass == 0xA) {
-    printk("Docking Station ");
-    printk("\n");
+    printf("Docking Station ");
+    printf("\n");
   } else if (pci_config_space_puclic->BaseClass == 0xB) {
-    printk("Processor ");
-    printk("\n");
+    printf("Processor ");
+    printf("\n");
   } else {
-    printk("Unknow\n");
+    printf("Unknow\n");
   }
 }

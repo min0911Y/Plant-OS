@@ -85,7 +85,7 @@ void Sputs(vram_t *vram, char *str, int x, int y, color_t col, int xsize);
 void putfonts_asc_sht(struct SHEET *sht, int x, int y, color_t c, color_t b, char *s, int l);
 void putfonts_asc(vram_t *vram, int xsize, int x, int y, color_t c, u8 *s);
 void putfont(vram_t *vram, int xsize, int x, int y, color_t c, char *font);
-void Draw_Line_32(uint8_t *Buffer, int x1, int y1, int x2, int y2, int r, int g, int b, int xsize);
+void Draw_Line_32(u8 *Buffer, int x1, int y1, int x2, int y2, int r, int g, int b, int xsize);
 void Draw_Line(vram_t *Buffer, int x1, int y1, int x2, int y2, color_t c, int xsize);
 // sheet.c
 struct SHEET  *sheet_alloc(struct SHTCTL *ctl);
@@ -105,19 +105,14 @@ void           Draw_Box_GraphicMode(struct tty *res, int x, int y, int x1, int y
 void           AddShell_GraphicMode();
 bool           now_tty_GraphicMode(struct tty *res);
 
-static inline uint32_t LCD_AlphaBlend(uint32_t foreground_color, uint32_t background_color,
-                                      uint8_t alpha) {
+static inline u32 LCD_AlphaBlend(u32 foreground_color, u32 background_color, u8 alpha) {
   if (alpha == 0xff) { return foreground_color; }
-  uint8_t *fg = (uint8_t *)&foreground_color;
-  uint8_t *bg = (uint8_t *)&background_color;
+  u8 *fg = (u8 *)&foreground_color;
+  u8 *bg = (u8 *)&background_color;
 
-  uint32_t rb = (((uint32_t)(*fg & 0xFF) * alpha) + ((uint32_t)(*bg & 0xFF) * (256 - alpha))) >> 8;
-  uint32_t g =
-      (((uint32_t)(*(fg + 1) & 0xFF) * alpha) + ((uint32_t)(*(bg + 1) & 0xFF) * (256 - alpha))) >>
-      8;
-  uint32_t a =
-      (((uint32_t)(*(fg + 2) & 0xFF) * alpha) + ((uint32_t)(*(bg + 2) & 0xFF) * (256 - alpha))) >>
-      8;
+  u32 rb = (((u32)(*fg & 0xFF) * alpha) + ((u32)(*bg & 0xFF) * (256 - alpha))) >> 8;
+  u32 g  = (((u32)(*(fg + 1) & 0xFF) * alpha) + ((u32)(*(bg + 1) & 0xFF) * (256 - alpha))) >> 8;
+  u32 a  = (((u32)(*(fg + 2) & 0xFF) * alpha) + ((u32)(*(bg + 2) & 0xFF) * (256 - alpha))) >> 8;
 
   return (rb & 0xFF) | ((g & 0xFF) << 8) | ((a & 0xFF) << 16);
 }

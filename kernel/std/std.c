@@ -286,14 +286,14 @@ static char *int64_to_str_dec(int64_t num, int flag, int width) {
   return 0;
 }
 
-static char *uint32_to_str_hex(uint32_t num, int flag, int width) {
-  uint32_t num_tmp   = num;
-  char    *p         = num_str_buf;
-  char    *q         = NULL;
-  int      len       = 0;
-  char    *str_first = NULL;
-  char    *str_end   = NULL;
-  char     ch        = 0;
+static char *uint32_to_str_hex(u32 num, int flag, int width) {
+  u32   num_tmp   = num;
+  char *p         = num_str_buf;
+  char *q         = NULL;
+  int   len       = 0;
+  char *str_first = NULL;
+  char *str_end   = NULL;
+  char  ch        = 0;
 
   memset(num_str_buf, 0, sizeof(num_str_buf));
 
@@ -424,14 +424,14 @@ static char *uint64_to_str_hex(uint64_t num, int flag, int width) {
   return str_first;
 }
 
-static char *uint32_to_str_oct(uint32_t num, int flag, int width) {
-  uint32_t num_tmp   = num;
-  char    *p         = num_str_buf;
-  char    *q         = NULL;
-  int      len       = 0;
-  char    *str_first = NULL;
-  char    *str_end   = NULL;
-  char     ch        = 0;
+static char *uint32_to_str_oct(u32 num, int flag, int width) {
+  u32   num_tmp   = num;
+  char *p         = num_str_buf;
+  char *q         = NULL;
+  int   len       = 0;
+  char *str_first = NULL;
+  char *str_end   = NULL;
+  char  ch        = 0;
 
   memset(num_str_buf, 0, sizeof(num_str_buf));
 
@@ -510,11 +510,11 @@ int vsprintf(char *buf, const char *fmt, va_list args) {
   char    *s         = NULL;
   char     ch        = 0;
   int8_t   num_8     = 0;
-  uint8_t  num_u8    = 0;
+  u8       num_u8    = 0;
   int16_t  num_16    = 0;
-  uint16_t num_u16   = 0;
+  u16      num_u16   = 0;
   int32_t  num_32    = 0;
-  uint32_t num_u32   = 0;
+  u32      num_u32   = 0;
   int64_t  num_64    = 0;
   uint64_t num_u64   = 0;
 
@@ -629,15 +629,15 @@ int vsprintf(char *buf, const char *fmt, va_list args) {
     case 'X':
       switch (int_type) {
       case INT_TYPE_CHAR:
-        num_u8 = (uint8_t)va_arg(args, uint32_t);
+        num_u8 = (u8)va_arg(args, u32);
         str    = insert_str(str, uint32_to_str_hex(num_u8, flag, tot_width));
         break;
       case INT_TYPE_SHORT:
-        num_u16 = (uint16_t)va_arg(args, uint32_t);
+        num_u16 = (u16)va_arg(args, u32);
         str     = insert_str(str, uint32_to_str_hex(num_u16, flag, tot_width));
         break;
       case INT_TYPE_INT:
-        num_u32 = va_arg(args, uint32_t);
+        num_u32 = va_arg(args, u32);
         str     = insert_str(str, uint32_to_str_hex(num_u32, flag, tot_width));
         break;
       case INT_TYPE_LONG:
@@ -651,25 +651,25 @@ int vsprintf(char *buf, const char *fmt, va_list args) {
       }
       break;
     case 'o':
-      num_u32 = va_arg(args, uint32_t);
+      num_u32 = va_arg(args, u32);
       str     = insert_str(str, uint32_to_str_oct(num_u32, flag, tot_width));
       break;
     case 'b':
 
       switch (int_type) {
       case INT_TYPE_CHAR:
-        num_u8 = (uint8_t)va_arg(args, uint32_t);
-        UInt2BinAscii((uint32_t)num_u8, buf2);
+        num_u8 = (u8)va_arg(args, u32);
+        UInt2BinAscii((u32)num_u8, buf2);
         str = insert_str(str, buf2);
         break;
       case INT_TYPE_SHORT:
-        num_u16 = (uint16_t)va_arg(args, uint32_t);
-        UInt2BinAscii((uint32_t)num_u16, buf2);
+        num_u16 = (u16)va_arg(args, u32);
+        UInt2BinAscii((u32)num_u16, buf2);
         str = insert_str(str, buf2);
         break;
       case INT_TYPE_INT:
-        num_u32 = va_arg(args, uint32_t);
-        UInt2BinAscii((uint32_t)num_u32, buf2);
+        num_u32 = va_arg(args, u32);
+        UInt2BinAscii((u32)num_u32, buf2);
         str = insert_str(str, buf2);
         break;
       default: str = insert_str(str, "invalid int type"); break;
@@ -720,12 +720,12 @@ int printk(const char *format, ...) {
   va_end(ap);
   return len;
 }
-void _ZdlPvj(void *ptr, uint32_t size) {
+void _ZdlPvj(void *ptr, u32 size) {
   logk("_ZdlPvj %08x %d\n", ptr, size);
   free(ptr);
 }
 // //_Znwj
-// void *_Znwj(uint32_t size) {
+// void *_Znwj(u32 size) {
 //   printk("_Znwj:%d\n", size);
 //   return malloc(size);
 // }

@@ -7,12 +7,12 @@ unsigned                 div_round_up(unsigned num, unsigned size);
 extern struct PAGE_INFO *pages;
 unsigned                 custom_handler     = 0;
 unsigned                 custom_handler_pde = 0;
-void   page_set_physics_attr_pde(uint32_t vaddr, void *paddr, uint32_t attr, unsigned pde_backup);
+void   page_set_physics_attr_pde(u32 vaddr, void *paddr, u32 attr, unsigned pde_backup);
 mtask *custom_handler_owner;
-void   kbd_press(uint8_t dat, uint32_t task) {
+void   kbd_press(u8 dat, u32 task) {
   fifo8_put(get_task(task)->Pkeyfifo, dat);
 }
-void kbd_up(uint8_t dat, uint32_t task) {
+void kbd_up(u8 dat, u32 task) {
   fifo8_put(get_task(task)->Ukeyfifo, dat);
 }
 void user_thread_into() {
@@ -33,23 +33,23 @@ void user_thread_into() {
   task_set_fifo(current_task(), (struct FIFO8 *)kfifo, (struct FIFO8 *)mfifo);
   char tmp[100];
   task_to_user_mode(eip, esp);
-  for (;;) {}
+  while (true) {}
 }
 
 void test(u32 b) {
   return;
 }
-void *mem_alloc_nb(memory *mem, uint32_t size, uint32_t n) {
+void *mem_alloc_nb(memory *mem, u32 size, u32 n) {
   size = (size + 0xfff) & 0xfffff000;
   return mem_alloc(mem, size);
 }
 
-void *malloc_app_heap(void *alloc_addr, uint32_t ds_base, uint32_t size) {
+void *malloc_app_heap(void *alloc_addr, u32 ds_base, u32 size) {
   void *p   = mem_alloc_nb(alloc_addr, size + sizeof(int), 0x1000);
   *(int *)p = size;
   return (char *)p + sizeof(int);
 }
-void free_app_heap(void *alloc_addr, uint32_t ds_base, void *p) {}
+void free_app_heap(void *alloc_addr, u32 ds_base, void *p) {}
 enum {
   EDI,
   ESI,
@@ -123,7 +123,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
       int    by  = my1;
       int    bmp = *(char *)(task->TTY->vram + by * task->TTY->xsize * 2 + bx * 2 + 1);
       if (mdec.sleep == 1) mouse_ready(&mdec);
-      for (;;) {
+      while (true) {
         if (fifo8_status(task_get_mouse_fifo(task)) == 0) {
           task_next();
           signal_deal();
@@ -284,7 +284,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
     // i->eip = test;
     // i->esp = frame;
     // return;
-    // for (;;)
+    // while (true)
     //   ;
     if (!(*(u8 *)(0xf0000000))) {
       logk("here\n");
@@ -303,7 +303,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
     //  for(;;);
     asm volatile("nop");
     task_exit(ebx);
-    for (;;)
+    while (true)
       ;
   } else if (eax == 0x20) {
     // VBE驱动API
@@ -364,9 +364,9 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
       for (int i = DIDX(0x70000000) * 4; i < 0x1000; i += 4) {
         u32 *pde_entry = (u32 *)(pde + i);
         if (pages[IDX(*pde_entry)].count > 1 && !(*pde_entry & PG_SHARED)) {
-          uint32_t old  = *pde_entry & 0xfffff000;
-          uint32_t attr = *pde_entry & 0xfff;
-          *pde_entry    = (unsigned)page_malloc_one_count_from_4gb();
+          u32 old    = *pde_entry & 0xfffff000;
+          u32 attr   = *pde_entry & 0xfff;
+          *pde_entry = (unsigned)page_malloc_one_count_from_4gb();
           memcpy((void *)(*pde_entry), (void *)old, 0x1000);
           pages[IDX(old)].count--;
           *pde_entry |= attr;
@@ -386,7 +386,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
       set_cr3(pde);
       io_sti();
       logk("OK\n");
-      // for (;;)
+      // while (true)
       //   ;
       mtask *t      = create_task(user_thread_into, (unsigned)0, 1, 1);
       init_ok_flag  = 1;
@@ -567,7 +567,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
     reg[EAX] = memsize;
   } else if (eax == 0x3f) {
     extern struct PAGE_INFO *pages;
-    uint32_t                 r = 0;
+    u32                      r = 0;
     for (int i = 0; i < div_round_up(memsize, 0x1000); i++) {
       if (pages[i].count) { r++; }
     }

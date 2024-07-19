@@ -45,10 +45,10 @@ extern int              gmx, gmy;
 extern u8              *font, *ascfont, *hzkfont;
 extern struct TIMERCTL  timerctl;
 extern u32              memsize;
-extern uint32_t         running_mode;
+extern u32              running_mode;
 struct PAGE_INFO {
-  uint8_t task_id;
-  uint8_t count;
+  u8 task_id;
+  u8 count;
 } __PACKED__;
 
 #define FREE_MAX_NUM              4096
@@ -57,8 +57,8 @@ struct PAGE_INFO {
 #define ERRNO_NO_MORE_FREE_MEMBER 2
 #define MEM_MAX(a, b)             ((a) > (b) ? (a) : (b))
 typedef struct {
-  uint32_t start;
-  uint32_t end; // end和start都等于0说明这个free结构没有使用
+  u32 start;
+  u32 end; // end和start都等于0说明这个free结构没有使用
 } free_member;
 typedef struct freeinfo freeinfo;
 typedef struct freeinfo {
@@ -70,14 +70,14 @@ typedef struct {
   int       memerrno;
 } memory;
 struct SEGMENT_DESCRIPTOR {
-  short limit_low, base_low;
-  char  base_mid, access_right;
-  char  limit_high, base_high;
+  i16  limit_low, base_low;
+  char base_mid, access_right;
+  char limit_high, base_high;
 };
 struct GATE_DESCRIPTOR {
-  short offset_low, selector;
-  char  dw_count, access_right;
-  short offset_high;
+  i16  offset_low, selector;
+  char dw_count, access_right;
+  i16  offset_high;
 };
 #define MAX_TIMER 500
 struct mtask;
@@ -141,17 +141,17 @@ enum {
   CR0_PG = 1 << 31, // Paging 启用分页
 };
 typedef struct fpu_t {
-  uint16_t control;
-  uint16_t RESERVED1;
-  uint16_t status;
-  uint16_t RESERVED2;
-  uint16_t tag;
-  uint16_t RESERVED3;
-  uint32_t fip0;
-  uint32_t fop0;
-  uint32_t fdp0;
-  uint32_t fdp1;
-  uint8_t  regs[80];
+  u16 control;
+  u16 RESERVED1;
+  u16 status;
+  u16 RESERVED2;
+  u16 tag;
+  u16 RESERVED3;
+  u32 fip0;
+  u32 fop0;
+  u32 fdp0;
+  u32 fdp1;
+  u8  regs[80];
 } _packed fpu_t;
 // struct TASK {
 //   int sel, sleep, level;
@@ -169,34 +169,34 @@ typedef struct fpu_t {
 //   struct TIMER *timer;
 //   int esp_start; // 开始的esp
 //   int eip_start; // 开始的eip
-//   short cs_start;
-//   short ss_start;
+//   i16 cs_start;
+//   i16 ss_start;
 //   int is_child; // 是子线程吗
 //   int app;
 //   struct THREAD thread;
 //   int drive_number;
 //   char drive;
 //   char *line;
-//   void (*keyboard_press)(u8 data, uint32_t task);
-//   void (*keyboard_release)(u8 data, uint32_t task);
+//   void (*keyboard_press)(u8 data, u32 task);
+//   void (*keyboard_release)(u8 data, u32 task);
 //   int nl;
 //   int lock; // 被锁住了？
 //   char forever;
 //   int DisableExpFlag;
-//   uint32_t CatchEIP;
+//   u32 CatchEIP;
 //   char flagOfexp;
 //   int mx, my;
 //   fpu_t *fpu;
 //   struct vfs_t *nfs;
 //   int fpu_flag;
 //   struct FIFO8 *Pkeyfifo, *Ukeyfifo;
-//   uint32_t fpu_use;
-//   uint32_t *gdt_data;
-//   uint32_t pde;
+//   u32 fpu_use;
+//   u32 *gdt_data;
+//   u32 pde;
 // } __PACKED__;
 typedef struct {
-  uint32_t eax, ebx, ecx, edx, esi, edi, ebp;
-  uint32_t eip;
+  u32 eax, ebx, ecx, edx, esi, edi, ebp;
+  u32 eip;
 } stack_frame;
 enum STATE {
   EMPTY,
@@ -221,12 +221,12 @@ typedef struct mtask {
   struct vfs_t *nfs;
   uint64_t      tid, ptid;
   memory       *mm;
-  uint32_t      alloc_addr;
-  uint32_t     *alloc_size;
-  uint32_t      alloced;
+  u32           alloc_addr;
+  u32          *alloc_size;
+  u32           alloced;
   struct tty   *TTY;
   int           DisableExpFlag;
-  uint32_t      CatchEIP;
+  u32           CatchEIP;
   char          flagOfexp;
   fpu_t         fpu;
   int           fpu_flag;
@@ -235,17 +235,17 @@ typedef struct mtask {
   struct FIFO8 *Pkeyfifo, *Ukeyfifo;
   struct FIFO8 *keyfifo, *mousefifo; // 基本输入设备的缓冲区
   char          urgent;
-  void (*keyboard_press)(u8 data, uint32_t task);
-  void (*keyboard_release)(u8 data, uint32_t task);
+  void (*keyboard_press)(u8 data, u32 task);
+  void (*keyboard_release)(u8 data, u32 task);
   char          fifosleep;
   int           mx, my;
   char         *line;
   struct TIMER *timer;
   IPC_Header    ipc_header;
-  uint32_t      waittid;
+  u32           waittid;
   int           ready; // 如果为waiting 则无视wating
   int           sigint_up;
-  uint8_t       train; // 轮询
+  u8            train; // 轮询
   unsigned      status;
   unsigned      signal;
   unsigned      handler[30];
@@ -310,7 +310,7 @@ typedef struct List List;
 
 /* fs.h */
 
-extern uint32_t Path_Addr;
+extern u32 Path_Addr;
 struct FAT_CACHE {
   u32                  ADR_DISKIMG;
   struct FAT_FILEINFO *root_directory;
@@ -352,11 +352,11 @@ typedef struct {
   u16   hour, minute;
 } vfs_file;
 typedef struct vfs_t {
-  List   *path;
-  void   *cache;
-  char    FSName[255];
-  int     disk_number;
-  uint8_t drive; // 大写（必须）
+  List *path;
+  void *cache;
+  char  FSName[255];
+  int   disk_number;
+  u8    drive; // 大写（必须）
   vfs_file *(*FileInfo)(struct vfs_t *vfs, char *filename);
   List *(*ListFile)(struct vfs_t *vfs, char *dictpath);
   bool (*ReadFile)(struct vfs_t *vfs, char *path, char *buffer);
@@ -367,10 +367,10 @@ typedef struct vfs_t {
   bool (*CreateDict)(struct vfs_t *vfs, char *filename);
   bool (*RenameFile)(struct vfs_t *vfs, char *filename, char *filename_of_new);
   bool (*Attrib)(struct vfs_t *vfs, char *filename, ftype type);
-  bool (*Format)(uint8_t disk_number);
-  void (*InitFs)(struct vfs_t *vfs, uint8_t disk_number);
+  bool (*Format)(u8 disk_number);
+  void (*InitFs)(struct vfs_t *vfs, u8 disk_number);
   void (*DeleteFs)(struct vfs_t *vfs);
-  bool (*Check)(uint8_t disk_number);
+  bool (*Check)(u8 disk_number);
   bool (*cd)(struct vfs_t *vfs, char *dictName);
   int (*FileSize)(struct vfs_t *vfs, char *filename);
   void (*CopyCache)(struct vfs_t *dest, struct vfs_t *src);
@@ -746,10 +746,10 @@ typedef struct {
   VESAModeInfo       modeList[0];
 } __PACKED__ VESAControllerInfo;
 struct VBEINFO {
-  char  res1[18];
-  short xsize, ysize;
-  char  res2[18];
-  int   vram;
+  char res1[18];
+  i16  xsize, ysize;
+  char res2[18];
+  int  vram;
 };
 #define VBEINFO_ADDRESS                    0x7e00
 #define VGA_AC_INDEX                       0x3C0
@@ -816,21 +816,21 @@ struct arg_struct {
 };
 struct InitializationBlock {
   // 链接器所迫 只能这么写了
-  uint16_t mode;
-  uint8_t  reserved1numSendBuffers;
-  uint8_t  reserved2numRecvBuffers;
-  uint8_t  mac0, mac1, mac2, mac3, mac4, mac5;
-  uint16_t reserved3;
+  u16      mode;
+  u8       reserved1numSendBuffers;
+  u8       reserved2numRecvBuffers;
+  u8       mac0, mac1, mac2, mac3, mac4, mac5;
+  u16      reserved3;
   uint64_t logicalAddress;
-  uint32_t recvBufferDescAddress;
-  uint32_t sendBufferDescAddress;
+  u32      recvBufferDescAddress;
+  u32      sendBufferDescAddress;
 } __PACKED__;
 
 struct BufferDescriptor {
-  uint32_t address;
-  uint32_t flags;
-  uint32_t flags2;
-  uint32_t avail;
+  u32 address;
+  u32 flags;
+  u32 flags2;
+  u32 avail;
 } __PACKED__;
 
 struct IDEHardDiskInfomationBlock {
@@ -857,28 +857,28 @@ struct IDEHardDiskInfomationBlock {
 #define swap16(x) ((((x)&0xff00) >> 8) | (((x)&0x00ff) << 8))
 // 以太网帧
 struct EthernetFrame_head {
-  uint8_t  dest_mac[6];
-  uint8_t  src_mac[6];
-  uint16_t type;
+  u8  dest_mac[6];
+  u8  src_mac[6];
+  u16 type;
 } __PACKED__;
 // 以太网帧--尾部
 struct EthernetFrame_tail {
-  uint32_t CRC; // 这里可以填写为0，网卡会自动计算
+  u32 CRC; // 这里可以填写为0，网卡会自动计算
 };
 // ARP
 #define ARP_PROTOCOL  0x0806
 #define MAX_ARP_TABLE 256
 #define ARP_WAITTIME  1
 struct ARPMessage {
-  uint16_t hardwareType;
-  uint16_t protocol;
-  uint8_t  hardwareAddressSize;
-  uint8_t  protocolAddressSize;
-  uint16_t command;
-  uint8_t  src_mac[6];
-  uint32_t src_ip;
-  uint8_t  dest_mac[6];
-  uint32_t dest_ip;
+  u16 hardwareType;
+  u16 protocol;
+  u8  hardwareAddressSize;
+  u8  protocolAddressSize;
+  u16 command;
+  u8  src_mac[6];
+  u32 src_ip;
+  u8  dest_mac[6];
+  u32 dest_ip;
 } __PACKED__;
 // IPV4
 #define IP_PROTOCOL 0x0800
@@ -887,26 +887,26 @@ struct ARPMessage {
 #define IP_DF       14
 #define IP_OFFSET   0
 struct IPV4Message {
-  uint8_t  headerLength : 4;
-  uint8_t  version      : 4;
-  uint8_t  tos;
-  uint16_t totalLength;
-  uint16_t ident;
-  uint16_t flagsAndOffset;
-  uint8_t  timeToLive;
-  uint8_t  protocol;
-  uint16_t checkSum;
-  uint32_t srcIP;
-  uint32_t dstIP;
+  u8  headerLength : 4;
+  u8  version      : 4;
+  u8  tos;
+  u16 totalLength;
+  u16 ident;
+  u16 flagsAndOffset;
+  u8  timeToLive;
+  u8  protocol;
+  u16 checkSum;
+  u32 srcIP;
+  u32 dstIP;
 } __PACKED__;
 // ICMP
 #define ICMP_PROTOCOL 1
 struct ICMPMessage {
-  uint8_t  type;
-  uint8_t  code;
-  uint16_t checksum;
-  uint16_t ID;
-  uint16_t sequence;
+  u8  type;
+  u8  code;
+  u16 checksum;
+  u16 ID;
+  u16 sequence;
 } __PACKED__;
 #define PING_WAITTIME 200
 #define PING_ID       0x0038
@@ -916,32 +916,32 @@ struct ICMPMessage {
 // UDP
 #define UDP_PROTOCOL  17
 struct UDPMessage {
-  uint16_t srcPort;
-  uint16_t dstPort;
-  uint16_t length;
-  uint16_t checkSum;
+  u16 srcPort;
+  u16 dstPort;
+  u16 length;
+  u16 checkSum;
 } __PACKED__;
 // DHCP
 #define DHCP_CHADDR_LEN 16
 #define DHCP_SNAME_LEN  64
 #define DHCP_FILE_LEN   128
 struct DHCPMessage {
-  uint8_t  opcode;
-  uint8_t  htype;
-  uint8_t  hlen;
-  uint8_t  hops;
-  uint32_t xid;
-  uint16_t secs;
-  uint16_t flags;
-  uint32_t ciaddr;
-  uint32_t yiaddr;
-  uint32_t siaddr;
-  uint32_t giaddr;
-  uint8_t  chaddr[DHCP_CHADDR_LEN];
-  char     bp_sname[DHCP_SNAME_LEN];
-  char     bp_file[DHCP_FILE_LEN];
-  uint32_t magic_cookie;
-  uint8_t  bp_options[0];
+  u8   opcode;
+  u8   htype;
+  u8   hlen;
+  u8   hops;
+  u32  xid;
+  u16  secs;
+  u16  flags;
+  u32  ciaddr;
+  u32  yiaddr;
+  u32  siaddr;
+  u32  giaddr;
+  u8   chaddr[DHCP_CHADDR_LEN];
+  char bp_sname[DHCP_SNAME_LEN];
+  char bp_file[DHCP_FILE_LEN];
+  u32  magic_cookie;
+  u8   bp_options[0];
 } __PACKED__;
 #define DHCP_BOOTREQUEST 1
 #define DHCP_BOOTREPLY   2
@@ -997,33 +997,33 @@ struct DHCPMessage {
 #define DNS_PORT      53
 #define DNS_SERVER_IP 0x08080808
 struct DNS_Header {
-  uint16_t ID;
-  uint8_t  RD     : 1;
-  uint8_t  AA     : 1;
-  uint8_t  Opcode : 4;
-  uint8_t  QR     : 1;
-  uint8_t  RCODE  : 4;
-  uint8_t  Z      : 3;
-  uint8_t  RA     : 1;
-  uint8_t  TC     : 1;
-  uint16_t QDcount;
-  uint16_t ANcount;
-  uint16_t NScount;
-  uint16_t ARcount;
-  uint8_t  reserved;
+  u16 ID;
+  u8  RD     : 1;
+  u8  AA     : 1;
+  u8  Opcode : 4;
+  u8  QR     : 1;
+  u8  RCODE  : 4;
+  u8  Z      : 3;
+  u8  RA     : 1;
+  u8  TC     : 1;
+  u16 QDcount;
+  u16 ANcount;
+  u16 NScount;
+  u16 ARcount;
+  u8  reserved;
 } __PACKED__;
 struct DNS_Question {
-  uint16_t type;
-  uint16_t Class;
+  u16 type;
+  u16 Class;
 } __PACKED__;
 struct DNS_Answer {
-  uint32_t name : 24;
-  uint16_t type;
-  uint16_t Class;
-  uint32_t TTL;
-  uint16_t RDlength;
-  uint8_t  reserved;
-  uint8_t  RData[0];
+  u32 name : 24;
+  u16 type;
+  u16 Class;
+  u32 TTL;
+  u16 RDlength;
+  u8  reserved;
+  u8  RData[0];
 } __PACKED__;
 // TCP
 #define TCP_PROTOCOL         6
@@ -1031,54 +1031,54 @@ struct DNS_Answer {
 #define MSS_Default          1460
 #define TCP_SEG_WAITTIME     10
 struct TCPPesudoHeader {
-  uint32_t srcIP;
-  uint32_t dstIP;
-  uint16_t protocol;
-  uint16_t totalLength;
+  u32 srcIP;
+  u32 dstIP;
+  u16 protocol;
+  u16 totalLength;
 } __PACKED__;
 struct TCPMessage {
-  uint16_t srcPort;
-  uint16_t dstPort;
-  uint32_t seqNum;
-  uint32_t ackNum;
-  uint8_t  reserved     : 4;
-  uint8_t  headerLength : 4;
-  uint8_t  FIN          : 1;
-  uint8_t  SYN          : 1;
-  uint8_t  RST          : 1;
-  uint8_t  PSH          : 1;
-  uint8_t  ACK          : 1;
-  uint8_t  URG          : 1;
-  uint8_t  ECE          : 1;
-  uint8_t  CWR          : 1;
-  uint16_t window;
-  uint16_t checkSum;
-  uint16_t pointer;
-  uint32_t options[0];
+  u16 srcPort;
+  u16 dstPort;
+  u32 seqNum;
+  u32 ackNum;
+  u8  reserved     : 4;
+  u8  headerLength : 4;
+  u8  FIN          : 1;
+  u8  SYN          : 1;
+  u8  RST          : 1;
+  u8  PSH          : 1;
+  u8  ACK          : 1;
+  u8  URG          : 1;
+  u8  ECE          : 1;
+  u8  CWR          : 1;
+  u16 window;
+  u16 checkSum;
+  u16 pointer;
+  u32 options[0];
 } __PACKED__;
 // Socket
 #define MAX_SOCKET_NUM 256
 struct Socket {
   // 函数格式
-  int (*Connect)(struct Socket *socket);                             // TCP
-  void (*Disconnect)(struct Socket *socket);                         // TCP
-  void (*Listen)(struct Socket *socket);                             // TCP
-  void (*Send)(struct Socket *socket, uint8_t *data, uint32_t size); // TCP/UDP
-  void (*Handler)(struct Socket *socket, void *base);                // TCP/UDP
+  int (*Connect)(struct Socket *socket);                   // TCP
+  void (*Disconnect)(struct Socket *socket);               // TCP
+  void (*Listen)(struct Socket *socket);                   // TCP
+  void (*Send)(struct Socket *socket, u8 *data, u32 size); // TCP/UDP
+  void (*Handler)(struct Socket *socket, void *base);      // TCP/UDP
   // TCP/UDP
-  uint32_t remoteIP;
-  uint16_t remotePort;
-  uint32_t localIP;
-  uint16_t localPort;
-  uint8_t  state;
-  uint8_t  protocol;
+  u32   remoteIP;
+  u16   remotePort;
+  u32   localIP;
+  u16   localPort;
+  u8    state;
+  u8    protocol;
   // TCP
-  uint32_t seqNum;
-  uint32_t ackNum;
-  uint16_t MSS;
-  int      flag; // 1 有包 0 没包
-  int      size;
-  char    *buf;
+  u32   seqNum;
+  u32   ackNum;
+  u16   MSS;
+  int   flag; // 1 有包 0 没包
+  int   size;
+  char *buf;
 } __PACKED__;
 // UDP state
 #define SOCKET_ALLOC              -1
@@ -1100,8 +1100,8 @@ struct Socket {
 #define SOCKET_SERVER_MAX_CONNECT 32
 struct SocketServer {
   struct Socket *socket[SOCKET_SERVER_MAX_CONNECT];
-  void (*Send)(struct SocketServer *server, uint8_t *data,
-               uint32_t size); // TCP/UDP
+  void (*Send)(struct SocketServer *server, u8 *data,
+               u32 size); // TCP/UDP
 };
 // Http
 typedef struct HTTPGetHeader {
@@ -1110,15 +1110,15 @@ typedef struct HTTPGetHeader {
 } HTTPGetHeader;
 // ntp
 struct NTPMessage {
-  uint8_t  VN   : 3;
-  uint8_t  LI   : 2;
-  uint8_t  Mode : 3;
-  uint8_t  Startum;
-  uint8_t  Poll;
-  uint8_t  Precision;
-  uint32_t Root_Delay;
-  uint32_t Root_Difference;
-  uint32_t Root_Identifier;
+  u8       VN   : 3;
+  u8       LI   : 2;
+  u8       Mode : 3;
+  u8       Startum;
+  u8       Poll;
+  u8       Precision;
+  u32      Root_Delay;
+  u32      Root_Difference;
+  u32      Root_Identifier;
   uint64_t Reference_Timestamp;
   uint64_t Originate_Timestamp;
   uint64_t Receive_Timestamp;
@@ -1132,23 +1132,23 @@ struct NTPMessage {
 #define FTP_SERVER_DATA_PORT    20
 #define FTP_SERVER_COMMAND_PORT 21
 struct FTP_Client {
-  int (*Login)(struct FTP_Client *ftp_c_, uint8_t *user, uint8_t *pass);
+  int (*Login)(struct FTP_Client *ftp_c_, u8 *user, u8 *pass);
   int (*TransModeChoose)(struct FTP_Client *ftp_c_, int mode);
   void (*Logout)(struct FTP_Client *ftp_c_);
-  int (*Download)(struct FTP_Client *ftp_c_, uint8_t *path_pdos, uint8_t *path_ftp, int mode);
-  int (*Upload)(struct FTP_Client *ftp_c_, uint8_t *path_pdos, uint8_t *path_ftp, int mode);
-  int (*Delete)(struct FTP_Client *ftp_c_, uint8_t *path_ftp);
-  uint8_t *(*Getlist)(struct FTP_Client *ftp_c_);
+  int (*Download)(struct FTP_Client *ftp_c_, u8 *path_pdos, u8 *path_ftp, int mode);
+  int (*Upload)(struct FTP_Client *ftp_c_, u8 *path_pdos, u8 *path_ftp, int mode);
+  int (*Delete)(struct FTP_Client *ftp_c_, u8 *path_ftp);
+  u8 *(*Getlist)(struct FTP_Client *ftp_c_);
   struct Socket *socket_cmd;
   struct Socket *socket_dat;
   bool           is_using;
   bool           is_login;
-  uint8_t       *recv_buf_cmd;
+  u8            *recv_buf_cmd;
   bool           recv_flag_cmd;
-  uint32_t       reply_code;
-  uint8_t       *recv_buf_dat;
+  u32            reply_code;
+  u8            *recv_buf_dat;
   bool           recv_flag_dat;
-  uint32_t       recv_dat_size;
+  u32            recv_dat_size;
 };
 typedef struct {
   void (*Read)(char drive, u8 *buffer, u32 number, u32 lba);

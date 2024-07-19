@@ -397,7 +397,7 @@ do_init_seg_register:
   mov fs,ax
   popa
   ret
-; extern void entering_v86(uint32_t ss, uint32_t esp, uint32_t cs, uint32_t eip);
+; extern void entering_v86(u32 ss, u32 esp, u32 cs, u32 eip);
 entering_v86:
    mov ebp, esp               ; save stack pointer
 

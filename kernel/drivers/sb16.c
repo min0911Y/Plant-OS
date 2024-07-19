@@ -6,15 +6,15 @@
 #include <drivers.h>
 
 struct WAV16_HEADER {
-  char  riff[4];
-  int   size;
-  char  wave[4];
-  char  fmt[4];
-  int   fmt_size;
-  short format;
-  short channel;
-  int   sample_rate;
-  int   byte_per_sec;
+  char riff[4];
+  int  size;
+  char wave[4];
+  char fmt[4];
+  int  fmt_size;
+  i16  format;
+  i16  channel;
+  int  sample_rate;
+  int  byte_per_sec;
 } __attribute__((packed));
 #define SB_MIXER      0x224 // DSP 混合器端口
 #define SB_MIXER_DATA 0x225 // DSP 混合器数据端口
@@ -60,12 +60,12 @@ struct WAV16_HEADER {
 #define SAMPLE_RATE 44100 // 采样率
 
 struct sb16 {
-  mtask  *use_task;
-  int     status;
-  char   *addr;    // DMA 地址
-  uint8_t mode;    // 模式
-  uint8_t channel; // DMA 通道
-  uint8_t flag;
+  mtask *use_task;
+  int    status;
+  char  *addr;    // DMA 地址
+  u8     mode;    // 模式
+  u8     channel; // DMA 通道
+  u8     flag;
 };
 struct sb16 sb;
 void        sb16_handler(int *esp) {
@@ -73,7 +73,7 @@ void        sb16_handler(int *esp) {
 
   io_in8(SB_INTR16);
 
-  uint8_t state = io_in8(SB_STATE);
+  u8 state = io_in8(SB_STATE);
 
   logk("sb16 handler state 0x%X...\n", state);
   sb.flag = !sb.flag;
@@ -91,20 +91,20 @@ static void sb_reset() {
   io_out8(SB_RESET, 1);
   sleep(1);
   io_out8(SB_RESET, 0);
-  uint8_t state = io_in8(SB_READ);
+  u8 state = io_in8(SB_READ);
   logk("sb16 reset state 0x%x\n", state);
 }
 
 static void sb_intr_irq() {
   io_out8(SB_MIXER, 0x80);
-  uint8_t data = io_in8(SB_MIXER_DATA);
+  u8 data = io_in8(SB_MIXER_DATA);
   if (data != 2) {
     io_out8(SB_MIXER, 0x80);
     io_out8(SB_MIXER_DATA, 0x2);
   }
 }
 
-static void sb_out(uint8_t cmd) {
+static void sb_out(u8 cmd) {
   while (io_in8(SB_WRITE) & 128)
     ;
   io_out8(SB_WRITE, cmd);
@@ -117,11 +117,11 @@ static void sb_turn(bool on) {
     sb_out(CMD_OFF);
 }
 
-static uint32_t sb_time_constant(uint8_t channels, uint16_t sample) {
+static u32 sb_time_constant(u8 channels, u16 sample) {
   return 65536 - (256000000 / (channels * sample));
 }
 
-static void sb_set_volume(uint8_t level) {
+static void sb_set_volume(u8 level) {
   logk("set sb16 volume to 0x%02X\n", level);
   io_out8(SB_MIXER, 0x22);
   io_out8(SB_MIXER_DATA, level);
@@ -152,7 +152,7 @@ int sb16_set(int cmd, void *args) {
     sb.mode    = MODE_STEREO16;
     sb.channel = 5;
     return 0;
-  case 4: sb_set_volume((uint32_t)args & 0xff); return 0;
+  case 4: sb_set_volume((u32)args & 0xff); return 0;
   default: break;
   }
   return -1;

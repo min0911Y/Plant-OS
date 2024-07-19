@@ -97,7 +97,7 @@ struct ide_device {
   u32 Size;         // Size in Sectors.
   u8  Model[41];    // Model in string.
 } ide_devices[4];
-static inline void insl(uint32_t port, uint32_t *addr, int cnt) {
+static inline void insl(u32 port, u32 *addr, int cnt) {
   asm volatile("cld;"
                "repne; insl;"
                : "=D"(addr), "=c"(cnt)
@@ -370,7 +370,7 @@ u8 ide_print_error(u32 drive, u8 err) {
 
   return err;
 }
-// static inline void insl(uint32_t port, void *addr, int cnt) {
+// static inline void insl(u32 port, void *addr, int cnt) {
 //   asm volatile("cld;"
 //                "repne; insl;"
 //                : "=D"(addr), "=c"(cnt)
@@ -474,7 +474,7 @@ u8 ide_ata_access(u8 direction, u8 drive, u32 lba, u8 numsects, u16 selector, u3
     int bmp_ticks           = current_task()->timeout;
     current_task()->timeout = 50;
     current_task()->running = 0;
-    uint16_t *word_         = edi;
+    u16 *word_              = edi;
     for (i = 0; i < numsects; i++) {
       logk("read %d\n", i);
       if (err = ide_polling(channel, 1)) return err; // Polling, set error and exit if there is.
@@ -492,7 +492,7 @@ u8 ide_ata_access(u8 direction, u8 drive, u32 lba, u8 numsects, u16 selector, u3
     int bmp_ticks           = current_task()->timeout;
     current_task()->timeout = 50;
     current_task()->running = 0;
-    uint16_t *word_         = edi;
+    u16 *word_              = edi;
     for (i = 0; i < numsects; i++) {
       logk("write %d\n", i);
       ide_polling(channel, 0); // Polling.
@@ -584,20 +584,20 @@ u8 ide_atapi_read(u8 drive, u32 lba, u8 numsects, u16 selector, u32 edi) {
   // (VIII): Sending the packet data:
   // ------------------------------------------------------------------
   logk("VIII\n");
-  uint16_t *_atapi_packet = atapi_packet;
+  u16 *_atapi_packet = atapi_packet;
   for (int i = 0; i < 6; i++) {
     io_out16(bus, _atapi_packet[i]);
   }
   // (IX): Receiving Data:
   // ------------------------------------------------------------------
   logk("IX\n");
-  uint16_t *_word = edi;
+  u16 *_word = edi;
   for (i = 0; i < numsects; i++) {
     ide_wait_irq();                                // Wait for an IRQ.
     if (err = ide_polling(channel, 1)) return err; // Polling and return if error.
     logk("words = %d\n", words);
     for (int h = 0; h < words; h++) {
-      uint16_t a           = io_in16(bus);
+      u16 a                = io_in16(bus);
       _word[i * words + h] = a;
     }
   }

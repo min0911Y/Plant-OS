@@ -8,10 +8,10 @@ typedef struct {
   u8 *ok_flag;
 } packet_header;
 typedef struct {
-  uint8_t  res[2];
-  uint16_t sectors_of_number;
-  uint16_t off;
-  uint16_t seg;
+  u8       res[2];
+  u16      sectors_of_number;
+  u16      off;
+  u16      seg;
   uint64_t lba;
 } __attribute__((packed)) packet;
 

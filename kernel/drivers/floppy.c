@@ -452,7 +452,7 @@ int write_block(int block, u8 *blockbuff, u32 nosectors) {
 int write_floppy_for_ths(int track, int head, int sec, u8 *blockbuff, u32 nosec) {
   int res = fdc_rw_ths(track, head, sec, blockbuff, 0, nosec);
 }
-#define N(H, L) ((uint16_t)(H) << 8 | (uint16_t)(L))
+#define N(H, L) ((u16)(H) << 8 | (u16)(L))
 void bios_fdc_rw(int block, u8 *blockbuff, int read, u32 nosectors) {
   int head, track, sector, tries, copycount = 0;
   u8 *p_tbaddr    = (char *)0x7e00; // 512byte

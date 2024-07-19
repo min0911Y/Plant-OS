@@ -69,7 +69,7 @@ void sysinit() {
   mouse_sleep(&mdec);
 
   heap        = page_malloc(128 * 1024 * 1024);
-  public_heap = memory_init((uint32_t)heap, 128 * 1024 * 1024);
+  public_heap = memory_init((u32)heap, 128 * 1024 * 1024);
   init_tty();
   clear();
   printk("Welcome to Plant OS Kernel!!!!!!\n");
@@ -121,6 +121,6 @@ void sysinit() {
   }
   printk("base count is %08x\n", base_count);
   into_mtask();
-  for (;;)
+  while (true)
     ;
 }

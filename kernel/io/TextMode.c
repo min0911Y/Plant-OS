@@ -96,7 +96,7 @@ void AddShell_TextMode() {
   // void *alloc_addr = (void *)page_malloc(512 * 1024);
   // ntask->alloc_addr = alloc_addr;
   // ntask->alloc_size = 512 * 1024;
-  // ntask->mm = memory_init((uint32_t)alloc_addr, 512 * 1024);
+  // ntask->mm = memory_init((u32)alloc_addr, 512 * 1024);
   // ntask->fifosleep = 3;
   // int fg = tty_set(ntask, ntty);
   // //  printk("set vram = %08x\n",ntty->vram);

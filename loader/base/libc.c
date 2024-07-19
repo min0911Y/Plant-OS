@@ -283,14 +283,14 @@ static char *int64_to_str_dec(int64_t num, int flag, int width) {
   return 0;
 }
 
-static char *uint32_to_str_hex(uint32_t num, int flag, int width) {
-  uint32_t num_tmp   = num;
-  char    *p         = num_str_buf;
-  char    *q         = NULL;
-  int      len       = 0;
-  char    *str_first = NULL;
-  char    *str_end   = NULL;
-  char     ch        = 0;
+static char *uint32_to_str_hex(u32 num, int flag, int width) {
+  u32   num_tmp   = num;
+  char *p         = num_str_buf;
+  char *q         = NULL;
+  int   len       = 0;
+  char *str_first = NULL;
+  char *str_end   = NULL;
+  char  ch        = 0;
 
   memset(num_str_buf, 0, sizeof(num_str_buf));
 
@@ -421,14 +421,14 @@ static char *uint64_to_str_hex(uint64_t num, int flag, int width) {
   return str_first;
 }
 
-static char *uint32_to_str_oct(uint32_t num, int flag, int width) {
-  uint32_t num_tmp   = num;
-  char    *p         = num_str_buf;
-  char    *q         = NULL;
-  int      len       = 0;
-  char    *str_first = NULL;
-  char    *str_end   = NULL;
-  char     ch        = 0;
+static char *uint32_to_str_oct(u32 num, int flag, int width) {
+  u32   num_tmp   = num;
+  char *p         = num_str_buf;
+  char *q         = NULL;
+  int   len       = 0;
+  char *str_first = NULL;
+  char *str_end   = NULL;
+  char  ch        = 0;
 
   memset(num_str_buf, 0, sizeof(num_str_buf));
 
@@ -507,11 +507,11 @@ int vsprintf(char *buf, const char *fmt, va_list args) {
   char    *s         = NULL;
   char     ch        = 0;
   int8_t   num_8     = 0;
-  uint8_t  num_u8    = 0;
+  u8       num_u8    = 0;
   int16_t  num_16    = 0;
-  uint16_t num_u16   = 0;
+  u16      num_u16   = 0;
   int32_t  num_32    = 0;
-  uint32_t num_u32   = 0;
+  u32      num_u32   = 0;
   int64_t  num_64    = 0;
   uint64_t num_u64   = 0;
 
@@ -626,15 +626,15 @@ int vsprintf(char *buf, const char *fmt, va_list args) {
     case 'X':
       switch (int_type) {
       case INT_TYPE_CHAR:
-        num_u8 = (uint8_t)va_arg(args, uint32_t);
+        num_u8 = (u8)va_arg(args, u32);
         str    = insert_str(str, uint32_to_str_hex(num_u8, flag, tot_width));
         break;
       case INT_TYPE_SHORT:
-        num_u16 = (uint16_t)va_arg(args, uint32_t);
+        num_u16 = (u16)va_arg(args, u32);
         str     = insert_str(str, uint32_to_str_hex(num_u16, flag, tot_width));
         break;
       case INT_TYPE_INT:
-        num_u32 = va_arg(args, uint32_t);
+        num_u32 = va_arg(args, u32);
         str     = insert_str(str, uint32_to_str_hex(num_u32, flag, tot_width));
         break;
       case INT_TYPE_LONG:
@@ -648,7 +648,7 @@ int vsprintf(char *buf, const char *fmt, va_list args) {
       }
       break;
     case 'o':
-      num_u32 = va_arg(args, uint32_t);
+      num_u32 = va_arg(args, u32);
       str     = insert_str(str, uint32_to_str_oct(num_u32, flag, tot_width));
       break;
     case '%': *str++ = '%'; break;
@@ -696,7 +696,7 @@ int printf(const char *format, ...) {
   va_end(ap);
   return len;
 }
-int _Znaj(uint32_t size) {
+int _Znaj(u32 size) {
   printk("_Znaj:%d\n", size);
   return (int)malloc(size);
 }
@@ -705,12 +705,12 @@ void _ZdaPv(void *ptr) {
   free(ptr);
 }
 //_ZdlPvj
-void _ZdlPvj(void *ptr, uint32_t size) {
+void _ZdlPvj(void *ptr, u32 size) {
   printk("_ZdlPvj %08x %d\n", ptr, size);
   free(ptr);
 }
 //_Znwj
-void *_Znwj(uint32_t size) {
+void *_Znwj(u32 size) {
   printk("_Znwj:%d\n", size);
   return malloc(size);
 }
@@ -741,8 +741,8 @@ void *memmove(void *dest, const void *src, int n) {
   进行操作。并不是因为操作的对象是字符串*/
   char       *pdest = (char *)dest;
   const char *psrc  = (const char *)src;
-  assert(dest);
-  assert(src);
+  assert((int)dest);
+  assert((int)src);
   if (pdest <= psrc && pdest >= psrc + n) //正常情况下从前向后拷贝
   {
     while (n--) {

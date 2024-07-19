@@ -4,46 +4,44 @@
 #define mem_mapping      0
 #define input_output     1
 typedef struct base_address_register {
-  int      prefetchable;
-  uint8_t *address;
-  uint32_t size;
-  int      type;
+  int prefetchable;
+  u8 *address;
+  u32 size;
+  int type;
 } base_address_register;
-uint32_t read_pci(uint8_t bus, uint8_t device, uint8_t function, uint8_t registeroffset) {
-  uint32_t id = 1 << 31 | ((bus & 0xff) << 16) | ((device & 0x1f) << 11) |
-                ((function & 0x07) << 8) | (registeroffset & 0xfc);
+u32 read_pci(u8 bus, u8 device, u8 function, u8 registeroffset) {
+  u32 id = 1 << 31 | ((bus & 0xff) << 16) | ((device & 0x1f) << 11) | ((function & 0x07) << 8) |
+           (registeroffset & 0xfc);
   io_out32(PCI_COMMAND_PORT, id);
-  uint32_t result = io_in32(PCI_DATA_PORT);
+  u32 result = io_in32(PCI_DATA_PORT);
   return result >> (8 * (registeroffset % 4));
 }
-uint32_t read_bar_n(uint8_t bus, uint8_t device, uint8_t function, uint8_t bar_n) {
-  uint32_t bar_offset = 0x10 + 4 * bar_n;
+u32 read_bar_n(u8 bus, u8 device, u8 function, u8 bar_n) {
+  u32 bar_offset = 0x10 + 4 * bar_n;
   return read_pci(bus, device, function, bar_offset);
 }
-void write_pci(uint8_t bus, uint8_t device, uint8_t function, uint8_t registeroffset,
-               uint32_t value) {
-  uint32_t id = 1 << 31 | ((bus & 0xff) << 16) | ((device & 0x1f) << 11) |
-                ((function & 0x07) << 8) | (registeroffset & 0xfc);
+void write_pci(u8 bus, u8 device, u8 function, u8 registeroffset, u32 value) {
+  u32 id = 1 << 31 | ((bus & 0xff) << 16) | ((device & 0x1f) << 11) | ((function & 0x07) << 8) |
+           (registeroffset & 0xfc);
   io_out32(PCI_COMMAND_PORT, id);
   io_out32(PCI_DATA_PORT, value);
 }
-uint32_t pci_read_command_status(uint8_t bus, uint8_t slot, uint8_t func) {
+u32 pci_read_command_status(u8 bus, u8 slot, u8 func) {
   return read_pci(bus, slot, func, 0x04);
 }
 // write command status register
-void pci_write_command_status(uint8_t bus, uint8_t slot, uint8_t func, uint32_t value) {
+void pci_write_command_status(u8 bus, u8 slot, u8 func, u32 value) {
   write_pci(bus, slot, func, 0x04, value);
 }
-base_address_register get_base_address_register(uint8_t bus, uint8_t device, uint8_t function,
-                                                uint8_t bar) {
+base_address_register get_base_address_register(u8 bus, u8 device, u8 function, u8 bar) {
   base_address_register result;
 
-  uint32_t headertype = read_pci(bus, device, function, 0x0e) & 0x7e;
-  int      max_bars   = 6 - 4 * headertype;
+  u32 headertype = read_pci(bus, device, function, 0x0e) & 0x7e;
+  int max_bars   = 6 - 4 * headertype;
   if (bar >= max_bars) return result;
 
-  uint32_t bar_value = read_pci(bus, device, function, 0x10 + 4 * bar);
-  result.type        = (bar_value & 1) ? input_output : mem_mapping;
+  u32 bar_value = read_pci(bus, device, function, 0x10 + 4 * bar);
+  result.type   = (bar_value & 1) ? input_output : mem_mapping;
 
   if (result.type == mem_mapping) {
     switch ((bar_value >> 1) & 0x3) {
@@ -52,27 +50,26 @@ base_address_register get_base_address_register(uint8_t bus, uint8_t device, uin
     case 2: // 64
       break;
     }
-    result.address      = (uint8_t *)(bar_value & ~0x3);
+    result.address      = (u8 *)(bar_value & ~0x3);
     result.prefetchable = 0;
   } else {
-    result.address      = (uint8_t *)(bar_value & ~0x3);
+    result.address      = (u8 *)(bar_value & ~0x3);
     result.prefetchable = 0;
   }
   return result;
 }
-uint8_t pci_get_drive_irq(uint8_t bus, uint8_t slot, uint8_t func) {
-  return (uint8_t)read_pci(bus, slot, func, 0x3c);
+u8 pci_get_drive_irq(u8 bus, u8 slot, u8 func) {
+  return (u8)read_pci(bus, slot, func, 0x3c);
 }
-uint32_t pci_get_port_base(uint8_t bus, uint8_t slot, uint8_t func) {
-  uint32_t io_port = 0;
+u32 pci_get_port_base(u8 bus, u8 slot, u8 func) {
+  u32 io_port = 0;
   for (int i = 0; i < 6; i++) {
     base_address_register bar = get_base_address_register(bus, slot, func, i);
-    if (bar.type == input_output) { io_port = (uint32_t)bar.address; }
+    if (bar.type == input_output) { io_port = (u32)bar.address; }
   }
   return io_port;
 }
-void PCI_GET_DEVICE(uint16_t vendor_id, uint16_t device_id, uint8_t *bus, uint8_t *slot,
-                    uint8_t *func) {
+void PCI_GET_DEVICE(u16 vendor_id, u16 device_id, u8 *bus, u8 *slot, u8 *func) {
   extern int PCI_ADDR_BASE;
   u8        *pci_drive = PCI_ADDR_BASE;
   for (;; pci_drive += 0x110 + 4) {
@@ -131,11 +128,11 @@ void init_PCI(u32 adder_Base) {
               memcpy(PCI_DATA1, &i, 4);
               PCI_DATA1 = PCI_DATA1 + 4;
             }
-            for (uint8_t barNum = 0; barNum < 6; barNum++) {
+            for (u8 barNum = 0; barNum < 6; barNum++) {
               base_address_register bar = get_base_address_register(BUS, Equipment, F, barNum);
               if (bar.address && (bar.type == input_output)) {
                 PCI_DATA1 += 4;
-                int i      = ((uint32_t)(bar.address));
+                int i      = ((u32)(bar.address));
                 memcpy(PCI_DATA1, &i, 4);
               }
             }

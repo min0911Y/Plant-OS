@@ -10,9 +10,9 @@ static void NETGOBANG_Handler(struct Socket *socket, void *base) {
   struct IPV4Message *ipv4 = (struct IPV4Message *)(base + sizeof(struct EthernetFrame_head));
   struct TCPMessage  *tcp =
       (struct TCPMessage *)(base + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message));
-  uint16_t size = swap16(ipv4->totalLength) - sizeof(struct IPV4Message) - (tcp->headerLength * 4);
-  uint8_t *data = base + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message) +
-                  (tcp->headerLength * 4);
+  u16 size = swap16(ipv4->totalLength) - sizeof(struct IPV4Message) - (tcp->headerLength * 4);
+  u8 *data = base + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message) +
+             (tcp->headerLength * 4);
   ng_size   = size;
   ng_buffer = (u8 *)malloc(ng_size);
   memcpy((void *)ng_buffer, (void *)data, ng_size);
@@ -31,7 +31,7 @@ static void NETGOBANG_OnClick() {
 int SelRoom() {
   u8 str[100];
   ng_size = 0;
-  socket->Send(socket, (uint8_t *)"RMLS", 5);
+  socket->Send(socket, (u8 *)"RMLS", 5);
   while (!ng_size)
     ;
   strcpy((char *)str, (char *)ng_buffer);
@@ -114,7 +114,7 @@ void FS2() { // 根据ng_buffer获取对方的x，y信息
 void dual() {
   command_run("cls");
   ng_size = 0;
-  socket->Send(socket, (uint8_t *)"R", 2);
+  socket->Send(socket, (u8 *)"R", 2);
   printk("Wait to ready.\n");
   while (!ng_size)
     ;
@@ -136,7 +136,7 @@ void dual() {
         char ss[50];
         ng_size = 0;
         sprintf(ss, "GETPL %d", uid);
-        socket->Send(socket, (uint8_t *)ss, strlen(ss) + 1);
+        socket->Send(socket, (u8 *)ss, strlen(ss) + 1);
         while (!ng_size)
           ;
         char name[50];
@@ -163,7 +163,7 @@ void dual() {
           char ss[50];
           ng_size = 0;
           sprintf(ss, "GETPL %d", uid);
-          socket->Send(socket, (uint8_t *)ss, strlen(ss) + 1);
+          socket->Send(socket, (u8 *)ss, strlen(ss) + 1);
           while (!ng_size)
             ;
           char name[50];
@@ -185,11 +185,11 @@ void dual() {
         ViewMap(); // 然后显示
       }
       int x, y;
-      FS(&x, &y);                                          // 最后捏，到我们自己来了
-      char s1[50];                                         // 发送缓冲区
-      ng_size = 0;                                         // size置0
-      sprintf(s1, "U %d %d", x, y);                        // U命令，告诉服务器我已落子
-      socket->Send(socket, (uint8_t *)s1, strlen(s1) + 1); // 调用Socket API发送
+      FS(&x, &y);                                     // 最后捏，到我们自己来了
+      char s1[50];                                    // 发送缓冲区
+      ng_size = 0;                                    // size置0
+      sprintf(s1, "U %d %d", x, y);                   // U命令，告诉服务器我已落子
+      socket->Send(socket, (u8 *)s1, strlen(s1) + 1); // 调用Socket API发送
     }
   } else {
     while (1) {
@@ -201,7 +201,7 @@ void dual() {
       char s1[50];
       ng_size = 0;
       sprintf(s1, "U %d %d", x, y);
-      socket->Send(socket, (uint8_t *)s1, strlen(s1) + 1);
+      socket->Send(socket, (u8 *)s1, strlen(s1) + 1);
       ViewMap();
       printk("Waiting...");
       while (!ng_size)
@@ -217,7 +217,7 @@ void dual() {
         char ss[50];
         ng_size = 0;
         sprintf(ss, "GETPL %d", uid);
-        socket->Send(socket, (uint8_t *)ss, strlen(ss) + 1);
+        socket->Send(socket, (u8 *)ss, strlen(ss) + 1);
         while (!ng_size)
           ;
         char name[50];
@@ -242,7 +242,7 @@ void dual() {
           char ss[50];
           ng_size = 0;
           sprintf(ss, "GETPL %d", uid);
-          socket->Send(socket, (uint8_t *)ss, strlen(ss) + 1);
+          socket->Send(socket, (u8 *)ss, strlen(ss) + 1);
           while (!ng_size)
             ;
           char name[50] = {0};
@@ -283,7 +283,7 @@ void switchUI() {
       char s3[50];
       sprintf(s3, "CRT %s", s1);
       ng_size = 0;
-      socket->Send(socket, (uint8_t *)s3, strlen(s3) + 1);
+      socket->Send(socket, (u8 *)s3, strlen(s3) + 1);
       while (!ng_size)
         ;
       ng_size = 0;
@@ -293,7 +293,7 @@ void switchUI() {
       now = 0;
       dual();
       ng_size = 0;
-      socket->Send(socket, (uint8_t *)"EXIT", 5);
+      socket->Send(socket, (u8 *)"EXIT", 5);
       while (!ng_size)
         ;
     } else if (strcmp(s, "2") == 0) {
@@ -304,7 +304,7 @@ void switchUI() {
         char s2[50];
         sprintf(s2, "IN %d", rid);
         ng_size = 0;
-        socket->Send(socket, (uint8_t *)s2, strlen(s2) + 1);
+        socket->Send(socket, (u8 *)s2, strlen(s2) + 1);
         while (!ng_size)
           ;
         if (*ng_buffer == 'E') {
@@ -315,7 +315,7 @@ void switchUI() {
         now = 1;
         dual();
         ng_size = 0;
-        socket->Send(socket, (uint8_t *)"EXIT", 5);
+        socket->Send(socket, (u8 *)"EXIT", 5);
         while (!ng_size)
           ;
       }
@@ -333,17 +333,17 @@ void netgobang() {
   printk("Server IP:");
 
   input((char *)str, 100);
-  uint32_t ip_ = IP2UINT32_T(str);
+  u32 ip_ = IP2UINT32_T(str);
   printk("Server Port:");
   input((char *)str, 100);
-  uint16_t port = (uint16_t)strtol((char *)str, NULL, 10);
+  u16 port = (u16)strtol((char *)str, NULL, 10);
   printk("Connect the Server...\n");
   if (ping(ip_) == -1) {
     printk("The ICMP Packet is not from the ip.\n");
     return;
   }
   socket = socket_alloc(TCP_PROTOCOL);
-  extern uint32_t ip;
+  extern u32 ip;
   srand(time());
   Socket_Init(socket, ip_, port, ip, rand());
   Socket_Bind(socket, NETGOBANG_Handler);
@@ -352,7 +352,7 @@ void netgobang() {
     return;
   }
   ng_size = 0;
-  socket->Send(socket, (uint8_t *)"TEST", 5);
+  socket->Send(socket, (u8 *)"TEST", 5);
   while (!ng_size)
     ;
   if (strcmp((char *)ng_buffer, "OK") != 0) {

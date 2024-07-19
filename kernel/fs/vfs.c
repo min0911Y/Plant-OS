@@ -4,7 +4,7 @@
 #define PDEBUG
 vfs_t         vfsstl[26];
 vfs_t         vfsMount_Stl[26];
-static vfs_t *drive2fs(uint8_t drive) {
+static vfs_t *drive2fs(u8 drive) {
   for (int i = 0; i < 26; i++) {
     if (vfsMount_Stl[i].drive == toupper(drive) && vfsMount_Stl[i].flag == 1) {
       return &vfsMount_Stl[i];
@@ -40,7 +40,7 @@ static vfs_t *findSeat(vfs_t *vstl) {
   }
   return NULL;
 }
-static vfs_t *check_disk_fs(uint8_t disk_number) {
+static vfs_t *check_disk_fs(u8 disk_number) {
   for (int i = 0; i < 26; i++) {
     if (vfsstl[i].flag == 1) {
       if (vfsstl[i].Check(disk_number)) { return &vfsstl[i]; }
@@ -53,7 +53,7 @@ static void insert_str(char *str, char *insert_str, int pos) {
     insert_char(str, pos + i, insert_str[i]);
   }
 }
-bool vfs_mount_disk(uint8_t disk_number, uint8_t drive) {
+bool vfs_mount_disk(u8 disk_number, u8 drive) {
   PDEBUG("Mount DISK ---- %02x", disk_number);
   for (int i = 0; i < 26; i++) {
     if (vfsMount_Stl[i].flag == 1 &&
@@ -82,7 +82,7 @@ bool vfs_mount_disk(uint8_t disk_number, uint8_t drive) {
   PDEBUG("success");
   return true;
 }
-bool vfs_unmount_disk(uint8_t drive) {
+bool vfs_unmount_disk(u8 drive) {
   PDEBUG("Unmount disk ---- %c", drive);
   for (int i = 0; i < 26; i++) {
     if (vfsMount_Stl[i].drive == drive && vfsMount_Stl[i].flag == 1) {
@@ -123,7 +123,7 @@ bool vfs_writefile(char *path, char *buffer, int size) {
   free(new_path);
   return result;
 }
-uint32_t vfs_filesize(char *filename) {
+u32 vfs_filesize(char *filename) {
   char *new_path = malloc(strlen(filename) + 1);
   strcpy(new_path, filename);
   vfs_t *vfs = ParsePath(new_path);
@@ -232,7 +232,7 @@ bool vfs_attrib(char *filename, ftype type) {
   free(new_path);
   return result;
 }
-bool vfs_format(uint8_t disk_number, char *FSName) {
+bool vfs_format(u8 disk_number, char *FSName) {
   for (int i = 0; i < 255; i++) {
     if (strcmp(vfsstl[i].FSName, FSName) == 0 && vfsstl[i].flag == 1) {
       return vfsstl[i].Format(disk_number);
@@ -253,7 +253,7 @@ vfs_file *vfs_fileinfo(char *filename) {
   free(new_path);
   return result;
 }
-bool vfs_change_disk(uint8_t drive) {
+bool vfs_change_disk(u8 drive) {
   PDEBUG("will change to %c", drive);
   if (vfs_now != NULL) {
     while (FindForCount(1, vfs_now->path) != NULL) {
@@ -280,7 +280,7 @@ bool vfs_change_disk(uint8_t drive) {
   PDEBUG("OK.");
   return true;
 }
-bool vfs_change_disk_for_task(uint8_t drive, mtask *task) {
+bool vfs_change_disk_for_task(u8 drive, mtask *task) {
   PDEBUG("will change to %c", drive);
   if (vfs(task) != NULL) {
     while (FindForCount(1, vfs(task)->path) != NULL) {
@@ -377,7 +377,7 @@ void vfs_getPath_no_drive(char *buffer) {
   }
   if (i == 1) { insert_char(buffer, 0, '/'); }
 }
-bool vfs_check_mount(uint8_t drive) {
+bool vfs_check_mount(u8 drive) {
   return drive2fs(drive) ? true : false;
 }
 void init_vfs() {

@@ -58,7 +58,7 @@ void driver_call(drv_t driver, int func, void *arg) {
   args.arg      = arg;
   args.tid      = get_tid(current_task());
   send_ipc_message(get_tid(driver->drv_task), &args, sizeof(struct arg_struct), synchronous);
-  for (;;) {
+  while (true) {
     while (ipc_message_len(get_tid(driver->drv_task)) == -1)
       ;
     int result;

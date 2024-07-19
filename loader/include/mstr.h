@@ -5,6 +5,7 @@ typedef struct {
   size_t len;         // the length of the string
   size_t malloc_size; // when does the buf of the data need to remalloc?
 } mstr;
+
 mstr *mstr_init();
 void  mstr_add_str(mstr *ms, char *str);
 void  mstr_add_char(mstr *ms, char c);

@@ -5,9 +5,9 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # ----------------------------------------------------------------------------------------------------
 # 编译器配置
 
-set(CMAKE_C_COMPILER "gcc")
-set(CMAKE_CXX_COMPILER "g++")
-set(CMAKE_LINKER "ld")
+# set(CMAKE_C_COMPILER "gcc")
+# set(CMAKE_CXX_COMPILER "g++")
+# set(CMAKE_LINKER "ld")
 set(CMAKE_BUILD_TYPE "Release")
 
 enable_language(ASM_NASM)

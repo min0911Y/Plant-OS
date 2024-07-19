@@ -16,21 +16,20 @@ char       keytable1[0x54] = { // 未按下Shift
     'g', 'h',  'j', 'k', 'l', ';', '\'', '`', 0,   '\\', 'z', 'x', 'c', 'v', 'b',  'n',  'm',
     ',', '.',  '/', 0,   '*', 0,   ' ',  0,   0,   0,    0,   0,   0,   0,   0,    0,    0,
     0,   0,    0,   '7', '8', '9', '-',  '4', '5', '6',  '+', '1', '2', '3', '0',  '.'};
-void       wait_KBC_sendready(void) {
-  /* 等待键盘控制电路准备完毕 */
-  for (;;) {
+
+// 等待键盘控制电路准备完毕
+void wait_KBC_sendready() {
+  while (true) {
     if ((io_in8(PORT_KEYSTA) & KEYSTA_SEND_NOTREADY) == 0) { break; }
   }
-  return;
 }
 
-void init_keyboard(void) {
-  /* 初始化键盘控制电路 */
+// 初始化键盘控制电路
+void init_keyboard() {
   wait_KBC_sendready();
   io_out8(PORT_KEYCMD, KEYCMD_WRITE_MODE);
   wait_KBC_sendready();
   io_out8(PORT_KEYDAT, KBC_MODE);
-  return;
 }
 int getch() {
   u8 ch;

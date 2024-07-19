@@ -106,14 +106,14 @@ void PutChineseStr0(vram_t *vram, int xsize, int x, int y, color_t color, u8 *st
   int i;
   for (i = 0; i < strlen(str); i += 2) {
     u8 cstr[3] = {str[i], str[i + 1]};
-    PUTCHINESE0(vram, x + i * 8, y, color, *(short *)(cstr), xsize);
+    PUTCHINESE0(vram, x + i * 8, y, color, *(i16 *)(cstr), xsize);
   }
 }
 void PrintChineseStr(int x, int y, char color, u8 *str) {
   int i;
   for (i = 0; i < strlen(str); i += 2) {
     u8 cstr[3] = {str[i], str[i + 1]};
-    PrintChineseChar(x + i / 2, y, color, *(short *)(cstr));
+    PrintChineseChar(x + i / 2, y, color, *(i16 *)(cstr));
   }
 }
 void Draw_Px(int x, int y, char color) {
@@ -266,7 +266,7 @@ void putfonts_asc_sht(struct SHEET *sht, int x, int y, color_t c, color_t b, cha
   sheet_refresh(sht, x, y, x + l * 8, y + 16);
   return;
 }
-void Draw_Line_32(uint8_t *Buffer, int x1, int y1, int x2, int y2, int r, int g, int b, int xsize) {
+void Draw_Line_32(u8 *Buffer, int x1, int y1, int x2, int y2, int r, int g, int b, int xsize) {
   int dx    = x2 - x1;
   int dy    = y2 - y1;
   int x     = x1;

@@ -15,24 +15,23 @@ void load_segment(Elf32_Phdr *phdr, void *elf) {
     memset((void *)(phdr->p_vaddr + phdr->p_filesz), 0, phdr->p_memsz - phdr->p_filesz);
   }
 }
-uint32_t load_elf(Elf32_Ehdr *hdr) {
-  Elf32_Phdr *phdr = (Elf32_Phdr *)((uint32_t)hdr + hdr->e_phoff);
+u32 load_elf(Elf32_Ehdr *hdr) {
+  Elf32_Phdr *phdr = (Elf32_Phdr *)((u32)hdr + hdr->e_phoff);
   for (int i = 0; i < hdr->e_phnum; i++) {
     load_segment(phdr, (void *)hdr);
     phdr++;
   }
   return hdr->e_entry;
 }
-void read_pci_class(uint8_t bus, uint8_t device, uint8_t function, uint8_t *class_code,
-                    uint8_t *subclass_code) {
+void read_pci_class(u8 bus, u8 device, u8 function, u8 *class_code, u8 *subclass_code) {
   // 读取设备类别和子类别寄存器的值
-  uint32_t class_register = read_pci(bus, device, function, 0x08);
+  u32 class_register = read_pci(bus, device, function, 0x08);
   // 解析设备类别和子类别
   *class_code    = (class_register >> 24) & 0xFF;
   *subclass_code = (class_register >> 16) & 0xFF;
 }
-int is_ide_device(uint8_t bus, uint8_t device, uint8_t function) {
-  uint8_t class_code, subclass_code;
+int is_ide_device(u8 bus, u8 device, u8 function) {
+  u8 class_code, subclass_code;
   // 读取设备类别和子类别
   read_pci_class(bus, device, function, &class_code, &subclass_code);
   // 检查设备类别和子类别是否符合IDE设备的类别码
@@ -105,7 +104,7 @@ void DOSLDR_MAIN() {
   int sz = vfs_filesize(path);
   if (sz == -1) {
     printf("DOSLDR can't find kernel.bin in Drive %c", path[0]);
-    for (;;)
+    while (true)
       ;
   }
   // printf("fp = %08x\n%d\n",fp, fp->size);
@@ -113,7 +112,7 @@ void DOSLDR_MAIN() {
   printf("Will load in %08x size = %08x\n", s, sz);
   vfs_readfile(path, s);
   printf("Loading...\n");
-  uint32_t entry = load_elf((Elf32_Ehdr *)s);
+  u32 entry = load_elf((Elf32_Ehdr *)s);
 
   // printf("ESP:%08x\n", *(u32 *)(0x00280000 + 12));
   _IN(2 * 8, entry);

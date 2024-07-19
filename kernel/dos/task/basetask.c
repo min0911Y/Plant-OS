@@ -76,6 +76,6 @@ void init() {
   page_free(current_task()->nfs, sizeof(vfs_t));
 
   task_kill(current_task()->tid);
-  for (;;)
+  while (true)
     ;
 }

@@ -4,30 +4,30 @@
 #include <dos.h>
 #define CARD_VENDOR_ID 0x10EC
 #define CARD_DEVICE_ID 0x8139
-#define MAC0 0x00
-#define MAC1 0x01
-#define MAC2 0x02
-#define MAC3 0x03
-#define MAC4 0x04
-#define MAC5 0x05
-#define MAR 0x08
-#define RBSTART 0x30
-#define CAPR 0x38
-#define CMD 0x37
-#define IMR 0x3C
-#define ISR 0x3E
-#define CONFIG_1 0x52
-#define TCR 0x40
-#define RCR 0x44
-#define TSAD0 0x20
-#define TSD0 0x10
-void RTL8139_ASM_INTHANDLER(void);
-static uint8_t bus, dev, func;
-static uint32_t io_base;
-extern uint8_t mac0, mac1, mac2, mac3, mac4, mac5;
-static uint8_t *sendBuffer[4];
-static uint8_t *recvBuffer;
-static uint8_t currentSendBuffer;
+#define MAC0           0x00
+#define MAC1           0x01
+#define MAC2           0x02
+#define MAC3           0x03
+#define MAC4           0x04
+#define MAC5           0x05
+#define MAR            0x08
+#define RBSTART        0x30
+#define CAPR           0x38
+#define CMD            0x37
+#define IMR            0x3C
+#define ISR            0x3E
+#define CONFIG_1       0x52
+#define TCR            0x40
+#define RCR            0x44
+#define TSAD0          0x20
+#define TSD0           0x10
+void        RTL8139_ASM_INTHANDLER(void);
+static u8   bus, dev, func;
+static u32  io_base;
+extern u8   mac0, mac1, mac2, mac3, mac4, mac5;
+static u8  *sendBuffer[4];
+static u8  *recvBuffer;
+static u8   currentSendBuffer;
 static void set_handler(int IRQ, int addr) {
   // 注册中断
   struct GATE_DESCRIPTOR *idt = (struct GATE_DESCRIPTOR *)ADR_IDT;
@@ -35,9 +35,9 @@ static void set_handler(int IRQ, int addr) {
   irq_mask_clear(IRQ);
 }
 static void init_Card_all() {
-  recvBuffer = (uint8_t *)malloc(8192 + 16);
+  recvBuffer = (u8 *)malloc(8192 + 16);
   for (int i = 0; i != 4; i++) {
-    sendBuffer[i] = (uint8_t *)malloc(8192 + 16);
+    sendBuffer[i] = (u8 *)malloc(8192 + 16);
   }
 
   mac0 = io_in8(io_base + MAC0);
@@ -70,7 +70,6 @@ static void init_Card_all() {
 
   printk("RTL8139 INIT DONE\n");
 
-
   irq_mask_clear(0);
 
   // 初始化ARP表
@@ -83,7 +82,7 @@ void Rtl8139Recv() {
   // printk("\n");
   Card_Recv_Handler(recvBuffer + 4);
 }
-void Rtl8139Send(uint8_t *buffer, int size) {
+void Rtl8139Send(u8 *buffer, int size) {
   if (size > 1792) {
     size = 1792 - 4;
   } else if (size < 64) {
@@ -98,32 +97,28 @@ void Rtl8139Send(uint8_t *buffer, int size) {
   // }
   // printk("\n");
 
-  io_out32(io_base + TSAD0 + 4 * currentSendBuffer,
-           sendBuffer[currentSendBuffer]);
+  io_out32(io_base + TSAD0 + 4 * currentSendBuffer, sendBuffer[currentSendBuffer]);
   io_out32(io_base + TSD0 + 4 * currentSendBuffer, size - 4);
   currentSendBuffer++;
   currentSendBuffer %= 4;
 }
 bool rtl8139_find_card() {
-	bus = 255;
+  bus = 255;
   PCI_GET_DEVICE(CARD_VENDOR_ID, CARD_DEVICE_ID, &bus, &dev, &func);
-  if (bus == 255) {
-    return false;
-  }
+  if (bus == 255) { return false; }
   return true;
 }
 void init_rtl8139_card() {
-  set_handler(pci_get_drive_irq(bus, dev, func),
-              (int)RTL8139_ASM_INTHANDLER);
-  uint32_t conf = pci_read_command_status(bus, dev, func);
-  conf &= 0xffff0000; // 保留STATUS寄存器，清除COMMAND寄存器
-  conf |= 0x7;        // 设置第0~2位（允许PCNET网卡产生中断
+  set_handler(pci_get_drive_irq(bus, dev, func), (int)RTL8139_ASM_INTHANDLER);
+  u32 conf  = pci_read_command_status(bus, dev, func);
+  conf     &= 0xffff0000; // 保留STATUS寄存器，清除COMMAND寄存器
+  conf     |= 0x7;        // 设置第0~2位（允许PCNET网卡产生中断
   pci_write_command_status(bus, dev, func, conf);
   io_base = pci_get_port_base(bus, dev, func);
   init_Card_all();
 }
 void RTL8139_IRQ() {
-  uint16_t temp = io_in16(io_base + ISR);
+  u16 temp = io_in16(io_base + ISR);
   if ((temp & 0x0004) == 0x0004) {
     // printk("RTL8139 SEND\n");
   } else if ((temp & 0x0001) == 0x0001) {

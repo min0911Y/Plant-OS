@@ -2,17 +2,17 @@
 
 // do nothing
 static void Read(char drive, u8 *buffer, u32 number, u32 lba) {
-  uint32_t **buf = (uint32_t *)buffer;
-  **buf          = 1;
+  u32 **buf = (u32 *)buffer;
+  **buf     = 1;
   printk("[dev fs]don't try to read!\n");
 }
 static void Write(char drive, u8 *buffer, u32 number, u32 lba) {
   printk("[dev fs]don't try to write!\n");
 }
-static bool dev_check(uint8_t disk_number) {
-  uint32_t **b  = page_malloc(512);
-  *b            = page_malloc(4);
-  uint32_t *bmp = *b;
+static bool dev_check(u8 disk_number) {
+  u32 **b  = page_malloc(512);
+  *b       = page_malloc(4);
+  u32 *bmp = *b;
 
   Disk_Read(0, 1, b, disk_number);
   if (*b != bmp) { return false; }
@@ -32,7 +32,7 @@ static bool dev_check(uint8_t disk_number) {
 static void dev_copy_cache(struct vfs_t *dest, struct vfs_t *src) {
   return;
 }
-static void dev_init(struct vfs_t *vfs, uint8_t disk_number) {
+static void dev_init(struct vfs_t *vfs, u8 disk_number) {
   printk("init dev fs.\n");
   return;
 }

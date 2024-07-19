@@ -26,13 +26,13 @@ u32 *acpi_find_rsdp() {
 }
 
 u32 acpi_find_table(char *Signature) {
-  uint8_t *ptr, *ptr2;
-  uint32_t len;
-  uint8_t *rsdt = (uint8_t *)RSDT;
+  u8 *ptr, *ptr2;
+  u32 len;
+  u8 *rsdt = (u8 *)RSDT;
   // iterate on ACPI table pointers
-  for (len = *((uint32_t *)(rsdt + 4)), ptr2 = rsdt + 36; ptr2 < rsdt + len;
+  for (len = *((u32 *)(rsdt + 4)), ptr2 = rsdt + 36; ptr2 < rsdt + len;
        ptr2 += rsdt[0] == 'X' ? 8 : 4) {
-    ptr = (uint8_t *)(uintptr_t)(rsdt[0] == 'X' ? *((uint64_t *)ptr2) : *((uint32_t *)ptr2));
+    ptr = (u8 *)(uintptr_t)(rsdt[0] == 'X' ? *((uint64_t *)ptr2) : *((u32 *)ptr2));
     if (!memcmp(ptr, Signature, 4)) { return (unsigned)ptr; }
   }
   // printk("not found.\n");
@@ -124,14 +124,14 @@ int acpi_shutdown() {
 // copy from EXOS(https://gitee.com/yywd123/EXOS)
 typedef struct {
   char     sign[4];
-  uint32_t len;
+  u32      len;
   char     revision;
   char     checksum;
   char     oemid[6];
   uint64_t oem_table_id;
-  uint32_t oem_revision;
-  uint32_t creator_id;
-  uint32_t creator_revision;
+  u32      oem_revision;
+  u32      creator_id;
+  u32      creator_revision;
 } __attribute__((packed)) MADT;
 typedef struct {
   uint64_t configurationAndCapability;
@@ -146,40 +146,40 @@ typedef struct {
   uint64_t  generalConfiguration;
   uint64_t  reserved1;
   uint64_t  generalIntrruptStatus;
-  uint8_t   reserved3[0xc8];
+  u8        reserved3[0xc8];
   uint64_t  mainCounterValue;
   uint64_t  reserved4;
   HpetTimer timers[0];
 } __attribute__((packed)) HpetInfo;
 
 typedef struct {
-  uint8_t   addressSpaceID;
-  uint8_t   registerBitWidth;
-  uint8_t   registerBitOffset;
-  uint8_t   accessWidth; //  acpi 3.0
+  u8        addressSpaceID;
+  u8        registerBitWidth;
+  u8        registerBitOffset;
+  u8        accessWidth; //  acpi 3.0
   uintptr_t address;
 } __attribute__((packed)) AcpiAddress;
 
 typedef struct {
-  uint32_t    signature;
-  uint32_t    length;
-  uint8_t     revision;
-  uint8_t     checksum;
-  uint8_t     oem[6];
-  uint8_t     oemTableID[8];
-  uint32_t    oemVersion;
-  uint32_t    creatorID;
-  uint32_t    creatorVersion;
-  uint8_t     hardwareRevision;
-  uint8_t     comparatorCount   : 5;
-  uint8_t     counterSize       : 1;
-  uint8_t     reserved          : 1;
-  uint8_t     legacyReplacement : 1;
-  uint16_t    pciVendorId;
+  u32         signature;
+  u32         length;
+  u8          revision;
+  u8          checksum;
+  u8          oem[6];
+  u8          oemTableID[8];
+  u32         oemVersion;
+  u32         creatorID;
+  u32         creatorVersion;
+  u8          hardwareRevision;
+  u8          comparatorCount   : 5;
+  u8          counterSize       : 1;
+  u8          reserved          : 1;
+  u8          legacyReplacement : 1;
+  u16         pciVendorId;
   AcpiAddress hpetAddress;
-  uint8_t     hpetNumber;
-  uint16_t    minimumTick;
-  uint8_t     pageProtection;
+  u8          hpetNumber;
+  u16         minimumTick;
+  u8          pageProtection;
 } __attribute__((packed)) HPET;
 
 static HpetInfo *hpetInfo   = NULL;
@@ -191,8 +191,8 @@ void hpet_initialize() {
   hpetInfo = (HpetInfo *)hpet->hpetAddress.address;
   logk("hpetInfo %016x\n", hpetInfo);
 
-  uint32_t counterClockPeriod = hpetInfo->generalCapabilities >> 32;
-  hpetPeriod                  = counterClockPeriod / 1000000;
+  u32 counterClockPeriod = hpetInfo->generalCapabilities >> 32;
+  hpetPeriod             = counterClockPeriod / 1000000;
   logk("hpet period: 0x%016x\n", hpetPeriod);
 
   hpetInfo->generalConfiguration |= 1; //  启用hpet

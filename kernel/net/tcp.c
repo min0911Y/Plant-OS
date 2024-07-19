@@ -1,11 +1,11 @@
 #include <dos.h>
 // TCP
-void tcp_provider_send(uint32_t dstIP, uint32_t srcIP, uint16_t dstPort, uint16_t srcPort,
-                       uint32_t Sequence, uint32_t ackNum, bool URG, bool ACK, bool PSH, bool RST,
-                       bool SYN, bool FIN, bool ECE, bool CWR, uint8_t *data, uint32_t size) {
-  uint32_t s   = SYN ? (sizeof(struct TCPPesudoHeader) + sizeof(struct TCPMessage) + size + 4)
-                     : (sizeof(struct TCPPesudoHeader) + sizeof(struct TCPMessage) + size);
-  uint8_t *dat = (uint8_t *)page_malloc(s);
+void tcp_provider_send(u32 dstIP, u32 srcIP, u16 dstPort, u16 srcPort, u32 Sequence, u32 ackNum,
+                       bool URG, bool ACK, bool PSH, bool RST, bool SYN, bool FIN, bool ECE,
+                       bool CWR, u8 *data, u32 size) {
+  u32 s   = SYN ? (sizeof(struct TCPPesudoHeader) + sizeof(struct TCPMessage) + size + 4)
+                : (sizeof(struct TCPPesudoHeader) + sizeof(struct TCPMessage) + size);
+  u8 *dat = (u8 *)page_malloc(s);
   struct TCPPesudoHeader *phdr = (struct TCPPesudoHeader *)dat;
   struct TCPMessage      *tcp  = (struct TCPMessage *)(dat + sizeof(struct TCPPesudoHeader));
   memcpy((void *)(tcp) + (SYN ? (sizeof(struct TCPMessage) + 4) : sizeof(struct TCPMessage)),
@@ -36,8 +36,8 @@ void tcp_provider_send(uint32_t dstIP, uint32_t srcIP, uint16_t dstPort, uint16_
     tcp->headerLength += 1;
   }
   tcp->checkSum = 0;
-  tcp->checkSum = CheckSum((uint16_t *)dat, s);
-  IPV4ProviderSend(6, IPParseMAC(dstIP), dstIP, srcIP, (uint8_t *)tcp,
+  tcp->checkSum = CheckSum((u16 *)dat, s);
+  IPV4ProviderSend(6, IPParseMAC(dstIP), dstIP, srcIP, (u8 *)tcp,
                    s - sizeof(struct TCPPesudoHeader));
   page_free((void *)dat, s);
   return;
@@ -53,8 +53,8 @@ void tcp_handler(void *base) {
     // swap16(tcp->srcPort), swap32(ipv4->dstIP), swap16(tcp->dstPort));
     return;
   }
-  uint8_t flags = (tcp->ACK << 4) | (tcp->PSH << 3) | (tcp->SYN << 1) |
-                  tcp->FIN; // 只看ACK,PSH,SYN,FIN四个flags
+  u8 flags = (tcp->ACK << 4) | (tcp->PSH << 3) | (tcp->SYN << 1) |
+             tcp->FIN; // 只看ACK,PSH,SYN,FIN四个flags
   if (tcp->RST) { socket->state = SOCKET_TCP_CLOSED; }
   if (socket->state != SOCKET_TCP_CLOSED) {
     switch (flags) {
@@ -62,9 +62,9 @@ void tcp_handler(void *base) {
       if (socket->state == SOCKET_TCP_SYN_SENT) {
         socket->state  = SOCKET_TCP_ESTABLISHED;
         socket->ackNum = swap32(tcp->seqNum) + 1;
-        if ((uint16_t)tcp->options == 0x0402) {
-          uint16_t MSS_ = swap32(tcp->options[0]) & 0xffff;
-          socket->MSS   = (MSS_Default >= MSS_) ? MSS_ : MSS_Default;
+        if ((u16)tcp->options == 0x0402) {
+          u16 MSS_    = swap32(tcp->options[0]) & 0xffff;
+          socket->MSS = (MSS_Default >= MSS_) ? MSS_ : MSS_Default;
         }
         tcp_provider_send(socket->remoteIP, socket->localIP, socket->remotePort, socket->localPort,
                           socket->seqNum, socket->ackNum, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0);
@@ -77,9 +77,9 @@ void tcp_handler(void *base) {
         socket->remotePort = swap16(tcp->srcPort);
         socket->ackNum     = swap32(tcp->seqNum) + 1;
         socket->seqNum     = 0;
-        if ((uint16_t)tcp->options == 0x0402) {
-          uint16_t MSS_ = swap32(tcp->options[0]) & 0xffff;
-          socket->MSS   = (MSS_Default >= MSS_) ? MSS_ : MSS_Default;
+        if ((u16)tcp->options == 0x0402) {
+          u16 MSS_    = swap32(tcp->options[0]) & 0xffff;
+          socket->MSS = (MSS_Default >= MSS_) ? MSS_ : MSS_Default;
         }
         tcp_provider_send(socket->remoteIP, socket->localIP, socket->remotePort, socket->localPort,
                           socket->seqNum, socket->ackNum, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0);

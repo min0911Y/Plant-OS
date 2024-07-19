@@ -1,11 +1,4 @@
-/**
- * This file has no copyright assigned and is placed in the Public Domain.
- * This file is part of the mingw-w64 runtime package.
- * No warranty is given; refer to the file DISCLAIMER.PD within this package.
- */
-#ifndef _INC_TYPES
-#define _INC_TYPES
-
+#pragma once
 #include <stddef.h>
 
 #ifdef _USE_32BIT_TIME_T
@@ -93,5 +86,3 @@ typedef u32     _sigset_t;
 typedef _sigset_t sigset_t;
 #  endif
 #endif /* Not _SIGSET_T_ */
-
-#endif /* _INC_TYPES */

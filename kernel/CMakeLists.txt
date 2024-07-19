@@ -6,7 +6,7 @@ add_binary_asm_no_elf(boot boot/boot.asm)
 add_binary_asm_no_elf(boot32 boot/boot32.asm)
 add_binary_asm_no_elf(boot_pfs boot/boot_pfs.asm)
 
-add_exe_link_flag("-static -Ttext 0x280000 -e KernelMain")
+add_exe_link_flag("-static -Wl,-Ttext -Wl,0x280000 -e KernelMain")
 add_binary_exclude(kernel boot/boot.asm boot/boot32.asm boot/boot_pfs.asm)
 target_link_libraries(kernel tcc1)
 

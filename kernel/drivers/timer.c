@@ -68,7 +68,7 @@ void timer_settime(struct TIMER *timer, u32 timeout) {
     io_store_eflags(e);
     return;
   }
-  for (;;) {
+  while (true) {
     s = t;
     t = t->next;
     if (timer->timeout <= t->timeout) {
@@ -98,11 +98,11 @@ void sleep(uint64_t time_s) {
   } while (now_time.sec < end_time.sec || now_time.nsec < end_time.nsec);
 }
 
-uint32_t        mt2flag     = 0;
-int             g           = 0;
-static uint32_t count       = 0;
-uint64_t        global_time = 0;
-void            inthandler20(int cs, int *esp) {
+u32        mt2flag     = 0;
+int        g           = 0;
+static u32 count       = 0;
+uint64_t   global_time = 0;
+void       inthandler20(int cs, int *esp) {
   //logk("*");
   // printk("CS:EIP=%04x:%08x\n",current_task()->tss.cs,esp[-10]);
   io_out8(PIC0_OCW2, 0x60); /* 把IRQ-00接收信号结束的信息通知给PIC */
@@ -124,7 +124,7 @@ void            inthandler20(int cs, int *esp) {
 
   timer   = timerctl.t0; /* 首先把最前面的地址赋给timer */
   char ts = 0;
-  for (;;) {
+  while (true) {
     /* 因为timers的定时器都处于运行状态，所以不确认flags */
     if (timer->timeout > timerctl.count) { break; }
     /* 超时 */

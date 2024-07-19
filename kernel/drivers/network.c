@@ -1,8 +1,8 @@
 /* 网络粘合层 */
 #include <dos.h>
-extern uint8_t mac0, mac1, mac2, mac3, mac4, mac5;
-u32            strtoul(const char *str, char **endptr, int base);
-void           Rtl8139Send(uint8_t *buffer, int size);
+extern u8 mac0, mac1, mac2, mac3, mac4, mac5;
+u32       strtoul(const char *str, char **endptr, int base);
+void      Rtl8139Send(u8 *buffer, int size);
 typedef struct {
   bool (*find)();
   void (*init)();
@@ -11,10 +11,10 @@ typedef struct {
   int  use; // 正在使用
   int  flag;
 } network_card;
-bool            pcnet_find_card();
-network_card    network_card_CTL[25] = {};
-static uint8_t *IP_Packet_Base[16]   = {};
-static uint32_t Find_IP_Packet(uint16_t ident) {
+bool         pcnet_find_card();
+network_card network_card_CTL[25] = {};
+static u8   *IP_Packet_Base[16]   = {};
+static u32   Find_IP_Packet(u16 ident) {
   for (int i = 0; i != 16; i++) {
     if (IP_Packet_Base[i] != NULL) {
       struct IPV4Message *ipv4 =
@@ -25,14 +25,13 @@ static uint32_t Find_IP_Packet(uint16_t ident) {
   return -1;
 }
 static void IP_Assembling(struct IPV4Message *ipv4, u8 *RawData) {
-  uint32_t            i_p = Find_IP_Packet(swap16(ipv4->ident));
+  u32                 i_p = Find_IP_Packet(swap16(ipv4->ident));
   struct IPV4Message *ipv4_p =
       (struct IPV4Message *)(IP_Packet_Base[i_p] + sizeof(struct EthernetFrame_head));
-  uint32_t size_p = swap16(ipv4_p->totalLength);
+  u32 size_p = swap16(ipv4_p->totalLength);
   ipv4_p->totalLength =
       swap16(swap16(ipv4->totalLength) + swap16(ipv4_p->totalLength) - sizeof(struct IPV4Message));
-  IP_Packet_Base[i_p] =
-      (uint8_t *)realloc((void *)IP_Packet_Base[i_p], swap16(ipv4_p->totalLength));
+  IP_Packet_Base[i_p] = (u8 *)realloc((void *)IP_Packet_Base[i_p], swap16(ipv4_p->totalLength));
   memcpy((void *)(IP_Packet_Base[i_p] + size_p),
          RawData + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message),
          swap16(ipv4->totalLength) - sizeof(struct IPV4Message));
@@ -58,7 +57,7 @@ void init_card() {
       printk("Find --- %s\n", network_card_CTL[i].card_name);
       network_card_CTL[i].use = 1;
       network_card_CTL[i].init();
-      extern uint32_t ip, gateway, submask, dns;
+      extern u32 ip, gateway, submask, dns;
 
       ip      = 0xFFFFFFFF;
       gateway = 0xFFFFFFFF;
@@ -87,7 +86,7 @@ void init_card() {
         dns     = strtoul(env_read("dns"), NULL, 16);
       }
 
-      for (uint8_t i = 1; i != 0; i++) {
+      for (u8 i = 1; i != 0; i++) {
         // printk("%d\n",i);
         IPParseMAC((ip & 0xffffff00) | i);
       }
@@ -120,7 +119,7 @@ void Card_Recv_Handler(u8 *RawData) {
           for (int i = 0; i != 16; i++) {
             if (IP_Packet_Base[i] == NULL) {
               IP_Packet_Base[i] =
-                  (uint8_t *)malloc(swap16(ipv4->totalLength) + sizeof(struct EthernetFrame_head));
+                  (u8 *)malloc(swap16(ipv4->totalLength) + sizeof(struct EthernetFrame_head));
               memcpy((void *)IP_Packet_Base[i], RawData,
                      swap16(ipv4->totalLength) + sizeof(struct EthernetFrame_head));
               break;
@@ -130,8 +129,8 @@ void Card_Recv_Handler(u8 *RawData) {
           IP_Assembling(ipv4, RawData);
         }
       } else if (!((swap16(ipv4->flagsAndOffset) >> IP_MF) & 1)) {
-        uint32_t i_p  = Find_IP_Packet(swap16(ipv4->ident));
-        void    *base = RawData;
+        u32   i_p  = Find_IP_Packet(swap16(ipv4->ident));
+        void *base = RawData;
         if (i_p != -1) {
           IP_Assembling(ipv4, RawData);
           base = (void *)IP_Packet_Base[i_p];

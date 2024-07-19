@@ -46,7 +46,7 @@ int             os_execute_shell(char *line);
 void            idle();
 void            init();
 extern uint64_t global_time;
-void            set_cr3(uint32_t pde);
+void            set_cr3(u32 pde);
 struct FIFO8   *task_get_key_fifo(mtask *task);
 void            task_fifo_sleep(mtask *task);
 struct FIFO8   *task_get_mouse_fifo(mtask *task);
@@ -55,43 +55,43 @@ void            task_unlock();
 void            task_to_user_mode(unsigned eip, unsigned esp);
 void            task_set_fifo(mtask *task, struct FIFO8 *kfifo, struct FIFO8 *mfifo);
 void            os_execute_no_ret(char *filename, char *line);
-uint32_t        get_father_tid(mtask *t);
-int             waittid(uint32_t tid);
+u32             get_father_tid(mtask *t);
+int             waittid(u32 tid);
 void            task_fall_blocked(enum STATE state);
 void            task_run(mtask *task);
 void            mtask_run_now(mtask *obj);
 int             task_fork();
 
 // page.c
-void     C_init_page();
-void     pf_set(u32 memsize);
-int      get_line_address(int t, int p, int o);
-int      get_page_from_line_address(int line_address);
-void     page2tpo(int page, int *t, int *p);
-void     tpo2page(int *page, int t, int p);
-void    *page_malloc_one();
-void    *page_malloc_one_count_from_4gb();
-void    *page_malloc_one_no_mark();
-void    *page_malloc_one_mark(unsigned tid);
-int      get_pageinpte_address(int t, int p);
-void     page_free_one(void *p);
-int      find_kpage(int line, int n);
-void    *page_malloc(int size);
-void     page_free(void *p, int size);
-void     page_map(void *target, void *start, void *end);
-void     change_page_task_id(int task_id, void *p, u32 size);
-void     PF(unsigned edi, unsigned esi, unsigned ebp, unsigned esp, unsigned ebx, unsigned edx,
-            unsigned ecx, unsigned eax, unsigned gs, unsigned fs, unsigned es, unsigned ds,
-            unsigned error, unsigned eip, unsigned cs, unsigned eflags);
-void     page_set_physics_attr(uint32_t vaddr, void *paddr, uint32_t attr);
-uint32_t page_get_attr(unsigned vaddr);
-uint32_t page_get_phy(unsigned vaddr);
-void     copy_from_phy_to_line(unsigned phy, unsigned line, unsigned pde, unsigned size);
-uint32_t page_get_attr_pde(unsigned vaddr, unsigned pde);
-void     set_line_address(unsigned val, unsigned line, unsigned pde, unsigned size);
-void     page_link_pde(unsigned addr, unsigned pde);
-uint32_t page_get_phy_pde(unsigned vaddr, unsigned pde);
-void     page_links(unsigned start, unsigned numbers);
+void  C_init_page();
+void  pf_set(u32 memsize);
+int   get_line_address(int t, int p, int o);
+int   get_page_from_line_address(int line_address);
+void  page2tpo(int page, int *t, int *p);
+void  tpo2page(int *page, int t, int p);
+void *page_malloc_one();
+void *page_malloc_one_count_from_4gb();
+void *page_malloc_one_no_mark();
+void *page_malloc_one_mark(unsigned tid);
+int   get_pageinpte_address(int t, int p);
+void  page_free_one(void *p);
+int   find_kpage(int line, int n);
+void *page_malloc(int size);
+void  page_free(void *p, int size);
+void  page_map(void *target, void *start, void *end);
+void  change_page_task_id(int task_id, void *p, u32 size);
+void  PF(unsigned edi, unsigned esi, unsigned ebp, unsigned esp, unsigned ebx, unsigned edx,
+         unsigned ecx, unsigned eax, unsigned gs, unsigned fs, unsigned es, unsigned ds,
+         unsigned error, unsigned eip, unsigned cs, unsigned eflags);
+void  page_set_physics_attr(u32 vaddr, void *paddr, u32 attr);
+u32   page_get_attr(unsigned vaddr);
+u32   page_get_phy(unsigned vaddr);
+void  copy_from_phy_to_line(unsigned phy, unsigned line, unsigned pde, unsigned size);
+u32   page_get_attr_pde(unsigned vaddr, unsigned pde);
+void  set_line_address(unsigned val, unsigned line, unsigned pde, unsigned size);
+void  page_link_pde(unsigned addr, unsigned pde);
+u32   page_get_phy_pde(unsigned vaddr, unsigned pde);
+void  page_links(unsigned start, unsigned numbers);
 
 // nasmfunc.asm
 void int32(u8 intnum, regs16_t *regs);
@@ -155,48 +155,48 @@ void __init_PIT();
 void init_float();
 
 // other.c
-void     INT(u8 intnum, regs16_t *regs);
-void     ERROR0(uint32_t eip);
-void     ERROR1(uint32_t eip);
-void     ERROR3(uint32_t eip);
-void     ERROR4(uint32_t eip);
-void     ERROR5(uint32_t eip);
-void     ERROR6(uint32_t eip);
-void     ERROR7(uint32_t eip);
-void     ERROR8(uint32_t eip);
-void     ERROR9(uint32_t eip);
-void     ERROR10(uint32_t eip);
-void     ERROR11(uint32_t eip);
-void     ERROR12(uint32_t eip);
-void     ERROR13(uint32_t eip);
-void     ERROR16(uint32_t eip);
-void     ERROR17(uint32_t eip);
-void     ERROR18(uint32_t eip);
-void     ERROR19(uint32_t eip);
-void     ERROR(int CODE, char *TIPS);
-void     KILLAPP(int ec, int eip);
-void     KILLAPP0(int ec, int tn);
-void     insert_char(char *str, int pos, char ch); // str:字符串，pos:位置，ch:字符
-void     delete_char(char *str, int pos);          // str:字符串，pos:位置
-char     bcd2hex(char bcd);
-char     hex2bcd(char hex);
-void     getCPUBrand(char *cBrand);
-char     ascii2num(char c);
-char     num2ascii(char c);
-void     strtoupper(char *str);
-int      GetCHorEN(u8 *str);
-void     clean(char *s, int len);
-void     disableExp();
-void     EnableExp();
-uint32_t get_cr0();
-void     set_cr0(uint32_t cr0);
-char     GetExpFlag();
-void     ClearExpFlag();
-void     SetCatchEip(uint32_t eip);
-void     SwitchPublic();
-void     SwitchPrivate();
+void INT(u8 intnum, regs16_t *regs);
+void ERROR0(u32 eip);
+void ERROR1(u32 eip);
+void ERROR3(u32 eip);
+void ERROR4(u32 eip);
+void ERROR5(u32 eip);
+void ERROR6(u32 eip);
+void ERROR7(u32 eip);
+void ERROR8(u32 eip);
+void ERROR9(u32 eip);
+void ERROR10(u32 eip);
+void ERROR11(u32 eip);
+void ERROR12(u32 eip);
+void ERROR13(u32 eip);
+void ERROR16(u32 eip);
+void ERROR17(u32 eip);
+void ERROR18(u32 eip);
+void ERROR19(u32 eip);
+void ERROR(int CODE, char *TIPS);
+void KILLAPP(int ec, int eip);
+void KILLAPP0(int ec, int tn);
+void insert_char(char *str, int pos, char ch); // str:字符串，pos:位置，ch:字符
+void delete_char(char *str, int pos);          // str:字符串，pos:位置
+char bcd2hex(char bcd);
+char hex2bcd(char hex);
+void getCPUBrand(char *cBrand);
+char ascii2num(char c);
+char num2ascii(char c);
+void strtoupper(char *str);
+int  GetCHorEN(u8 *str);
+void clean(char *s, int len);
+void disableExp();
+void EnableExp();
+u32  get_cr0();
+void set_cr0(u32 cr0);
+char GetExpFlag();
+void ClearExpFlag();
+void SetCatchEip(u32 eip);
+void SwitchPublic();
+void SwitchPrivate();
 // syscall.c
-void     inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx, int eax);
+void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx, int eax);
 
 // fifo.c
 void fifo8_init(struct FIFO8 *fifo, int size, u8 *buf);
@@ -241,17 +241,17 @@ freeinfo    *make_next_freeinfo(memory *mem);
 free_member *mem_insert(int pos, freeinfo *finf);
 free_member *mem_add(freeinfo *finf);
 void         mem_delete(int pos, freeinfo *finf);
-uint32_t     mem_get_all_finf(freeinfo *finf);
+u32          mem_get_all_finf(freeinfo *finf);
 void         mem_defragmenter(freeinfo *finf);
-uint32_t     mem_partition(freeinfo *finf, uint32_t start, uint32_t end, uint32_t index);
-int          mem_free_finf(memory *mem, freeinfo *finf, void *p, uint32_t size);
-void        *mem_alloc_finf(memory *mem, freeinfo *finf, uint32_t size, freeinfo *if_nomore);
-void        *mem_alloc(memory *mem, uint32_t size);
-void         mem_free(memory *mem, void *p, uint32_t size);
-memory      *memory_init(uint32_t start, uint32_t size);
+u32          mem_partition(freeinfo *finf, u32 start, u32 end, u32 index);
+int          mem_free_finf(memory *mem, freeinfo *finf, void *p, u32 size);
+void        *mem_alloc_finf(memory *mem, freeinfo *finf, u32 size, freeinfo *if_nomore);
+void        *mem_alloc(memory *mem, u32 size);
+void         mem_free(memory *mem, void *p, u32 size);
+memory      *memory_init(u32 start, u32 size);
 void        *malloc(int size);
 void         free(void *p);
-void        *realloc(void *ptr, uint32_t size);
+void        *realloc(void *ptr, u32 size);
 
 // ipc.c
 int  send_ipc_message(int to_tid, void *data, u32 size, char type);
@@ -292,7 +292,7 @@ void unmount(char drive);
 void set_signal_handler(unsigned sig, unsigned handler);
 
 // farcall.c
-uint32_t call_across_page(uint32_t (*f)(void *arg), unsigned cr3, void *a);
+u32 call_across_page(u32 (*f)(void *arg), unsigned cr3, void *a);
 
 // fartty.c
 struct tty *fartty_alloc(void *vram, unsigned handle, unsigned cr3, int xsize, int ysize);

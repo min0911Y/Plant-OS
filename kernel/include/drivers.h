@@ -74,19 +74,17 @@ void mouseinput();
 void inthandler2c(int *esp);
 
 // pci.c
-uint32_t read_pci(uint8_t bus, uint8_t device, uint8_t function, uint8_t registeroffset);
-void     write_pci(uint8_t bus, uint8_t device, uint8_t function, uint8_t registeroffset,
-                   uint32_t value);
-uint32_t pci_read_command_status(uint8_t bus, uint8_t slot, uint8_t func);
-void     pci_write_command_status(uint8_t bus, uint8_t slot, uint8_t func, uint32_t value);
-uint8_t  pci_get_drive_irq(uint8_t bus, uint8_t slot, uint8_t func);
-uint32_t pci_get_port_base(uint8_t bus, uint8_t slot, uint8_t func);
-void     PCI_GET_DEVICE(uint16_t vendor_id, uint16_t device_id, uint8_t *bus, uint8_t *slot,
-                        uint8_t *func);
-void     pci_config(u32 Bus, u32 f, u32 equipment, u32 adder);
-uint32_t read_bar_n(uint8_t bus, uint8_t device, uint8_t function, uint8_t bar_n);
-void     init_PCI(u32 adder_Base);
-void     PCI_ClassCode_Print(struct pci_config_space_public *pci_config_space_puclic);
+u32  read_pci(u8 bus, u8 device, u8 function, u8 registeroffset);
+void write_pci(u8 bus, u8 device, u8 function, u8 registeroffset, u32 value);
+u32  pci_read_command_status(u8 bus, u8 slot, u8 func);
+void pci_write_command_status(u8 bus, u8 slot, u8 func, u32 value);
+u8   pci_get_drive_irq(u8 bus, u8 slot, u8 func);
+u32  pci_get_port_base(u8 bus, u8 slot, u8 func);
+void PCI_GET_DEVICE(u16 vendor_id, u16 device_id, u8 *bus, u8 *slot, u8 *func);
+void pci_config(u32 Bus, u32 f, u32 equipment, u32 adder);
+u32  read_bar_n(u8 bus, u8 device, u8 function, u8 bar_n);
+void init_PCI(u32 adder_Base);
+void PCI_ClassCode_Print(struct pci_config_space_public *pci_config_space_puclic);
 
 // pic.c
 void init_pic(void);
@@ -100,7 +98,7 @@ void into_16bitsRW();
 void reset_card();
 void Activate();
 void init_pcnet_card();
-void PcnetSend(uint8_t *buffer, int size);
+void PcnetSend(u8 *buffer, int size);
 void PCNET_IRQ(int *esp);
 
 // vbe.c
@@ -119,7 +117,7 @@ void     write_regs(u8 *regs);
 void     SwitchTo320X200X256();
 void     SwitchToText8025();
 void     Set_Font(char *file);
-void     pokew(int setmentaddr, int offset, short value);
+void     pokew(int setmentaddr, int offset, i16 value);
 void     pokeb(int setmentaddr, int offset, char value);
 void     set_palette(int start, int end, u8 *rgb);
 void     init_palette(void);

@@ -3,19 +3,19 @@
 // ------------------------------------------------
 #include <dos.h>
 
-int      DisableExpFlag = 0;
-uint32_t CatchEIP       = 0;
-char     flagOfexp      = 0;
-char     public_catch   = 0;
-int      st_task        = 0;
+int  DisableExpFlag = 0;
+u32  CatchEIP       = 0;
+char flagOfexp      = 0;
+char public_catch   = 0;
+int  st_task        = 0;
 // 得到 cr0 寄存器
-uint32_t get_cr0() {
+u32  get_cr0() {
   // 直接将 mov eax, cr0，返回值在 eax 中
   asm volatile("movl %cr0, %eax\n");
 }
 
 // 设置 cr0 寄存器，参数是页目录的地址
-void set_cr0(uint32_t cr0) {
+void set_cr0(u32 cr0) {
   asm volatile("movl %%eax, %%cr0\n" ::"a"(cr0));
 }
 void SwitchPublic() {
@@ -53,7 +53,7 @@ void ClearExpFlag() {
     current_task()->flagOfexp = 0;
   }
 }
-void SetCatchEip(uint32_t eip) {
+void SetCatchEip(u32 eip) {
   // printk("eip = %08x\n",eip);
   if (public_catch) {
     CatchEIP = eip;
@@ -110,8 +110,8 @@ void fpu_enable(mtask *task) {
 }
 
 #define _ERROR(_code_, _tips_)                                                                     \
-  void ERROR##_code_(uint32_t eip) {                                                               \
-    uint32_t *esp = &eip;                                                                          \
+  void ERROR##_code_(u32 eip) {                                                                    \
+    u32 *esp = &eip;                                                                               \
     ERROR(_code_, _tips_);                                                                         \
     if (public_catch) {                                                                            \
       *esp = CatchEIP;                                                                             \
@@ -141,12 +141,12 @@ _ERROR(19, "#XF");
 int  dflag = 0;
 bool has_fpu_error() {
   dflag = 0;
-  uint16_t status_word;
+  u16 status_word;
   asm("fnstsw %0" : "=m"(status_word));
   dflag = 1;
   return (status_word & 0x1F) != 0;
 }
-void ERROR7(uint32_t eip) {
+void ERROR7(u32 eip) {
   if (current_task()->fpu_flag > 1 || current_task()->fpu_flag < 0) {
     set_cr0(get_cr0() & ~(CR0_EM | CR0_TS));
     return;
@@ -154,9 +154,9 @@ void ERROR7(uint32_t eip) {
   fpu_enable(current_task());
 }
 
-void ERROR13(uint32_t eip) {
+void ERROR13(u32 eip) {
   printk("ERROR GP!!!!");
-  for (;;)
+  while (true)
     ;
 }
 
@@ -200,7 +200,7 @@ void ERROR(int CODE, char *TIPS) {
 
   // printk("Task sel=%d\n", current_task()->sel);
   io_cli();
-  for (;;) {}
+  while (true) {}
 }
 void KILLAPP(int eip, int ec) {
   printk("KILL APP %08x %d\n", eip, ec);
@@ -223,7 +223,7 @@ void KILLAPP(int eip, int ec) {
   //          task->name, task->sel / 8 - 103, ec, eip);
   // }
   //  task_delete(task);
-  for (;;)
+  while (true)
     ;
 }
 void KILLAPP0(int ec, int tn) {
