@@ -52,7 +52,7 @@ TESTSRC = \
 
 TEST = $(TESTSRC:.c=)
 
-LIB = ../libs/libutf.a
+LIB = ../lib/libutf.a
 HDR = include/utf.h
 MAN = share/man/rune.3 share/man/isalpharune.3
 

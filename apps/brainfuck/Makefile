@@ -1,4 +1,4 @@
-LIBS_PATH := ../libs
+LIBS_PATH := ../lib
 INCLUDE_PATH := ../include
 include ../defs.mk
 NASM = nasm

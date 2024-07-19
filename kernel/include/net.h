@@ -42,7 +42,7 @@ struct Socket *socket_alloc(uint8_t protocol);
 void           socket_free(struct Socket *socket);
 void Socket_Init(struct Socket *socket, uint32_t remoteIP, uint16_t remotePort, uint32_t localIP,
                  uint16_t localPort);
-void Socket_Bind(struct Socket *socket, void (*Handler)());
+void Socket_Bind(struct Socket *socket, void (*Handler)(struct Socket *socket, void *base));
 struct Socket       *Socket_Find(uint32_t dstIP, uint16_t dstPort, uint32_t srcIP, uint16_t srcPort,
                                  uint8_t protocol);
 struct SocketServer *SocketServer_Alloc(void (*Handler)(struct Socket *socket, void *base),

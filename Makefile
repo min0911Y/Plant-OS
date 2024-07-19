@@ -1,5 +1,8 @@
 default :
 	cd ./apps && make -j && cd ..
-	cd ./loader && make -j && cd ..
-	cd ./kernel && make -j && cd ..
+	mkdir -p ./build && cd ./build && cmake .. && make && cd ..
+
+img_run:
 	cd ./kernel && make img_run
+run:
+	cd ./kernel && make run

@@ -5,7 +5,7 @@ apps/*/*.o
 apps/*/*.obj
 apps/*/*/*.o
 apps/out
-apps/libs
+apps/lib
 apps/doomgeneric/*.o
 apps/sdl2/*.o
 apps/sdl2_old/*.o

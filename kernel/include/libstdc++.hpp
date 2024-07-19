@@ -7,6 +7,7 @@ public:
   string();
   string(char *s);
   string(string &s);
+  string(string &&s);
   string(const char *s);
   ~string();
   const char *c_str();

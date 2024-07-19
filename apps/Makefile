@@ -1,5 +1,5 @@
 default :
-	mkdir -p libs
+	mkdir -p lib
 	mkdir -p out
 	make -r -C libp
 	make -r -C libtcc1
@@ -64,6 +64,6 @@ default :
 	make -r -C netgobang
 	make -r -C bfpp
 clean :
-	rm libs/*
+	rm lib/*
 	rm out/*
 

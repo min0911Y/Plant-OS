@@ -1,4 +1,4 @@
-LIBS_PATH := ../libs
+LIBS_PATH := ../lib
 INCLUDE_PATH := ../include
 include ../defs.mk
 CFLAGS = -m32 -I$(INCLUDE_PATH) -nostdinc -nolibc -nostdlib -ffreestanding -fno-stack-protector -Qn -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fomit-frame-pointer -finput-charset=UTF-8 -fexec-charset=UTF-8 -march=pentium -Qn -O0 -w
@@ -9,7 +9,7 @@ OBJS_PACK3 = ../out/lualib.obj
 default : $(OBJS_PACK1) $(OBJS_PACK2) $(OBJS_PACK3)
 	$(LINK) $(OBJS_PACK1) $(BASIC_LIB_C) -o ../out/lua.bin
 	$(LINK) $(OBJS_PACK2) $(BASIC_LIB_C) -o ../out/luac.bin
-	ar rv ../libs/liblua.a $(OBJS_PACK3)
+	ar rv ../lib/liblua.a $(OBJS_PACK3)
 ../out/%.obj : %.c Makefile
 	$(C) -c $*.c -o ../out/$*.obj
 ../out/%.obj : %.cpp Makefile

@@ -177,10 +177,10 @@ $(NASMLIB): $(LIBOBJ)
 	$(RANLIB) $(NASMLIB)
 
 nasm$(X): $(NASM) $(NASMLIB)
-	ld $(ALL_LDFLAGS) -o ../out/nasm$(X) $(NASM) $(NASMLIB) $(LIBS) ../libs/libp.a ../libs/libtcc1.a ../libs/libabi.a
+	ld $(ALL_LDFLAGS) -o ../out/nasm$(X) $(NASM) $(NASMLIB) $(LIBS) ../lib/libp.a ../lib/libtcc1.a ../lib/libabi.a
 
 ndisasm$(X): $(NDISASM) $(NASMLIB)
-	ld $(ALL_LDFLAGS) -o ../out/ndisasm$(X) $(NDISASM) $(NASMLIB) $(LIBS) ../libs/libp.a ../libs/libtcc1.a ../libs/libabi.a
+	ld $(ALL_LDFLAGS) -o ../out/ndisasm$(X) $(NDISASM) $(NASMLIB) $(LIBS) ../lib/libp.a ../lib/libtcc1.a ../lib/libabi.a
 
 #-- Begin Generated File Rules --#
 
