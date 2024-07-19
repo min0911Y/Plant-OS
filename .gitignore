@@ -17,6 +17,10 @@ cloc.exe
 
 Loader/out
 
+.bin
+.build
+.lib
+
 fattools/fattools
 
 # /kernel

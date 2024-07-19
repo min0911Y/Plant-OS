@@ -24,6 +24,8 @@ RULEFILE = make.rul
 COPY     = copy
 DEL      = rm
 
+QEMU_ARGS = -net nic,model=pcnet -net user -serial stdio -device sb16 -device floppy
+
 OBJS_BOOTPACK = $(OUTPATH)kernelc.o $(OUTPATH)screen.o $(OUTPATH)command.o $(OUTPATH)execbatch.o $(OUTPATH)timer.o \
 				$(OUTPATH)mem.o $(OUTPATH)file.o $(OUTPATH)setjmp.obj $(OUTPATH)int32.obj $(OUTPATH)i386.obj \
 				$(OUTPATH)handlers.obj $(OUTPATH)errors.obj $(OUTPATH)vga.o $(OUTPATH)harddisk.o $(OUTPATH)TextMode.o  \
@@ -142,7 +144,6 @@ Mimg : make_dir $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $
 #		mcopy -i ./disk.img $(APPSOUTPATH)stamon.bin ::/stamon/bin
 #		mcopy -i ./disk.img ../apps/stamon/bin/include/* ::/stamon/bin/include
 #		mcopy -i ./disk.img ../apps/stamon/demos/* ::/stamon/demos
-
 
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(LOADERPATH)dosldr.bin ::
 		mcopy -i $(IMGPATH)Powerint_DOS_386.img $(OUTPATH)kernel.bin ::
@@ -263,9 +264,13 @@ img_run :
 	$(MAKE) -C $(NETPATH)
 	$(MAKE) -C $(MSTPATH)
 	$(MAKE) Mimg
-	sudo qemu-system-i386 -enable-kvm -net nic,model=pcnet -net user -serial stdio -device sb16 -device floppy -fda ./img/Powerint_DOS_386.img -hda ./img/Disk2.img -hdb ./img/Disk3.img -hdc ./img/res.img \
-	-hdd disk.img \
-	 -boot a -m 4096
+	sudo qemu-system-i386 -enable-kvm $(QEMU_ARGS) \
+		-fda ./img/Powerint_DOS_386.img \
+		-hda ./img/Disk2.img \
+		-hdb ./img/Disk3.img \
+		-hdc ./img/res.img \
+		-hdd disk.img \
+		-boot a -m 4096
 full : make_dir
 	$(MAKE) -C $(DOSPATH)
 	$(MAKE) -C $(IOPATH)
@@ -278,7 +283,8 @@ full : make_dir
 	$(MAKE) -C $(MSTPATH)
 	$(MAKE) Mimg
 run:
-	qemu-system-i386 -d in_asm -no-reboot -net nic,model=pcnet -net user -serial stdio -device sb16 -device floppy -fda ./img/Powerint_DOS_386.img -drive id=disk,file=disk.img,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -hdb ./img/Disk2.img -hdc ./img/Disk3.img -hdd ./img/res.img -boot a -m 512
+	qemu-system-i386 -d in_asm -no-reboot $(QEMU_ARGS) \
+		-fda ./img/Powerint_DOS_386.img -drive id=disk,file=disk.img,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -hdb ./img/Disk2.img -hdc ./img/Disk3.img -hdd ./img/res.img -boot a -m 512
 full_run:
 	$(MAKE) -C $(DOSPATH)
 	$(MAKE) -C $(IOPATH)
@@ -289,7 +295,7 @@ full_run:
 	$(MAKE) -C $(NETPATH)
 	$(MAKE) -C $(APPSPATH)
 	$(MAKE) Mimg
-	qemu-system-i386 -net nic,model=pcnet -net user -serial stdio -device sb16 -device floppy -fda ./img/Powerint_DOS_386.img -drive id=disk,file=disk.img,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -hdb ./img/Disk2.img -hdc ./img/Disk3.img -hdd ./img/res.img -boot a -m 512 -enable-kvm
+	qemu-system-i386 $(QEMU_ARGS) -fda ./img/Powerint_DOS_386.img -drive id=disk,file=disk.img,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -hdb ./img/Disk2.img -hdc ./img/Disk3.img -hdd ./img/res.img -boot a -m 512 -enable-kvm
 clean :
 	rm -r ./obj
 	rm -r ./img

@@ -1,4 +1,4 @@
-default : Makefile
+default :
 	mkdir -p libs
 	mkdir -p out
 	make -r -C libp

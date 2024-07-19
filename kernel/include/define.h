@@ -6,6 +6,8 @@
 typedef unsigned int vram_t;
 typedef vram_t       color_t;
 
+#define __PACKED__ __attribute__((packed))
+
 /* dos.h */
 #define VERSION      "0.7b" // Version of the program
 #define ADR_IDT      0x0026f800
@@ -47,13 +49,13 @@ extern uint32_t         running_mode;
 struct PAGE_INFO {
   uint8_t task_id;
   uint8_t count;
-} __attribute__((packed));
+} __PACKED__;
 
 #define FREE_MAX_NUM              4096
 #define ERRNO_NOPE                0
 #define ERRNO_NO_ENOGHT_MEMORY    1
 #define ERRNO_NO_MORE_FREE_MEMBER 2
-#define MEM_MAX(a, b)             (a) > (b) ? (a) : (b)
+#define MEM_MAX(a, b)             ((a) > (b) ? (a) : (b))
 typedef struct {
   uint32_t start;
   uint32_t end; // end和start都等于0说明这个free结构没有使用
@@ -124,7 +126,7 @@ typedef struct { // IPC头（在TASK结构体中的头）
 // struct THREAD {
 //   struct TASK *father;
 // };
-#define _packed __attribute__((packed))
+#define _packed __PACKED__
 enum {
   CR0_PE = 1 << 0, // Protection Enable 启用保护模式
   CR0_MP = 1 << 1, // Monitor Coprocessor
@@ -191,7 +193,7 @@ typedef struct fpu_t {
 //   uint32_t fpu_use;
 //   uint32_t *gdt_data;
 //   uint32_t pde;
-// } __attribute__((packed));
+// } __PACKED__;
 typedef struct {
   uint32_t eax, ebx, ecx, edx, esi, edi, ebp;
   uint32_t eip;
@@ -640,7 +642,7 @@ struct ACPI_FADT {
   GenericAddressStructure X_PMTimerBlock;
   GenericAddressStructure X_GPE0Block;
   GenericAddressStructure X_GPE1Block;
-} __attribute__((packed));
+} __PACKED__;
 #define BCD_HEX(n)      ((n >> 4) * 10) + (n & 0xf)
 #define HEX_BCD(n)      ((n / 10) << 4) + (n % 10)
 #define CMOS_CUR_SEC    0x0
@@ -724,7 +726,7 @@ typedef struct {
   unsigned int   offscreen;
   unsigned short offsize;
 
-} __attribute__((packed)) VESAModeInfo;
+} __PACKED__ VESAModeInfo;
 typedef struct {
   unsigned char      signature[4];
   unsigned short     Version;
@@ -742,7 +744,7 @@ typedef struct {
   unsigned char      reserved0[220];
   unsigned char      oemUse[256];
   VESAModeInfo       modeList[0];
-} __attribute__((packed)) VESAControllerInfo;
+} __PACKED__ VESAControllerInfo;
 struct VBEINFO {
   char  res1[18];
   short xsize, ysize;
@@ -771,7 +773,7 @@ struct VBEINFO {
 #define VGA_NUM_GC_REGS                    9
 #define VGA_NUM_AC_REGS                    21
 #define VGA_NUM_REGS                       (1 + VGA_NUM_SEQ_REGS + VGA_NUM_CRTC_REGS + VGA_NUM_GC_REGS + VGA_NUM_AC_REGS)
-#define _vmemwr(DS, DO, S, N)              memcpy((char *)((DS) * 16 + (DO)), S, N)
+#define _vmemwr(DS, DO, S, N)              memcpy((char *)((DS)*16 + (DO)), S, N)
 #define SB16_IRQ                           5
 #define SB16_FAKE_TID                      -3
 #define SB16_PORT_MIXER                    0x224
@@ -822,14 +824,14 @@ struct InitializationBlock {
   uint64_t logicalAddress;
   uint32_t recvBufferDescAddress;
   uint32_t sendBufferDescAddress;
-} __attribute__((packed));
+} __PACKED__;
 
 struct BufferDescriptor {
   uint32_t address;
   uint32_t flags;
   uint32_t flags2;
   uint32_t avail;
-} __attribute__((packed));
+} __PACKED__;
 
 struct IDEHardDiskInfomationBlock {
   char           reserve1[2];
@@ -850,15 +852,15 @@ struct IDEHardDiskInfomationBlock {
 
 /* net */
 #define swap32(x)                                                                                  \
-  ((((x) & 0xff000000) >> 24) | (((x) & 0x00ff0000) >> 8) | (((x) & 0x0000ff00) << 8) |            \
-   (((x) & 0x000000ff) << 24))
-#define swap16(x) ((((x) & 0xff00) >> 8) | (((x) & 0x00ff) << 8))
+  ((((x)&0xff000000) >> 24) | (((x)&0x00ff0000) >> 8) | (((x)&0x0000ff00) << 8) |                  \
+   (((x)&0x000000ff) << 24))
+#define swap16(x) ((((x)&0xff00) >> 8) | (((x)&0x00ff) << 8))
 // 以太网帧
 struct EthernetFrame_head {
   uint8_t  dest_mac[6];
   uint8_t  src_mac[6];
   uint16_t type;
-} __attribute__((packed));
+} __PACKED__;
 // 以太网帧--尾部
 struct EthernetFrame_tail {
   uint32_t CRC; // 这里可以填写为0，网卡会自动计算
@@ -877,7 +879,7 @@ struct ARPMessage {
   uint32_t src_ip;
   uint8_t  dest_mac[6];
   uint32_t dest_ip;
-} __attribute__((packed));
+} __PACKED__;
 // IPV4
 #define IP_PROTOCOL 0x0800
 #define MTU         1500
@@ -896,7 +898,7 @@ struct IPV4Message {
   uint16_t checkSum;
   uint32_t srcIP;
   uint32_t dstIP;
-} __attribute__((packed));
+} __PACKED__;
 // ICMP
 #define ICMP_PROTOCOL 1
 struct ICMPMessage {
@@ -905,7 +907,7 @@ struct ICMPMessage {
   uint16_t checksum;
   uint16_t ID;
   uint16_t sequence;
-} __attribute__((packed));
+} __PACKED__;
 #define PING_WAITTIME 200
 #define PING_ID       0x0038
 #define PING_SEQ      0x2115
@@ -918,7 +920,7 @@ struct UDPMessage {
   uint16_t dstPort;
   uint16_t length;
   uint16_t checkSum;
-} __attribute__((packed));
+} __PACKED__;
 // DHCP
 #define DHCP_CHADDR_LEN 16
 #define DHCP_SNAME_LEN  64
@@ -940,7 +942,7 @@ struct DHCPMessage {
   char     bp_file[DHCP_FILE_LEN];
   uint32_t magic_cookie;
   uint8_t  bp_options[0];
-} __attribute__((packed));
+} __PACKED__;
 #define DHCP_BOOTREQUEST 1
 #define DHCP_BOOTREPLY   2
 
@@ -1009,11 +1011,11 @@ struct DNS_Header {
   uint16_t NScount;
   uint16_t ARcount;
   uint8_t  reserved;
-} __attribute__((packed));
+} __PACKED__;
 struct DNS_Question {
   uint16_t type;
   uint16_t Class;
-} __attribute__((packed));
+} __PACKED__;
 struct DNS_Answer {
   uint32_t name : 24;
   uint16_t type;
@@ -1022,7 +1024,7 @@ struct DNS_Answer {
   uint16_t RDlength;
   uint8_t  reserved;
   uint8_t  RData[0];
-} __attribute__((packed));
+} __PACKED__;
 // TCP
 #define TCP_PROTOCOL         6
 #define TCP_CONNECT_WAITTIME 1000
@@ -1033,7 +1035,7 @@ struct TCPPesudoHeader {
   uint32_t dstIP;
   uint16_t protocol;
   uint16_t totalLength;
-} __attribute__((packed));
+} __PACKED__;
 struct TCPMessage {
   uint16_t srcPort;
   uint16_t dstPort;
@@ -1053,7 +1055,7 @@ struct TCPMessage {
   uint16_t checkSum;
   uint16_t pointer;
   uint32_t options[0];
-} __attribute__((packed));
+} __PACKED__;
 // Socket
 #define MAX_SOCKET_NUM 256
 struct Socket {
@@ -1077,7 +1079,7 @@ struct Socket {
   int      flag; // 1 有包 0 没包
   int      size;
   char    *buf;
-} __attribute__((packed));
+} __PACKED__;
 // UDP state
 #define SOCKET_ALLOC              -1
 // UDP/TCP state
@@ -1121,7 +1123,7 @@ struct NTPMessage {
   uint64_t Originate_Timestamp;
   uint64_t Receive_Timestamp;
   uint64_t Transmission_Timestamp;
-} __attribute__((packed));
+} __PACKED__;
 #define NTPServer1              0xA29FC87B
 #define NTPServer2              0x727607A3
 // ftp

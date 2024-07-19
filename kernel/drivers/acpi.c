@@ -14,7 +14,7 @@ char checksum(unsigned char *addr, unsigned int length) {
   return sum == 0;
 }
 
-unsigned int *acpi_find_rsdp(void) {
+unsigned int *acpi_find_rsdp() {
   unsigned int *addr;
 
   for (addr = (unsigned int *)0x000e0000; addr < (unsigned int *)0x00100000; addr++) {
@@ -90,7 +90,7 @@ void init_acpi(void) {
  * 			0E Qword
  */
 
-int acpi_shutdown(void) {
+int acpi_shutdown() {
   int                   i;
   unsigned short        SLP_TYPa, SLP_TYPb;
   struct ACPISDTHeader *header     = (struct ACPISDTHeader *)acpi_find_table("DSDT");
