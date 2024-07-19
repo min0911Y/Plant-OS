@@ -8,10 +8,10 @@ add_binary_asm_no_elf(boot_pfs boot/boot_pfs.asm)
 
 add_exe_link_flag("-static -Ttext 0x280000 -e KernelMain")
 add_binary_exclude(kernel boot/boot.asm boot/boot32.asm boot/boot_pfs.asm)
-target_link_libraries(kernel ${PROJECT_SOURCE_DIR}/apps/lib/libtcc1.a)
+target_link_libraries(kernel tcc1)
 
 add_custom_target(
-  make_img
+  make_img ALL
   cd ${CMAKE_CURRENT_SOURCE_DIR}
   COMMAND make make_img
   DEPENDS boot boot32 boot_pfs kernel)
@@ -20,3 +20,13 @@ add_custom_target(
   cd ${CMAKE_CURRENT_SOURCE_DIR}
   COMMAND make Mimg
   DEPENDS boot boot32 boot_pfs kernel)
+add_custom_target(
+  img_run
+  cd ${CMAKE_CURRENT_SOURCE_DIR}
+  COMMAND make img_run
+  DEPENDS make_img_full)
+add_custom_target(
+  run
+  cd ${CMAKE_CURRENT_SOURCE_DIR}
+  COMMAND make run
+  DEPENDS make_img)
