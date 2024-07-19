@@ -1,6 +1,6 @@
 #include <dos.h>
 static void fartty_putchar(struct tty *res, int c) {
-  uint32_t args[10];
+  u32 args[10];
   args[0] = 0;
   args[1] = res->vram;
   args[2] = c;
@@ -18,7 +18,7 @@ static void fartty_putchar(struct tty *res, int c) {
   res->color = nc;
 }
 static void fartty_MoveCursor(struct tty *res, int x, int y) {
-  uint32_t *args[10];
+  u32 *args[10];
   args[0] = 1;
   args[1] = res->vram;
   args[2] = x;
@@ -32,7 +32,7 @@ static void fartty_MoveCursor(struct tty *res, int x, int y) {
   call_across_page(res->reserved[0], res->reserved[1], args);
 }
 static void fartty_clear(struct tty *res) {
-  uint32_t args[10];
+  u32 args[10];
   args[0] = 2;
   args[1] = res->vram;
   args[7] = res->x;
@@ -48,7 +48,7 @@ static void fartty_clear(struct tty *res) {
   res->color = nc;
 }
 static void fartty_screen_ne(struct tty *res) {
-  uint32_t args[10];
+  u32 args[10];
   args[0] = 3;
   args[1] = res->vram;
   args[7] = res->x;
@@ -63,15 +63,15 @@ static void fartty_screen_ne(struct tty *res) {
   res->y     = ny;
   res->color = nc;
 }
-static void fartty_Draw_Box(struct tty *res, int x, int y, int x1, int y1, unsigned char color) {
-  uint32_t args[10];
+static void fartty_Draw_Box(struct tty *res, int x, int y, int x1, int y1, u8 color) {
+  u32 args[10];
   args[0] = 4;
   args[1] = res->vram;
   args[2] = x;
   args[3] = y;
   args[4] = x1;
   args[5] = y1;
-  args[6] = (uint32_t)color;
+  args[6] = (u32)color;
   args[7] = res->x;
   args[8] = res->y;
   args[9] = res->color;
@@ -85,7 +85,7 @@ static void fartty_Draw_Box(struct tty *res, int x, int y, int x1, int y1, unsig
   res->color = nc;
 }
 static int fartty_fifo_status(struct tty *res) {
-  uint32_t args[10];
+  u32 args[10];
   args[0] = 5;
   args[1] = res->vram;
   args[7] = res->x;
@@ -102,7 +102,7 @@ static int fartty_fifo_status(struct tty *res) {
   return args[0];
 }
 static int fartty_fifo_get(struct tty *res) {
-  uint32_t args[10];
+  u32 args[10];
   args[0] = 6;
   args[1] = res->vram;
   args[7] = res->x;

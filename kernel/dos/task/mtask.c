@@ -12,58 +12,63 @@ char         mtask_stop_flag = 0;
 unsigned     get_cr3() {
   asm volatile("movl %cr3, %eax\n");
 }
-void set_cr3(uint32_t pde) {
+void set_cr3(u32 pde) {
   asm volatile("movl %%eax, %%cr3\n" ::"a"(pde));
 }
-mtask      *next_set = NULL;
-mtask       null_task;
-static void init_task() {
-  for (int i = 0; i < 255; i++) {
-    m[i].jiffies   = 0; // 最后一次执行的全局时间片
-    m[i].user_mode = 0; // 此项暂时废除
-    m[i].running   = 0;
-    m[i].timeout   = 0;
-    m[i].state     = EMPTY; // EMPTY
-    m[i].tid       = i;     // task id
-    m[i].ptid      = -1;    // parent task id
-    /* keyboard hook */
-    m[i].keyboard_press   = NULL;
-    m[i].keyboard_release = NULL;
-    m[i].urgent           = 0;
-    m[i].fpu_flag         = 0;
-    m[i].fifosleep        = 0;
-    m[i].mx               = 0;
-    m[i].my               = 0;
-    m[i].line             = NULL;
-    m[i].timer            = NULL;
-    m[i].nfs              = NULL;
-    m[i].mm               = NULL;
-    m[i].waittid          = -1;
-    m[i].alloc_addr       = 0;
-    m[i].alloc_size       = 0;
-    m[i].alloced          = 0;
-    m[i].ready            = 0;
-    m[i].pde              = 0;
-    m[i].Pkeyfifo         = NULL;
-    m[i].Ukeyfifo         = NULL;
-    m[i].sigint_up        = 0;
-    m[i].train            = 0;
-    m[i].signal_disable   = 0;
-    m[i].times            = 0;
-    m[i].keyboard_press   = NULL;
-    m[i].keyboard_release = NULL;
-    lock_init(&(m[i].ipc_header.l));
-    m[i].ipc_header.now = 0;
-    for (int k = 0; k < MAX_IPC_MESSAGE; k++) {
-      m[i].ipc_header.messages[k].from_tid = -1;
-      m[i].ipc_header.messages[k].flag1    = 0;
-      m[i].ipc_header.messages[k].flag2    = 0;
-    }
-    for (int k = 0; k < 30; k++) {
-      m[i].handler[k] = 0;
-    }
+mtask *next_set = NULL;
+mtask  null_task;
+
+static void init_task(mtask *t, int id) {
+  t->jiffies          = 0; // 最后一次执行的全局时间片
+  t->user_mode        = 0; // 此项暂时废除
+  t->running          = 0;
+  t->timeout          = 0;
+  t->state            = EMPTY; // EMPTY
+  t->tid              = id;    // task id
+  t->ptid             = -1;    // parent task id
+  t->keyboard_press   = NULL;  // keyboard hook
+  t->keyboard_release = NULL;
+  t->urgent           = 0;
+  t->fpu_flag         = 0;
+  t->fifosleep        = 0;
+  t->mx               = 0;
+  t->my               = 0;
+  t->line             = NULL;
+  t->timer            = NULL;
+  t->nfs              = NULL;
+  t->mm               = NULL;
+  t->waittid          = -1;
+  t->alloc_addr       = 0;
+  t->alloc_size       = 0;
+  t->alloced          = 0;
+  t->ready            = 0;
+  t->pde              = 0;
+  t->Pkeyfifo         = NULL;
+  t->Ukeyfifo         = NULL;
+  t->sigint_up        = 0;
+  t->train            = 0;
+  t->signal_disable   = 0;
+  t->times            = 0;
+  t->keyboard_press   = NULL;
+  t->keyboard_release = NULL;
+  lock_init(&t->ipc_header.l);
+  t->ipc_header.now = 0;
+  for (int k = 0; k < MAX_IPC_MESSAGE; k++) {
+    t->ipc_header.messages[k].from_tid = -1;
+    t->ipc_header.messages[k].flag1    = 0;
+    t->ipc_header.messages[k].flag2    = 0;
+  }
+  for (int k = 0; k < 30; k++) {
+    t->handler[k] = 0;
   }
 }
+
+static void init_tasks() {
+  for (int i = 0; i < 255; i++) {
+    init_task(&m[i], i);
+  }
+}
+
 fpu_t public_fpu;
 bool  task_check_train(mtask *task) {
   if (!task) { return false; }
@@ -169,24 +174,23 @@ mtask *create_task(unsigned eip, unsigned esp, unsigned ticks, unsigned floor) {
   if (!flags_once) {
     if (memcmp((void *)"FAT12   ", (void *)0x7c00 + BS_FileSysType, 8) == 0 ||
         memcmp((void *)"FAT16   ", (void *)0x7c00 + BS_FileSysType, 8) == 0) {
-      if (*(unsigned char *)(0x7c00 + BS_DrvNum) >= 0x80) {
-        default_drive_number = *(unsigned char *)(0x7c00 + BS_DrvNum) - 0x80 + 0x02;
+      if (*(u8 *)(0x7c00 + BS_DrvNum) >= 0x80) {
+        default_drive_number = *(u8 *)(0x7c00 + BS_DrvNum) - 0x80 + 0x02;
       } else {
-        default_drive_number = *(unsigned char *)(0x7c00 + BS_DrvNum);
+        default_drive_number = *(u8 *)(0x7c00 + BS_DrvNum);
       }
     } else if (memcmp((void *)"FAT32   ", (void *)0x7c00 + BPB_Fat32ExtByts + BS_FileSysType, 8) ==
                0) {
-      if (*(unsigned char *)(0x7c00 + BPB_Fat32ExtByts + BS_DrvNum) >= 0x80) {
-        default_drive_number =
-            *(unsigned char *)(0x7c00 + BPB_Fat32ExtByts + BS_DrvNum) - 0x80 + 0x02;
+      if (*(u8 *)(0x7c00 + BPB_Fat32ExtByts + BS_DrvNum) >= 0x80) {
+        default_drive_number = *(u8 *)(0x7c00 + BPB_Fat32ExtByts + BS_DrvNum) - 0x80 + 0x02;
       } else {
-        default_drive_number = *(unsigned char *)(0x7c00 + BPB_Fat32ExtByts + BS_DrvNum);
+        default_drive_number = *(u8 *)(0x7c00 + BPB_Fat32ExtByts + BS_DrvNum);
       }
     } else {
-      if (*(unsigned char *)(0x7c00) >= 0x80) {
-        default_drive_number = *(unsigned char *)(0x7c00) - 0x80 + 0x02;
+      if (*(u8 *)(0x7c00) >= 0x80) {
+        default_drive_number = *(u8 *)(0x7c00) - 0x80 + 0x02;
       } else {
-        default_drive_number = *(unsigned char *)(0x7c00);
+        default_drive_number = *(u8 *)(0x7c00);
       }
     }
     default_drive = default_drive_number + 0x41;
@@ -240,7 +244,7 @@ void task_to_user_mode(unsigned eip, unsigned esp) {
                "pop %%es\n"
                "pop %%ds\n"
                "iret" ::"m"(iframe));
-  for (;;)
+  while (true)
     ;
 }
 
@@ -263,6 +267,7 @@ void task_kill(unsigned tid) {
     page_free(m[tid].Ukeyfifo->buf, 4096);
     free(m[tid].Ukeyfifo);
   }
+
   m[tid].urgent     = 0;
   m[tid].fpu_flag   = 0;
   m[tid].fifosleep  = 0;
@@ -305,7 +310,7 @@ void task_kill(unsigned tid) {
   m[tid].ptid = -1;
   io_sti();
   if (get_task(tid) == current_task())
-    for (;;)
+    while (true)
       ;
 }
 
@@ -317,7 +322,7 @@ mtask *current_task() {
   return current;
 }
 int into_mtask() {
-  init_task();
+  init_tasks();
   set_cr0(get_cr0() & ~(CR0_EM | CR0_TS));
   asm volatile("fninit");
   asm volatile("fnsave (%%eax) \n" ::"a"(&public_fpu));
@@ -399,7 +404,7 @@ void task_unlock() {
     }
   }
 }
-uint32_t get_father_tid(mtask *t) {
+u32 get_father_tid(mtask *t) {
   if (t->ptid == -1) { return get_tid(t); }
   return get_father_tid(get_task(t->ptid));
 }
@@ -476,10 +481,10 @@ void                     task_exit(unsigned status) {
 
   m[tid].ptid = -1;
   io_sti();
-  for (;;)
+  while (true)
     ;
 }
-int waittid(uint32_t tid) {
+int waittid(u32 tid) {
   mtask *t = get_task(tid);
   if (!t) return;
   if (t->ptid != current_task()->tid) return;
@@ -527,7 +532,7 @@ mtask *mtask_get_free() {
 void interrput_exit();
 void roc() {
   logk("ROCT\n");
-  for (;;)
+  while (true)
     ;
 }
 static void build_fork_stack(mtask *task) {
@@ -557,7 +562,7 @@ int task_fork() {
   memcpy(m, current_task(), sizeof(mtask));
   unsigned stack = page_malloc(STACK_SIZE);
   change_page_task_id(tid, stack, STACK_SIZE);
-  // unsigned int off = m->top - (unsigned)m->esp;
+  // u32 off = m->top - (unsigned)m->esp;
   memcpy(stack, m->top - STACK_SIZE, STACK_SIZE);
   logk("s = %08x \n", m->top - STACK_SIZE);
   m->top = stack += STACK_SIZE;

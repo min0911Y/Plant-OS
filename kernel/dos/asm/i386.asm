@@ -5,7 +5,7 @@ section .data
 		GLOBAL	io_out8, io_out16, io_out32
 		GLOBAL	io_load_eflags, io_store_eflags
 		GLOBAL	load_gdtr, load_idtr
-		GLOBAL ASM_call
+		GLOBAL move_cursor_by_idx
 		GLOBAL	load_cr0, store_cr0,memtest_sub,farjmp,farcall,start_app
 		GLOBAL load_tr
 		GLOBAL get_eip,return_to_app,do_init_seg_register,entering_v86
@@ -50,7 +50,7 @@ EXTERN clear
 EXTERN Print_Hex
 EXTERN Clear_A_Line
 
-memtest_sub:	; unsigned int memtest_sub(unsigned int start, unsigned int end)
+memtest_sub:	; u32 memtest_sub(u32 start, u32 end)
 		CLI
 		PUSH	EDI						; （由于还要使用EBX, ESI, EDI）
 		PUSH	ESI
@@ -161,7 +161,7 @@ load_idtr:		; void load_idtr(int limit, int addr);
 		LIDT	[ESP+6]
 		RET
 
-ASM_call:  ;移动光标
+move_cursor_by_idx:  ;移动光标
 mov dx,03d4h;03d4h是索引端口
 mov al,0eh;内部的0eh位置存放着光标位置的高八位
 out dx,al
@@ -397,7 +397,7 @@ do_init_seg_register:
   mov fs,ax
   popa
   ret
-; extern void entering_v86(uint32_t ss, uint32_t esp, uint32_t cs, uint32_t eip);
+; extern void entering_v86(u32 ss, u32 esp, u32 cs, u32 eip);
 entering_v86:
    mov ebp, esp               ; save stack pointer
 

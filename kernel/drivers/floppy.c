@@ -10,9 +10,9 @@ void         floppy_int(void);
 struct TASK *floppy_use = NULL;
 
 typedef struct DrvGeom {
-  unsigned char heads;
-  unsigned char tracks;
-  unsigned char spt; /* 每轨扇区数 */
+  u8 heads;
+  u8 tracks;
+  u8 spt; /* 每轨扇区数 */
 } DrvGeom;
 
 /* 驱动器结构 */
@@ -46,22 +46,22 @@ typedef struct DrvGeom {
 #define CMD_SEEK    (0x0f) /* 寻找磁道 */
 #define CMD_VERSION (0x10) /* 获取软盘驱动器的版本 */
 /**globals*/
-static volatile int  done      = 0;
-static int           dchange   = 0;
-static int           motor     = 0;
-static int           mtick     = 0;
-static volatile int  tmout     = 0;
-static unsigned char status[7] = {0};
-static unsigned char statsz    = 0;
-static unsigned char sr0       = 0;
-static unsigned char fdc_track = 0xff;
-static DrvGeom       geometry  = {DG144_HEADS, DG144_TRACKS, DG144_SPT};
-unsigned long        tbaddr    = 0x80000L; /* 位于1M以下的轨道缓冲器的物理地址 */
-void                 sendbyte(int byte);
-int                  getbyte();
+static volatile int done      = 0;
+static int          dchange   = 0;
+static int          motor     = 0;
+static int          mtick     = 0;
+static volatile int tmout     = 0;
+static u8           status[7] = {0};
+static u8           statsz    = 0;
+static u8           sr0       = 0;
+static u8           fdc_track = 0xff;
+static DrvGeom      geometry  = {DG144_HEADS, DG144_TRACKS, DG144_SPT};
+u32                 tbaddr    = 0x80000L; /* 位于1M以下的轨道缓冲器的物理地址 */
+void                sendbyte(int byte);
+int                 getbyte();
 
 #define SECTORS_ONCE 4
-static void Read(char drive, unsigned char *buffer, unsigned int number, unsigned int lba) {
+static void Read(char drive, u8 *buffer, u32 number, u32 lba) {
   floppy_use = current_task();
   for (int i = 0; i < number; i += SECTORS_ONCE) {
     int sectors = ((number - i) >= SECTORS_ONCE) ? SECTORS_ONCE : (number - i);
@@ -69,7 +69,7 @@ static void Read(char drive, unsigned char *buffer, unsigned int number, unsigne
   }
   floppy_use = NULL;
 }
-static void Write(char drive, unsigned char *buffer, unsigned int number, unsigned int lba) {
+static void Write(char drive, u8 *buffer, u32 number, u32 lba) {
   floppy_use = current_task();
   for (int i = 0; i < number; i += SECTORS_ONCE) {
     int sectors = ((number - i) >= SECTORS_ONCE) ? SECTORS_ONCE : (number - i);
@@ -269,12 +269,12 @@ void block2hts(int block, int *track, int *head, int *sector) {
 void hts2block(int track, int head, int sector, int *block) {
   *block = track * 18 * 2 + head * 18 + sector;
 }
-int fdc_rw(int block, unsigned char *blockbuff, int read, unsigned long nosectors) {
+int fdc_rw(int block, u8 *blockbuff, int read, u32 nosectors) {
   set_waiter(current_task());
-  int            head, track, sector, tries, copycount = 0;
-  unsigned char *p_tbaddr = (char *)0x80000; // 512byte
+  int head, track, sector, tries, copycount = 0;
+  u8 *p_tbaddr = (char *)0x80000; // 512byte
       // 缓冲区（大家可以放心，我们再page.c已经把这里设置为占用了）
-  unsigned char *p_blockbuff = blockbuff; // r/w的数据缓冲区
+  u8 *p_blockbuff = blockbuff; // r/w的数据缓冲区
 
   /* 获取block对应的ths */
   block2hts(block, &track, &head, &sector);
@@ -358,12 +358,11 @@ int fdc_rw(int block, unsigned char *blockbuff, int read, unsigned long nosector
 
   return (tries != 3);
 }
-int fdc_rw_ths(int track, int head, int sector, unsigned char *blockbuff, int read,
-               unsigned long nosectors) {
+int fdc_rw_ths(int track, int head, int sector, u8 *blockbuff, int read, u32 nosectors) {
   // 跟上面的大同小异
-  int            tries, copycount = 0;
-  unsigned char *p_tbaddr    = (char *)0x80000;
-  unsigned char *p_blockbuff = blockbuff;
+  int tries, copycount = 0;
+  u8 *p_tbaddr    = (char *)0x80000;
+  u8 *p_blockbuff = blockbuff;
 
   motoron();
 
@@ -433,7 +432,7 @@ int fdc_rw_ths(int track, int head, int sector, unsigned char *blockbuff, int re
 
   return (tries != 3);
 }
-int read_block(int block, unsigned char *blockbuff, unsigned long nosectors) {
+int read_block(int block, u8 *blockbuff, u32 nosectors) {
   int track = 0, sector = 0, head = 0, track2 = 0, result = 0, loop = 0;
   block2hts(block, &track, &head, &sector);
   block2hts(block + nosectors, &track2, &head, &sector);
@@ -447,18 +446,17 @@ int read_block(int block, unsigned char *blockbuff, unsigned long nosectors) {
 }
 
 /* 写一个扇区 */
-int write_block(int block, unsigned char *blockbuff, unsigned long nosectors) {
+int write_block(int block, u8 *blockbuff, u32 nosectors) {
   return fdc_rw(block, blockbuff, 0, nosectors);
 }
-int write_floppy_for_ths(int track, int head, int sec, unsigned char *blockbuff,
-                         unsigned long nosec) {
+int write_floppy_for_ths(int track, int head, int sec, u8 *blockbuff, u32 nosec) {
   int res = fdc_rw_ths(track, head, sec, blockbuff, 0, nosec);
 }
-#define N(H, L) ((uint16_t)(H) << 8 | (uint16_t)(L))
-void bios_fdc_rw(int block, unsigned char *blockbuff, int read, unsigned long nosectors) {
-  int            head, track, sector, tries, copycount = 0;
-  unsigned char *p_tbaddr    = (char *)0x7e00; // 512byte
-  unsigned char *p_blockbuff = blockbuff;      // r/w的数据缓冲区
+#define N(H, L) ((u16)(H) << 8 | (u16)(L))
+void bios_fdc_rw(int block, u8 *blockbuff, int read, u32 nosectors) {
+  int head, track, sector, tries, copycount = 0;
+  u8 *p_tbaddr    = (char *)0x7e00; // 512byte
+  u8 *p_blockbuff = blockbuff;      // r/w的数据缓冲区
   /* 获取block对应的ths */
   block2hts(block, &track, &head, &sector);
   if (!read) { memcpy(p_tbaddr, blockbuff, 512); }

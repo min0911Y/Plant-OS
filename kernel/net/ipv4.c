@@ -1,10 +1,9 @@
 #include <dos.h>
 // IPV4
-static uint16_t ident = 0;
-void IPV4ProviderSend(uint8_t protocol, uint64_t dest_mac, uint32_t dest_ip, uint32_t src_ip,
-                      uint8_t *data, uint32_t size) {
+static u16 ident = 0;
+void IPV4ProviderSend(u8 protocol, uint64_t dest_mac, u32 dest_ip, u32 src_ip, u8 *data, u32 size) {
   struct IPV4Message *res = (struct IPV4Message *)page_malloc(sizeof(struct IPV4Message) + size);
-  uint8_t            *dat = (uint8_t *)res;
+  u8                 *dat = (u8 *)res;
   memcpy(dat + sizeof(struct IPV4Message), data, size);
   res->version      = 4;
   res->headerLength = sizeof(struct IPV4Message) / 4;
@@ -20,11 +19,11 @@ void IPV4ProviderSend(uint8_t protocol, uint64_t dest_mac, uint32_t dest_ip, uin
     res->totalLength    = swap16(sizeof(struct IPV4Message) + size);
     res->flagsAndOffset = 0;
     res->checkSum       = 0;
-    res->checkSum       = CheckSum((uint16_t *)dat, sizeof(struct IPV4Message));
+    res->checkSum       = CheckSum((u16 *)dat, sizeof(struct IPV4Message));
     ether_frame_provider_send(dest_mac, 0x0800, dat, sizeof(struct IPV4Message) + size);
   } else {
-    int      offset = 0;
-    uint8_t *dat1   = (uint8_t *)malloc(MTU);
+    int offset = 0;
+    u8 *dat1   = (u8 *)malloc(MTU);
     for (int i = 0; i * (MTU - sizeof(struct IPV4Message)) <= size; i++) {
       if (i * (MTU - sizeof(struct IPV4Message)) >= size - (MTU - sizeof(struct IPV4Message))) {
         res->totalLength =
@@ -32,7 +31,7 @@ void IPV4ProviderSend(uint8_t protocol, uint64_t dest_mac, uint32_t dest_ip, uin
         res->flagsAndOffset = offset << IP_OFFSET;
         res->flagsAndOffset = swap16(res->flagsAndOffset);
         res->checkSum       = 0;
-        res->checkSum       = CheckSum((uint16_t *)dat, sizeof(struct IPV4Message));
+        res->checkSum       = CheckSum((u16 *)dat, sizeof(struct IPV4Message));
         memcpy((void *)dat1, (void *)res, sizeof(struct IPV4Message));
         memcpy((void *)(dat1 + sizeof(struct IPV4Message)),
                (void *)(data + i * (MTU - sizeof(struct IPV4Message))),
@@ -48,7 +47,7 @@ void IPV4ProviderSend(uint8_t protocol, uint64_t dest_mac, uint32_t dest_ip, uin
         res->flagsAndOffset = (offset << IP_OFFSET) | (1 << IP_MF);
         res->flagsAndOffset = swap16(res->flagsAndOffset);
         res->checkSum       = 0;
-        res->checkSum       = CheckSum((uint16_t *)dat, sizeof(struct IPV4Message));
+        res->checkSum       = CheckSum((u16 *)dat, sizeof(struct IPV4Message));
         memcpy((void *)dat1, (void *)res, sizeof(struct IPV4Message));
         memcpy((void *)(dat1 + sizeof(struct IPV4Message)),
                (void *)(data + i * (MTU - sizeof(struct IPV4Message))),
@@ -66,20 +65,20 @@ void IPV4ProviderSend(uint8_t protocol, uint64_t dest_mac, uint32_t dest_ip, uin
   ident++;
   return;
 }
-uint16_t CheckSum(uint16_t *data, uint32_t size) {
-  uint32_t tmp = 0;
+u16 CheckSum(u16 *data, u32 size) {
+  u32 tmp = 0;
   for (int i = 0; i < size / 2; i++) {
     tmp += ((data[i] & 0xff00) >> 8) | ((data[i] & 0x00ff) << 8);
   }
-  if (size % 2) tmp += ((uint16_t)((char *)data)[size - 1]) << 8;
+  if (size % 2) tmp += ((u16)((char *)data)[size - 1]) << 8;
   while (tmp & 0xffff0000)
     tmp = (tmp & 0xffff) + (tmp >> 16);
   return ((~tmp & 0xff00) >> 8) | ((~tmp & 0x00ff) << 8);
 }
-uint32_t IP2UINT32_T(uint8_t *ip) {
-  uint8_t ip0, ip1, ip2, ip3;
-  ip0       = strtol(ip, '.', 10);
-  uint8_t t = ip0;
+u32 IP2UINT32_T(u8 *ip) {
+  u8 ip0, ip1, ip2, ip3;
+  ip0  = strtol(ip, '.', 10);
+  u8 t = ip0;
   while (t >= 10) {
     t /= 10;
     ip++;
@@ -97,5 +96,5 @@ uint32_t IP2UINT32_T(uint8_t *ip) {
     ip++;
   }
   ip3 = strtol(ip + 6, NULL, 10);
-  return (uint32_t)((ip0 << 24) | (ip1 << 16) | (ip2 << 8) | ip3);
+  return (u32)((ip0 << 24) | (ip1 << 16) | (ip2 << 8) | ip3);
 }

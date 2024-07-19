@@ -46,7 +46,7 @@ typedef struct {
   int      err;
 } MST_Object;
 typedef struct {
-  uint32_t num;
+  u32 num;
 } Integer;
 typedef struct {
   char *str;

@@ -39,4 +39,4 @@ SRC			:=	src/autofit/*.c \
 
 default : 
 	gcc -m32 -I../include $(INCDIRS) -nostdinc -nostdlib -fno-builtin -ffreestanding -fno-stack-protector -Qn -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fomit-frame-pointer -march=pentium -O2 -w -c $(SRC)
-	ar rv ../libs/libft.a *.o
+	ar rv ../lib/libft.a *.o

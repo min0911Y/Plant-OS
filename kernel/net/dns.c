@@ -1,9 +1,9 @@
 #include <net.h>
 // DNS
-uint32_t dns_parse_ip_result = 0;
-uint32_t dns_parse_ip(uint8_t *name) {
-  uint8_t           *data = (uint8_t *)page_malloc(sizeof(struct DNS_Header) + strlen(name) + 2 +
-                                                   sizeof(struct DNS_Question));
+u32 dns_parse_ip_result = 0;
+u32 dns_parse_ip(u8 *name) {
+  u8 *data =
+      (u8 *)page_malloc(sizeof(struct DNS_Header) + strlen(name) + 2 + sizeof(struct DNS_Question));
   struct DNS_Header *dns_header = (struct DNS_Header *)data;
   dns_header->ID                = swap16(DNS_Header_ID);
   dns_header->QR                = 0; // 查询
@@ -19,7 +19,7 @@ uint32_t dns_parse_ip(uint8_t *name) {
   dns_header->NScount           = 0;
   dns_header->ARcount           = 0;
   dns_header->reserved          = 0;
-  uint8_t *new_name             = data + sizeof(struct DNS_Header) - 1;
+  u8 *new_name                  = data + sizeof(struct DNS_Header) - 1;
   name--;
   for (int i = 1, j = 0; i != strlen(name + 1) + 1; i++) {
     if (name[i] == '.') {
@@ -35,7 +35,7 @@ uint32_t dns_parse_ip(uint8_t *name) {
       (struct DNS_Question *)(data + sizeof(struct DNS_Header) + strlen(name) + 1);
   dns_question->type  = DNS_TYPE_A;
   dns_question->Class = DNS_CLASS_INET;
-  extern uint32_t ip;
+  extern u32 ip;
   udp_provider_send(DNS_SERVER_IP, ip, DNS_PORT, CHAT_CLIENT_PROT, data,
                     sizeof(struct DNS_Header) + strlen(name) + 1 + sizeof(struct DNS_Question));
   dns_parse_ip_result = 0;
@@ -48,9 +48,9 @@ void dns_handler(void *base) {
       (struct DNS_Header *)(base + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message) +
                             sizeof(struct UDPMessage));
   if (swap16(dns_header->ID) == DNS_Header_ID) {
-    uint8_t *p                     = (uint8_t *)(dns_header) + sizeof(struct DNS_Header);
+    u8 *p                          = (u8 *)(dns_header) + sizeof(struct DNS_Header);
     p                             += strlen(p) + sizeof(struct DNS_Question) - 1;
     struct DNS_Answer *dns_answer  = (struct DNS_Answer *)p;
-    dns_parse_ip_result            = swap32(*(uint32_t *)&dns_answer->RData[0]);
+    dns_parse_ip_result            = swap32(*(u32 *)&dns_answer->RData[0]);
   }
 }

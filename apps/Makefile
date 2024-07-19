@@ -1,8 +1,7 @@
-default : Makefile
-	mkdir -p libs
+default :
+	mkdir -p lib
 	mkdir -p out
 	make -r -C libp
-	make -r -C libtcc1
 	make -r -C plui
 	make -r -C zlib
 	make -r -C miniset
@@ -64,6 +63,6 @@ default : Makefile
 	make -r -C netgobang
 	make -r -C bfpp
 clean :
-	rm libs/*
+	rm lib/*
 	rm out/*
 

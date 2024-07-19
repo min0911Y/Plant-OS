@@ -19,7 +19,7 @@ mandir		= ${datarootdir}/man
 datarootdir	= ${prefix}/share
 
 CC		= gcc
-CFLAGS		= -fwrapv -ftrivial-auto-var-init=zero -U__STRICT_ANSI__ -fno-common -Werror=attributes -ffunction-sections -fdata-sections -fvisibility=hidden -m32 -I./include -nostdinc -nolibc -nostdlib -ffreestanding -fno-stack-protector -Qn -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fomit-frame-pointer -finput-charset=UTF-8 -fexec-charset=GB2312 -Qn -O2 -mno-mmx -mno-sse -mno-sse2 -mno-sse3 -mno-3dnow -mfpmath=387 -w
+CFLAGS		= -fwrapv -ftrivial-auto-var-init=zero -U__STRICT_ANSI__ -fno-common -Werror=attributes -ffunction-sections -fdata-sections -fvisibility=hidden -m32 -I./include -nostdinc -nolibc -nostdlib -ffreestanding -fno-stack-protector -Qn -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fomit-frame-pointer -finput-charset=UTF-8 -fexec-charset=UTF-8 -Qn -O2 -mno-mmx -mno-sse -mno-sse2 -mno-sse3 -mno-3dnow -mfpmath=387 -w
 CPPFLAGS	=
 BUILD_CFLAGS	= $(CPPFLAGS) $(CFLAGS) -DHAVE_CONFIG_H
 INTERNAL_CFLAGS = -I$(srcdir) -I$(objdir) \
@@ -177,10 +177,10 @@ $(NASMLIB): $(LIBOBJ)
 	$(RANLIB) $(NASMLIB)
 
 nasm$(X): $(NASM) $(NASMLIB)
-	ld $(ALL_LDFLAGS) -o ../out/nasm$(X) $(NASM) $(NASMLIB) $(LIBS) ../libs/libp.a ../libs/libtcc1.a ../libs/libabi.a
+	ld $(ALL_LDFLAGS) -o ../out/nasm$(X) $(NASM) $(NASMLIB) $(LIBS) ../lib/libp.a ../lib/libtcc1.a ../lib/libabi.a
 
 ndisasm$(X): $(NDISASM) $(NASMLIB)
-	ld $(ALL_LDFLAGS) -o ../out/ndisasm$(X) $(NDISASM) $(NASMLIB) $(LIBS) ../libs/libp.a ../libs/libtcc1.a ../libs/libabi.a
+	ld $(ALL_LDFLAGS) -o ../out/ndisasm$(X) $(NDISASM) $(NASMLIB) $(LIBS) ../lib/libp.a ../lib/libtcc1.a ../lib/libabi.a
 
 #-- Begin Generated File Rules --#
 

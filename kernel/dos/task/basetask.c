@@ -1,11 +1,11 @@
 #include <dos.h>
-int                 init_ok_flag = 0;
-extern unsigned int PCI_ADDR_BASE;
-char               *shell_data;
-extern unsigned     base_count;
-float               f_cpu_usage;
-unsigned            ret_to_app;
-void                idle() {
+int             init_ok_flag = 0;
+extern u32      PCI_ADDR_BASE;
+char           *shell_data;
+extern unsigned base_count;
+float           f_cpu_usage;
+unsigned        ret_to_app;
+void            idle() {
   while (1) {
     unsigned c     = timerctl.count;
     unsigned count = 0;
@@ -23,7 +23,7 @@ void init() {
   page_set_physics_attr(ret_to_app, ret_to_app, page_get_attr(ret_to_app) | PG_USU);
   logk("init task has been started!\n");
 
-  PCI_ADDR_BASE = (unsigned int)page_malloc(1 * 1024 * 1024);
+  PCI_ADDR_BASE = (u32)page_malloc(1 * 1024 * 1024);
   init_PCI(PCI_ADDR_BASE);
   init_floppy();
   rtc_init();
@@ -76,6 +76,6 @@ void init() {
   page_free(current_task()->nfs, sizeof(vfs_t));
 
   task_kill(current_task()->tid);
-  for (;;)
+  while (true)
     ;
 }

@@ -5,18 +5,17 @@ static void              ftp_client_cmd_handler(struct Socket *socket, void *bas
   struct IPV4Message *ipv4 = (struct IPV4Message *)(base + sizeof(struct EthernetFrame_head));
   struct TCPMessage  *tcp =
       (struct TCPMessage *)(base + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message));
-  uint8_t *data = base + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message) +
-                  (tcp->headerLength * 4);
+  u8 *data = base + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message) +
+             (tcp->headerLength * 4);
   printk("Recv:%s\n", data);
   struct FTP_Client *ftp_c_ = ftp_client_find(socket);
   if (ftp_c_ != NULL) {
     printk("Not NULL\n");
-    uint32_t length =
-        swap16(ipv4->totalLength) - sizeof(struct IPV4Message) - (tcp->headerLength * 4);
+    u32 length = swap16(ipv4->totalLength) - sizeof(struct IPV4Message) - (tcp->headerLength * 4);
     free((void *)ftp_c_->recv_buf_cmd);
-    ftp_c_->recv_buf_cmd = (uint8_t *)malloc(length);
+    ftp_c_->recv_buf_cmd = (u8 *)malloc(length);
     memcpy((void *)ftp_c_->recv_buf_cmd, (void *)data, length);
-    ftp_c_->reply_code    = (uint32_t)strtol(data, NULL, 10);
+    ftp_c_->reply_code    = (u32)strtol(data, NULL, 10);
     ftp_c_->recv_flag_cmd = true;
     printk("reply_code:%d\n", ftp_c_->reply_code);
   } else {
@@ -28,28 +27,28 @@ static void ftp_client_dat_handler(struct Socket *socket, void *base) {
   struct IPV4Message *ipv4 = (struct IPV4Message *)(base + sizeof(struct EthernetFrame_head));
   struct TCPMessage  *tcp =
       (struct TCPMessage *)(base + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message));
-  uint8_t *data = base + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message) +
-                  (tcp->headerLength * 4);
+  u8 *data = base + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message) +
+             (tcp->headerLength * 4);
   struct FTP_Client *ftp_c_ = ftp_client_find(socket);
   printk("DAT Handler!\n");
   if (ftp_c_ != NULL) {
-    uint32_t pak_length =
+    u32 pak_length =
         swap16(ipv4->totalLength) - sizeof(struct IPV4Message) - (tcp->headerLength * 4);
-    uint32_t mlc_length = *(uint32_t *)(ftp_c_->recv_buf_dat - 4);
+    u32 mlc_length = *(u32 *)(ftp_c_->recv_buf_dat - 4);
     if (ftp_c_->recv_buf_dat != NULL) {
       void *ptr            = realloc(ftp_c_->recv_buf_dat, pak_length + mlc_length);
-      ftp_c_->recv_buf_dat = (uint8_t *)ptr;
+      ftp_c_->recv_buf_dat = (u8 *)ptr;
       memcpy((void *)(ftp_c_->recv_buf_dat + mlc_length), (void *)data, pak_length);
       ftp_c_->recv_dat_size = pak_length + mlc_length;
     } else {
-      ftp_c_->recv_buf_dat = (uint8_t *)malloc(pak_length);
+      ftp_c_->recv_buf_dat = (u8 *)malloc(pak_length);
       memcpy((void *)ftp_c_->recv_buf_dat, (void *)data, pak_length);
       ftp_c_->recv_dat_size = pak_length;
     }
     ftp_c_->recv_flag_dat = true;
   }
 }
-static int Login(struct FTP_Client *ftp_c_, uint8_t *user, uint8_t *pass) {
+static int Login(struct FTP_Client *ftp_c_, u8 *user, u8 *pass) {
   char s[128];
   sprintf(s, "USER %s\r\n", user);
   ftp_c_->recv_flag_cmd = false;
@@ -79,12 +78,12 @@ static int TransModeChoose(struct FTP_Client *ftp_c_, int mode) {
   if (mode == FTP_PORT_MODE) {
     ftp_c_->socket_dat->remotePort = 20;
     ftp_c_->socket_dat->state      = SOCKET_TCP_LISTEN;
-    char    s[128];
-    uint8_t i1, i2, i3, i4;
-    i1 = (uint8_t)ftp_c_->socket_dat->localIP;
-    i2 = (uint8_t)ftp_c_->socket_dat->localIP >> 8;
-    i3 = (uint8_t)ftp_c_->socket_dat->localIP >> 16;
-    i4 = (uint8_t)ftp_c_->socket_dat->localIP >> 24;
+    char s[128];
+    u8   i1, i2, i3, i4;
+    i1 = (u8)ftp_c_->socket_dat->localIP;
+    i2 = (u8)ftp_c_->socket_dat->localIP >> 8;
+    i3 = (u8)ftp_c_->socket_dat->localIP >> 16;
+    i4 = (u8)ftp_c_->socket_dat->localIP >> 24;
     sprintf(s, "PORT %d,%d,%d,%d,%d,%d\r\n", i1, i2, i3, i4, ftp_c_->socket_dat->localPort / 256,
             ftp_c_->socket_dat->localPort % 256);
     ftp_c_->recv_flag_cmd = false;
@@ -99,15 +98,15 @@ static int TransModeChoose(struct FTP_Client *ftp_c_, int mode) {
     while (ftp_c_->recv_flag_cmd != true)
       ;
     if (ftp_c_->reply_code != 227) { return -1; }
-    uint8_t *p = strrchr(ftp_c_->recv_buf_cmd, '(');
-    uint16_t port;
+    u8 *p = strrchr(ftp_c_->recv_buf_cmd, '(');
+    u16 port;
     for (int i = 0, spCount = 0; i != strlen(p); i++) {
       if (p[i] == ',') { spCount++; }
       if (spCount == 4) {
-        char   *ptr;
-        uint8_t port1 = (uint8_t)strtol(&p[i + 1], &ptr, 10);
-        uint8_t port2 = (uint8_t)strtol(ptr, NULL, 10);
-        port          = port1 * 256 + port2;
+        char *ptr;
+        u8    port1 = (u8)strtol(&p[i + 1], &ptr, 10);
+        u8    port2 = (u8)strtol(ptr, NULL, 10);
+        port        = port1 * 256 + port2;
         printk("port1=%d\nport2=%d\n", port1, port2);
         break;
       }
@@ -122,7 +121,7 @@ static void Logout(struct FTP_Client *ftp_c_) {
   ftp_c_->socket_cmd->Send(ftp_c_->socket_cmd, "QUIT\r\n", 6);
   ftp_c_->is_login = false;
 }
-static int Download(struct FTP_Client *ftp_c_, uint8_t *path_pdos, uint8_t *path_ftp, int mode) {
+static int Download(struct FTP_Client *ftp_c_, u8 *path_pdos, u8 *path_ftp, int mode) {
   printk("DOWNLOAD!!!\n");
   char s[50];
   sprintf(s, "SIZE %s\r\n", path_ftp);
@@ -130,7 +129,7 @@ static int Download(struct FTP_Client *ftp_c_, uint8_t *path_pdos, uint8_t *path
   ftp_c_->socket_cmd->Send(ftp_c_->socket_cmd, s, strlen(s));
   while (ftp_c_->recv_flag_cmd != true)
     ;
-  uint32_t size = (uint32_t)strtol(ftp_c_->recv_buf_cmd + 4, NULL, 10);
+  u32 size = (u32)strtol(ftp_c_->recv_buf_cmd + 4, NULL, 10);
   printk("SIZE=%d\n", size);
   if (ftp_c_->TransModeChoose(ftp_c_, mode) == -1) {
     printk("Error!!!\n");
@@ -155,7 +154,7 @@ static int Download(struct FTP_Client *ftp_c_, uint8_t *path_pdos, uint8_t *path
   free((void *)ftp_c_->recv_buf_dat);
   return 0;
 }
-static uint8_t *Getlist(struct FTP_Client *ftp_c_, uint8_t *path, int mode) {
+static u8 *Getlist(struct FTP_Client *ftp_c_, u8 *path, int mode) {
   if (ftp_c_->TransModeChoose(ftp_c_, mode) == -1) { return -1; }
   char s[50];
   sprintf(s, "LIST %s\r\n", path);
@@ -164,14 +163,14 @@ static uint8_t *Getlist(struct FTP_Client *ftp_c_, uint8_t *path, int mode) {
   ftp_c_->socket_cmd->Send(ftp_c_->socket_cmd, s, strlen(s));
   while (ftp_c_->recv_flag_cmd != true)
     ;
-  if (ftp_c_->reply_code != 150) { return (uint8_t *)NULL; }
+  if (ftp_c_->reply_code != 150) { return (u8 *)NULL; }
   while (ftp_c_->recv_flag_dat != true)
     ;
-  uint8_t *res = (uint8_t *)malloc(*(uint32_t *)(ftp_c_->recv_buf_dat - 4));
-  memcpy((void *)res, (void *)ftp_c_->recv_buf_dat, *(uint32_t *)(ftp_c_->recv_buf_dat - 4));
+  u8 *res = (u8 *)malloc(*(u32 *)(ftp_c_->recv_buf_dat - 4));
+  memcpy((void *)res, (void *)ftp_c_->recv_buf_dat, *(u32 *)(ftp_c_->recv_buf_dat - 4));
   return res;
 }
-struct FTP_Client *FTP_Client_Alloc(uint32_t remoteIP, uint32_t localIP, uint16_t localPort) {
+struct FTP_Client *FTP_Client_Alloc(u32 remoteIP, u32 localIP, u16 localPort) {
   for (int i = 0; i != MAX_FTP_CLIENT_NUM; i++) {
     if (ftp_c[i].is_using == false) {
       ftp_c[i].is_using               = true;
@@ -190,8 +189,8 @@ struct FTP_Client *FTP_Client_Alloc(uint32_t remoteIP, uint32_t localIP, uint16_
       ftp_c[i].Logout                 = Logout;
       ftp_c[i].Download               = Download;
       ftp_c[i].Getlist                = Getlist;
-      ftp_c[i].recv_buf_cmd           = (uint8_t *)malloc(128); // 吴用
-      ftp_c[i].recv_buf_dat           = (uint8_t *)NULL;
+      ftp_c[i].recv_buf_cmd           = (u8 *)malloc(128); // 吴用
+      ftp_c[i].recv_buf_dat           = (u8 *)NULL;
       ftp_c[i].recv_flag_cmd          = false;
       ftp_c[i].recv_flag_dat          = false;
       Socket_Bind(ftp_c[i].socket_cmd, ftp_client_cmd_handler);

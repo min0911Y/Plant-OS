@@ -12,31 +12,30 @@ typedef struct {
 } HttpFile;
 List *httpFileList;
 extern struct ide_device {
-  unsigned char  Reserved;     // 0 (Empty) or 1 (This Drive really exists).
-  unsigned char  Channel;      // 0 (Primary Channel) or 1 (Secondary Channel).
-  unsigned char  Drive;        // 0 (Master Drive) or 1 (Slave Drive).
-  unsigned short Type;         // 0: ATA, 1:ATAPI.
-  unsigned short Signature;    // Drive Signature
-  unsigned short Capabilities; // Features.
-  unsigned int   CommandSets;  // Command Sets Supported.
-  unsigned int   Size;         // Size in Sectors.
-  unsigned char  Model[41];    // Model in string.
+  u8  Reserved;     // 0 (Empty) or 1 (This Drive really exists).
+  u8  Channel;      // 0 (Primary Channel) or 1 (Secondary Channel).
+  u8  Drive;        // 0 (Master Drive) or 1 (Slave Drive).
+  u16 Type;         // 0: ATA, 1:ATAPI.
+  u16 Signature;    // Drive Signature
+  u16 Capabilities; // Features.
+  u32 CommandSets;  // Command Sets Supported.
+  u32 Size;         // Size in Sectors.
+  u8  Model[41];    // Model in string.
 } ide_devices[4];
-unsigned char *ramdisk;
+u8 *ramdisk;
 typedef struct base_address_register {
-  int      prefetchable;
-  uint8_t *address;
-  uint32_t size;
-  int      type;
+  int prefetchable;
+  u8 *address;
+  u32 size;
+  int type;
 } base_address_register;
-base_address_register get_base_address_register(uint8_t bus, uint8_t device, uint8_t function,
-                                                uint8_t bar);
+base_address_register get_base_address_register(u8 bus, u8 device, u8 function, u8 bar);
 /* vdisk的RW测试函数 */
-void TestRead(char drive, unsigned char *buffer, unsigned int number, unsigned int lba) {
+void                  TestRead(char drive, u8 *buffer, u32 number, u32 lba) {
   // printk("TestRW:Read Lba %d,Read Sectors number %d\n", lba, number);
   memcpy(buffer, ramdisk + lba * 512, number * 512);
 }
-void TestWrite(char drive, unsigned char *buffer, unsigned int number, unsigned int lba) {
+void TestWrite(char drive, u8 *buffer, u32 number, u32 lba) {
   // printk("TestRW:Write Lba %d,Write Sectors number %d\n", lba, number);
   memcpy(ramdisk + lba * 512, buffer, number * 512);
 }
@@ -44,56 +43,55 @@ void TestWrite(char drive, unsigned char *buffer, unsigned int number, unsigned 
 static void TCP_Socket_Handler(struct Socket *socket, void *base) {
   struct TCPMessage *tcp =
       (struct TCPMessage *)(base + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message));
-  uint8_t *data = base + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message) +
-                  (tcp->headerLength * 4);
-  printk("\nTCP Recv from %d.%d.%d.%d:%d:%s\n", (uint8_t)(socket->remoteIP >> 24),
-         (uint8_t)(socket->remoteIP >> 16), (uint8_t)(socket->remoteIP >> 8),
-         (uint8_t)(socket->remoteIP), socket->remotePort, data);
+  u8 *data = base + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message) +
+             (tcp->headerLength * 4);
+  printk("\nTCP Recv from %d.%d.%d.%d:%d:%s\n", (u8)(socket->remoteIP >> 24),
+         (u8)(socket->remoteIP >> 16), (u8)(socket->remoteIP >> 8), (u8)(socket->remoteIP),
+         socket->remotePort, data);
 }
 static void UDP_Socket_Handler(struct Socket *socket, void *base) {
-  uint8_t *data = base + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message) +
-                  sizeof(struct UDPMessage);
-  printk("\nUDP Recv from %d.%d.%d.%d:%d:%s\n", (uint8_t)(socket->remoteIP >> 24),
-         (uint8_t)(socket->remoteIP >> 16), (uint8_t)(socket->remoteIP >> 8),
-         (uint8_t)(socket->remoteIP), socket->remotePort, data);
+  u8 *data = base + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message) +
+             sizeof(struct UDPMessage);
+  printk("\nUDP Recv from %d.%d.%d.%d:%d:%s\n", (u8)(socket->remoteIP >> 24),
+         (u8)(socket->remoteIP >> 16), (u8)(socket->remoteIP >> 8), (u8)(socket->remoteIP),
+         socket->remotePort, data);
 }
 /* 如果开启了HTTP命令，那么接收到HTTP请求会调用这个函数 */
-static unsigned char *html_file;
-static void           HTTP_Socket_Handler(struct Socket *socket, void *base) {
+static u8  *html_file;
+static void HTTP_Socket_Handler(struct Socket *socket, void *base) {
   /* 声明，获取各个协议的标头和数据 */
   struct IPV4Message *ipv4 = (struct IPV4Message *)(base + sizeof(struct EthernetFrame_head));
   struct TCPMessage  *tcp =
       (struct TCPMessage *)(base + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message));
-  uint16_t size = swap16(ipv4->totalLength) - sizeof(struct IPV4Message) - (tcp->headerLength * 4);
-  uint8_t *data = base + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message) +
-                  (tcp->headerLength * 4);
+  u16 size = swap16(ipv4->totalLength) - sizeof(struct IPV4Message) - (tcp->headerLength * 4);
+  u8 *data = base + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message) +
+             (tcp->headerLength * 4);
   if (http_check(data, size).ok) { // 是HTTP GetHeader
     /* 标头信息 */
-    unsigned char head[500]      = "HTTP/1.1 200 OK\r\n";
-    unsigned char content_type[] = "Content-Type: text/html\r\n";
-    unsigned char content_length[100];
-    unsigned char date[100];
+    u8 head[500]      = "HTTP/1.1 200 OK\r\n";
+    u8 content_type[] = "Content-Type: text/html\r\n";
+    u8 content_length[100];
+    u8 date[100];
     printk("Is Http get header!\n");
     if (strlen(http_check(data, size).path) == 1) { // 只有一个字符，那只能是"/"
       printk("root\n");                             // 根目录
       HttpFile *f = (HttpFile *)FindForCount(1, httpFileList)->val; // 第一个文件就是根目录
       printk("f->path = %s\n", f->path);
-      html_file = (unsigned char *)f->buf; // 设置html_file的地址
+      html_file = (u8 *)f->buf; // 设置html_file的地址
     } else {
       printk("Not root.\n"); // 不是根目录
       for (int i = 1; FindForCount(i, httpFileList) != NULL; i++) {
         HttpFile *f = (HttpFile *)FindForCount(i, httpFileList)->val;
         if (strcmp(f->path, http_check(data, size).path + 1) == 0) { // 判断网站是否有这个文件
-          html_file = (unsigned char *)f->buf;                       // 有，直接返回
+          html_file = (u8 *)f->buf;                                  // 有，直接返回
           goto OK;
         }
       }
-      html_file = (unsigned char
-                       *)("<html><head><title>404 Not Found</title></head><body "
-                                    "bgcolor= white"
-                                    "><center><h1>404 Not "
-                                    "Found</h1></center><hr><center>Powerint DOS "
-                                    "HTTP Server</center></body></html>"); // 啊，没有呢，那就只能给404页面了
+      html_file = (u8 *)("<html><head><title>404 Not Found</title></head><body "
+                         "bgcolor= white"
+                         "><center><h1>404 Not "
+                         "Found</h1></center><hr><center>Powerint DOS "
+                         "HTTP Server</center></body></html>"); // 啊，没有呢，那就只能给404页面了
       strcpy((char *)head, "HTTP/1.1 404 Not Found\r\n"); // 顺便修改一下head
     }
   OK:
@@ -106,16 +104,16 @@ static void           HTTP_Socket_Handler(struct Socket *socket, void *base) {
     strcat((char *)head, "\r\n");
     strcat((char *)head, "\r\n");
     printk("%s", (char *)head);
-    // unsigned char *head = "HTTP/1.1 200 OK\r\n";
-    unsigned char *packet = (unsigned char *)page_malloc(
-        strlen((char *)head) + strlen((char *)html_file) + 1); // 声明最终的packet发送的数据
+    // u8 *head = "HTTP/1.1 200 OK\r\n";
+    u8 *packet = (u8 *)page_malloc(strlen((char *)head) + strlen((char *)html_file) +
+                                   1); // 声明最终的packet发送的数据
     memcpy((void *)packet, (void *)head, strlen((char *)head)); // HTTP 标头
     memcpy((void *)(packet + strlen((char *)head)), (void *)html_file,
-                     strlen((char *)html_file)); // html文件数据
+           strlen((char *)html_file)); // html文件数据
     packet[strlen((char *)head) + strlen((char *)html_file) + 1] =
         0; // 字符串结束符（为了下面调用的strlen函数）
     socket->Send(socket, packet,
-                           strlen((char *)packet) + 1); // 调用Socket API发送
+                 strlen((char *)packet) + 1); // 调用Socket API发送
   } else {
     printk("isn't http get header\n"); // 不是HTTP get header
   }
@@ -139,16 +137,16 @@ static void SocketServerLoop(struct SocketServer *server) { // Socket Server（H
   }
 }
 /* 用UDP协议传输文件 */
-static unsigned int   fudp_size;
-static unsigned char *fudp_buffer;
-static void           FUDP_Socket_Handler(struct Socket *socket, void *base) {
+static u32  fudp_size;
+static u8  *fudp_buffer;
+static void FUDP_Socket_Handler(struct Socket *socket, void *base) {
   /* 获取数据并拷贝到fudp_buffer中 */
   struct IPV4Message *ipv4 = (struct IPV4Message *)(base + sizeof(struct EthernetFrame_head));
   (void)(ipv4);
   struct UDPMessage *udp =
       (struct UDPMessage *)(base + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message));
-  uint8_t *data = base + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message) +
-                  sizeof(struct UDPMessage);
+  u8 *data = base + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message) +
+             sizeof(struct UDPMessage);
   fudp_size   = swap16(udp->length) - sizeof(struct UDPMessage);
   fudp_buffer = malloc(fudp_size);
   memcpy((void *)fudp_buffer, (void *)data, fudp_size);
@@ -169,8 +167,8 @@ int command_run(char *cmdline) {
   free(line);
   return status;
   //   //命令解析器
-  //   uint32_t addr;
-  //   uint8_t c;
+  //   u32 addr;
+  //   u8 c;
   //   char* p;
   //   if (cmdline[0] == 0) {
   //     return;
@@ -246,11 +244,11 @@ int command_run(char *cmdline) {
   //     netgobang();
   //   } else if (strincmp("READPCI ", cmdline, 8) == 0) {
   //     char* endptr;
-  //     uint32_t bus = strtol(cmdline + 8, &endptr, 16);
+  //     u32 bus = strtol(cmdline + 8, &endptr, 16);
   //     printk("endptr = %s\n", endptr);
-  //     uint32_t slot = strtol(endptr, &endptr, 16);
+  //     u32 slot = strtol(endptr, &endptr, 16);
 
-  //     uint32_t func = strtol(endptr, &endptr, 16);
+  //     u32 func = strtol(endptr, &endptr, 16);
 
   //     printk("looking for %02x %02x %02x\n", bus, slot, func);
   //     for (int i = 0; i < 6; i++) {
@@ -288,21 +286,21 @@ int command_run(char *cmdline) {
   //       // f = FindForCount(i, httpFileList)->val;
   //       // printk("f->path = %s\n", f->path);
   //     }
-  //     extern uint32_t ip;
+  //     extern u32 ip;
   //     srand(time());
-  //     uint16_t port = (uint16_t)80;
+  //     u16 port = (u16)80;
   //     struct SocketServer* server =
   //         SocketServer_Alloc(HTTP_Socket_Handler, ip, port, TCP_PROTOCOL);
-  //     printk("SrcIP/Port:%d.%d.%d.%d:%d\n", (uint8_t)(ip >> 24),
-  //            (uint8_t)(ip >> 16), (uint8_t)(ip >> 8), (uint8_t)(ip), port);
+  //     printk("SrcIP/Port:%d.%d.%d.%d:%d\n", (u8)(ip >> 24),
+  //            (u8)(ip >> 16), (u8)(ip >> 8), (u8)(ip), port);
   //     SocketServerLoop(server);
   //   } else if (stricmp("SOCKET", cmdline) == 0) {
-  //     extern uint32_t ip;
+  //     extern u32 ip;
   //     struct Socket* socket;
   //     struct SocketServer* server;
   //     srand(time());
-  //     uint32_t dstIP = 0, srcIP = ip;
-  //     uint16_t dstPort = 0, srcPort = (uint16_t)rand();
+  //     u32 dstIP = 0, srcIP = ip;
+  //     u16 dstPort = 0, srcPort = (u16)rand();
   //     printk("Protocol(UDP(0)/TCP(1)):");
   //     int p = getch() - '0';
   //     printk("\n");
@@ -316,14 +314,14 @@ int command_run(char *cmdline) {
   //     if (!m) {
   //       printk("DstIP:");
   //       input(buf, 15);
-  //       dstIP = IP2UINT32_T((uint8_t*)buf);
+  //       dstIP = IP2UINT32_T((u8*)buf);
   //       printk("DstPort:");
   //       input(buf, 15);
-  //       dstPort = (uint16_t)strtol(buf, NULL, 10);
+  //       dstPort = (u16)strtol(buf, NULL, 10);
   //     }
-  //     printk("Src IP:%d.%d.%d.%d\n", (uint8_t)(srcIP >> 24),
-  //            (uint8_t)(srcIP >> 16), (uint8_t)(srcIP >> 8),
-  //            (uint8_t)(srcIP));
+  //     printk("Src IP:%d.%d.%d.%d\n", (u8)(srcIP >> 24),
+  //            (u8)(srcIP >> 16), (u8)(srcIP >> 8),
+  //            (u8)(srcIP));
   //     printk("Src Port:%d\n", srcPort);
   //     if (!m) {
   //       if (p) {  // TCP
@@ -354,9 +352,9 @@ int command_run(char *cmdline) {
   //     }
   //     if (!m) {
   //       printk(
-  //           "Connect %d.%d.%d.%d:%d done.\n", (uint8_t)(socket->remoteIP >>
-  //           24), (uint8_t)(socket->remoteIP >> 16),
-  //           (uint8_t)(socket->remoteIP >> 8), (uint8_t)(socket->remoteIP),
+  //           "Connect %d.%d.%d.%d:%d done.\n", (u8)(socket->remoteIP >>
+  //           24), (u8)(socket->remoteIP >> 16),
+  //           (u8)(socket->remoteIP >> 8), (u8)(socket->remoteIP),
   //           socket->remotePort);
   //     }
   //     char* inp = (char*)page_malloc(1024);
@@ -375,11 +373,11 @@ int command_run(char *cmdline) {
   //         printk("UDP ");
   //       }
   //       if (!m) {
-  //         printk("Send to %d.%d.%d.%d:%d:", (uint8_t)(socket->remoteIP >>
+  //         printk("Send to %d.%d.%d.%d:%d:", (u8)(socket->remoteIP >>
   //         24),
-  //                (uint8_t)(socket->remoteIP >> 16),
-  //                (uint8_t)(socket->remoteIP >> 8),
-  //                (uint8_t)(socket->remoteIP), socket->remotePort);
+  //                (u8)(socket->remoteIP >> 16),
+  //                (u8)(socket->remoteIP >> 8),
+  //                (u8)(socket->remoteIP), socket->remotePort);
   //       } else if (m) {
   //         printk("Send to %d client(s):",
   //                SocketServer_Status(server, SOCKET_TCP_ESTABLISHED));
@@ -398,60 +396,60 @@ int command_run(char *cmdline) {
   //         return;
   //       }
   //       if (!m) {
-  //         socket->Send(socket, (uint8_t*)inp, strlen(inp));
+  //         socket->Send(socket, (u8*)inp, strlen(inp));
   //       } else if (m) {
-  //         server->Send(server, (uint8_t*)inp, strlen(inp));
+  //         server->Send(server, (u8*)inp, strlen(inp));
   //       }
   //     }
   //   } else if (stricmp("ARP", cmdline) == 0) {
-  //     extern uint32_t ARP_write_pointer;
+  //     extern u32 ARP_write_pointer;
   //     extern uint64_t ARP_mac_address[MAX_ARP_TABLE];
-  //     extern uint32_t ARP_ip_address[MAX_ARP_TABLE];
+  //     extern u32 ARP_ip_address[MAX_ARP_TABLE];
   //     if (ARP_write_pointer == 0) {
   //       return;
   //     }
   //     for (int i = 0; i != ARP_write_pointer; i++) {
   //       printk("IP: %d.%d.%d.%d -> MAC: %02x:%02x:%02x:%02x:%02x:%02x\n",
-  //              (uint8_t)(ARP_ip_address[i] >> 24),
-  //              (uint8_t)(ARP_ip_address[i] >> 16),
-  //              (uint8_t)(ARP_ip_address[i] >> 8),
-  //              (uint8_t)(ARP_ip_address[i]), (uint8_t)(ARP_mac_address[i]),
-  //              (uint8_t)(ARP_mac_address[i] >> 8),
-  //              (uint8_t)(ARP_mac_address[i] >> 16),
-  //              (uint8_t)(ARP_mac_address[i] >> 24),
-  //              (uint8_t)(ARP_mac_address[i] >> 32),
-  //              (uint8_t)(ARP_mac_address[i] >> 40));
+  //              (u8)(ARP_ip_address[i] >> 24),
+  //              (u8)(ARP_ip_address[i] >> 16),
+  //              (u8)(ARP_ip_address[i] >> 8),
+  //              (u8)(ARP_ip_address[i]), (u8)(ARP_mac_address[i]),
+  //              (u8)(ARP_mac_address[i] >> 8),
+  //              (u8)(ARP_mac_address[i] >> 16),
+  //              (u8)(ARP_mac_address[i] >> 24),
+  //              (u8)(ARP_mac_address[i] >> 32),
+  //              (u8)(ARP_mac_address[i] >> 40));
   //     }
   //   } else if (strincmp("FUDP ", cmdline, 5) == 0) {
-  //     extern uint32_t ip;
-  //     uint32_t dstIP = 0;
-  //     uint16_t dstPort = 0;
+  //     extern u32 ip;
+  //     u32 dstIP = 0;
+  //     u16 dstPort = 0;
   //     srand(time());
-  //     uint32_t srcIP = ip;
-  //     uint16_t srcPort = (uint16_t)rand();
+  //     u32 srcIP = ip;
+  //     u16 srcPort = (u16)rand();
   //     char buf[15];
-  //     printk("Src IP:%d.%d.%d.%d\n", (uint8_t)(srcIP >> 24),
-  //            (uint8_t)(srcIP >> 16), (uint8_t)(srcIP >> 8),
-  //            (uint8_t)(srcIP));
+  //     printk("Src IP:%d.%d.%d.%d\n", (u8)(srcIP >> 24),
+  //            (u8)(srcIP >> 16), (u8)(srcIP >> 8),
+  //            (u8)(srcIP));
   //     printk("Src Port:%d\n", srcPort);
   //     printk("Choose Mode(Send(0)/Recv(1)):");
   //     input(buf, 15);
   //     int m = (int)strtol(buf, NULL, 10);
   //     printk("DstIP:");
   //     input(buf, 15);
-  //     dstIP = IP2UINT32_T((uint8_t*)buf);
+  //     dstIP = IP2UINT32_T((u8*)buf);
   //     printk("DstPort:");
   //     input(buf, 15);
-  //     dstPort = (uint16_t)strtol(buf, NULL, 10);
+  //     dstPort = (u16)strtol(buf, NULL, 10);
   //     struct Socket* socket;
   //     socket = socket_alloc(UDP_PROTOCOL);
   //     Socket_Init(socket, dstIP, dstPort, srcIP, srcPort);
   //     if (m) {
   //       Socket_Bind(socket, FUDP_Socket_Handler);
   //       printk("Waiting %d.%d.%d.%d:%d to send file...",
-  //              (uint8_t)(socket->remoteIP >> 24),
-  //              (uint8_t)(socket->remoteIP >> 16),
-  //              (uint8_t)(socket->remoteIP >> 8), (uint8_t)(socket->remoteIP),
+  //              (u8)(socket->remoteIP >> 24),
+  //              (u8)(socket->remoteIP >> 16),
+  //              (u8)(socket->remoteIP >> 8), (u8)(socket->remoteIP),
   //              socket->remotePort);
   //       fudp_buffer = NULL;
   //       while (fudp_buffer == NULL)
@@ -484,31 +482,31 @@ int command_run(char *cmdline) {
   //     }
   //     socket_free(socket);
   //   } else if (strincmp("NSLOOKUP ", cmdline, 9) == 0) {
-  //     uint8_t* dns = (uint8_t*)page_malloc(strlen(cmdline + 9) + 1);
+  //     u8* dns = (u8*)page_malloc(strlen(cmdline + 9) + 1);
   //     memcpy(dns + 1, cmdline + 9, strlen(cmdline + 9));
-  //     uint32_t ip = dns_parse_ip(dns + 1);
-  //     printk("DNS: %s -> IP: %d.%d.%d.%d\n", cmdline + 9, (uint8_t)(ip >>
+  //     u32 ip = dns_parse_ip(dns + 1);
+  //     printk("DNS: %s -> IP: %d.%d.%d.%d\n", cmdline + 9, (u8)(ip >>
   //     24),
-  //            (uint8_t)(ip >> 16), (uint8_t)(ip >> 8), (uint8_t)(ip));
+  //            (u8)(ip >> 16), (u8)(ip >> 8), (u8)(ip));
   //     page_free(dns, strlen(cmdline + 9) + 1);
   //   } else if (strincmp("PING ", cmdline, 5) == 0) {
   //     cmd_ping(cmdline + 5);
   //   } else if (stricmp("IPCONFIG", cmdline) == 0) {
-  //     extern uint32_t gateway, submask, dns, ip, dhcp_ip;
-  //     printk("DCHP: %d.%d.%d.%d\n", (uint8_t)(dhcp_ip >> 24),
-  //            (uint8_t)(dhcp_ip >> 16), (uint8_t)(dhcp_ip >> 8),
-  //            (uint8_t)(dhcp_ip));
-  //     printk("IP: %d.%d.%d.%d\n", (uint8_t)(ip >> 24), (uint8_t)(ip >> 16),
-  //            (uint8_t)(ip >> 8), (uint8_t)(ip));
-  //     printk("DNS: %d.%d.%d.%d\n", (uint8_t)(dns >> 24), (uint8_t)(dns >>
+  //     extern u32 gateway, submask, dns, ip, dhcp_ip;
+  //     printk("DCHP: %d.%d.%d.%d\n", (u8)(dhcp_ip >> 24),
+  //            (u8)(dhcp_ip >> 16), (u8)(dhcp_ip >> 8),
+  //            (u8)(dhcp_ip));
+  //     printk("IP: %d.%d.%d.%d\n", (u8)(ip >> 24), (u8)(ip >> 16),
+  //            (u8)(ip >> 8), (u8)(ip));
+  //     printk("DNS: %d.%d.%d.%d\n", (u8)(dns >> 24), (u8)(dns >>
   //     16),
-  //            (uint8_t)(dns >> 8), (uint8_t)(dns));
-  //     printk("Subnet Mask: %d.%d.%d.%d\n", (uint8_t)(submask >> 24),
-  //            (uint8_t)(submask >> 16), (uint8_t)(submask >> 8),
-  //            (uint8_t)(submask));
-  //     printk("Gateway: %d.%d.%d.%d\n", (uint8_t)(gateway >> 24),
-  //            (uint8_t)(gateway >> 16), (uint8_t)(gateway >> 8),
-  //            (uint8_t)(gateway));
+  //            (u8)(dns >> 8), (u8)(dns));
+  //     printk("Subnet Mask: %d.%d.%d.%d\n", (u8)(submask >> 24),
+  //            (u8)(submask >> 16), (u8)(submask >> 8),
+  //            (u8)(submask));
+  //     printk("Gateway: %d.%d.%d.%d\n", (u8)(gateway >> 24),
+  //            (u8)(gateway >> 16), (u8)(gateway >> 8),
+  //            (u8)(gateway));
   //   } else if (stricmp("CATCH", cmdline) == 0) {
   //     int a = 0;
   //     disableExp();                // 关闭蓝屏
@@ -525,12 +523,12 @@ int command_run(char *cmdline) {
   //   } else if (stricmp("FORK", cmdline) == 0) {
   //     // printk("FTP Test!\n");
 
-  //     // extern uint32_t ip;
+  //     // extern u32 ip;
   //     // struct FTP_Client *ftp_c =
-  //     //     FTP_Client_Alloc(IP2UINT32_T((uint8_t *)"192.168.0.106"), ip,
+  //     //     FTP_Client_Alloc(IP2UINT32_T((u8 *)"192.168.0.106"), ip,
   //     25565);
   //     // printk("Alloc OK!\n");
-  //     // if (ftp_c->Login(ftp_c, (uint8_t *)"anonymous", (uint8_t
+  //     // if (ftp_c->Login(ftp_c, (u8 *)"anonymous", (u8
   //     *)"anonymous")
   //     // ==
   //     //     -1) {
@@ -539,7 +537,7 @@ int command_run(char *cmdline) {
   //     // }
   //     // printk("Login OK!!!\n");
 
-  //     // ftp_c->Download(ftp_c, (uint8_t *)"c.py", (uint8_t *)"/c.py",
+  //     // ftp_c->Download(ftp_c, (u8 *)"c.py", (u8 *)"/c.py",
   //     //                 FTP_PASV_MODE);
   //     // ftp_c->Logout(ftp_c);
   //     // SubTask(GetTask(2));
@@ -547,7 +545,7 @@ int command_run(char *cmdline) {
   //     // io_cli();
   //     // struct TASK* task = AddUserTask("UsrTask", 1, 1146 * 8,
   //     usertasktest,
-  //     // 1145*8,1145*8,(unsigned int)malloc(16*1024)+16*1024); task->tss.ss0
+  //     // 1145*8,1145*8,(u32)malloc(16*1024)+16*1024); task->tss.ss0
   //     =
   //     // 1*8; task->tss.esp0 = malloc(16*1024)+16*1024; io_sti();
   //   } else if(stricmp("SHOW_HEAP",cmdline) == 0) {
@@ -592,8 +590,8 @@ int command_run(char *cmdline) {
   //     free(args[0]);
   //     return;
   //   } else if (stricmp("NTPTIME", cmdline) == 0) {
-  //     uint32_t ts = ntp_get_server_time(NTPServer2);
-  //     uint32_t year, mon, day, hour, min, sec;
+  //     u32 ts = ntp_get_server_time(NTPServer2);
+  //     u32 year, mon, day, hour, min, sec;
   //     UnNTPTimeStamp(ts, &year, &mon, &day, &hour, &min, &sec);
   //     printk("NTPTime:%04d\\%02d\\%02d %02d:%02d:%02d\n", year, mon, day,
   //     hour,
@@ -603,14 +601,14 @@ int command_run(char *cmdline) {
   //     cmd_tl();
   //     return;
   //   } else if (strincmp("MD5S ", cmdline, 5) == 0) {
-  //     unsigned char r[16];
+  //     u8 r[16];
   //     printk("\"%s\" = ", cmdline + 5);
   //     md5s(cmdline + 5, strlen(cmdline + 5), (char*)r);
   //     for (int i = 0; i < 16; i++)
   //       printk("%02x", r[i]);
   //     printk("\n");
   //   } else if (strincmp("MD5F ", cmdline, 5) == 0) {
-  //     unsigned char r[16];
+  //     u8 r[16];
   //     printk("\"%s\" = ", cmdline + 5);
   //     md5f(cmdline + 5, r);
   //     for (int i = 0; i < 16; i++)
@@ -761,7 +759,7 @@ int command_run(char *cmdline) {
   //       ;
   //   } else if (strincmp("COLOR ", cmdline, 6) == 0) {
   //     struct TASK* task = current_task();
-  //     unsigned char c = (ascii2num(cmdline[6]) << 4) + ascii2num(cmdline[7]);
+  //     u8 c = (ascii2num(cmdline[6]) << 4) + ascii2num(cmdline[7]);
   //     Text_Draw_Box(0, 0, task->TTY->xsize, task->TTY->ysize, c);
   //     task->TTY->color = c;
   //   } else if (strincmp("MKFILE ", cmdline, 7) == 0) {
@@ -886,8 +884,8 @@ void show_heap(memory *mem) {
 }
 
 void pci_list() {
-  extern int     PCI_ADDR_BASE;
-  unsigned char *pci_drive = (unsigned char *)PCI_ADDR_BASE;
+  extern int PCI_ADDR_BASE;
+  u8        *pci_drive = (u8 *)PCI_ADDR_BASE;
   //输出PCI表的内容
   for (int line = 0;; pci_drive += 0x110 + 4, line++) {
     if (pci_drive[0] == 0xff)

@@ -1,7 +1,7 @@
 #include <dos.h>
 // HTTP
 
-HTTPGetHeader http_check(uint8_t *data, uint32_t size) {
+HTTPGetHeader http_check(u8 *data, u32 size) {
   HTTPGetHeader hg;
   hg.ok = false;
   clean(hg.path, 13);

@@ -2,11 +2,11 @@
 #include <drivers.h>
 #define KEYCMD_SENDTO_MOUSE 0xd4
 #define MOUSECMD_ENABLE     0xf4
-typedef unsigned char byte;
-mtask                *mouse_use_task = NULL;
-void                  mouse_wait(byte a_type) // unsigned char
+typedef u8 byte;
+mtask     *mouse_use_task = NULL;
+void       mouse_wait(byte a_type) // u8
 {
-  unsigned int _time_out = 100000; // unsigned int
+  u32 _time_out = 100000; // u32
   if (a_type == 0) {
     while (_time_out--) // Data
     {
@@ -22,7 +22,7 @@ void                  mouse_wait(byte a_type) // unsigned char
   }
 }
 
-void mouse_write(byte a_write) // unsigned char
+void mouse_write(byte a_write) // u8
 {
   // Wait to be able to send a command
   mouse_wait(1);
@@ -73,7 +73,7 @@ void mouse_ready(struct MOUSE_DEC *mdec) {
   mdec->sleep    = 0;
   return;
 }
-int mouse_decode(struct MOUSE_DEC *mdec, unsigned char dat) {
+int mouse_decode(struct MOUSE_DEC *mdec, u8 dat) {
   if (mdec->phase == 1) {
     if (dat == 0xfa) { // ACK
       return 0;
@@ -116,7 +116,7 @@ unsigned m_eip = 0;
 unsigned times = 0;
 void     inthandler2c(int *esp) {
   // logk("2c\n");
-  unsigned char data;
+  u8 data;
   io_out8(PIC1_OCW2, 0x64);
   io_out8(PIC0_OCW2, 0x62);
   data = io_in8(PORT_KEYDAT);

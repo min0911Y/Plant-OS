@@ -1,10 +1,10 @@
 #include <dos.h>
 #include <fs.h>
-#define READ 0x2
-#define WRITE 0x4
+#define READ   0x2
+#define WRITE  0x4
 #define APPEND 0x8
-#define BIN 0x0
-#define PLUS 0x10
+#define BIN    0x0
+#define PLUS   0x10
 int fseek(FILE *fp, int offset, int whence) {
   if (whence == 0) {
     fp->p = offset;
@@ -17,30 +17,22 @@ int fseek(FILE *fp, int offset, int whence) {
   }
   return 0;
 }
-long ftell(FILE *stream) { return stream->p; }
-#define CANREAD(flag) ((flag)&READ || (flag)&PLUS)
+long ftell(FILE *stream) {
+  return stream->p;
+}
+#define CANREAD(flag)  ((flag)&READ || (flag)&PLUS)
 #define CANWRITE(flag) ((flag)&WRITE || (flag)&PLUS || (flag)&APPEND)
 FILE *fopen(char *filename, char *mode) {
-  unsigned int flag = 0;
-  FILE *fp = (FILE *)malloc(sizeof(FILE));
+  u32   flag = 0;
+  FILE *fp   = (FILE *)malloc(sizeof(FILE));
   while (*mode != '\0') {
     switch (*mode) {
-    case 'a':
-      flag |= APPEND;
-      break;
-    case 'b':
-      break;
-    case 'r':
-      flag |= READ;
-      break;
-    case 'w':
-      flag |= WRITE;
-      break;
-    case '+':
-      flag |= PLUS;
-      break;
-    default:
-      break;
+    case 'a': flag |= APPEND; break;
+    case 'b': break;
+    case 'r': flag |= READ; break;
+    case 'w': flag |= WRITE; break;
+    case '+': flag |= PLUS; break;
+    default: break;
     }
     mode++;
   }
@@ -62,21 +54,15 @@ FILE *fopen(char *filename, char *mode) {
     fp->bufferSize = vfs_filesize(filename);
     // printk("[Set]BufferSize=%d\n",fp->bufferSize);
   }
-  if (flag & WRITE || flag & PLUS || flag & APPEND) {
-    fp->bufferSize += 100;
-  }
-  if (fp->bufferSize == 0) {
-    fp->bufferSize = 1;
-  }
+  if (flag & WRITE || flag & PLUS || flag & APPEND) { fp->bufferSize += 100; }
+  if (fp->bufferSize == 0) { fp->bufferSize = 1; }
   fp->buffer = malloc(fp->bufferSize);
   if (flag & PLUS || flag & APPEND || flag & READ) {
     //	printk("ReadFile........\n");
     vfs_readfile(filename, fp->buffer);
   }
   fp->p = 0;
-  if (flag & APPEND) {
-    fp->p = fp->fileSize;
-  }
+  if (flag & APPEND) { fp->p = fp->fileSize; }
   fp->name = malloc(strlen(filename) + 1);
   strcpy(fp->name, filename);
   fp->mode = flag;
@@ -99,12 +85,10 @@ int fputc(int ch, FILE *stream) {
     //		printk("Current Buffer=%s\n",stream->buffer);
     if (stream->p >= stream->bufferSize) {
       //	printk("Realloc....(%d,%d)\n",stream->p,stream->bufferSize);
-      stream->buffer = realloc(stream->buffer, stream->bufferSize + 100);
+      stream->buffer      = realloc(stream->buffer, stream->bufferSize + 100);
       stream->bufferSize += 100;
     }
-    if (stream->p >= stream->fileSize) {
-      stream->fileSize++;
-    }
+    if (stream->p >= stream->fileSize) { stream->fileSize++; }
     //		printk("Current Buffer=%s(A)\n",stream->buffer);
     stream->buffer[stream->p++] = ch;
     //	printk("Current Buffer=%s(B)\n",stream->buffer);
@@ -112,10 +96,9 @@ int fputc(int ch, FILE *stream) {
   }
   return EOF;
 }
-unsigned int fwrite(const void *ptr, unsigned int size, unsigned int nmemb,
-                    FILE *stream) {
+u32 fwrite(const void *ptr, u32 size, u32 nmemb, FILE *stream) {
   if (CANWRITE(stream->mode)) {
-    unsigned char *c_ptr = (unsigned char *)ptr;
+    u8 *c_ptr = (u8 *)ptr;
     for (int i = 0; i < size * nmemb; i++) {
       fputc(c_ptr[i], stream);
     }
@@ -124,12 +107,11 @@ unsigned int fwrite(const void *ptr, unsigned int size, unsigned int nmemb,
     return 0;
   }
 }
-unsigned int fread(void *buffer, unsigned int size, unsigned int count,
-                   FILE *stream) {
+u32 fread(void *buffer, u32 size, u32 count, FILE *stream) {
   if (CANREAD(stream->mode)) {
-    unsigned char *c_ptr = (unsigned char *)buffer;
+    u8 *c_ptr = (u8 *)buffer;
     for (int i = 0; i < size * count; i++) {
-      unsigned int ch = fgetc(stream);
+      u32 ch = fgetc(stream);
       if (ch == EOF) {
         return i;
       } else {
@@ -142,9 +124,7 @@ unsigned int fread(void *buffer, unsigned int size, unsigned int count,
   }
 }
 int fclose(FILE *fp) {
-  if (fp == NULL) {
-    return EOF;
-  }
+  if (fp == NULL) { return EOF; }
   if (CANWRITE(fp->mode)) {
     //		printk("Save file.....(%s) Size =
     //%d\n",fp->buffer,fp->fileSize);
@@ -159,7 +139,7 @@ int fclose(FILE *fp) {
 char *fgets(char *str, int n, FILE *stream) {
   if (CANREAD(stream->mode)) {
     for (int i = 0; i < n; i++) {
-      unsigned int ch = fgetc(stream);
+      u32 ch = fgetc(stream);
       if (ch == EOF) {
         if (i == 0) {
           return NULL;
@@ -167,9 +147,7 @@ char *fgets(char *str, int n, FILE *stream) {
           break;
         }
       }
-      if (ch == '\n') {
-        break;
-      }
+      if (ch == '\n') { break; }
       str[i] = ch;
     }
     return str;
@@ -187,11 +165,11 @@ int fputs(const char *str, FILE *stream) {
 }
 int fprintf(FILE *stream, const char *format, ...) {
   if (CANWRITE(stream->mode)) {
-    int len;
+    int     len;
     va_list ap;
     va_start(ap, format);
     char *buf = malloc(1024);
-    len = vsprintf(buf, format, ap);
+    len       = vsprintf(buf, format, ap);
     fputs(buf, stream);
     free(buf);
     va_end(ap);
@@ -203,14 +181,18 @@ int fprintf(FILE *stream, const char *format, ...) {
 }
 
 int feof(FILE *stream) {
-  if (stream->p >= stream->fileSize) {
-    return EOF;
-  }
+  if (stream->p >= stream->fileSize) { return EOF; }
   return 0;
 }
-int ferror(FILE *stream) { return 0; }
-int getc(FILE *stream) { return fgetc(stream); }
-int fsz(char *filename) { return vfs_filesize(filename); }
+int ferror(FILE *stream) {
+  return 0;
+}
+int getc(FILE *stream) {
+  return fgetc(stream);
+}
+int fsz(char *filename) {
+  return vfs_filesize(filename);
+}
 
 void EDIT_FILE(char *name, char *dest, int length, int offset) {
   if (vfs_filesize(name) == -1) {
@@ -223,7 +205,7 @@ void EDIT_FILE(char *name, char *dest, int length, int offset) {
   return;
 }
 int Copy(char *path, char *path1) {
-  unsigned char *path1_file_buffer;
+  u8 *path1_file_buffer;
   if (fsz(path) == -1) {
     // printk("file not found\n");
     return -1;
@@ -232,7 +214,7 @@ int Copy(char *path, char *path1) {
   vfs_createfile(path1);
 
   path1_file_buffer = kmalloc(fsz(path) + 1);
-  int sz = fsz(path);
+  int sz            = fsz(path);
   vfs_readfile(path, path1_file_buffer);
   vfs_writefile(path1, path1_file_buffer, sz);
   kfree(path1_file_buffer);

@@ -1,17 +1,15 @@
 /* MOUNT.C : 映射文件为disk */
 #include <dos.h>
-static void MountDiskRead(char drive, unsigned char *buffer,
-                          unsigned int number, unsigned int lba);
-static void MountDiskWrite(char drive, unsigned char *buffer,
-                           unsigned int number, unsigned int lba);
+static void MountDiskRead(char drive, u8 *buffer, u32 number, u32 lba);
+static void MountDiskWrite(char drive, u8 *buffer, u32 number, u32 lba);
 typedef struct {
-  char drive;
+  char  drive;
   FILE *fp;
-  int flag;
+  int   flag;
   vdisk vd;
 } mount_disk;
 mount_disk md[255];
-void init_mount_disk() {
+void       init_mount_disk() {
   for (int i = 0; i < 255; i++) {
     md[i].flag = 0;
   }
@@ -19,14 +17,14 @@ void init_mount_disk() {
 int mount(char *fileName) {
   for (int i = 0; i < 255; i++) {
     if (md[i].flag == 0) {
-      FILE *fp = fopen(fileName, "rw");
-      md[i].vd.flag = 1;
-      md[i].vd.Read = MountDiskRead;
+      FILE *fp       = fopen(fileName, "rw");
+      md[i].vd.flag  = 1;
+      md[i].vd.Read  = MountDiskRead;
       md[i].vd.Write = MountDiskWrite;
-      md[i].vd.size = fp->fileSize;
-      md[i].flag = 1;
-      md[i].fp = fp;
-      strcpy(md[i].vd.DriveName,fileName);
+      md[i].vd.size  = fp->fileSize;
+      md[i].flag     = 1;
+      md[i].fp       = fp;
+      strcpy(md[i].vd.DriveName, fileName);
       md[i].drive = register_vdisk(md[i].vd);
       return md[i].drive; // 成功
     }
@@ -44,8 +42,7 @@ void unmount(char drive) {
     }
   }
 }
-static void MountDiskRead(char drive, unsigned char *buffer,
-                          unsigned int number, unsigned int lba) {
+static void MountDiskRead(char drive, u8 *buffer, u32 number, u32 lba) {
   for (int i = 0; i < 255; i++) {
     if (md[i].flag && md[i].drive == drive) {
       memcpy(buffer, md[i].fp->buffer + lba * 512, number * 512);
@@ -53,8 +50,7 @@ static void MountDiskRead(char drive, unsigned char *buffer,
     }
   }
 }
-static void MountDiskWrite(char drive, unsigned char *buffer,
-                           unsigned int number, unsigned int lba) {
+static void MountDiskWrite(char drive, u8 *buffer, u32 number, u32 lba) {
   for (int i = 0; i < 255; i++) {
     if (md[i].flag && md[i].drive == drive) {
       memcpy(md[i].fp->buffer + lba * 512, buffer, number * 512);

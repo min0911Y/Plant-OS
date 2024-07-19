@@ -22,7 +22,7 @@ typedef struct intr_frame1_t {
 } signal_frame_t;
 void b2() {
 
-  for (;;)
+  while (true)
     ;
   return;
 }

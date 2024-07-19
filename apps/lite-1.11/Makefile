@@ -1,12 +1,12 @@
-LIBS_PATH := ../libs
+LIBS_PATH := ../lib
 INCLUDE_PATH := ../include
 include ../defs.mk
 NASM = nasm
 OBJS_PACK = ../out/lite_main.obj ../out/api.obj ../out/renderer_font.obj ../out/api_renderer.obj ../out/system.obj ../out/stb_truetype.obj \
 ../out/rencache.obj ../out/renderer.obj lapi.obj      lfunc.obj     lparser.obj lauxlib.obj   lgc.obj       lstate.obj lbaselib.obj  linit.obj     lstring.obj lbitlib.obj   liolib.obj    lstrlib.obj lcode.obj     llex.obj      ltable.obj lcorolib.obj  lmathlib.obj  ltablib.obj lctype.obj    lmem.obj      ltm.obj ldblib.obj    loadlib.obj   lundump.obj ldebug.obj    lobject.obj   lvm.obj ldo.obj       lopcodes.obj  lzio.obj ldump.obj     loslib.obj
-CFLAGS = -m32 -I$(INCLUDE_PATH) -nostdinc -nolibc -nostdlib -ffreestanding -fno-stack-protector -Qn -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fomit-frame-pointer -finput-charset=UTF-8 -fexec-charset=GB2312 -march=pentium -Qn -O2 -w
+CFLAGS = -m32 -I$(INCLUDE_PATH) -nostdinc -nolibc -nostdlib -ffreestanding -fno-stack-protector -Qn -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fomit-frame-pointer -finput-charset=UTF-8 -fexec-charset=UTF-8 -march=pentium -Qn -O2 -w
 default : $(OBJS_PACK)
-	$(LINK) $(OBJS_PACK) ../libs/sdl2_old.a ../libs/libgui.a $(BASIC_LIB_C) -o ../out/lite.bin
+	$(LINK) $(OBJS_PACK) ../lib/sdl2_old.a ../lib/libgui.a $(BASIC_LIB_C) -o ../out/lite.bin
 ../out/%.obj : src/%.c Makefile
 	$(C) -I./src -I../sdl2/include -I../sdl2/SDL2 -I../sdl2/src/video/yuv2rgb -c $*.c -o ../out/$*.obj
 ../out/%.obj : src/%.c Makefile

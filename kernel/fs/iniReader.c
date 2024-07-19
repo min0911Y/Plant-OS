@@ -1,19 +1,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <type.h>
+
 // 替换字符串
-char* replace(char* str, char* old, char* new) {
+char *replace(char *str, char *old, char *new) {
   char *ret, *r;
-  int i, count = 0;
-  int newlen = strlen(new);
-  int oldlen = strlen(old);
+  int   i, count = 0;
+  int   newlen = strlen(new);
+  int   oldlen = strlen(old);
   for (i = 0; str[i] != '\0'; i++) {
-    if (strncmp(&str[i], old, oldlen) == 0)
-      count++;
+    if (strncmp(&str[i], old, oldlen) == 0) count++;
   }
-  ret = (char*)malloc(i + count * (newlen - oldlen) + 1);
-  if (ret == NULL)
-    return NULL;
+  ret = (char *)malloc(i + count * (newlen - oldlen) + 1);
+  if (ret == NULL) return NULL;
   r = ret;
   while (*str) {
     if (strncmp(str, old, oldlen) == 0) {
@@ -27,8 +27,8 @@ char* replace(char* str, char* old, char* new) {
   return ret;
 }
 
-int ReadIni_GetSectionForCount(char* IniFile, int count, char* result) {
-  char* p = IniFile;
+int ReadIni_GetSectionForCount(char *IniFile, int count, char *result) {
+  char *p = IniFile;
   for (int i = 0, c = 0, j = 0; i < strlen(IniFile); i++) {
     if (IniFile[i] == '[') {
       c++;
@@ -39,35 +39,29 @@ int ReadIni_GetSectionForCount(char* IniFile, int count, char* result) {
         result[j++] = IniFile[i];
       } else {
         result[j] = '\0';
-        return i + 1;  // 运行正常 返回index
+        return i + 1; // 运行正常 返回index
       }
     }
   }
   // 程序如果执行到这里，说明是没找到，或者出错
   return -1;
 }
-int ReadIni_GetValueForName(char* IniFile,
-                            char* name,
-                            char* section,
-                            char* result) {
-  char* p = IniFile;
-  char buf[500];
+int ReadIni_GetValueForName(char *IniFile, char *name, char *section, char *result) {
+  char *p = IniFile;
+  char  buf[500];
   for (int i = 0; ReadIni_GetNameForCount(IniFile, i, section, buf) != 1; i++) {
     //		printk("\n%s\n",buf);
     if (strcmp(buf, name) == 0) {
-      int index = ReadIni_GetNameForCount(IniFile, i, section, buf);
-      IniFile += index;
+      int index  = ReadIni_GetNameForCount(IniFile, i, section, buf);
+      IniFile   += index;
       //			printk(IniFile);
       for (; *IniFile != '='; IniFile++)
         ;
       IniFile++;
       int l = 0;
-      for (; *IniFile != '\r' && *IniFile != '\n' && *IniFile != '#' &&
-             *IniFile != '\0';
+      for (; *IniFile != '\r' && *IniFile != '\n' && *IniFile != '#' && *IniFile != '\0';
            IniFile++) {
-        if (*IniFile != ' ' && *IniFile != '\t') {
-          result[l++] = *IniFile;
-        }
+        if (*IniFile != ' ' && *IniFile != '\t') { result[l++] = *IniFile; }
       }
       result[l] = 0;
       // 获取完成，处理插值
@@ -101,62 +95,44 @@ int ReadIni_GetValueForName(char* IniFile,
   }
   return 1;
 }
-int ReadIni_GetNameForCount(char* IniFile,
-                            int count,
-                            char* section,
-                            char* result) {
+int ReadIni_GetNameForCount(char *IniFile, int count, char *section, char *result) {
   char buf[500];
-  int flag = 0, adr;
+  int  flag = 0, adr;
   for (int i = 1; ReadIni_GetSectionForCount(IniFile, i, buf) != -1; i++) {
     if (strcmp(section, buf) == 0) {
-      int index = ReadIni_GetSectionForCount(IniFile, i, buf);
-      flag = 1;
-      IniFile += index;
-      adr = index;
+      int index  = ReadIni_GetSectionForCount(IniFile, i, buf);
+      flag       = 1;
+      IniFile   += index;
+      adr        = index;
       break;
     }
   }
-  if (!flag) {
-    return 1;
-  }
+  if (!flag) { return 1; }
   //          printk(IniFile);
   for (int i = 0; i < 500; i++) {
     buf[i] = 0;
   }
   for (int i = 0, j = 0; i < strlen(IniFile); i++) {
-    if (IniFile[i] == '\r' || IniFile[i] == '\n' || IniFile[i] == ' ' ||
-        IniFile[i] == '\t') {
+    if (IniFile[i] == '\r' || IniFile[i] == '\n' || IniFile[i] == ' ' || IniFile[i] == '\t') {
       continue;
     }
-    if (IniFile[i] == '[') {
-      return 1;
-    }
+    if (IniFile[i] == '[') { return 1; }
     if (j == count) {
       //			printk("Got It! %d\n",i);
-      while (IniFile[i] == '#' || IniFile[i] == ' ' ||
-             IniFile[i] == '\t')  // 注释
+      while (IniFile[i] == '#' || IniFile[i] == ' ' || IniFile[i] == '\t') // 注释
       {
-        for (; (IniFile[i] == ' ' || IniFile[i] == '\t') && i < strlen(IniFile);
-             i++)
+        for (; (IniFile[i] == ' ' || IniFile[i] == '\t') && i < strlen(IniFile); i++)
           ;
-        if (IniFile[i] != '#')
-          break;
-        for (; IniFile[i] != '\r' && IniFile[i] != '\n' && i < strlen(IniFile);
-             i++)
+        if (IniFile[i] != '#') break;
+        for (; IniFile[i] != '\r' && IniFile[i] != '\n' && i < strlen(IniFile); i++)
           ;
-        for (;
-             (IniFile[i] == '\r' || IniFile[i] == '\n') && i < strlen(IniFile);
-             i++)
+        for (; (IniFile[i] == '\r' || IniFile[i] == '\n') && i < strlen(IniFile); i++)
           ;
       }
       int l = 0;
       for (int k = i; IniFile[k] != '='; k++) {
-        if (IniFile[k] == '\0') {
-          return 1;
-        }
-        if (IniFile[k] != ' ' && IniFile[k] != '\t') {
-          result[l++] = IniFile[k];
-        }
+        if (IniFile[k] == '\0') { return 1; }
+        if (IniFile[k] != ' ' && IniFile[k] != '\t') { result[l++] = IniFile[k]; }
         //				printk("%d %c\n",k,result[l-1]);
       }
       result[l] = 0;
@@ -166,9 +142,7 @@ int ReadIni_GetNameForCount(char* IniFile,
     if (IniFile[i] == '=') {
       j++;
       for (; IniFile[i] != '\r' && IniFile[i] != '\n'; i++) {
-        if (IniFile[i] == '\0' || IniFile[i] == '[') {
-          return 1;
-        }
+        if (IniFile[i] == '\0' || IniFile[i] == '[') { return 1; }
       }
     }
   }

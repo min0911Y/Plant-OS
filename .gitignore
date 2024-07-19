@@ -5,7 +5,7 @@ apps/*/*.o
 apps/*/*.obj
 apps/*/*/*.o
 apps/out
-apps/libs
+apps/lib
 apps/doomgeneric/*.o
 apps/sdl2/*.o
 apps/sdl2_old/*.o
@@ -15,7 +15,12 @@ apps/sdl2_old/*.o
 c.py
 cloc.exe
 
-Loader/out
+loader/out
+
+bin
+build
+lib
+.cache
 
 fattools/fattools
 

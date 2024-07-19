@@ -1,5 +1,6 @@
-#ifndef __STDLIB
-#define __STDLIB
+#pragma once
+#include <copi143-define.h>
+#include <type.h>
+
 #define NOREAD
 #include <dos.h>
-#endif

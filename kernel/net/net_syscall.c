@@ -5,7 +5,7 @@ static void handler_udp(struct Socket *socket, void *base) {
       (struct UDPMessage *)(base + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message));
   void *dat = base + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message) +
               sizeof(struct UDPMessage);
-  uint32_t total_size =
+  u32 total_size =
       swap16(ipv4->totalLength) - sizeof(struct IPV4Message) - sizeof(struct UDPMessage);
   if (socket->flag == 0) {
     memcpy(socket->buf, dat, total_size);
@@ -19,8 +19,7 @@ static void handler_tcp(struct Socket *socket, void *base) {
       (struct TCPMessage *)(base + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message));
   void *dat = base + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message) +
               (tcp->headerLength * 4);
-  uint32_t total_size =
-      swap16(ipv4->totalLength) - sizeof(struct IPV4Message) - (tcp->headerLength * 4);
+  u32 total_size = swap16(ipv4->totalLength) - sizeof(struct IPV4Message) - (tcp->headerLength * 4);
   if (socket->flag == 0) {
     memcpy(socket->buf, dat, total_size);
     socket->size = total_size;
@@ -38,12 +37,12 @@ enum {
   EAX
 };
 void net_api(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx, int eax) {
-  mtask    *task       = current_task();
-  int       cs_base    = 0;
-  int       ds_base    = 0;
-  int       alloc_addr = task->alloc_addr; // malloc地址
-  uint32_t *reg        = &eax + 1;         /* eax后面的地址*/
-                                           /*强行改写通过PUSHAD保存的值*/
+  mtask *task       = current_task();
+  int    cs_base    = 0;
+  int    ds_base    = 0;
+  int    alloc_addr = task->alloc_addr; // malloc地址
+  u32   *reg        = &eax + 1;         /* eax后面的地址*/
+                                        /*强行改写通过PUSHAD保存的值*/
   /* reg[0] : EDI,   reg[1] : ESI,   reg[2] : EBP,   reg[3] : ESP */
   /* reg[4] : EBX,   reg[5] : EDX,   reg[6] : ECX,   reg[7] : EAX */
   if (eax == 0x01) { // Socket
@@ -63,7 +62,7 @@ void net_api(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx, int 
     socket_free((struct Socket *)ebx);
   } else if (eax == 0x03) {
     struct Socket *socket = (struct Socket *)ebx;
-    socket->Send(socket, (uint8_t *)(ds_base + ecx), edx);
+    socket->Send(socket, (u8 *)(ds_base + ecx), edx);
   } else if (eax == 0x04) {
     int            t = -1;
     struct Socket *s = (struct Socket *)ebx;
@@ -74,7 +73,7 @@ void net_api(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx, int 
       }
       if (s->flag) { break; }
     }
-    uint32_t sz;
+    u32 sz;
     if (edx > s->size) {
       sz = s->size;
     } else {
@@ -87,7 +86,7 @@ void net_api(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx, int 
     struct Socket *socket = (struct Socket *)ebx;
     Socket_Init(socket, ecx, edx, esi, edi);
   } else if (eax == 0x06) {
-    extern uint32_t ip;
+    extern u32 ip;
     reg[EAX] = ip;
   } else if (eax == 0x07) {
     reg[EAX] = ping(ebx);

@@ -1,21 +1,17 @@
 // bmp.c ：位图解析
 #include <fs.h>
-bool BMPVIEW8(char *path, unsigned char *vram, int xsize) {
-  if (fsz(path) == -1) {
-    return false;
-  }
-  int i, j;
+bool BMPVIEW8(char *path, u8 *vram, int xsize) {
+  if (fsz(path) == -1) { return false; }
+  int   i, j;
   FILE *fp = fopen(path, "r");
-  char *p = fp->buffer;
-  unsigned short pxsize, pysize, start;
-  unsigned int length;
-  if (p[0] != 'B' || p[1] != 'M') {
-    return false;
-  }
-  pxsize = *(unsigned short *)(p + 0x12);
-  pysize = *(unsigned short *)(p + 0x16);
-  length = *(unsigned int *)(p + 2);
-  start = *(unsigned short *)(p + 0xa);
+  char *p  = fp->buffer;
+  u16   pxsize, pysize, start;
+  u32   length;
+  if (p[0] != 'B' || p[1] != 'M') { return false; }
+  pxsize = *(u16 *)(p + 0x12);
+  pysize = *(u16 *)(p + 0x16);
+  length = *(u32 *)(p + 2);
+  start  = *(u16 *)(p + 0xa);
   io_out8(VGA_DAC_WRITE_INDEX, 0);
   for (i = 0; i != 256; i++) {
     io_out8(VGA_DAC_DATA, p[0x36 + i * 4 + 2] / 4);
@@ -31,21 +27,17 @@ bool BMPVIEW8(char *path, unsigned char *vram, int xsize) {
   fclose(fp);
   return true;
 }
-bool BMPVIEW32(char *path, unsigned char *vram, int xsize) {
-  if (fsz(path) == -1) {
-    return false;
-  }
-  FILE *fp = fopen(path, "r");
-  unsigned char *buf = fp->buffer;
-  if (buf[0] != 'B' || buf[1] != 'M') {
-    return false;
-  }
+bool BMPVIEW32(char *path, u8 *vram, int xsize) {
+  if (fsz(path) == -1) { return false; }
+  FILE *fp  = fopen(path, "r");
+  u8   *buf = fp->buffer;
+  if (buf[0] != 'B' || buf[1] != 'M') { return false; }
   int i, j;
   int offset;
   int width, height;
-  unsigned char r, g, b;
+  u8  r, g, b;
   int x, y;
-  width = *(int *)(buf + 18);
+  width  = *(int *)(buf + 18);
   height = *(int *)(buf + 22);
   offset = *(int *)(buf + 10);
   for (i = 0; i < height; i++) {

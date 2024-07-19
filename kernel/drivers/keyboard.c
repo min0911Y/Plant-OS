@@ -16,24 +16,23 @@ char       keytable1[0x54] = { // 未按下Shift
     'g', 'h',  'j', 'k', 'l', ';', '\'', '`', 0,   '\\', 'z', 'x', 'c', 'v', 'b',  'n',  'm',
     ',', '.',  '/', 0,   '*', 0,   ' ',  0,   0,   0,    0,   0,   0,   0,   0,    0,    0,
     0,   0,    0,   '7', '8', '9', '-',  '4', '5', '6',  '+', '1', '2', '3', '0',  '.'};
-void       wait_KBC_sendready(void) {
-  /* 等待键盘控制电路准备完毕 */
-  for (;;) {
+
+// 等待键盘控制电路准备完毕
+void wait_KBC_sendready() {
+  while (true) {
     if ((io_in8(PORT_KEYSTA) & KEYSTA_SEND_NOTREADY) == 0) { break; }
   }
-  return;
 }
 
-void init_keyboard(void) {
-  /* 初始化键盘控制电路 */
+// 初始化键盘控制电路
+void init_keyboard() {
   wait_KBC_sendready();
   io_out8(PORT_KEYCMD, KEYCMD_WRITE_MODE);
   wait_KBC_sendready();
   io_out8(PORT_KEYDAT, KBC_MODE);
-  return;
 }
 int getch() {
-  unsigned char ch;
+  u8 ch;
   ch = input_char_inSM(); // 扫描码
   if (ch == 0xe0) {       // keytable之外的键（↑,↓,←,→）
     ch = input_char_inSM();
@@ -123,7 +122,7 @@ int    disable_flag      = 0;
 mtask *keyboard_use_task = NULL;
 void   inthandler21(int *esp) {
   // 键盘中断处理函数
-  unsigned char data, s[4];
+  u8 data, s[4];
   io_out8(PIC0_OCW2, 0x61);
   data = io_in8(PORT_KEYDAT); // 从键盘IO口读取扫描码
   //  特殊键处理

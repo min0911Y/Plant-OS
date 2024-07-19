@@ -2,76 +2,76 @@
 // Copyright (C) 2021-2022 zhouzhihao & min0911
 #include <dos.h>
 #include <mst.h>
-uint32_t running_mode = POWERINTDOS;  // 运行模式
-uint32_t Path_Addr;
-unsigned char *font, *ascfont, *hzkfont;
-unsigned char* IVT;
+u32 running_mode = POWERINTDOS; // 运行模式
+u32 Path_Addr;
+u8 *font, *ascfont, *hzkfont;
+u8 *IVT;
 
 void c_pgui_main(void);
 void shell(void) {
-//   ide_initialize(0x1F0, 0x3F6, 0x170, 0x376, 0x000);
-//   init_palette();
-//   vfs_mount_disk(current_task()->drive, current_task()->drive);
-//   vfs_change_disk(current_task()->drive);
-//   env_init();
-//   init_networkCTL();
-//   init_network();
+  //   ide_initialize(0x1F0, 0x3F6, 0x170, 0x376, 0x000);
+  //   init_palette();
+  //   vfs_mount_disk(current_task()->drive, current_task()->drive);
+  //   vfs_change_disk(current_task()->drive);
+  //   env_init();
+  //   init_networkCTL();
+  //   init_network();
 
-//   if (env_read("network") == NULL) {
-//     printk("would you like to enable network?(y/n)\n");
-//     switch (getch()) {
-//       case 'y':
-//       case 'Y':
-//         env_write("network", "enable");
-//         break;
-//       default:
-//         env_write("network", "disable");
-//         break;
-//     }
-//   }
-//   if (strcmp(env_read("network"), "enable") == 0) {
-//     init_card();
-//     //for(;;);
-//   }
-//   init_ok_flag = 1;
-//   /*到这里 系统的初始化才真正结束*/
-//   font = (unsigned char*)"/other/font.bin";
-//   FILE* fp = fopen("/other/font.bin", "r");
-//   ascfont = fp->buffer;
-//   fp = fopen("/other/hzk16", "r");
-//   hzkfont = fp->buffer;
-// retry:
-//   if (!(Path_Addr = env_read("path"))) {
-//     env_write("path", "");
-//     goto retry;
-//   }
-//   clear();
+  //   if (env_read("network") == NULL) {
+  //     printk("would you like to enable network?(y/n)\n");
+  //     switch (getch()) {
+  //       case 'y':
+  //       case 'Y':
+  //         env_write("network", "enable");
+  //         break;
+  //       default:
+  //         env_write("network", "disable");
+  //         break;
+  //     }
+  //   }
+  //   if (strcmp(env_read("network"), "enable") == 0) {
+  //     init_card();
+  //     //for(;;);
+  //   }
+  //   init_ok_flag = 1;
+  //   /*到这里 系统的初始化才真正结束*/
+  //   font = (u8*)"/other/font.bin";
+  //   FILE* fp = fopen("/other/font.bin", "r");
+  //   ascfont = fp->buffer;
+  //   fp = fopen("/other/hzk16", "r");
+  //   hzkfont = fp->buffer;
+  // retry:
+  //   if (!(Path_Addr = env_read("path"))) {
+  //     env_write("path", "");
+  //     goto retry;
+  //   }
+  //   clear();
 
-//   printk("Please choose your boot mode:\n");
-//   printk("1. TextMode 80 * 25\n");
-//   printk("2. HighTextMode 128 * 48\n");
-//   printk("Input:");
-//   unsigned char choice;
-//   for (;;) {
-//     choice = getch();
-//     if (choice == '1') {
-//       running_mode = POWERINTDOS;
-//       clear();
-//       break;
-//     } else if (choice == '2') {
-//       running_mode = HIGHTEXTMODE;
-//       SwitchToHighTextMode();
-//       break;
-//     }
-//   }
-//   if (fsz("AUTOEXEC.BAT") == -1) {
-//     printk("Boot Warning:No AUTOEXEC.BAT in Drive %c\n", current_task()->drive);
-//   } else {
-//     run_bat("AUTOEXEC.BAT");
-//   }
-//   extern struct tty* tty_default;
-//   tty_set(current_task(), tty_default);
-//   shell_handler();
+  //   printk("Please choose your boot mode:\n");
+  //   printk("1. TextMode 80 * 25\n");
+  //   printk("2. HighTextMode 128 * 48\n");
+  //   printk("Input:");
+  //   u8 choice;
+  //   while (true) {
+  //     choice = getch();
+  //     if (choice == '1') {
+  //       running_mode = POWERINTDOS;
+  //       clear();
+  //       break;
+  //     } else if (choice == '2') {
+  //       running_mode = HIGHTEXTMODE;
+  //       SwitchToHighTextMode();
+  //       break;
+  //     }
+  //   }
+  //   if (fsz("AUTOEXEC.BAT") == -1) {
+  //     printk("Boot Warning:No AUTOEXEC.BAT in Drive %c\n", current_task()->drive);
+  //   } else {
+  //     run_bat("AUTOEXEC.BAT");
+  //   }
+  //   extern struct tty* tty_default;
+  //   tty_set(current_task(), tty_default);
+  //   shell_handler();
 }
 void shell_handler() {
   // struct TASK* task = current_task();
@@ -87,7 +87,7 @@ void shell_handler() {
 }
 struct tty *now_tty() {
   extern struct List *tty_list;
-  struct tty *n;
+  struct tty         *n;
   for (int j = 1; FindForCount(j, tty_list) != 0; j++) {
     n = (struct tty *)FindForCount(j, tty_list)->val;
     if ((now_tty_TextMode(n) && running_mode == POWERINTDOS) ||
@@ -96,7 +96,6 @@ struct tty *now_tty() {
     }
   }
 }
-
 
 void task_sr1() {
   // // 提供安全结束进程
@@ -126,7 +125,7 @@ void task_sr1() {
   //   task_sleep(current_task());
   // }
 }
-void com_input(char* ptr, int len) {
+void com_input(char *ptr, int len) {
   int i;
   for (i = 0; i != len; i++) {
     char in = read_serial();
@@ -154,9 +153,9 @@ void com_input(char* ptr, int len) {
 void task_sr2() {
   // SleepTask(current_task());
 
-  // for (;;) {
+  // while (true) {
   // }
-  // for (;;) {
+  // while (true) {
   //   printk("Debug> ");
   //   char buf[150];
   //   com_input(buf, 150);
@@ -182,7 +181,7 @@ void task_sr2() {
   //     printk("will set_mode %dx%dx%d\n",data[0],data[1],data[2]);
   //     int result = _set_mode(data[0],data[1],data[2]);
   //     printk("Set OK.\n");
-  //     unsigned int *r = data[3];
+  //     u32 *r = data[3];
   //     *r = result;
   //   }
   // }

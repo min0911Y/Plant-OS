@@ -1,46 +1,45 @@
 // md5加密
 #include <dos.h>
-void MD5Transform(unsigned int state[4], unsigned char block[64]);
-void MD5Encode(unsigned char *output, unsigned int *input, unsigned int len);
+void MD5Transform(u32 state[4], u8 block[64]);
+void MD5Encode(u8 *output, u32 *input, u32 len);
 typedef struct {
-  unsigned int count[2];
-  unsigned int state[4];
-  unsigned char buffer[64];
+  u32 count[2];
+  u32 state[4];
+  u8  buffer[64];
 } MD5_CTX;
 
-#define F(x, y, z) ((x & y) | (~x & z))
-#define G(x, y, z) ((x & z) | (y & ~z))
-#define H(x, y, z) (x ^ y ^ z)
-#define I(x, y, z) (y ^ (x | ~z))
+#define F(x, y, z)        ((x & y) | (~x & z))
+#define G(x, y, z)        ((x & z) | (y & ~z))
+#define H(x, y, z)        (x ^ y ^ z)
+#define I(x, y, z)        (y ^ (x | ~z))
 #define ROTATE_LEFT(x, n) ((x << n) | (x >> (32 - n)))
-#define FF(a, b, c, d, x, s, ac)                                               \
-  {                                                                            \
-    a += F(b, c, d) + x + ac;                                                  \
-    a = ROTATE_LEFT(a, s);                                                     \
-    a += b;                                                                    \
+#define FF(a, b, c, d, x, s, ac)                                                                   \
+  {                                                                                                \
+    a += F(b, c, d) + x + ac;                                                                      \
+    a  = ROTATE_LEFT(a, s);                                                                        \
+    a += b;                                                                                        \
   }
-#define GG(a, b, c, d, x, s, ac)                                               \
-  {                                                                            \
-    a += G(b, c, d) + x + ac;                                                  \
-    a = ROTATE_LEFT(a, s);                                                     \
-    a += b;                                                                    \
+#define GG(a, b, c, d, x, s, ac)                                                                   \
+  {                                                                                                \
+    a += G(b, c, d) + x + ac;                                                                      \
+    a  = ROTATE_LEFT(a, s);                                                                        \
+    a += b;                                                                                        \
   }
-#define HH(a, b, c, d, x, s, ac)                                               \
-  {                                                                            \
-    a += H(b, c, d) + x + ac;                                                  \
-    a = ROTATE_LEFT(a, s);                                                     \
-    a += b;                                                                    \
+#define HH(a, b, c, d, x, s, ac)                                                                   \
+  {                                                                                                \
+    a += H(b, c, d) + x + ac;                                                                      \
+    a  = ROTATE_LEFT(a, s);                                                                        \
+    a += b;                                                                                        \
   }
-#define II(a, b, c, d, x, s, ac)                                               \
-  {                                                                            \
-    a += I(b, c, d) + x + ac;                                                  \
-    a = ROTATE_LEFT(a, s);                                                     \
-    a += b;                                                                    \
+#define II(a, b, c, d, x, s, ac)                                                                   \
+  {                                                                                                \
+    a += I(b, c, d) + x + ac;                                                                      \
+    a  = ROTATE_LEFT(a, s);                                                                        \
+    a += b;                                                                                        \
   }
-unsigned char PADDING[] = {0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                           0,    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                           0,    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                           0,    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+u8 PADDING[] = {0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0,    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0,    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
 void MD5Init(MD5_CTX *context) {
   context->count[0] = 0;
@@ -50,13 +49,12 @@ void MD5Init(MD5_CTX *context) {
   context->state[2] = 0x98BADCFE;
   context->state[3] = 0x10325476;
 }
-void MD5Update(MD5_CTX *context, unsigned char *input, unsigned int inputlen) {
-  unsigned int i = 0, index = 0, partlen = 0;
-  index = (context->count[0] >> 3) & 0x3F;
-  partlen = 64 - index;
+void MD5Update(MD5_CTX *context, u8 *input, u32 inputlen) {
+  u32 i = 0, index = 0, partlen = 0;
+  index              = (context->count[0] >> 3) & 0x3F;
+  partlen            = 64 - index;
   context->count[0] += inputlen << 3;
-  if (context->count[0] < (inputlen << 3))
-    context->count[1]++;
+  if (context->count[0] < (inputlen << 3)) context->count[1]++;
   context->count[1] += inputlen >> 29;
 
   if (inputlen >= partlen) {
@@ -70,20 +68,20 @@ void MD5Update(MD5_CTX *context, unsigned char *input, unsigned int inputlen) {
   }
   memcpy(&context->buffer[index], &input[i], inputlen - i);
 }
-void MD5Final(MD5_CTX *context, unsigned char digest[16]) {
-  unsigned int index = 0, padlen = 0;
-  unsigned char bits[8];
-  index = (context->count[0] >> 3) & 0x3F;
+void MD5Final(MD5_CTX *context, u8 digest[16]) {
+  u32 index = 0, padlen = 0;
+  u8  bits[8];
+  index  = (context->count[0] >> 3) & 0x3F;
   padlen = (index < 56) ? (56 - index) : (120 - index);
   MD5Encode(bits, context->count, 8);
   MD5Update(context, PADDING, padlen);
   MD5Update(context, bits, 8);
   MD5Encode(digest, context->state, 16);
 }
-void MD5Encode(unsigned char *output, unsigned int *input, unsigned int len) {
-  unsigned int i = 0, j = 0;
+void MD5Encode(u8 *output, u32 *input, u32 len) {
+  u32 i = 0, j = 0;
   while (j < len) {
-    output[j] = input[i] & 0xFF;
+    output[j]     = input[i] & 0xFF;
     output[j + 1] = (input[i] >> 8) & 0xFF;
     output[j + 2] = (input[i] >> 16) & 0xFF;
     output[j + 3] = (input[i] >> 24) & 0xFF;
@@ -91,21 +89,20 @@ void MD5Encode(unsigned char *output, unsigned int *input, unsigned int len) {
     j += 4;
   }
 }
-void MD5Decode(unsigned int *output, unsigned char *input, unsigned int len) {
-  unsigned int i = 0, j = 0;
+void MD5Decode(u32 *output, u8 *input, u32 len) {
+  u32 i = 0, j = 0;
   while (j < len) {
-    output[i] = (input[j]) | (input[j + 1] << 8) | (input[j + 2] << 16) |
-                (input[j + 3] << 24);
+    output[i] = (input[j]) | (input[j + 1] << 8) | (input[j + 2] << 16) | (input[j + 3] << 24);
     i++;
     j += 4;
   }
 }
-void MD5Transform(unsigned int state[4], unsigned char block[64]) {
-  unsigned int a = state[0];
-  unsigned int b = state[1];
-  unsigned int c = state[2];
-  unsigned int d = state[3];
-  unsigned int x[64];
+void MD5Transform(u32 state[4], u8 block[64]) {
+  u32 a = state[0];
+  u32 b = state[1];
+  u32 c = state[2];
+  u32 d = state[3];
+  u32 x[64];
   MD5Decode(x, block, 64);
   FF(a, b, c, d, x[0], 7, 0xd76aa478);   /* 1 */
   FF(d, a, b, c, x[1], 12, 0xe8c7b756);  /* 2 */
@@ -184,12 +181,12 @@ void MD5Transform(unsigned int state[4], unsigned char block[64]) {
 }
 void md5s(char *hexbuf, int read_len, char *result) {
   //	int read_len;
-  int i;
+  int  i;
   char temp[8] = {0};
-  unsigned char digest[16]; //存放结果
-                            //	char hexbuf[128] = "hello";
-  unsigned char decrypt[16] = {0};
-  unsigned char decrypt32[64] = {0};
+  u8   digest[16]; //存放结果
+                   //	char hexbuf[128] = "hello";
+  u8   decrypt[16]   = {0};
+  u8   decrypt32[64] = {0};
   (void)(digest);
   (void)(temp);
   (void)(i);
@@ -197,7 +194,7 @@ void md5s(char *hexbuf, int read_len, char *result) {
 
   MD5Init(&md5c); //初始化
                   //	read_len = strlen(hexbuf);
-  MD5Update(&md5c, (unsigned char *)hexbuf, read_len);
+  MD5Update(&md5c, (u8 *)hexbuf, read_len);
 
   MD5Final(&md5c, decrypt);
   strcpy((char *)decrypt32, "");
@@ -205,7 +202,7 @@ void md5s(char *hexbuf, int read_len, char *result) {
   memcpy(result, decrypt, 16);
   return;
 }
-void md5f(char *filename, unsigned char *result) {
+void md5f(char *filename, u8 *result) {
   FILE *fp = fopen(filename, "r");
   md5s((char *)fp->buffer, fsz(filename), (char *)result);
   fclose(fp);

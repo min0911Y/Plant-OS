@@ -3,6 +3,6 @@ void check(void);
 void KernelMain(void) {
   check();
   sysinit();
-  for (;;)
+  while (true)
     ;
 }

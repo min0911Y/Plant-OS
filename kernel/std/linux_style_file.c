@@ -2,12 +2,12 @@
 #include <dos.h>
 #include <fcntl.h>
 typedef struct OPEN {
-  unsigned char *buf;
-  unsigned int   p;
-  unsigned int   size;
-  unsigned char *path;
-  unsigned       arrsz;
-  int            wg;
+  u8      *buf;
+  u32      p;
+  u32      size;
+  u8      *path;
+  unsigned arrsz;
+  int      wg;
 } OPEN;
 int close(int fd) {
   logk("Close(%08x)\n", fd);
@@ -20,7 +20,7 @@ int close(int fd) {
   return 0;
 }
 
-int open(const char *pathname, int flags, unsigned int mode) {
+int open(const char *pathname, int flags, u32 mode) {
   printk("OPEN:%s\n", pathname);
   OPEN *fp;
   fp = malloc(sizeof(OPEN));
@@ -38,22 +38,22 @@ int open(const char *pathname, int flags, unsigned int mode) {
   return (int)fp;
 }
 
-unsigned int read(int fd, void *buf, unsigned int count) {
+u32 read(int fd, void *buf, u32 count) {
   OPEN *fp = (OPEN *)fd;
   int   i;
   for (i = 0; i < count; i++) {
     if (fp->p >= fp->size) { break; }
-    ((unsigned char *)buf)[i] = fp->buf[fp->p++];
+    ((u8 *)buf)[i] = fp->buf[fp->p++];
   }
   return i;
 }
-void rc(int fd, unsigned char c) {
+void rc(int fd, u8 c) {
   OPEN *fp = (OPEN *)fd;
   if (fp->size < fp->arrsz) {
     fp->buf[fp->p++] = c;
   } else {
-    fp->arrsz         += 4096;
-    unsigned char *re  = malloc(fp->arrsz);
+    fp->arrsz += 4096;
+    u8 *re     = malloc(fp->arrsz);
     memcpy(re, fp->buf, fp->size);
     free(fp->buf);
     fp->buf          = re;
@@ -62,15 +62,15 @@ void rc(int fd, unsigned char c) {
   fp->size++;
   fp->wg = 1;
 }
-unsigned int write(int fd, const void *buf, unsigned int nbyte) {
+u32 write(int fd, const void *buf, u32 nbyte) {
   OPEN *fp = (OPEN *)fd;
   logk("fp=%08x\n", fp);
   for (int i = 0; i < nbyte; i++) {
-    rc(fd, ((unsigned char *)buf)[i]);
+    rc(fd, ((u8 *)buf)[i]);
   }
   return nbyte;
 }
-unsigned int lseek(int fd, unsigned int offset, int whence) {
+u32 lseek(int fd, u32 offset, int whence) {
   OPEN *fp = (OPEN *)fd;
   if (whence == 0) {
     fp->p = offset;

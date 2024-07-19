@@ -3,8 +3,10 @@
 #include <ctypes.h>
 #include <stdarg.h>
 #include <stddef.h>
-typedef unsigned int vram_t;
-typedef vram_t       color_t;
+typedef u32    vram_t;
+typedef vram_t color_t;
+
+#define __PACKED__ __attribute__((packed))
 
 /* dos.h */
 #define VERSION      "0.7b" // Version of the program
@@ -40,23 +42,23 @@ typedef vram_t       color_t;
 #define HIGHTEXTMODE         1
 extern struct MOUSE_DEC mdec;
 extern int              gmx, gmy;
-extern unsigned char   *font, *ascfont, *hzkfont;
+extern u8              *font, *ascfont, *hzkfont;
 extern struct TIMERCTL  timerctl;
-extern unsigned int     memsize;
-extern uint32_t         running_mode;
+extern u32              memsize;
+extern u32              running_mode;
 struct PAGE_INFO {
-  uint8_t task_id;
-  uint8_t count;
-} __attribute__((packed));
+  u8 task_id;
+  u8 count;
+} __PACKED__;
 
 #define FREE_MAX_NUM              4096
 #define ERRNO_NOPE                0
 #define ERRNO_NO_ENOGHT_MEMORY    1
 #define ERRNO_NO_MORE_FREE_MEMBER 2
-#define MEM_MAX(a, b)             (a) > (b) ? (a) : (b)
+#define MEM_MAX(a, b)             ((a) > (b) ? (a) : (b))
 typedef struct {
-  uint32_t start;
-  uint32_t end; // end和start都等于0说明这个free结构没有使用
+  u32 start;
+  u32 end; // end和start都等于0说明这个free结构没有使用
 } free_member;
 typedef struct freeinfo freeinfo;
 typedef struct freeinfo {
@@ -68,27 +70,27 @@ typedef struct {
   int       memerrno;
 } memory;
 struct SEGMENT_DESCRIPTOR {
-  short limit_low, base_low;
-  char  base_mid, access_right;
-  char  limit_high, base_high;
+  i16  limit_low, base_low;
+  char base_mid, access_right;
+  char limit_high, base_high;
 };
 struct GATE_DESCRIPTOR {
-  short offset_low, selector;
-  char  dw_count, access_right;
-  short offset_high;
+  i16  offset_low, selector;
+  char dw_count, access_right;
+  i16  offset_high;
 };
 #define MAX_TIMER 500
 struct mtask;
 typedef struct mtask mtask;
 struct TIMER {
   struct TIMER *next;
-  unsigned int  timeout, flags;
+  u32           timeout, flags;
   struct FIFO8 *fifo;
-  unsigned char data;
+  u8            data;
   mtask        *waiter;
 };
 struct TIMERCTL {
-  unsigned int  count, next;
+  u32           count, next;
   struct TIMER *t0;
   struct TIMER  timers0[MAX_TIMER];
 };
@@ -102,11 +104,11 @@ struct TSS32 {
 #define synchronous     1
 #define asynchronous    2
 typedef struct {
-  void        *data;
-  unsigned int size;
-  int          from_tid;
-  int          flag1;
-  int          flag2;
+  void *data;
+  u32   size;
+  int   from_tid;
+  int   flag1;
+  int   flag2;
 } IPCMessage;
 // lock.c
 typedef struct {
@@ -124,7 +126,7 @@ typedef struct { // IPC头（在TASK结构体中的头）
 // struct THREAD {
 //   struct TASK *father;
 // };
-#define _packed __attribute__((packed))
+#define _packed __PACKED__
 enum {
   CR0_PE = 1 << 0, // Protection Enable 启用保护模式
   CR0_MP = 1 << 1, // Monitor Coprocessor
@@ -139,17 +141,17 @@ enum {
   CR0_PG = 1 << 31, // Paging 启用分页
 };
 typedef struct fpu_t {
-  uint16_t control;
-  uint16_t RESERVED1;
-  uint16_t status;
-  uint16_t RESERVED2;
-  uint16_t tag;
-  uint16_t RESERVED3;
-  uint32_t fip0;
-  uint32_t fop0;
-  uint32_t fdp0;
-  uint32_t fdp1;
-  uint8_t  regs[80];
+  u16 control;
+  u16 RESERVED1;
+  u16 status;
+  u16 RESERVED2;
+  u16 tag;
+  u16 RESERVED3;
+  u32 fip0;
+  u32 fop0;
+  u32 fdp0;
+  u32 fdp1;
+  u8  regs[80];
 } _packed fpu_t;
 // struct TASK {
 //   int sel, sleep, level;
@@ -167,34 +169,34 @@ typedef struct fpu_t {
 //   struct TIMER *timer;
 //   int esp_start; // 开始的esp
 //   int eip_start; // 开始的eip
-//   short cs_start;
-//   short ss_start;
+//   i16 cs_start;
+//   i16 ss_start;
 //   int is_child; // 是子线程吗
 //   int app;
 //   struct THREAD thread;
 //   int drive_number;
 //   char drive;
 //   char *line;
-//   void (*keyboard_press)(unsigned char data, uint32_t task);
-//   void (*keyboard_release)(unsigned char data, uint32_t task);
+//   void (*keyboard_press)(u8 data, u32 task);
+//   void (*keyboard_release)(u8 data, u32 task);
 //   int nl;
 //   int lock; // 被锁住了？
 //   char forever;
 //   int DisableExpFlag;
-//   uint32_t CatchEIP;
+//   u32 CatchEIP;
 //   char flagOfexp;
 //   int mx, my;
 //   fpu_t *fpu;
 //   struct vfs_t *nfs;
 //   int fpu_flag;
 //   struct FIFO8 *Pkeyfifo, *Ukeyfifo;
-//   uint32_t fpu_use;
-//   uint32_t *gdt_data;
-//   uint32_t pde;
-// } __attribute__((packed));
+//   u32 fpu_use;
+//   u32 *gdt_data;
+//   u32 pde;
+// } __PACKED__;
 typedef struct {
-  uint32_t eax, ebx, ecx, edx, esi, edi, ebp;
-  uint32_t eip;
+  u32 eax, ebx, ecx, edx, esi, edi, ebp;
+  u32 eip;
 } stack_frame;
 enum STATE {
   EMPTY,
@@ -219,12 +221,12 @@ typedef struct mtask {
   struct vfs_t *nfs;
   uint64_t      tid, ptid;
   memory       *mm;
-  uint32_t      alloc_addr;
-  uint32_t     *alloc_size;
-  uint32_t      alloced;
+  u32           alloc_addr;
+  u32          *alloc_size;
+  u32           alloced;
   struct tty   *TTY;
   int           DisableExpFlag;
-  uint32_t      CatchEIP;
+  u32           CatchEIP;
   char          flagOfexp;
   fpu_t         fpu;
   int           fpu_flag;
@@ -233,17 +235,17 @@ typedef struct mtask {
   struct FIFO8 *Pkeyfifo, *Ukeyfifo;
   struct FIFO8 *keyfifo, *mousefifo; // 基本输入设备的缓冲区
   char          urgent;
-  void (*keyboard_press)(unsigned char data, uint32_t task);
-  void (*keyboard_release)(unsigned char data, uint32_t task);
+  void (*keyboard_press)(u8 data, u32 task);
+  void (*keyboard_release)(u8 data, u32 task);
   char          fifosleep;
   int           mx, my;
   char         *line;
   struct TIMER *timer;
   IPC_Header    ipc_header;
-  uint32_t      waittid;
+  u32           waittid;
   int           ready; // 如果为waiting 则无视wating
   int           sigint_up;
-  uint8_t       train; // 轮询
+  u8            train; // 轮询
   unsigned      status;
   unsigned      signal;
   unsigned      handler[30];
@@ -285,8 +287,8 @@ typedef struct intr_frame_t {
 #define PAGE_END      (PTE_ADDRESS + 0x400000)
 #define PAGE_MANNAGER PAGE_END
 struct FIFO8 {
-  unsigned char *buf;
-  int            p, q, size, free, flags;
+  u8 *buf;
+  int p, q, size, free, flags;
 };
 struct ListCtl {
   struct List *start;
@@ -308,23 +310,23 @@ typedef struct List List;
 
 /* fs.h */
 
-extern uint32_t Path_Addr;
+extern u32 Path_Addr;
 struct FAT_CACHE {
-  unsigned int         ADR_DISKIMG;
+  u32                  ADR_DISKIMG;
   struct FAT_FILEINFO *root_directory;
   struct List         *directory_list;
   struct List         *directory_clustno_list;
   struct List         *directory_max_list;
   int                 *fat;
   int                  FatMaxTerms;
-  unsigned int         ClustnoBytes;
-  unsigned short       RootMaxFiles;
-  unsigned int         RootDictAddress;
-  unsigned int         FileDataAddress;
-  unsigned int         imgTotalSize;
-  unsigned short       SectorBytes;
-  unsigned int         Fat1Address, Fat2Address;
-  unsigned char       *FatClustnoFlags;
+  u32                  ClustnoBytes;
+  u16                  RootMaxFiles;
+  u32                  RootDictAddress;
+  u32                  FileDataAddress;
+  u32                  imgTotalSize;
+  u16                  SectorBytes;
+  u32                  Fat1Address, Fat2Address;
+  u8                  *FatClustnoFlags;
   int                  type;
 };
 typedef struct {
@@ -343,18 +345,18 @@ typedef enum {
   SYS
 } ftype;
 typedef struct {
-  char           name[255];
-  ftype          type;
-  unsigned int   size;
-  unsigned short year, month, day;
-  unsigned short hour, minute;
+  char  name[255];
+  ftype type;
+  u32   size;
+  u16   year, month, day;
+  u16   hour, minute;
 } vfs_file;
 typedef struct vfs_t {
-  List   *path;
-  void   *cache;
-  char    FSName[255];
-  int     disk_number;
-  uint8_t drive; // 大写（必须）
+  List *path;
+  void *cache;
+  char  FSName[255];
+  int   disk_number;
+  u8    drive; // 大写（必须）
   vfs_file *(*FileInfo)(struct vfs_t *vfs, char *filename);
   List *(*ListFile)(struct vfs_t *vfs, char *dictpath);
   bool (*ReadFile)(struct vfs_t *vfs, char *path, char *buffer);
@@ -365,10 +367,10 @@ typedef struct vfs_t {
   bool (*CreateDict)(struct vfs_t *vfs, char *filename);
   bool (*RenameFile)(struct vfs_t *vfs, char *filename, char *filename_of_new);
   bool (*Attrib)(struct vfs_t *vfs, char *filename, ftype type);
-  bool (*Format)(uint8_t disk_number);
-  void (*InitFs)(struct vfs_t *vfs, uint8_t disk_number);
+  bool (*Format)(u8 disk_number);
+  void (*InitFs)(struct vfs_t *vfs, u8 disk_number);
   void (*DeleteFs)(struct vfs_t *vfs);
-  bool (*Check)(uint8_t disk_number);
+  bool (*Check)(u8 disk_number);
   bool (*cd)(struct vfs_t *vfs, char *dictName);
   int (*FileSize)(struct vfs_t *vfs, char *filename);
   void (*CopyCache)(struct vfs_t *dest, struct vfs_t *src);
@@ -407,33 +409,33 @@ typedef struct vfs_t {
 #define SEEK_CUR         1
 #define SEEK_END         2
 struct FAT_FILEINFO {
-  unsigned char  name[8], ext[3], type;
-  char           reserve;
-  unsigned char  create_time_tenth;
-  unsigned short create_time, create_date, access_date, clustno_high;
-  unsigned short update_time, update_date, clustno_low;
-  unsigned int   size;
+  u8   name[8], ext[3], type;
+  char reserve;
+  u8   create_time_tenth;
+  u16  create_time, create_date, access_date, clustno_high;
+  u16  update_time, update_date, clustno_low;
+  u32  size;
 };
 #define rmfarptr2ptr(x) ((x).seg * 0x10 + (x).offset)
 typedef struct FILE {
-  unsigned int   mode;
-  unsigned int   fileSize;
-  unsigned char *buffer;
-  unsigned int   bufferSize;
-  unsigned int   p;
-  char          *name;
+  u32   mode;
+  u32   fileSize;
+  u8   *buffer;
+  u32   bufferSize;
+  u32   p;
+  char *name;
 } FILE;
 struct DLL_STRPICENV {
   int work[16384];
 };
 struct RGB {
-  unsigned char b, g, r, t;
+  u8 b, g, r, t;
 };
 struct paw_info {
-  unsigned char reserved[12]; // 12 bytes reserved(0xFF)
-  char          oem[3];       // PRA
-  int           xsize;        // xsize
-  int           ysize;        // ysize
+  u8   reserved[12]; // 12 bytes reserved(0xFF)
+  char oem[3];       // PRA
+  int  xsize;        // xsize
+  int  ysize;        // ysize
 };
 
 /* interrupts.h */
@@ -450,8 +452,8 @@ struct paw_info {
 #define PIC1_ICW3 0x00a1
 #define PIC1_ICW4 0x00a1
 typedef struct {
-  unsigned short di, si, bp, sp, bx, dx, cx, ax;
-  unsigned short gs, fs, es, ds, eflags;
+  u16 di, si, bp, sp, bx, dx, cx, ax;
+  u16 gs, fs, es, ds, eflags;
 } regs16_t;
 
 /* io.h */
@@ -472,13 +474,13 @@ typedef enum {
   MODE_m = 'm'
 } vt100_mode_t;
 struct tty {
-  int           is_using;                             // 使用标志
-  void         *vram;                                 // 显存（也可以当做图层）
-  int           x, y;                                 // 目前的 x y 坐标
-  int           xsize, ysize;                         // x 坐标大小 y 坐标大小
-  int           Raw_y;                                // 换行次数
-  int           cur_moving;                           // 光标需要移动吗
-  unsigned char color;                                // 颜色
+  int   is_using;                                     // 使用标志
+  void *vram;                                         // 显存（也可以当做图层）
+  int   x, y;                                         // 目前的 x y 坐标
+  int   xsize, ysize;                                 // x 坐标大小 y 坐标大小
+  int   Raw_y;                                        // 换行次数
+  int   cur_moving;                                   // 光标需要移动吗
+  u8    color;                                        // 颜色
   void (*putchar)(struct tty *res, int c);            // putchar函数
   void (*MoveCursor)(struct tty *res, int x, int y);  // MoveCursor函数
   void (*clear)(struct tty *res);                     // clear函数
@@ -486,10 +488,10 @@ struct tty {
   void (*gotoxy)(struct tty *res, int x, int y);      // gotoxy函数
   void (*print)(struct tty *res, const char *string); // print函数
   void (*Draw_Box)(struct tty *res, int x, int y, int x1, int y1,
-                   unsigned char color); // Draw_Box函数
+                   u8 color); // Draw_Box函数
   int (*fifo_status)(struct tty *res);
   int (*fifo_get)(struct tty *res);
-  unsigned int reserved[4]; // 保留项
+  u32 reserved[4]; // 保留项
 
   //////////////实现VT100需要的//////////////////
 
@@ -501,11 +503,11 @@ struct tty {
   int          color_saved; // 保存的颜色
 };
 struct Input_StacK {
-  char       **Stack;
-  unsigned int Stack_Size;
-  unsigned int free;
-  unsigned int Now;
-  unsigned int times;
+  char **Stack;
+  u32    Stack_Size;
+  u32    free;
+  u32    Now;
+  u32    times;
 };
 #define MAX_SHEETS 256
 struct SHEET {
@@ -517,11 +519,11 @@ struct SHEET {
   void *args;
 };
 struct SHTCTL {
-  vram_t        *vram;
-  unsigned char *map;
-  int            xsize, ysize, top;
-  struct SHEET  *sheets[MAX_SHEETS];
-  struct SHEET   sheets0[MAX_SHEETS];
+  vram_t       *vram;
+  u8           *map;
+  int           xsize, ysize, top;
+  struct SHEET *sheets[MAX_SHEETS];
+  struct SHEET  sheets0[MAX_SHEETS];
 };
 #define COL_000000      0x00000000
 #define COL_FF0000      0x00ff0000
@@ -543,94 +545,94 @@ struct SHTCTL {
 
 /* drivers.h */
 struct ACPI_RSDP {
-  char          Signature[8];
-  unsigned char Checksum;
-  char          OEMID[6];
-  unsigned char Revision;
-  unsigned int  RsdtAddress;
-  unsigned int  Length;
-  unsigned int  XsdtAddress[2];
-  unsigned char ExtendedChecksum;
-  unsigned char Reserved[3];
+  char Signature[8];
+  u8   Checksum;
+  char OEMID[6];
+  u8   Revision;
+  u32  RsdtAddress;
+  u32  Length;
+  u32  XsdtAddress[2];
+  u8   ExtendedChecksum;
+  u8   Reserved[3];
 };
 struct ACPISDTHeader {
-  char          Signature[4];
-  unsigned int  Length;
-  unsigned char Revision;
-  unsigned char Checksum;
-  char          OEMID[6];
-  char          OEMTableID[8];
-  unsigned int  OEMRevision;
-  unsigned int  CreatorID;
-  unsigned int  CreatorRevision;
+  char Signature[4];
+  u32  Length;
+  u8   Revision;
+  u8   Checksum;
+  char OEMID[6];
+  char OEMTableID[8];
+  u32  OEMRevision;
+  u32  CreatorID;
+  u32  CreatorRevision;
 };
 struct ACPI_RSDT {
   struct ACPISDTHeader header;
-  unsigned int         Entry;
+  u32                  Entry;
 };
 typedef struct {
-  unsigned char AddressSpace;
-  unsigned char BitWidth;
-  unsigned char BitOffset;
-  unsigned char AccessSize;
-  unsigned int  Address[2];
+  u8  AddressSpace;
+  u8  BitWidth;
+  u8  BitOffset;
+  u8  AccessSize;
+  u32 Address[2];
 } GenericAddressStructure;
 struct ACPI_FADT {
   struct ACPISDTHeader h;
-  unsigned int         FirmwareCtrl;
-  unsigned int         Dsdt;
+  u32                  FirmwareCtrl;
+  u32                  Dsdt;
 
   // field used in ACPI 1.0; no longer in use, for compatibility only
-  unsigned char Reserved;
+  u8 Reserved;
 
-  unsigned char  PreferredPowerManagementProfile;
-  unsigned short SCI_Interrupt;
-  unsigned int   SMI_CommandPort;
-  unsigned char  AcpiEnable;
-  unsigned char  AcpiDisable;
-  unsigned char  S4BIOS_REQ;
-  unsigned char  PSTATE_Control;
-  unsigned int   PM1aEventBlock;
-  unsigned int   PM1bEventBlock;
-  unsigned int   PM1aControlBlock;
-  unsigned int   PM1bControlBlock;
-  unsigned int   PM2ControlBlock;
-  unsigned int   PMTimerBlock;
-  unsigned int   GPE0Block;
-  unsigned int   GPE1Block;
-  unsigned char  PM1EventLength;
-  unsigned char  PM1ControlLength;
-  unsigned char  PM2ControlLength;
-  unsigned char  PMTimerLength;
-  unsigned char  GPE0Length;
-  unsigned char  GPE1Length;
-  unsigned char  GPE1Base;
-  unsigned char  CStateControl;
-  unsigned short WorstC2Latency;
-  unsigned short WorstC3Latency;
-  unsigned short FlushSize;
-  unsigned short FlushStride;
-  unsigned char  DutyOffset;
-  unsigned char  DutyWidth;
-  unsigned char  DayAlarm;
-  unsigned char  MonthAlarm;
-  unsigned char  Century;
+  u8  PreferredPowerManagementProfile;
+  u16 SCI_Interrupt;
+  u32 SMI_CommandPort;
+  u8  AcpiEnable;
+  u8  AcpiDisable;
+  u8  S4BIOS_REQ;
+  u8  PSTATE_Control;
+  u32 PM1aEventBlock;
+  u32 PM1bEventBlock;
+  u32 PM1aControlBlock;
+  u32 PM1bControlBlock;
+  u32 PM2ControlBlock;
+  u32 PMTimerBlock;
+  u32 GPE0Block;
+  u32 GPE1Block;
+  u8  PM1EventLength;
+  u8  PM1ControlLength;
+  u8  PM2ControlLength;
+  u8  PMTimerLength;
+  u8  GPE0Length;
+  u8  GPE1Length;
+  u8  GPE1Base;
+  u8  CStateControl;
+  u16 WorstC2Latency;
+  u16 WorstC3Latency;
+  u16 FlushSize;
+  u16 FlushStride;
+  u8  DutyOffset;
+  u8  DutyWidth;
+  u8  DayAlarm;
+  u8  MonthAlarm;
+  u8  Century;
 
   // reserved in ACPI 1.0; used since ACPI 2.0+
-  unsigned short BootArchitectureFlags;
+  u16 BootArchitectureFlags;
 
-  unsigned char Reserved2;
-  unsigned int  Flags;
+  u8  Reserved2;
+  u32 Flags;
 
   // 12 byte structure; see below for details
   GenericAddressStructure ResetReg;
 
-  unsigned char ResetValue;
-  unsigned char Reserved3[3];
+  u8 ResetValue;
+  u8 Reserved3[3];
 
   // 64bit pointers - Available on ACPI 2.0+
-  unsigned int X_FirmwareControl[2];
-  unsigned int X_Dsdt[2];
+  u32 X_FirmwareControl[2];
+  u32 X_Dsdt[2];
 
   GenericAddressStructure X_PM1aEventBlock;
   GenericAddressStructure X_PM1bEventBlock;
@@ -640,7 +642,7 @@ struct ACPI_FADT {
   GenericAddressStructure X_PMTimerBlock;
   GenericAddressStructure X_GPE0Block;
   GenericAddressStructure X_GPE1Block;
-} __attribute__((packed));
+} __PACKED__;
 #define BCD_HEX(n)      ((n >> 4) * 10) + (n & 0xf)
 #define HEX_BCD(n)      ((n / 10) << 4) + (n % 10)
 #define CMOS_CUR_SEC    0x0
@@ -664,90 +666,90 @@ struct ACPI_FADT {
 #define MOUSE_ROLL_UP   1
 #define MOUSE_ROLL_DOWN 2
 struct MOUSE_DEC {
-  unsigned char buf[4], phase;
-  int           x, y, btn;
-  int           sleep;
-  char          roll;
+  u8   buf[4], phase;
+  int  x, y, btn;
+  int  sleep;
+  char roll;
 };
 struct pci_config_space_public {
-  unsigned short VendorID;
-  unsigned short DeviceID;
-  unsigned short Command;
-  unsigned short Status;
-  unsigned char  RevisionID;
-  unsigned char  ProgIF;
-  unsigned char  SubClass;
-  unsigned char  BaseClass;
-  unsigned char  CacheLineSize;
-  unsigned char  LatencyTimer;
-  unsigned char  HeaderType;
-  unsigned char  BIST;
-  unsigned int   BaseAddr[6];
-  unsigned int   CardbusCIS;
-  unsigned short SubVendorID;
-  unsigned short SubSystemID;
-  unsigned int   ROMBaseAddr;
-  unsigned char  CapabilitiesPtr;
-  unsigned char  Reserved[3];
-  unsigned int   Reserved1;
-  unsigned char  InterruptLine;
-  unsigned char  InterruptPin;
-  unsigned char  MinGrant;
-  unsigned char  MaxLatency;
+  u16 VendorID;
+  u16 DeviceID;
+  u16 Command;
+  u16 Status;
+  u8  RevisionID;
+  u8  ProgIF;
+  u8  SubClass;
+  u8  BaseClass;
+  u8  CacheLineSize;
+  u8  LatencyTimer;
+  u8  HeaderType;
+  u8  BIST;
+  u32 BaseAddr[6];
+  u32 CardbusCIS;
+  u16 SubVendorID;
+  u16 SubSystemID;
+  u32 ROMBaseAddr;
+  u8  CapabilitiesPtr;
+  u8  Reserved[3];
+  u32 Reserved1;
+  u8  InterruptLine;
+  u8  InterruptPin;
+  u8  MinGrant;
+  u8  MaxLatency;
 };
 typedef struct {
-  unsigned short offset;
-  unsigned short seg;
+  u16 offset;
+  u16 seg;
 } ReadModeFarPointer;
 typedef struct {
-  unsigned short attributes;
-  unsigned char  winA, winB;
-  unsigned short granularity;
-  unsigned short winsize;
-  unsigned short segmentA, segmentB;
+  u16 attributes;
+  u8  winA, winB;
+  u16 granularity;
+  u16 winsize;
+  u16 segmentA, segmentB;
   /* In VBE Specification, this field should be
    * ReadModeFarPointer winPosFunc;
    * However, we overwrite this field in loader n*/
-  unsigned short mode;
-  unsigned short reserved2;
-  unsigned short bytesPerLine;
-  unsigned short width, height;
-  unsigned char  Wchar, Ychar, planes, bitsPerPixel, banks;
-  unsigned char  memory_model, bank_size, image_pages;
-  unsigned char  reserved0;
-  unsigned char  red_mask, red_position;
-  unsigned char  green_mask, green_position;
-  unsigned char  blue_mask, blue_position;
-  unsigned char  rsv_mask, rsv_position;
-  unsigned char  directcolor_attributes;
-  unsigned int   physbase; // your LFB (Linear Framebuffer) address ;)
-  unsigned int   offscreen;
-  unsigned short offsize;
+  u16 mode;
+  u16 reserved2;
+  u16 bytesPerLine;
+  u16 width, height;
+  u8  Wchar, Ychar, planes, bitsPerPixel, banks;
+  u8  memory_model, bank_size, image_pages;
+  u8  reserved0;
+  u8  red_mask, red_position;
+  u8  green_mask, green_position;
+  u8  blue_mask, blue_position;
+  u8  rsv_mask, rsv_position;
+  u8  directcolor_attributes;
+  u32 physbase; // your LFB (Linear Framebuffer) address ;)
+  u32 offscreen;
+  u16 offsize;
 
-} __attribute__((packed)) VESAModeInfo;
+} __PACKED__ VESAModeInfo;
 typedef struct {
-  unsigned char      signature[4];
-  unsigned short     Version;
+  u8                 signature[4];
+  u16                Version;
   ReadModeFarPointer oemString;
-  unsigned int       capabilities;
+  u32                capabilities;
   ReadModeFarPointer videoModes;
-  unsigned short     totalMemory;
-  unsigned short     OEMVersion;
+  u16                totalMemory;
+  u16                OEMVersion;
   ReadModeFarPointer vendor;
   ReadModeFarPointer product;
   ReadModeFarPointer revision;
   /* In VBE Specification, this field should be reserved.
    * However, we overwrite this field in loader */
-  unsigned short     modeCount;
-  unsigned char      reserved0[220];
-  unsigned char      oemUse[256];
+  u16                modeCount;
+  u8                 reserved0[220];
+  u8                 oemUse[256];
   VESAModeInfo       modeList[0];
-} __attribute__((packed)) VESAControllerInfo;
+} __PACKED__ VESAControllerInfo;
 struct VBEINFO {
-  char  res1[18];
-  short xsize, ysize;
-  char  res2[18];
-  int   vram;
+  char res1[18];
+  i16  xsize, ysize;
+  char res2[18];
+  int  vram;
 };
 #define VBEINFO_ADDRESS                    0x7e00
 #define VGA_AC_INDEX                       0x3C0
@@ -771,7 +773,7 @@ struct VBEINFO {
 #define VGA_NUM_GC_REGS                    9
 #define VGA_NUM_AC_REGS                    21
 #define VGA_NUM_REGS                       (1 + VGA_NUM_SEQ_REGS + VGA_NUM_CRTC_REGS + VGA_NUM_GC_REGS + VGA_NUM_AC_REGS)
-#define _vmemwr(DS, DO, S, N)              memcpy((char *)((DS) * 16 + (DO)), S, N)
+#define _vmemwr(DS, DO, S, N)              memcpy((char *)((DS)*16 + (DO)), S, N)
 #define SB16_IRQ                           5
 #define SB16_FAKE_TID                      -3
 #define SB16_PORT_MIXER                    0x224
@@ -814,70 +816,70 @@ struct arg_struct {
 };
 struct InitializationBlock {
   // 链接器所迫 只能这么写了
-  uint16_t mode;
-  uint8_t  reserved1numSendBuffers;
-  uint8_t  reserved2numRecvBuffers;
-  uint8_t  mac0, mac1, mac2, mac3, mac4, mac5;
-  uint16_t reserved3;
+  u16      mode;
+  u8       reserved1numSendBuffers;
+  u8       reserved2numRecvBuffers;
+  u8       mac0, mac1, mac2, mac3, mac4, mac5;
+  u16      reserved3;
   uint64_t logicalAddress;
-  uint32_t recvBufferDescAddress;
-  uint32_t sendBufferDescAddress;
-} __attribute__((packed));
+  u32      recvBufferDescAddress;
+  u32      sendBufferDescAddress;
+} __PACKED__;
 
 struct BufferDescriptor {
-  uint32_t address;
-  uint32_t flags;
-  uint32_t flags2;
-  uint32_t avail;
-} __attribute__((packed));
+  u32 address;
+  u32 flags;
+  u32 flags2;
+  u32 avail;
+} __PACKED__;
 
 struct IDEHardDiskInfomationBlock {
-  char           reserve1[2];
-  unsigned short CylinesNum;
-  char           reserve2[2];
-  unsigned short HeadersNum;
-  unsigned short TrackBytes;
-  unsigned short SectorBytes;
-  unsigned short TrackSectors;
-  char           reserve3[6];
-  char           OEM[20];
-  char           reserve4[2];
-  unsigned short BuffersBytes;
-  unsigned short EECCheckSumLength;
-  char           Version[8];
-  char           ID[40];
+  char reserve1[2];
+  u16  CylinesNum;
+  char reserve2[2];
+  u16  HeadersNum;
+  u16  TrackBytes;
+  u16  SectorBytes;
+  u16  TrackSectors;
+  char reserve3[6];
+  char OEM[20];
+  char reserve4[2];
+  u16  BuffersBytes;
+  u16  EECCheckSumLength;
+  char Version[8];
+  char ID[40];
 };
 
 /* net */
 #define swap32(x)                                                                                  \
-  ((((x) & 0xff000000) >> 24) | (((x) & 0x00ff0000) >> 8) | (((x) & 0x0000ff00) << 8) |            \
-   (((x) & 0x000000ff) << 24))
-#define swap16(x) ((((x) & 0xff00) >> 8) | (((x) & 0x00ff) << 8))
+  ((((x)&0xff000000) >> 24) | (((x)&0x00ff0000) >> 8) | (((x)&0x0000ff00) << 8) |                  \
+   (((x)&0x000000ff) << 24))
+#define swap16(x) ((((x)&0xff00) >> 8) | (((x)&0x00ff) << 8))
 // 以太网帧
 struct EthernetFrame_head {
-  uint8_t  dest_mac[6];
-  uint8_t  src_mac[6];
-  uint16_t type;
-} __attribute__((packed));
+  u8  dest_mac[6];
+  u8  src_mac[6];
+  u16 type;
+} __PACKED__;
 // 以太网帧--尾部
 struct EthernetFrame_tail {
-  uint32_t CRC; // 这里可以填写为0，网卡会自动计算
+  u32 CRC; // 这里可以填写为0，网卡会自动计算
 };
 // ARP
 #define ARP_PROTOCOL  0x0806
 #define MAX_ARP_TABLE 256
 #define ARP_WAITTIME  1
 struct ARPMessage {
-  uint16_t hardwareType;
-  uint16_t protocol;
-  uint8_t  hardwareAddressSize;
-  uint8_t  protocolAddressSize;
-  uint16_t command;
-  uint8_t  src_mac[6];
-  uint32_t src_ip;
-  uint8_t  dest_mac[6];
-  uint32_t dest_ip;
-} __attribute__((packed));
+  u16 hardwareType;
+  u16 protocol;
+  u8  hardwareAddressSize;
+  u8  protocolAddressSize;
+  u16 command;
+  u8  src_mac[6];
+  u32 src_ip;
+  u8  dest_mac[6];
+  u32 dest_ip;
+} __PACKED__;
 // IPV4
 #define IP_PROTOCOL 0x0800
 #define MTU         1500
@@ -885,27 +887,27 @@ struct ARPMessage {
 #define IP_DF       14
 #define IP_OFFSET   0
 struct IPV4Message {
-  uint8_t  headerLength : 4;
-  uint8_t  version      : 4;
-  uint8_t  tos;
-  uint16_t totalLength;
-  uint16_t ident;
-  uint16_t flagsAndOffset;
-  uint8_t  timeToLive;
-  uint8_t  protocol;
-  uint16_t checkSum;
-  uint32_t srcIP;
-  uint32_t dstIP;
-} __attribute__((packed));
+  u8  headerLength : 4;
+  u8  version      : 4;
+  u8  tos;
+  u16 totalLength;
+  u16 ident;
+  u16 flagsAndOffset;
+  u8  timeToLive;
+  u8  protocol;
+  u16 checkSum;
+  u32 srcIP;
+  u32 dstIP;
+} __PACKED__;
 // ICMP
 #define ICMP_PROTOCOL 1
 struct ICMPMessage {
-  uint8_t  type;
-  uint8_t  code;
-  uint16_t checksum;
-  uint16_t ID;
-  uint16_t sequence;
-} __attribute__((packed));
+  u8  type;
+  u8  code;
+  u16 checksum;
+  u16 ID;
+  u16 sequence;
+} __PACKED__;
 #define PING_WAITTIME 200
 #define PING_ID       0x0038
 #define PING_SEQ      0x2115
@@ -914,33 +916,33 @@ struct ICMPMessage {
 // UDP
 #define UDP_PROTOCOL  17
 struct UDPMessage {
-  uint16_t srcPort;
-  uint16_t dstPort;
-  uint16_t length;
-  uint16_t checkSum;
-} __attribute__((packed));
+  u16 srcPort;
+  u16 dstPort;
+  u16 length;
+  u16 checkSum;
+} __PACKED__;
 // DHCP
 #define DHCP_CHADDR_LEN 16
 #define DHCP_SNAME_LEN  64
 #define DHCP_FILE_LEN   128
 struct DHCPMessage {
-  uint8_t  opcode;
-  uint8_t  htype;
-  uint8_t  hlen;
-  uint8_t  hops;
-  uint32_t xid;
-  uint16_t secs;
-  uint16_t flags;
-  uint32_t ciaddr;
-  uint32_t yiaddr;
-  uint32_t siaddr;
-  uint32_t giaddr;
-  uint8_t  chaddr[DHCP_CHADDR_LEN];
-  char     bp_sname[DHCP_SNAME_LEN];
-  char     bp_file[DHCP_FILE_LEN];
-  uint32_t magic_cookie;
-  uint8_t  bp_options[0];
-} __attribute__((packed));
+  u8   opcode;
+  u8   htype;
+  u8   hlen;
+  u8   hops;
+  u32  xid;
+  u16  secs;
+  u16  flags;
+  u32  ciaddr;
+  u32  yiaddr;
+  u32  siaddr;
+  u32  giaddr;
+  u8   chaddr[DHCP_CHADDR_LEN];
+  char bp_sname[DHCP_SNAME_LEN];
+  char bp_file[DHCP_FILE_LEN];
+  u32  magic_cookie;
+  u8   bp_options[0];
+} __PACKED__;
 #define DHCP_BOOTREQUEST 1
 #define DHCP_BOOTREPLY   2
 
@@ -995,89 +997,89 @@ struct DHCPMessage {
 #define DNS_PORT      53
 #define DNS_SERVER_IP 0x08080808
 struct DNS_Header {
-  uint16_t ID;
-  uint8_t  RD     : 1;
-  uint8_t  AA     : 1;
-  uint8_t  Opcode : 4;
-  uint8_t  QR     : 1;
-  uint8_t  RCODE  : 4;
-  uint8_t  Z      : 3;
-  uint8_t  RA     : 1;
-  uint8_t  TC     : 1;
-  uint16_t QDcount;
-  uint16_t ANcount;
-  uint16_t NScount;
-  uint16_t ARcount;
-  uint8_t  reserved;
-} __attribute__((packed));
+  u16 ID;
+  u8  RD     : 1;
+  u8  AA     : 1;
+  u8  Opcode : 4;
+  u8  QR     : 1;
+  u8  RCODE  : 4;
+  u8  Z      : 3;
+  u8  RA     : 1;
+  u8  TC     : 1;
+  u16 QDcount;
+  u16 ANcount;
+  u16 NScount;
+  u16 ARcount;
+  u8  reserved;
+} __PACKED__;
 struct DNS_Question {
-  uint16_t type;
-  uint16_t Class;
-} __attribute__((packed));
+  u16 type;
+  u16 Class;
+} __PACKED__;
 struct DNS_Answer {
-  uint32_t name : 24;
-  uint16_t type;
-  uint16_t Class;
-  uint32_t TTL;
-  uint16_t RDlength;
-  uint8_t  reserved;
-  uint8_t  RData[0];
-} __attribute__((packed));
+  u32 name : 24;
+  u16 type;
+  u16 Class;
+  u32 TTL;
+  u16 RDlength;
+  u8  reserved;
+  u8  RData[0];
+} __PACKED__;
 // TCP
 #define TCP_PROTOCOL         6
 #define TCP_CONNECT_WAITTIME 1000
 #define MSS_Default          1460
 #define TCP_SEG_WAITTIME     10
 struct TCPPesudoHeader {
-  uint32_t srcIP;
-  uint32_t dstIP;
-  uint16_t protocol;
-  uint16_t totalLength;
-} __attribute__((packed));
+  u32 srcIP;
+  u32 dstIP;
+  u16 protocol;
+  u16 totalLength;
+} __PACKED__;
 struct TCPMessage {
-  uint16_t srcPort;
-  uint16_t dstPort;
-  uint32_t seqNum;
-  uint32_t ackNum;
-  uint8_t  reserved     : 4;
-  uint8_t  headerLength : 4;
-  uint8_t  FIN          : 1;
-  uint8_t  SYN          : 1;
-  uint8_t  RST          : 1;
-  uint8_t  PSH          : 1;
-  uint8_t  ACK          : 1;
-  uint8_t  URG          : 1;
-  uint8_t  ECE          : 1;
-  uint8_t  CWR          : 1;
-  uint16_t window;
-  uint16_t checkSum;
-  uint16_t pointer;
-  uint32_t options[0];
-} __attribute__((packed));
+  u16 srcPort;
+  u16 dstPort;
+  u32 seqNum;
+  u32 ackNum;
+  u8  reserved     : 4;
+  u8  headerLength : 4;
+  u8  FIN          : 1;
+  u8  SYN          : 1;
+  u8  RST          : 1;
+  u8  PSH          : 1;
+  u8  ACK          : 1;
+  u8  URG          : 1;
+  u8  ECE          : 1;
+  u8  CWR          : 1;
+  u16 window;
+  u16 checkSum;
+  u16 pointer;
+  u32 options[0];
+} __PACKED__;
 // Socket
 #define MAX_SOCKET_NUM 256
 struct Socket {
   // 函数格式
-  int (*Connect)(struct Socket *socket);                             // TCP
-  void (*Disconnect)(struct Socket *socket);                         // TCP
-  void (*Listen)(struct Socket *socket);                             // TCP
-  void (*Send)(struct Socket *socket, uint8_t *data, uint32_t size); // TCP/UDP
-  void (*Handler)(struct Socket *socket, void *base);                // TCP/UDP
+  int (*Connect)(struct Socket *socket);                   // TCP
+  void (*Disconnect)(struct Socket *socket);               // TCP
+  void (*Listen)(struct Socket *socket);                   // TCP
+  void (*Send)(struct Socket *socket, u8 *data, u32 size); // TCP/UDP
+  void (*Handler)(struct Socket *socket, void *base);      // TCP/UDP
   // TCP/UDP
-  uint32_t remoteIP;
-  uint16_t remotePort;
-  uint32_t localIP;
-  uint16_t localPort;
-  uint8_t  state;
-  uint8_t  protocol;
+  u32   remoteIP;
+  u16   remotePort;
+  u32   localIP;
+  u16   localPort;
+  u8    state;
+  u8    protocol;
   // TCP
-  uint32_t seqNum;
-  uint32_t ackNum;
-  uint16_t MSS;
-  int      flag; // 1 有包 0 没包
-  int      size;
-  char    *buf;
-} __attribute__((packed));
+  u32   seqNum;
+  u32   ackNum;
+  u16   MSS;
+  int   flag; // 1 有包 0 没包
+  int   size;
+  char *buf;
+} __PACKED__;
 // UDP state
 #define SOCKET_ALLOC              -1
 // UDP/TCP state
@@ -1098,8 +1100,8 @@ struct Socket {
 #define SOCKET_SERVER_MAX_CONNECT 32
 struct SocketServer {
   struct Socket *socket[SOCKET_SERVER_MAX_CONNECT];
-  void (*Send)(struct SocketServer *server, uint8_t *data,
-               uint32_t size); // TCP/UDP
+  void (*Send)(struct SocketServer *server, u8 *data,
+               u32 size); // TCP/UDP
 };
 // Http
 typedef struct HTTPGetHeader {
@@ -1108,20 +1110,20 @@ typedef struct HTTPGetHeader {
 } HTTPGetHeader;
 // ntp
 struct NTPMessage {
-  uint8_t  VN   : 3;
-  uint8_t  LI   : 2;
-  uint8_t  Mode : 3;
-  uint8_t  Startum;
-  uint8_t  Poll;
-  uint8_t  Precision;
-  uint32_t Root_Delay;
-  uint32_t Root_Difference;
-  uint32_t Root_Identifier;
+  u8       VN   : 3;
+  u8       LI   : 2;
+  u8       Mode : 3;
+  u8       Startum;
+  u8       Poll;
+  u8       Precision;
+  u32      Root_Delay;
+  u32      Root_Difference;
+  u32      Root_Identifier;
   uint64_t Reference_Timestamp;
   uint64_t Originate_Timestamp;
   uint64_t Receive_Timestamp;
   uint64_t Transmission_Timestamp;
-} __attribute__((packed));
+} __PACKED__;
 #define NTPServer1              0xA29FC87B
 #define NTPServer2              0x727607A3
 // ftp
@@ -1130,30 +1132,30 @@ struct NTPMessage {
 #define FTP_SERVER_DATA_PORT    20
 #define FTP_SERVER_COMMAND_PORT 21
 struct FTP_Client {
-  int (*Login)(struct FTP_Client *ftp_c_, uint8_t *user, uint8_t *pass);
+  int (*Login)(struct FTP_Client *ftp_c_, u8 *user, u8 *pass);
   int (*TransModeChoose)(struct FTP_Client *ftp_c_, int mode);
   void (*Logout)(struct FTP_Client *ftp_c_);
-  int (*Download)(struct FTP_Client *ftp_c_, uint8_t *path_pdos, uint8_t *path_ftp, int mode);
-  int (*Upload)(struct FTP_Client *ftp_c_, uint8_t *path_pdos, uint8_t *path_ftp, int mode);
-  int (*Delete)(struct FTP_Client *ftp_c_, uint8_t *path_ftp);
-  uint8_t *(*Getlist)(struct FTP_Client *ftp_c_);
+  int (*Download)(struct FTP_Client *ftp_c_, u8 *path_pdos, u8 *path_ftp, int mode);
+  int (*Upload)(struct FTP_Client *ftp_c_, u8 *path_pdos, u8 *path_ftp, int mode);
+  int (*Delete)(struct FTP_Client *ftp_c_, u8 *path_ftp);
+  u8 *(*Getlist)(struct FTP_Client *ftp_c_);
   struct Socket *socket_cmd;
   struct Socket *socket_dat;
   bool           is_using;
   bool           is_login;
-  uint8_t       *recv_buf_cmd;
+  u8            *recv_buf_cmd;
   bool           recv_flag_cmd;
-  uint32_t       reply_code;
-  uint8_t       *recv_buf_dat;
+  u32            reply_code;
+  u8            *recv_buf_dat;
   bool           recv_flag_dat;
-  uint32_t       recv_dat_size;
+  u32            recv_dat_size;
 };
 typedef struct {
-  void (*Read)(char drive, unsigned char *buffer, unsigned int number, unsigned int lba);
-  void (*Write)(char drive, unsigned char *buffer, unsigned int number, unsigned int lba);
-  int          flag;
-  unsigned int size; // 大小
-  char         DriveName[50];
+  void (*Read)(char drive, u8 *buffer, u32 number, u32 lba);
+  void (*Write)(char drive, u8 *buffer, u32 number, u32 lba);
+  int  flag;
+  u32  size; // 大小
+  char DriveName[50];
 } vdisk;
 // signal
 #define SIGINT     0

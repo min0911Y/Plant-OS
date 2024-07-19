@@ -1,10 +1,10 @@
 #include <dos.h>
-#define vfs(task) ((task)->nfs)
+#define vfs(task)  ((task)->nfs)
 #define toupper(c) ((c) >= 'a' && (c) <= 'z' ? c - 32 : c)
 #define PDEBUG
-vfs_t vfsstl[26];
-vfs_t vfsMount_Stl[26];
-static vfs_t *drive2fs(uint8_t drive) {
+vfs_t         vfsstl[26];
+vfs_t         vfsMount_Stl[26];
+static vfs_t *drive2fs(u8 drive) {
   for (int i = 0; i < 26; i++) {
     if (vfsMount_Stl[i].drive == toupper(drive) && vfsMount_Stl[i].flag == 1) {
       return &vfsMount_Stl[i];
@@ -28,9 +28,7 @@ static vfs_t *ParsePath(char *result) {
   }
   if (result) {
     for (int i = 0; i < strlen(result); i++) {
-      if (result[i] == '\\') {
-        result[i] = '/';
-      }
+      if (result[i] == '\\') { result[i] = '/'; }
     }
   }
   PDEBUG("Parse Path OK: %s", result);
@@ -38,18 +36,14 @@ static vfs_t *ParsePath(char *result) {
 }
 static vfs_t *findSeat(vfs_t *vstl) {
   for (int i = 0; i < 26; i++) {
-    if (vstl[i].flag == 0) {
-      return &vstl[i];
-    }
+    if (vstl[i].flag == 0) { return &vstl[i]; }
   }
   return NULL;
 }
-static vfs_t *check_disk_fs(uint8_t disk_number) {
+static vfs_t *check_disk_fs(u8 disk_number) {
   for (int i = 0; i < 26; i++) {
     if (vfsstl[i].flag == 1) {
-      if (vfsstl[i].Check(disk_number)) {
-        return &vfsstl[i];
-      }
+      if (vfsstl[i].Check(disk_number)) { return &vfsstl[i]; }
     }
   }
   return NULL;
@@ -59,12 +53,11 @@ static void insert_str(char *str, char *insert_str, int pos) {
     insert_char(str, pos + i, insert_str[i]);
   }
 }
-bool vfs_mount_disk(uint8_t disk_number, uint8_t drive) {
+bool vfs_mount_disk(u8 disk_number, u8 drive) {
   PDEBUG("Mount DISK ---- %02x", disk_number);
   for (int i = 0; i < 26; i++) {
     if (vfsMount_Stl[i].flag == 1 &&
-        (vfsMount_Stl[i].drive == drive ||
-         vfsMount_Stl[i].disk_number == disk_number)) {
+        (vfsMount_Stl[i].drive == drive || vfsMount_Stl[i].disk_number == disk_number)) {
       WARNING_K("It mounted");
       return false;
     }
@@ -83,13 +76,13 @@ bool vfs_mount_disk(uint8_t disk_number, uint8_t drive) {
   }
   *seat = *fs;
   seat->InitFs(seat, disk_number);
-  seat->drive = drive;
+  seat->drive       = drive;
   seat->disk_number = disk_number;
-  seat->flag = 1;
+  seat->flag        = 1;
   PDEBUG("success");
   return true;
 }
-bool vfs_unmount_disk(uint8_t drive) {
+bool vfs_unmount_disk(u8 drive) {
   PDEBUG("Unmount disk ---- %c", drive);
   for (int i = 0; i < 26; i++) {
     if (vfsMount_Stl[i].drive == drive && vfsMount_Stl[i].flag == 1) {
@@ -130,7 +123,7 @@ bool vfs_writefile(char *path, char *buffer, int size) {
   free(new_path);
   return result;
 }
-uint32_t vfs_filesize(char *filename) {
+u32 vfs_filesize(char *filename) {
   char *new_path = malloc(strlen(filename) + 1);
   strcpy(new_path, filename);
   vfs_t *vfs = ParsePath(new_path);
@@ -239,7 +232,7 @@ bool vfs_attrib(char *filename, ftype type) {
   free(new_path);
   return result;
 }
-bool vfs_format(uint8_t disk_number, char *FSName) {
+bool vfs_format(u8 disk_number, char *FSName) {
   for (int i = 0; i < 255; i++) {
     if (strcmp(vfsstl[i].FSName, FSName) == 0 && vfsstl[i].flag == 1) {
       return vfsstl[i].Format(disk_number);
@@ -254,18 +247,18 @@ vfs_file *vfs_fileinfo(char *filename) {
   if (vfs == NULL) {
     WARNING_K("Attempt read a nonexistent disk");
     free(new_path);
-    return false;
+    return NULL;
   }
   vfs_file *result = vfs->FileInfo(vfs, new_path);
   free(new_path);
   return result;
 }
-bool vfs_change_disk(uint8_t drive) {
+bool vfs_change_disk(u8 drive) {
   PDEBUG("will change to %c", drive);
   if (vfs_now != NULL) {
     while (FindForCount(1, vfs_now->path) != NULL) {
       // printk("%d\n",vfs_now->path->ctl->all);
-      free(FindForCount(vfs_now->path->ctl->all, vfs_now->path)->val);
+      free((void *)FindForCount(vfs_now->path->ctl->all, vfs_now->path)->val);
       DeleteVal(vfs_now->path->ctl->all, vfs_now->path);
     }
     free(vfs_now->cache);
@@ -287,12 +280,12 @@ bool vfs_change_disk(uint8_t drive) {
   PDEBUG("OK.");
   return true;
 }
-bool vfs_change_disk_for_task(uint8_t drive, mtask *task) {
+bool vfs_change_disk_for_task(u8 drive, mtask *task) {
   PDEBUG("will change to %c", drive);
   if (vfs(task) != NULL) {
     while (FindForCount(1, vfs(task)->path) != NULL) {
       //("%d\n",vfs_now->path->ctl->all);
-      free(FindForCount(vfs(task)->path->ctl->all, vfs(task)->path)->val);
+      free((void *)FindForCount(vfs(task)->path->ctl->all, vfs(task)->path)->val);
       DeleteVal(vfs(task)->path->ctl->all, vfs(task)->path);
     }
     free(vfs(task)->cache);
@@ -316,7 +309,7 @@ bool vfs_change_disk_for_task(uint8_t drive, mtask *task) {
 }
 bool vfs_change_path(char *dictName) {
   char *buf = malloc(strlen(dictName) + 1);
-  char *r = buf;
+  char *r   = buf;
   memcpy(buf, dictName, strlen(dictName) + 1);
   int i = 0;
   if (buf[i] == '/' || buf[i] == '\\') {
@@ -358,7 +351,7 @@ void vfs_getPath(char *buffer) {
   PDEBUG("%s", vfs_now->FSName);
   int pos = strlen(buffer);
   for (int i = 1; FindForCount(i, vfs_now->path) != NULL; i++) {
-    l = FindForCount(i, vfs_now->path);
+    l    = FindForCount(i, vfs_now->path);
     path = (char *)l->val;
     insert_str(buffer, path, pos);
     pos += strlen(path);
@@ -375,27 +368,27 @@ void vfs_getPath_no_drive(char *buffer) {
   int pos = strlen(buffer);
   int i;
   for (i = 1; FindForCount(i, vfs_now->path) != NULL; i++) {
-    l = FindForCount(i, vfs_now->path);
+    l    = FindForCount(i, vfs_now->path);
     path = (char *)l->val;
     insert_char(buffer, pos, '/');
     pos++;
     insert_str(buffer, path, pos);
     pos += strlen(path);
   }
-  if (i == 1) {
-    insert_char(buffer, 0, '/');
-  }
+  if (i == 1) { insert_char(buffer, 0, '/'); }
 }
-bool vfs_check_mount(uint8_t drive) { return drive2fs(drive) ? true : false; }
+bool vfs_check_mount(u8 drive) {
+  return drive2fs(drive) ? true : false;
+}
 void init_vfs() {
   PDEBUG("init vfs..........");
   for (int i = 0; i < 26; i++) {
-    vfsstl[i].flag = 0;
-    vfsstl[i].disk_number = 0;
-    vfsstl[i].drive = 0;
-    vfsMount_Stl[i].flag = 0;
+    vfsstl[i].flag              = 0;
+    vfsstl[i].disk_number       = 0;
+    vfsstl[i].drive             = 0;
+    vfsMount_Stl[i].flag        = 0;
     vfsMount_Stl[i].disk_number = 0;
-    vfsMount_Stl[i].drive = 0;
+    vfsMount_Stl[i].drive       = 0;
     // PDEBUG("Set vfsstl[%d] & vfsMount_Stl[%d] OK.", i, i);
   }
   PDEBUG("vfs ok.");

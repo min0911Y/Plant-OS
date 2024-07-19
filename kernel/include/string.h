@@ -1,6 +1,7 @@
-#ifndef _STRING_H
-#define _STRING_H
-#include <ctypes.h>
+#pragma once
+#include <copi143-define.h>
+#include <type.h>
+
 int    strcmp(const char *s1, const char *s2);
 char  *strcpy(char *dest, const char *src);
 char  *strncpy(char *dest, const char *src, size_t n);
@@ -21,4 +22,3 @@ void   assert(int expression);
 void  *memchr(const void *s, int c, size_t n);
 int    stricmp(const char *s1, const char *s2);
 int    strincmp(const char *s1, const char *s2, size_t n);
-#endif
