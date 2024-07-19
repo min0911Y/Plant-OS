@@ -1,5 +1,5 @@
 
-[English](../README.md) \| 中文
+[English](README_en-us.md) \| 中文
 
 # 关于 Plant OS
 
