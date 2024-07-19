@@ -28,7 +28,8 @@ void                  init_devfs();
 void                  init_vfs();
 void                  do_init_seg_register();
 unsigned              base_count;
-void                  sysinit(void) {
+
+void sysinit(void) {
   struct FIFO8 keyfifo, mousefifo;
   struct FIFO8 keyfifo_sr1, keyfifo_sr2;
   struct FIFO8 mousefifo_sr1, mousefifo_sr2;

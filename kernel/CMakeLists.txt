@@ -14,12 +14,12 @@ add_custom_target(
   make_img ALL
   cd ${CMAKE_CURRENT_SOURCE_DIR}
   COMMAND make make_img
-  DEPENDS boot boot32 boot_pfs kernel)
+  DEPENDS dosldr boot boot32 boot_pfs kernel)
 add_custom_target(
   make_img_full
   cd ${CMAKE_CURRENT_SOURCE_DIR}
   COMMAND make Mimg
-  DEPENDS boot boot32 boot_pfs kernel)
+  DEPENDS dosldr boot boot32 boot_pfs kernel)
 add_custom_target(
   img_run
   cd ${CMAKE_CURRENT_SOURCE_DIR}

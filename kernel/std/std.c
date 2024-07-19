@@ -55,7 +55,10 @@ char *strncat(char *dest, const char *src, size_t n) {
 }
 // memset
 void *memset(void *s, int c, size_t n) {
-  return __builtin_memset(s, c, n);
+  for (size_t i = 0; i < n; i++) {
+    *((__UINT8_TYPE__ *)s + i) = c;
+  }
+  return s;
 }
 // strtol
 long strtol(const char *nptr, char **endptr, int base) {
@@ -141,16 +144,10 @@ int memcmp(const void *s1, const void *s2, size_t n) {
 }
 // memcpy
 void *memcpy(void *s, const void *ct, size_t n) {
-  // size_t t = n / sizeof(size_t);
-  // n = n % sizeof(size_t);
-  // while (t--) {
-  //   *(size_t*)s = *(size_t*)ct;
-  //   s += sizeof(size_t);
-  //   ct += sizeof(size_t);
-  // }
-  // while (n--)
-  //   *(char*)s++ = *(char*)ct++;
-  return __builtin_memcpy(s, ct, n);
+  for (size_t i = 0; i < n; i++) {
+    *((__UINT8_TYPE__ *)s + i) = *((const __UINT8_TYPE__ *)ct + i);
+  }
+  return s;
 }
 // isspace
 int isspace(int c) {

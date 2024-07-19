@@ -62,7 +62,7 @@ set(CMAKE_SHARED_LINKER_FLAGS "-nolibc -Qn")
 
 add_compile_flag("-w")
 
-add_compile_flag("-m32 -mfpmath=387 -fno-builtin -mno-mmx -mno-sse -nostdlib")
+add_compile_flag("-m32 -mfpmath=387 -fno-builtin -mno-mmx -mno-sse -nostdlib -nostdinc")
 
 if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
   add_compile_flag("-emit-obj")

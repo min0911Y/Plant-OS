@@ -1,4 +1,4 @@
-set(EXECUTABLE_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/apps/lib)
+set(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/apps/lib)
 
 file(GLOB_RECURSE c_files "*.c")
 file(GLOB_RECURSE cpp_files "*.cpp")

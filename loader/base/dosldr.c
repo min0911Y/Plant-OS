@@ -2,9 +2,9 @@
 #include <dosldr.h>
 
 struct TASK MainTask;
-void *malloc(int size);
-void *memcpy(void *s, const void *ct, size_t n);
-bool elf32Validate(Elf32_Ehdr *hdr) {
+void       *malloc(int size);
+void       *memcpy(void *s, const void *ct, size_t n);
+bool        elf32Validate(Elf32_Ehdr *hdr) {
   return hdr->e_ident[EI_MAG0] == ELFMAG0 && hdr->e_ident[EI_MAG1] == ELFMAG1 &&
          hdr->e_ident[EI_MAG2] == ELFMAG2 && hdr->e_ident[EI_MAG3] == ELFMAG3;
 }
@@ -23,28 +23,29 @@ uint32_t load_elf(Elf32_Ehdr *hdr) {
   }
   return hdr->e_entry;
 }
-void read_pci_class(uint8_t bus, uint8_t device, uint8_t function, uint8_t *class_code, uint8_t *subclass_code) {
-    // 读取设备类别和子类别寄存器的值
-    uint32_t class_register = read_pci(bus, device, function, 0x08);
-    // 解析设备类别和子类别
-    *class_code = (class_register >> 24) & 0xFF;
-    *subclass_code = (class_register >> 16) & 0xFF;
+void read_pci_class(uint8_t bus, uint8_t device, uint8_t function, uint8_t *class_code,
+                    uint8_t *subclass_code) {
+  // 读取设备类别和子类别寄存器的值
+  uint32_t class_register = read_pci(bus, device, function, 0x08);
+  // 解析设备类别和子类别
+  *class_code    = (class_register >> 24) & 0xFF;
+  *subclass_code = (class_register >> 16) & 0xFF;
 }
 int is_ide_device(uint8_t bus, uint8_t device, uint8_t function) {
-    uint8_t class_code, subclass_code;
-    // 读取设备类别和子类别
-    read_pci_class(bus, device, function, &class_code, &subclass_code);
-    // 检查设备类别和子类别是否符合IDE设备的类别码
-    if (class_code == 0x01 && subclass_code == 0x01) {
-        return 1; // 是IDE设备
-    } else {
-        return 0; // 不是IDE设备
-    }
+  uint8_t class_code, subclass_code;
+  // 读取设备类别和子类别
+  read_pci_class(bus, device, function, &class_code, &subclass_code);
+  // 检查设备类别和子类别是否符合IDE设备的类别码
+  if (class_code == 0x01 && subclass_code == 0x01) {
+    return 1; // 是IDE设备
+  } else {
+    return 0; // 不是IDE设备
+  }
 }
-int get_vdisk_type(char drive);
+int  get_vdisk_type(char drive);
 void DOSLDR_MAIN() {
   struct MEMMAN *memman = MEMMAN_ADDR;
-  unsigned int memtotal;
+  unsigned int   memtotal;
   memtotal = 128 * 1024 * 1024;
   memman_init(memman);
   memman_free(memman, 0x00600000, memtotal - 0x00600000);
@@ -59,33 +60,29 @@ void DOSLDR_MAIN() {
   Register_fat_fileSys();
   reg_pfs();
   vdisk vd;
-  vd.flag = 1;
-  vd.Read = NULL;
+  vd.flag  = 1;
+  vd.Read  = NULL;
   vd.Write = NULL;
-  vd.size = 1;
+  vd.size  = 1;
   register_vdisk(vd);
   ide_initialize(0x1F0, 0x3F6, 0x170, 0x376, 0x000);
   ahci_init();
-  char default_drive;
+  char         default_drive;
   unsigned int default_drive_number;
   if (memcmp((void *)"FAT12   ", (void *)0x7c00 + BS_FileSysType, 8) == 0 ||
       memcmp((void *)"FAT16   ", (void *)0x7c00 + BS_FileSysType, 8) == 0) {
     if (*(unsigned char *)(0x7c00 + BS_DrvNum) >= 0x80) {
-      default_drive_number =
-          *(unsigned char *)(0x7c00 + BS_DrvNum) - 0x80 + 0x02;
+      default_drive_number = *(unsigned char *)(0x7c00 + BS_DrvNum) - 0x80 + 0x02;
     } else {
       default_drive_number = *(unsigned char *)(0x7c00 + BS_DrvNum);
     }
-  } else if (memcmp((void *)"FAT32   ",
-                    (void *)0x7c00 + BPB_Fat32ExtByts + BS_FileSysType,
-                    8) == 0) {
+  } else if (memcmp((void *)"FAT32   ", (void *)0x7c00 + BPB_Fat32ExtByts + BS_FileSysType, 8) ==
+             0) {
     if (*(unsigned char *)(0x7c00 + BPB_Fat32ExtByts + BS_DrvNum) >= 0x80) {
       default_drive_number =
-          *(unsigned char *)(0x7c00 + BPB_Fat32ExtByts + BS_DrvNum) - 0x80 +
-          0x02;
+          *(unsigned char *)(0x7c00 + BPB_Fat32ExtByts + BS_DrvNum) - 0x80 + 0x02;
     } else {
-      default_drive_number =
-          *(unsigned char *)(0x7c00 + BPB_Fat32ExtByts + BS_DrvNum);
+      default_drive_number = *(unsigned char *)(0x7c00 + BPB_Fat32ExtByts + BS_DrvNum);
     }
   } else {
     if (*(unsigned char *)(0x7c00) >= 0x80) {
@@ -95,10 +92,8 @@ void DOSLDR_MAIN() {
     }
   }
   default_drive = default_drive_number + 0x41;
-  if(get_vdisk_type(default_drive) != 1) {
-    default_drive++;
-  }
-  NowTask()->drive = default_drive;
+  if (get_vdisk_type(default_drive) != 1) { default_drive++; }
+  NowTask()->drive        = default_drive;
   NowTask()->drive_number = default_drive_number;
   vfs_mount_disk(NowTask()->drive, NowTask()->drive);
   vfs_change_disk(NowTask()->drive);
@@ -106,7 +101,7 @@ void DOSLDR_MAIN() {
   printf("Copyright zhouzhihao & min0911 2022\n");
   printf("memtotal=%dMB\n", memtotal / 1024 / 1024);
   char path[15] = " :\\kernel.bin";
-  path[0] = NowTask()->drive;
+  path[0]       = NowTask()->drive;
   printf("Load file:%s\n", path);
   int sz = vfs_filesize(path);
   if (sz == -1) {
@@ -121,7 +116,9 @@ void DOSLDR_MAIN() {
   printf("Loading...\n");
   uint32_t entry = load_elf((Elf32_Ehdr *)s);
 
-  // printf("ESP:%08x\n",*(unsigned int *)(0x00280000 + 12));
+  // printf("ESP:%08x\n", *(unsigned int *)(0x00280000 + 12));
   _IN(2 * 8, entry);
 }
-struct TASK *NowTask() { return &MainTask; }
+struct TASK *NowTask() {
+  return &MainTask;
+}

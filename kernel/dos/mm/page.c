@@ -8,8 +8,8 @@ void             *page_malloc_one_no_mark();
 void              flush_tlb(unsigned vaddr);
 unsigned          div_round_up(unsigned num, unsigned size);
 struct PAGE_INFO *pages = (struct PAGE_INFO *)PAGE_MANNAGER;
-void              init_pdepte(unsigned int pde_addr, unsigned pte_addr, unsigned page_end) {
 
+void init_pdepte(unsigned int pde_addr, unsigned pte_addr, unsigned page_end) {
   memset((void *)pde_addr, 0, page_end - pde_addr);
   // 这是初始化PDE 页目录
   for (int addr = pde_addr, i = pte_addr | PG_P | PG_RWW; addr != pte_addr;
@@ -473,7 +473,7 @@ uint32_t page_get_phy(unsigned vaddr) {
 void copy_on_write(uint32_t vaddr) {
   void *pd      = (void *)current_task()->pde;                          // PDE页目录地址
   void *pde     = (void *)((unsigned)pd + (unsigned)(DIDX(vaddr) * 4)); // PTE地址
-  void *pde_phy = (void *)(*(unsigned int *)(pde) & 0xfffff000);        // 页
+  void *pde_phy = (void *)(*(unsigned int *)(pde)&0xfffff000);          // 页
 
   if (!(*(unsigned *)pde & PG_RWW) || !(*(unsigned *)pde & PG_USU)) { // PDE如果不可写
     // 不可写的话，就需要对PDE做COW操作
