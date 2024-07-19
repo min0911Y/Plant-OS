@@ -33,11 +33,11 @@ Then, use `make` to compile the apps:
 make
 ```
 
-If you don't see an error message, then go to the `Loader` folder then type `make` in the cmd prompt:
+If you don't see an error message, then go to the `loader` folder then type `make` in the cmd prompt:
 
 ```cmd
 cd ..
-cd Loader
+cd loader
 make
 ```
 

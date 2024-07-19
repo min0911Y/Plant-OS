@@ -48,9 +48,9 @@ if [ $? -ne 0 ]; then
   exit
 fi
 
-cd ../Loader && make -j
+cd ../loader && make -j
 if [ $? -ne 0 ]; then
-  echo "在 Loader 目录中构建失败"
+  echo "在 loader 目录中构建失败"
   exit
 fi
 

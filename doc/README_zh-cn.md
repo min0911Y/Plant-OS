@@ -47,11 +47,11 @@ cd apps
 make
 ```
 
-如果你没有看到错误消息，则转到 `Loader` 文件夹，然后在 cmd 提示符中输入 `make`：
+如果你没有看到错误消息，则转到 `loader` 文件夹，然后在 cmd 提示符中输入 `make`：
 
 ```cmd
 cd ..
-cd Loader
+cd loader
 make
 ```
 

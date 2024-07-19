@@ -16,7 +16,7 @@ RESPATH = ./res/
 INCPATH  = ./include/
 OUTPATH = ./obj/
 IMGPATH = ./img/
-LOADERPATH = ../Loader/out/
+LOADERPATH = ../loader/out/
 
 MAKE     = make -r
 NASM     = nasm
