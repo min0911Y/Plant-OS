@@ -2,11 +2,11 @@
 #define EFLAGS_AC_BIT     0x00040000
 #define CR0_CACHE_DISABLE 0x60000000
 
-typedef unsigned int uintptr_t;
-unsigned int         memtest_sub(unsigned int, unsigned int);
-unsigned int         memtest(unsigned int start, unsigned int end) {
-  char         flg486 = 0;
-  unsigned int eflg, cr0, i;
+typedef u32 uintptr_t;
+u32         memtest_sub(u32, u32);
+u32         memtest(u32 start, u32 end) {
+  char flg486 = 0;
+  u32  eflg, cr0, i;
 
   /* 确认CPU是386还是486以上的 */
   eflg  = io_load_eflags();

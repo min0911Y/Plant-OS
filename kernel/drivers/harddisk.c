@@ -1,11 +1,11 @@
 #include <dos.h>
 #include <drivers.h>
 typedef struct {
-  int            rw;
-  int            number;
-  int            lba;
-  unsigned char *buffer;
-  unsigned char *ok_flag;
+  int rw;
+  int number;
+  int lba;
+  u8 *buffer;
+  u8 *ok_flag;
 } packet_header;
 typedef struct {
   uint8_t  res[2];
@@ -15,7 +15,7 @@ typedef struct {
   uint64_t lba;
 } __attribute__((packed)) packet;
 
-void bios_read_hd_sec(unsigned LBA, unsigned char *buffer) {
+void bios_read_hd_sec(unsigned LBA, u8 *buffer) {
   packet p;
   p.res[0]            = 16;
   p.res[1]            = 0;
@@ -26,7 +26,7 @@ void bios_read_hd_sec(unsigned LBA, unsigned char *buffer) {
   memcpy(0x7e00, &p, sizeof(packet));
   send_ipc_message(2, "a", 1, asynchronous);
 
-  while (*(unsigned char *)(0x7e00) != 0xff)
+  while (*(u8 *)(0x7e00) != 0xff)
     ;
 
   // regs16_t r;
@@ -37,7 +37,7 @@ void bios_read_hd_sec(unsigned LBA, unsigned char *buffer) {
   // INT(0x13, &r);
 }
 
-void bios_write_hd_sec(unsigned LBA, unsigned char *buffer) {
+void bios_write_hd_sec(unsigned LBA, u8 *buffer) {
   memcpy(0x8000, buffer, 512);
   packet p;
   p.res[0]            = 16;
@@ -48,7 +48,7 @@ void bios_write_hd_sec(unsigned LBA, unsigned char *buffer) {
   p.sectors_of_number = 1;
   memcpy(0x7e00, &p, sizeof(packet));
   send_ipc_message(2, "b", 1, asynchronous);
-  while (*(unsigned char *)(0x7e00) != 0xff)
+  while (*(u8 *)(0x7e00) != 0xff)
     ;
   // regs16_t r;
   // r.ax = 0x4200;
@@ -58,8 +58,8 @@ void bios_write_hd_sec(unsigned LBA, unsigned char *buffer) {
   // INT(0x13, &r);
 }
 
-void drivers_idehdd_read(unsigned int LBA, unsigned int number, unsigned short *buffer) {
-  // unsigned int offset, i;
+void drivers_idehdd_read(u32 LBA, u32 number, u16 *buffer) {
+  // u32 offset, i;
   // io_out8(0x1f7, 0x0c);
   // io_out16(0x1f2, number);              /**数量*/
   // io_out8(0x1f3, (LBA & 0xff));         /**LBA地址7~0*/
@@ -91,16 +91,16 @@ void drivers_idehdd_wait2(void) {
 }
 void drivers_idehdd_wait(void) {
   /**等待次数计时*/
-  // unsigned long n;
+  // u32 n;
   for (; (io_in8(0x1f7) & 0x88) != 0x08;)
     ; /**循环等待*/
 }
-void drivers_idehdd_write(unsigned int LBA, unsigned int number, unsigned short *buffer) {
+void drivers_idehdd_write(u32 LBA, u32 number, u16 *buffer) {
   ide_write_sectors(0x0, number, LBA, 8, buffer);
 }
 struct IDEHardDiskInfomationBlock *drivers_idehdd_info() {
   io_cli();
-  unsigned short *p = (unsigned short *)page_malloc(256 * sizeof(unsigned short));
+  u16 *p = (u16 *)page_malloc(256 * sizeof(u16));
   io_out8(0x1f7, 0xec);
   for (int i = 0; i != 256; i++) {
     p[i] = io_in16(0x1f0); /**从DATA端口中读取数据*/

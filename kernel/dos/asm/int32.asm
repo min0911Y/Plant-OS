@@ -19,7 +19,7 @@ section .text
 ;        int32() resets all selectors.
 ;
 ; C Prototype:
-;	void _cdelc int32(unsigned char intnum, regs16_t *regs);
+;	void _cdelc int32(u8 intnum, regs16_t *regs);
 ; 
 ; Example of usage:
 ;   regs.ax = 0x0013;

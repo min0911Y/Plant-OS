@@ -3,15 +3,15 @@
   Loader需要分页吗？？？？？
  */
 #include <dosldr.h>
-#define EFLAGS_AC_BIT 0x00040000
+#define EFLAGS_AC_BIT     0x00040000
 #define CR0_CACHE_DISABLE 0x60000000
 
-unsigned int memtest(unsigned int start, unsigned int end) {
+u32 memtest(u32 start, u32 end) {
   char flg486 = 0;
-  unsigned int eflg, cr0, i;
+  u32  eflg, cr0, i;
 
   /* 确认CPU是386还是486以上的 */
-  eflg = io_load_eflags();
+  eflg  = io_load_eflags();
   eflg |= EFLAGS_AC_BIT; /* AC-bit = 1 */
   io_store_eflags(eflg);
   eflg = io_load_eflags();
@@ -24,7 +24,7 @@ unsigned int memtest(unsigned int start, unsigned int end) {
   io_store_eflags(eflg);
 
   if (flg486 != 0) {
-    cr0 = load_cr0();
+    cr0  = load_cr0();
     cr0 |= CR0_CACHE_DISABLE; /* 禁止缓存 */
     store_cr0(cr0);
   }
@@ -32,7 +32,7 @@ unsigned int memtest(unsigned int start, unsigned int end) {
   i = memtest_sub(start, end);
 
   if (flg486 != 0) {
-    cr0 = load_cr0();
+    cr0  = load_cr0();
     cr0 &= ~CR0_CACHE_DISABLE; /* 允许缓存 */
     store_cr0(cr0);
   }
@@ -41,32 +41,32 @@ unsigned int memtest(unsigned int start, unsigned int end) {
 }
 
 void memman_init(struct MEMMAN *man) {
-  man->frees = 0;    /* 可用信息数目 */
+  man->frees    = 0; /* 可用信息数目 */
   man->maxfrees = 0; /* 用于观察可用状况：frees的最大值 */
   man->lostsize = 0; /* 释放失败的内存的大小总和 */
-  man->losts = 0;    /* 释放失败次数 */
+  man->losts    = 0; /* 释放失败次数 */
   return;
 }
 
-unsigned int memman_total(struct MEMMAN *man)
+u32 memman_total(struct MEMMAN *man)
 /* 报告空余内存大小的合计 */
 {
-  unsigned int i, t = 0;
+  u32 i, t = 0;
   for (i = 0; i < man->frees; i++) {
     t += man->free[i].size;
   }
   return t;
 }
 
-unsigned int memman_alloc(struct MEMMAN *man, unsigned int size)
+u32 memman_alloc(struct MEMMAN *man, u32 size)
 /* 分配 */
 {
-  unsigned int i, a;
+  u32 i, a;
   for (i = 0; i < man->frees; i++) {
     if (man->free[i].size >= size) {
       // printf("Find.\n");
       /* 找到了足够大的内存 */
-      a = man->free[i].addr;
+      a                  = man->free[i].addr;
       man->free[i].addr += size;
       man->free[i].size -= size;
       if (man->free[i].size == 0) {
@@ -83,16 +83,14 @@ unsigned int memman_alloc(struct MEMMAN *man, unsigned int size)
   return 0; /* 没有可用空间 */
 }
 
-int memman_free(struct MEMMAN *man, unsigned int addr, unsigned int size)
+int memman_free(struct MEMMAN *man, u32 addr, u32 size)
 /* 释放 */
 {
   int i, j;
   /* 为便于归纳内存，将free[]按照addr的顺序排列 */
   /* 所以，先决定应该放在哪里 */
   for (i = 0; i < man->frees; i++) {
-    if (man->free[i].addr > addr) {
-      break;
-    }
+    if (man->free[i].addr > addr) { break; }
   }
   /* free[i - 1].addr < addr < free[i].addr */
   if (i > 0) {
@@ -121,7 +119,7 @@ int memman_free(struct MEMMAN *man, unsigned int addr, unsigned int size)
     /* 后面还有 */
     if (addr + size == man->free[i].addr) {
       /* 可以与后面的内容归纳到一起 */
-      man->free[i].addr = addr;
+      man->free[i].addr  = addr;
       man->free[i].size += size;
       return 0; /* 成功完成 */
     }
@@ -133,9 +131,7 @@ int memman_free(struct MEMMAN *man, unsigned int addr, unsigned int size)
       man->free[j] = man->free[j - 1];
     }
     man->frees++;
-    if (man->maxfrees < man->frees) {
-      man->maxfrees = man->frees; /* 更新最大值 */
-    }
+    if (man->maxfrees < man->frees) { man->maxfrees = man->frees; /* 更新最大值 */ }
     man->free[i].addr = addr;
     man->free[i].size = size;
     return 0; /* 成功完成 */
@@ -146,39 +142,37 @@ int memman_free(struct MEMMAN *man, unsigned int addr, unsigned int size)
   return -1; /* 失败 */
 }
 
-unsigned int memman_alloc_4k(struct MEMMAN *man, unsigned int size) {
-  unsigned int a;
+u32 memman_alloc_4k(struct MEMMAN *man, u32 size) {
+  u32 a;
   size = (size + 0xfff) & 0xfffff000;
-  a = memman_alloc(man, size);
+  a    = memman_alloc(man, size);
   return a;
 }
 
-int memman_free_4k(struct MEMMAN *man, unsigned int addr, unsigned int size) {
+int memman_free_4k(struct MEMMAN *man, u32 addr, u32 size) {
   int i;
   size = (size + 0xfff) & 0xfffff000;
-  i = memman_free(man, addr, size);
+  i    = memman_free(man, addr, size);
   return i;
 }
 void *page_malloc(int size) {
-  struct MEMMAN *man = MEMMAN_ADDR;
-  int p = (int)memman_alloc_4k(man, size);
-  clean(p, size);
-  return p;
+  struct MEMMAN *man = (struct MEMMAN *)MEMMAN_ADDR;
+  int            p   = (int)memman_alloc_4k(man, size);
+  clean((char *)p, size);
+  return (void *)p;
 }
 void page_free(void *p, int size) {
-  struct MEMMAN *man = MEMMAN_ADDR;
-  memman_free_4k(man, (unsigned int)p, size);
+  struct MEMMAN *man = (struct MEMMAN *)MEMMAN_ADDR;
+  memman_free_4k(man, (u32)p, size);
 }
 void *malloc(int size) {
   void *p = page_malloc(size + sizeof(int));
-  if (p == 0)
-    return 0;
+  if (p == 0) return 0;
   *(int *)p = size;
   return p + sizeof(int);
 }
 void free(void *p) {
-  if (p == 0)
-    return;
+  if (p == 0) return;
   int size = *(int *)((char *)p - sizeof(int));
   page_free((char *)p - sizeof(int), size + sizeof(int));
 }

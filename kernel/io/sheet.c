@@ -4,6 +4,7 @@
  * @author kawai (30天自制操作系统)
  * @note 改进(char---vram_t) （zhouzhihao & min0911_）
  */
+#include <dos.h>
 #include <io.h>
 struct int4 {
   int a, b, c, d;
@@ -16,7 +17,7 @@ struct SHTCTL *shtctl_init(vram_t *vram, int xsize, int ysize) {
   int            i;
   ctl = (struct SHTCTL *)malloc(sizeof(struct SHTCTL));
   if (ctl == 0) { goto err; }
-  ctl->map = (unsigned char *)malloc(xsize * ysize);
+  ctl->map = (u8 *)malloc(xsize * ysize);
   if (ctl->map == 0) {
     free((void *)ctl);
     goto err;
@@ -136,12 +137,12 @@ void sheet_refresh(struct SHEET *sht, int bx0, int by0, int bx1, int by1) {
 }
 
 void sheet_refreshsub(struct SHTCTL *ctl, int vx0, int vy0, int vx1, int vy1, int h0, int h1) {
-  int            h, bx, by, vx, vy, bx0, by0, bx1, by1, bx2, sid4, i, i1, *p;
-  int4          *q, *r;
-  vram_t        *buf, *vram = ctl->vram;
-  unsigned char *map = ctl->map;
-  unsigned char  sid;
-  struct SHEET  *sht;
+  int           h, bx, by, vx, vy, bx0, by0, bx1, by1, bx2, sid4, i, i1, *p;
+  int4         *q, *r;
+  vram_t       *buf, *vram = ctl->vram;
+  u8           *map = ctl->map;
+  u8            sid;
+  struct SHEET *sht;
 
   /* 如果refresh的范围超出了画面则修正 */
   if (vx0 < 0) { vx0 = 0; }
@@ -228,7 +229,7 @@ void sheet_refreshsub(struct SHTCTL *ctl, int vx0, int vy0, int vx1, int vy1, in
 void sheet_refreshmap(struct SHTCTL *ctl, int vx0, int vy0, int vx1, int vy1, int h0) {
   int           h, bx, by, vx, vy, bx0, by0, bx1, by1, *p, sid4, bx2, by2;
   vram_t       *buf;
-  unsigned char sid, *map = ctl->map;
+  u8            sid, *map = ctl->map;
   struct SHEET *sht;
 
   if (vx0 < 0) { vx0 = 0; }

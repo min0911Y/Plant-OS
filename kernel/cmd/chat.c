@@ -1,27 +1,27 @@
 #include <dos.h>
-static uint8_t chat_data[2048]; // 接收网卡发来的数据包
-static uint8_t chat_flags = 1;  // 网卡发来数据包了吗？
-static struct Socket *socket;   // socket API需要用到这个结构体
+static uint8_t        chat_data[2048]; // 接收网卡发来的数据包
+static uint8_t        chat_flags = 1;  // 网卡发来数据包了吗？
+static struct Socket *socket;          // socket API需要用到这个结构体
 static void Chat_Handler(struct Socket *socket, void *base) { // 有数据接收时会调用这个函数
-  memcpy(chat_data, base, 2048);  // 拷贝数据
-  chat_flags = 0;   // 已经接收完成
+  memcpy(chat_data, base, 2048);                              // 拷贝数据
+  chat_flags = 0;                                             // 已经接收完成
 }
 static void out_put_task_main_cmd() { // 这是一个关于接收数据并输出的进程
   while (1) {
     clean((char *)chat_data, 2048); // 清空缓冲区
-    chat_flags = 1; // 等待接收
-    while (chat_flags) // 如果上面handler设置chat_flags为0，那么就会跳出循环，所以这里就是等待数据包发送
+    chat_flags = 1;                 // 等待接收
+    while (
+        chat_flags) // 如果上面handler设置chat_flags为0，那么就会跳出循环，所以这里就是等待数据包发送
       ;
-    struct UDPMessage *udp =
-        (struct UDPMessage *)(chat_data + sizeof(struct EthernetFrame_head) +
-                              sizeof(struct IPV4Message)); // 获取到udp协议头
-    uint8_t *dat = chat_data + sizeof(struct EthernetFrame_head) +
-                   sizeof(struct IPV4Message) + sizeof(struct UDPMessage); // 获取数据包
+    struct UDPMessage *udp = (struct UDPMessage *)(chat_data + sizeof(struct EthernetFrame_head) +
+                                                   sizeof(struct IPV4Message)); // 获取到udp协议头
+    uint8_t *dat = chat_data + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message) +
+                   sizeof(struct UDPMessage);      // 获取数据包
     char *p = malloc(swap16(udp->length) - 8 + 1); // malloc一个新的缓冲区存放数据
-    memcpy(p, dat, swap16(udp->length) - 8); // 复制数据
+    memcpy(p, dat, swap16(udp->length) - 8);       // 复制数据
     p[swap16(udp->length) - 8] = 0; // 设置字符串结束符（因为下面要直接print）
     printk("\nFrom 118.31.248.215 Server ### %s\n", p); // 打印提示符+数据
-    free(p); // 释放指针
+    free(p);                                            // 释放指针
   }
 }
 void chat_cmd() { // 用于接收用户想要发送的内容
@@ -56,7 +56,7 @@ void chat_cmd() { // 用于接收用户想要发送的内容
   // inp[2] = 'N';
   // inp[3] = 'D';
   // inp[4] = ' ';
-  // unsigned int stack = (unsigned int)page_malloc(64 * 1024); // 声明接收服务程序的task的栈空间
+  // u32 stack = (u32)page_malloc(64 * 1024); // 声明接收服务程序的task的栈空间
   // struct TASK *out_put_task =
   //     register_task("out_put_task", 2, 2 * 8, (int)out_put_task_main_cmd, 1 * 8,
   //             1 * 8, stack + 64 * 1024); // 创建进程
@@ -145,7 +145,7 @@ void chat_gui() {
   textbox = MakeTextBox(6, 40, 800, 16, sht_win);
   button = MakeButton(806, 13, 40, 16, sht_win, "Send", send);
 
-  unsigned int stack = (unsigned int)page_malloc(64 * 1024);
+  u32 stack = (u32)page_malloc(64 * 1024);
   struct TASK *out_put_task =
       register_task("out_put_task", 2, 2 * 8, (int)out_put_task_main_gui, 1 * 8,
               1 * 8, stack + 64 * 1024);

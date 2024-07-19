@@ -28,15 +28,15 @@ void user_thread_into() {
   char *mfifo = (char *)page_malloc_one();
   char *kbuf  = (char *)page_malloc_one();
   char *mbuf  = (char *)page_malloc_one();
-  fifo8_init((struct FIFO8 *)kfifo, 4096, (unsigned char *)kbuf);
-  fifo8_init((struct FIFO8 *)mfifo, 4096, (unsigned char *)mbuf);
+  fifo8_init((struct FIFO8 *)kfifo, 4096, (u8 *)kbuf);
+  fifo8_init((struct FIFO8 *)mfifo, 4096, (u8 *)mbuf);
   task_set_fifo(current_task(), (struct FIFO8 *)kfifo, (struct FIFO8 *)mfifo);
   char tmp[100];
   task_to_user_mode(eip, esp);
   for (;;) {}
 }
 
-void test(unsigned int b) {
+void test(u32 b) {
   return;
 }
 void *mem_alloc_nb(memory *mem, uint32_t size, uint32_t n) {
@@ -95,7 +95,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
       } else if (ebx == 0x07) {
         Draw_Str(ecx, edx, (char *)esi + ds_base, edi);
       } else if (ebx == 0x08) {
-        PrintChineseStr(ecx, edx, edi, (unsigned char *)esi + ds_base);
+        PrintChineseStr(ecx, edx, edi, (u8 *)esi + ds_base);
       }
     }
   } else if (eax == 0x04) {
@@ -109,7 +109,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
   } else if (eax == 0x09) {
     reg[EDX] = alloc_size;
   } else if (eax == 0x0c) {
-    Text_Draw_Box(ecx, ebx, esi, edx, (unsigned char)edi);
+    Text_Draw_Box(ecx, ebx, esi, edx, (u8)edi);
   } else if (eax == 0x0e) {
     reg[ECX] = get_y();
     reg[EDX] = get_x();
@@ -286,7 +286,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
     // return;
     // for (;;)
     //   ;
-    if (!(*(unsigned char *)(0xf0000000))) {
+    if (!(*(u8 *)(0xf0000000))) {
       logk("here\n");
       while (FindForCount(1, vfs_now->path) != NULL) {
         free(FindForCount(vfs_now->path->ctl->all, vfs_now->path)->val);
@@ -353,16 +353,16 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
 
       extern int init_ok_flag;
       init_ok_flag = 0;
-      // unsigned int *stack = page_malloc_one() + 0x1000;
+      // u32 *stack = page_malloc_one() + 0x1000;
       // stack--;
-      // *stack = (unsigned int)(esi);
+      // *stack = (u32)(esi);
       // stack--;
-      // *stack = (unsigned int)(edx);
+      // *stack = (u32)(edx);
       unsigned pde = current_task()->pde;
       io_cli();
       set_cr3(PDE_ADDRESS);
       for (int i = DIDX(0x70000000) * 4; i < 0x1000; i += 4) {
-        unsigned int *pde_entry = (unsigned int *)(pde + i);
+        u32 *pde_entry = (u32 *)(pde + i);
         if (pages[IDX(*pde_entry)].count > 1 && !(*pde_entry & PG_SHARED)) {
           uint32_t old  = *pde_entry & 0xfffff000;
           uint32_t attr = *pde_entry & 0xfff;
@@ -376,7 +376,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
         }
         unsigned p = *pde_entry & (0xfffff000);
         for (int j = 0; j < 0x1000; j += 4) {
-          unsigned int *pte_entry = (unsigned int *)(p + j);
+          u32 *pte_entry = (u32 *)(p + j);
           if (pages[IDX(*pte_entry)].count == 1 && (*pte_entry & PG_USU) &&
               !(*pte_entry & PG_SHARED)) {
             *pte_entry |= PG_SHARED;
@@ -421,7 +421,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
     if (ebx == 0x00) {
       task->timer            = timer_alloc();
       task->timer->fifo      = (struct FIFO8 *)page_malloc(sizeof(struct FIFO8));
-      task->timer->fifo->buf = (unsigned char *)page_malloc(50 * sizeof(unsigned char));
+      task->timer->fifo->buf = (u8 *)page_malloc(50 * sizeof(u8));
       fifo8_init(task->timer->fifo, 50, task->timer->fifo->buf);
       timer_init(task->timer, task->timer->fifo, 1);
     } else if (ebx == 0x01) {
@@ -433,7 +433,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
         reg[EAX] = 0;
       }
     } else if (ebx == 0x03) {
-      page_free((void *)task->timer->fifo->buf, 50 * sizeof(unsigned char));
+      page_free((void *)task->timer->fifo->buf, 50 * sizeof(u8));
       page_free((void *)task->timer->fifo, sizeof(struct FIFO8));
       timer_free(task->timer);
     }
@@ -481,7 +481,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
       int             y      = ecx;
       int             w      = edx;
       int             h      = esi;
-      unsigned int   *buffer = (unsigned int *)(edi + ds_base);
+      u32            *buffer = (u32 *)(edi + ds_base);
       for (int i = x; i < x + w; i++) {
         for (int j = y; j < y + h; j++) {
           r[j * vbe->xsize + i] = buffer[(j - y) * w + (i - x)];
@@ -519,8 +519,8 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
   } else if (eax == 0x30) {
     current_task()->Pkeyfifo = malloc(sizeof(struct FIFO8));
     current_task()->Ukeyfifo = malloc(sizeof(struct FIFO8));
-    unsigned char *kbuf      = (unsigned char *)page_malloc(4096);
-    unsigned char *mbuf      = (unsigned char *)page_malloc(4096);
+    u8 *kbuf                 = (u8 *)page_malloc(4096);
+    u8 *mbuf                 = (u8 *)page_malloc(4096);
     fifo8_init(current_task()->Pkeyfifo, 4096, kbuf);
     fifo8_init(current_task()->Ukeyfifo, 4096, mbuf);
     current_task()->keyboard_press   = kbd_press;
@@ -537,7 +537,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
     unsigned start_addr = task->alloc_addr + *(task->alloc_size);
     for (int i = 0; i < (ebx / 0x1000); i++) {
       //  logk("LINK %08x\n", start_addr + (i) * 0x1000);
-      page_link_share(start_addr + (i) * 0x1000);
+      page_link_share(start_addr + (i)*0x1000);
     }
     // page_links(start_addr,ebx / 0x1000);
     *(task->alloc_size) += ebx;

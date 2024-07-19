@@ -72,8 +72,8 @@ void putchar_HighTextMode(struct tty *res, int c) {
     unlock(&l);
   }
   lock(&l1);
-  struct SHEET  *sht = (struct SHEET *)res->vram;
-  unsigned char *p   = &c;
+  struct SHEET *sht = (struct SHEET *)res->vram;
+  u8           *p   = &c;
   if (p[0] == '\r') {
     unlock(&l1);
     return;
@@ -95,7 +95,7 @@ void putchar_HighTextMode(struct tty *res, int c) {
     res->x = 0;
     res->MoveCursor(res, res->x, res->y);
   }
-  unsigned char str[3];
+  u8 str[3];
   str[0] = p[0];
   str[1] = p[1];
   str[2] = 0;
@@ -145,12 +145,12 @@ void putchar_HighTextMode(struct tty *res, int c) {
     return;
   }
   if (c > 0x80 && p1) {
-    str[0]             = p1;
-    str[1]             = c;
-    str[2]             = 0;
-    unsigned int cn_ch = *(unsigned int *)(str);
-    int          bmx   = res->x;
-    int          bmy   = res->y;
+    str[0]    = p1;
+    str[1]    = c;
+    str[2]    = 0;
+    u32 cn_ch = *(u32 *)(str);
+    int bmx   = res->x;
+    int bmy   = res->y;
     if (res->x == res->xsize - 1) {
       res->y++;
       res->x = 0;
@@ -186,7 +186,7 @@ void MoveCursor_HighTextMode(struct tty *res, int x, int y) {
   sheet_slide(sht_cur, res->x * 8, res->y * 16);
 }
 
-void Draw_Box_HighTextMode(struct tty *res, int x, int y, int x1, int y1, unsigned char color) {
+void Draw_Box_HighTextMode(struct tty *res, int x, int y, int x1, int y1, u8 color) {
   struct SHEET *sht = (struct SHEET *)res->vram;
   for (int i = y * 16; i <= y1 * 16; i++) {
     for (int j = x * 8; j <= x1 * 8; j++) {
@@ -232,8 +232,8 @@ void cur_service() {
   lock(&l);
   cur_tmr         = timer_alloc();
   cur_tmr->waiter = current_task();
-  unsigned char buf[50];
-  struct FIFO8  fifo;
+  u8           buf[50];
+  struct FIFO8 fifo;
   fifo8_init(&fifo, 50, buf);
   timer_init(cur_tmr, &fifo, 1);
   unlock(&l);
@@ -287,7 +287,7 @@ void SwitchToHighTextMode() {
   sheet_slide(sht_cur, 0, 0);
   sheet_updown(sht_scr, 0);
   sheet_updown(sht_cur, 1);
-  /*stack = (unsigned int)page_malloc(64 * 1024);
+  /*stack = (u32)page_malloc(64 * 1024);
   t1 = AddTask("t1", 1, 2 * 8, (int)Gar_Test_Task, 1 * 8, 1 * 8,
                stack + 64 * 1024);*/
 
@@ -314,7 +314,7 @@ void AddShell_HighTextMode() {
   //                              Draw_Box_HighTextMode);
   // mtask* ntask =
   //     register_task("Shell", 1, 2 * 8, (int)shell_handler, 1 * 8, 1 * 8,
-  //                   (unsigned int)page_malloc(128 * 1024) + 128 * 1024);
+  //                   (u32)page_malloc(128 * 1024) + 128 * 1024);
   // char* kfifo = (struct FIFO8*)page_malloc(sizeof(struct FIFO8));
   // char* mfifo = (struct FIFO8*)page_malloc(sizeof(struct FIFO8));
   // char* kbuf = (char*)page_malloc(4096);

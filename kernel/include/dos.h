@@ -12,7 +12,7 @@
 #include <string.h>
 
 // gdtidt.c
-void set_segmdesc(struct SEGMENT_DESCRIPTOR *sd, unsigned int limit, int base, int ar);
+void set_segmdesc(struct SEGMENT_DESCRIPTOR *sd, u32 limit, int base, int ar);
 void set_gatedesc(struct GATE_DESCRIPTOR *gd, int offset, int selector, int ar);
 void init_pic(void);
 void init_gdtidt(void);
@@ -22,8 +22,8 @@ void register_intr_handler(int num, int addr);
 void          init_pit(void);
 struct TIMER *timer_alloc(void);
 void          timer_free(struct TIMER *timer);
-void          timer_init(struct TIMER *timer, struct FIFO8 *fifo, unsigned char data);
-void          timer_settime(struct TIMER *timer, unsigned int timeout);
+void          timer_init(struct TIMER *timer, struct FIFO8 *fifo, u8 data);
+void          timer_settime(struct TIMER *timer, u32 timeout);
 void          inthandler20(int cs, int *esp);
 
 // mtask.c
@@ -64,7 +64,7 @@ int             task_fork();
 
 // page.c
 void     C_init_page();
-void     pf_set(unsigned int memsize);
+void     pf_set(u32 memsize);
 int      get_line_address(int t, int p, int o);
 int      get_page_from_line_address(int line_address);
 void     page2tpo(int page, int *t, int *p);
@@ -79,7 +79,7 @@ int      find_kpage(int line, int n);
 void    *page_malloc(int size);
 void     page_free(void *p, int size);
 void     page_map(void *target, void *start, void *end);
-void     change_page_task_id(int task_id, void *p, unsigned int size);
+void     change_page_task_id(int task_id, void *p, u32 size);
 void     PF(unsigned edi, unsigned esi, unsigned ebp, unsigned esp, unsigned ebx, unsigned edx,
             unsigned ecx, unsigned eax, unsigned gs, unsigned fs, unsigned es, unsigned ds,
             unsigned error, unsigned eip, unsigned cs, unsigned eflags);
@@ -94,7 +94,7 @@ uint32_t page_get_phy_pde(unsigned vaddr, unsigned pde);
 void     page_links(unsigned start, unsigned numbers);
 
 // nasmfunc.asm
-void int32(unsigned char intnum, regs16_t *regs);
+void int32(u8 intnum, regs16_t *regs);
 void floppy_int(void);
 int  get_eip();
 void farjmp(int eip, int cs);
@@ -155,7 +155,7 @@ void __init_PIT();
 void init_float();
 
 // other.c
-void     INT(unsigned char intnum, regs16_t *regs);
+void     INT(u8 intnum, regs16_t *regs);
 void     ERROR0(uint32_t eip);
 void     ERROR1(uint32_t eip);
 void     ERROR3(uint32_t eip);
@@ -184,7 +184,7 @@ void     getCPUBrand(char *cBrand);
 char     ascii2num(char c);
 char     num2ascii(char c);
 void     strtoupper(char *str);
-int      GetCHorEN(unsigned char *str);
+int      GetCHorEN(u8 *str);
 void     clean(char *s, int len);
 void     disableExp();
 void     EnableExp();
@@ -195,13 +195,12 @@ void     ClearExpFlag();
 void     SetCatchEip(uint32_t eip);
 void     SwitchPublic();
 void     SwitchPrivate();
-
 // syscall.c
-void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx, int eax);
+void     inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx, int eax);
 
 // fifo.c
-void fifo8_init(struct FIFO8 *fifo, int size, unsigned char *buf);
-int  fifo8_put(struct FIFO8 *fifo, unsigned char data);
+void fifo8_init(struct FIFO8 *fifo, int size, u8 *buf);
+int  fifo8_put(struct FIFO8 *fifo, u8 data);
 int  fifo8_get(struct FIFO8 *fifo);
 int  fifo8_status(struct FIFO8 *fifo);
 
@@ -215,17 +214,17 @@ int          GetLastCount(struct List *Obj);
 void         DeleteList(struct List *Obj);
 
 // init.c
-void         sysinit();
-bool         SetDrive(unsigned char *name);
-unsigned int GetDriveCode(unsigned char *name);
-bool         DriveSemaphoreTake(unsigned int drive_code);
-void         DriveSemaphoreGive(unsigned int drive_code);
-unsigned int disk_Size(char drive);
-void         Disk_Read(unsigned int lba, unsigned int number, void *buffer, char drive);
-void         Disk_Write(unsigned int lba, unsigned int number, void *buffer, char drive);
-bool         CDROM_Read(unsigned int lba, unsigned int number, void *buffer, char drive);
-bool         DiskReady(char drive);
-int          getReadyDisk();
+void sysinit();
+bool SetDrive(u8 *name);
+u32  GetDriveCode(u8 *name);
+bool DriveSemaphoreTake(u32 drive_code);
+void DriveSemaphoreGive(u32 drive_code);
+u32  disk_Size(char drive);
+void Disk_Read(u32 lba, u32 number, void *buffer, char drive);
+void Disk_Write(u32 lba, u32 number, void *buffer, char drive);
+bool CDROM_Read(u32 lba, u32 number, void *buffer, char drive);
+bool DiskReady(char drive);
+int  getReadyDisk();
 
 // kernelc.c
 void        shell(void);
@@ -237,7 +236,7 @@ void        tty_stop_cursor_moving(struct tty *t);
 void        tty_start_curor_moving(struct tty *t);
 
 // mem.c
-unsigned int memtest(unsigned int start, unsigned int end);
+u32          memtest(u32 start, u32 end);
 freeinfo    *make_next_freeinfo(memory *mem);
 free_member *mem_insert(int pos, freeinfo *finf);
 free_member *mem_add(freeinfo *finf);
@@ -255,14 +254,14 @@ void         free(void *p);
 void        *realloc(void *ptr, uint32_t size);
 
 // ipc.c
-int          send_ipc_message(int to_tid, void *data, unsigned int size, char type);
-int          send_ipc_message_by_name(char *tname, void *data, unsigned int size, char type);
-int          get_ipc_message(void *data, int from_tid);
-int          get_ipc_message_by_name(void *data, char *tname);
-int          ipc_message_status();
-unsigned int ipc_message_len(int from_tid);
-bool         have_msg();
-int          get_msg_all(void *data);
+int  send_ipc_message(int to_tid, void *data, u32 size, char type);
+int  send_ipc_message_by_name(char *tname, void *data, u32 size, char type);
+int  get_ipc_message(void *data, int from_tid);
+int  get_ipc_message_by_name(void *data, char *tname);
+int  ipc_message_status();
+u32  ipc_message_len(int from_tid);
+bool have_msg();
+int  get_msg_all(void *data);
 
 // arg.c
 int Get_Arg(char *Arg, char *CmdLine, int Count);
@@ -272,12 +271,12 @@ int Get_Argc(char *CmdLine);
 unsigned time(void);
 
 // rand.c
-unsigned int rand(void);
-void         srand(unsigned long seed);
+u32  rand(void);
+void srand(u32 seed);
 
 // md5.c
 void md5s(char *hexbuf, int read_len, char *result);
-void md5f(char *filename, unsigned char *result);
+void md5f(char *filename, u8 *result);
 
 // lock.c
 bool cas(int *ptr, int old, int New);

@@ -1,6 +1,6 @@
 #include <ELF.h>
 #include <dosldr.h>
-
+void        _IN(int cs, int eip);
 struct TASK MainTask;
 void       *malloc(int size);
 void       *memcpy(void *s, const void *ct, size_t n);
@@ -10,9 +10,9 @@ bool        elf32Validate(Elf32_Ehdr *hdr) {
 }
 void load_segment(Elf32_Phdr *phdr, void *elf) {
   printf("%08x %08x %d\n", phdr->p_vaddr, phdr->p_offset, phdr->p_filesz);
-  memcpy(phdr->p_vaddr, elf + phdr->p_offset, phdr->p_filesz);
+  memcpy((void *)phdr->p_vaddr, elf + phdr->p_offset, phdr->p_filesz);
   if (phdr->p_memsz > phdr->p_filesz) { // 这个是bss段
-    memset(phdr->p_vaddr + phdr->p_filesz, 0, phdr->p_memsz - phdr->p_filesz);
+    memset((void *)(phdr->p_vaddr + phdr->p_filesz), 0, phdr->p_memsz - phdr->p_filesz);
   }
 }
 uint32_t load_elf(Elf32_Ehdr *hdr) {
@@ -44,8 +44,8 @@ int is_ide_device(uint8_t bus, uint8_t device, uint8_t function) {
 }
 int  get_vdisk_type(char drive);
 void DOSLDR_MAIN() {
-  struct MEMMAN *memman = MEMMAN_ADDR;
-  unsigned int   memtotal;
+  struct MEMMAN *memman = (struct MEMMAN *)MEMMAN_ADDR;
+  u32            memtotal;
   memtotal = 128 * 1024 * 1024;
   memman_init(memman);
   memman_free(memman, 0x00600000, memtotal - 0x00600000);
@@ -67,28 +67,27 @@ void DOSLDR_MAIN() {
   register_vdisk(vd);
   ide_initialize(0x1F0, 0x3F6, 0x170, 0x376, 0x000);
   ahci_init();
-  char         default_drive;
-  unsigned int default_drive_number;
+  char default_drive;
+  u32  default_drive_number;
   if (memcmp((void *)"FAT12   ", (void *)0x7c00 + BS_FileSysType, 8) == 0 ||
       memcmp((void *)"FAT16   ", (void *)0x7c00 + BS_FileSysType, 8) == 0) {
-    if (*(unsigned char *)(0x7c00 + BS_DrvNum) >= 0x80) {
-      default_drive_number = *(unsigned char *)(0x7c00 + BS_DrvNum) - 0x80 + 0x02;
+    if (*(u8 *)(0x7c00 + BS_DrvNum) >= 0x80) {
+      default_drive_number = *(u8 *)(0x7c00 + BS_DrvNum) - 0x80 + 0x02;
     } else {
-      default_drive_number = *(unsigned char *)(0x7c00 + BS_DrvNum);
+      default_drive_number = *(u8 *)(0x7c00 + BS_DrvNum);
     }
   } else if (memcmp((void *)"FAT32   ", (void *)0x7c00 + BPB_Fat32ExtByts + BS_FileSysType, 8) ==
              0) {
-    if (*(unsigned char *)(0x7c00 + BPB_Fat32ExtByts + BS_DrvNum) >= 0x80) {
-      default_drive_number =
-          *(unsigned char *)(0x7c00 + BPB_Fat32ExtByts + BS_DrvNum) - 0x80 + 0x02;
+    if (*(u8 *)(0x7c00 + BPB_Fat32ExtByts + BS_DrvNum) >= 0x80) {
+      default_drive_number = *(u8 *)(0x7c00 + BPB_Fat32ExtByts + BS_DrvNum) - 0x80 + 0x02;
     } else {
-      default_drive_number = *(unsigned char *)(0x7c00 + BPB_Fat32ExtByts + BS_DrvNum);
+      default_drive_number = *(u8 *)(0x7c00 + BPB_Fat32ExtByts + BS_DrvNum);
     }
   } else {
-    if (*(unsigned char *)(0x7c00) >= 0x80) {
-      default_drive_number = *(unsigned char *)(0x7c00) - 0x80 + 0x02;
+    if (*(u8 *)(0x7c00) >= 0x80) {
+      default_drive_number = *(u8 *)(0x7c00) - 0x80 + 0x02;
     } else {
-      default_drive_number = *(unsigned char *)(0x7c00);
+      default_drive_number = *(u8 *)(0x7c00);
     }
   }
   default_drive = default_drive_number + 0x41;
@@ -110,13 +109,13 @@ void DOSLDR_MAIN() {
       ;
   }
   // printf("fp = %08x\n%d\n",fp, fp->size);
-  unsigned char *s = page_malloc(sz);
+  u8 *s = page_malloc(sz);
   printf("Will load in %08x size = %08x\n", s, sz);
   vfs_readfile(path, s);
   printf("Loading...\n");
   uint32_t entry = load_elf((Elf32_Ehdr *)s);
 
-  // printf("ESP:%08x\n", *(unsigned int *)(0x00280000 + 12));
+  // printf("ESP:%08x\n", *(u32 *)(0x00280000 + 12));
   _IN(2 * 8, entry);
 }
 struct TASK *NowTask() {

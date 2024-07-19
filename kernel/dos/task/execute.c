@@ -25,8 +25,8 @@ void task_app() {
   char *kbuf  = (char *)page_malloc_one();
   char *mbuf  = (char *)page_malloc_one();
 
-  fifo8_init((struct FIFO8 *)kfifo, 4096, (unsigned char *)kbuf);
-  fifo8_init((struct FIFO8 *)mfifo, 4096, (unsigned char *)mbuf);
+  fifo8_init((struct FIFO8 *)kfifo, 4096, (u8 *)kbuf);
+  fifo8_init((struct FIFO8 *)mfifo, 4096, (u8 *)mbuf);
   task_set_fifo(current_task(), (struct FIFO8 *)kfifo, (struct FIFO8 *)mfifo);
   current_task()->alloc_size    = (uint32_t *)malloc(4);
   current_task()->alloced       = 1;
@@ -36,7 +36,7 @@ void task_app() {
   set_cr3(PDE_ADDRESS);
   logk("P1 %08x\n", current_task()->pde);
   for (int i = DIDX(0x70000000) * 4; i < 0x1000; i += 4) {
-    unsigned int *pde_entry = (unsigned int *)(pde + i);
+    u32 *pde_entry = (u32 *)(pde + i);
 
     if ((*pde_entry & PG_SHARED) || pages[IDX(*pde_entry)].count > 1) {
       // if (pde_entry == 0x08e6b718) {
@@ -57,7 +57,7 @@ void task_app() {
     }
     unsigned p = *pde_entry & (0xfffff000);
     for (int j = 0; j < 0x1000; j += 4) {
-      unsigned int *pte_entry = (unsigned int *)(p + j);
+      u32 *pte_entry = (u32 *)(p + j);
       if ((*pte_entry & PG_SHARED)) {
         *pte_entry &= 0xfffff000;
         *pte_entry |= PG_USU | PG_P;
@@ -78,8 +78,8 @@ void task_shell() {
   char *mfifo = (char *)page_malloc_one();
   char *kbuf  = (char *)page_malloc_one();
   char *mbuf  = (char *)page_malloc_one();
-  fifo8_init((struct FIFO8 *)kfifo, 4096, (unsigned char *)kbuf);
-  fifo8_init((struct FIFO8 *)mfifo, 4096, (unsigned char *)mbuf);
+  fifo8_init((struct FIFO8 *)kfifo, 4096, (u8 *)kbuf);
+  fifo8_init((struct FIFO8 *)mfifo, 4096, (u8 *)mbuf);
   task_set_fifo(current_task(), (struct FIFO8 *)kfifo, (struct FIFO8 *)mfifo);
   current_task()->alloc_size    = (uint32_t *)malloc(4);
   current_task()->alloced       = 1;
@@ -89,7 +89,7 @@ void task_shell() {
   io_cli();
   set_cr3(PDE_ADDRESS);
   for (int i = DIDX(0x70000000) * 4; i < 0x1000; i += 4) {
-    unsigned int *pde_entry = (unsigned int *)(pde + i);
+    u32 *pde_entry = (u32 *)(pde + i);
     if ((*pde_entry & PG_SHARED) || pages[IDX(*pde_entry)].count > 1) {
 
       if (pages[IDX(*pde_entry)].count > 1) {
@@ -107,7 +107,7 @@ void task_shell() {
     }
     unsigned p = *pde_entry & (0xfffff000);
     for (int j = 0; j < 0x1000; j += 4) {
-      unsigned int *pte_entry = (unsigned int *)(p + j);
+      u32 *pte_entry = (u32 *)(p + j);
       if ((*pte_entry & PG_SHARED)) {
         *pte_entry &= 0xfffff000;
         *pte_entry |= PG_USU | PG_P;
@@ -170,8 +170,8 @@ void task_to_user_mode_shell() {
   alloc_addr           += 128 * 0x1000;
   iframe->esp           = alloced_esp;
   page_link(0xf0000000);
-  *(unsigned char *)(0xf0000000) = 1;
-  current_task()->alloc_addr     = alloc_addr;
+  *(u8 *)(0xf0000000)        = 1;
+  current_task()->alloc_addr = alloc_addr;
 
   iframe->eip               = load_elf(p);
   current_task()->user_mode = 1;
@@ -241,10 +241,10 @@ void task_to_user_mode_elf(char *filename) {
   iframe->esp           = alloced_esp;
   if (current_task()->ptid != -1) {
     page_link(0xf0000000);
-    *(unsigned char *)(0xf0000000) = 0;
+    *(u8 *)(0xf0000000) = 0;
   }
-  // *(unsigned int *)(0xb5000000) = 2;
-  // logk("value = %08x\n",*(unsigned int *)(0xb5000000));
+  // *(u32 *)(0xb5000000) = 2;
+  // logk("value = %08x\n",*(u32 *)(0xb5000000));
   current_task()->alloc_addr = alloc_addr;
   iframe->eip                = load_elf(p);
   logk("eip = %08x\n", &(iframe->eip));

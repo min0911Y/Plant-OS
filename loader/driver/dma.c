@@ -6,39 +6,36 @@
 
 /* 定义用于访问一个整数的上位和下位字节。 */
 #define LOW_BYTE(x) (x & 0x00FF)
-#define HI_BYTE(x) ((x & 0xFF00) >> 8)
+#define HI_BYTE(x)  ((x & 0xFF00) >> 8)
 
 /* 每个DMA通道的快速访问寄存器和端口。 */
-unsigned char MaskReg[8] = {0x0A, 0x0A, 0x0A, 0x0A, 0xD4, 0xD4, 0xD4, 0xD4};
-unsigned char ModeReg[8] = {0x0B, 0x0B, 0x0B, 0x0B, 0xD6, 0xD6, 0xD6, 0xD6};
-unsigned char ClearReg[8] = {0x0C, 0x0C, 0x0C, 0x0C, 0xD8, 0xD8, 0xD8, 0xD8};
+u8 MaskReg[8]  = {0x0A, 0x0A, 0x0A, 0x0A, 0xD4, 0xD4, 0xD4, 0xD4};
+u8 ModeReg[8]  = {0x0B, 0x0B, 0x0B, 0x0B, 0xD6, 0xD6, 0xD6, 0xD6};
+u8 ClearReg[8] = {0x0C, 0x0C, 0x0C, 0x0C, 0xD8, 0xD8, 0xD8, 0xD8};
 
-unsigned char PagePort[8] = {0x87, 0x83, 0x81, 0x82, 0x8F, 0x8B, 0x89, 0x8A};
-unsigned char AddrPort[8] = {0x00, 0x02, 0x04, 0x06, 0xC0, 0xC4, 0xC8, 0xCC};
-unsigned char CountPort[8] = {0x01, 0x03, 0x05, 0x07, 0xC2, 0xC6, 0xCA, 0xCE};
+u8 PagePort[8]  = {0x87, 0x83, 0x81, 0x82, 0x8F, 0x8B, 0x89, 0x8A};
+u8 AddrPort[8]  = {0x00, 0x02, 0x04, 0x06, 0xC0, 0xC4, 0xC8, 0xCC};
+u8 CountPort[8] = {0x01, 0x03, 0x05, 0x07, 0xC2, 0xC6, 0xCA, 0xCE};
 
-void _dma_xfer(unsigned char DMA_channel, unsigned char page,
-               unsigned int offset, unsigned int length, unsigned char mode);
+void _dma_xfer(u8 DMA_channel, u8 page, u32 offset, u32 length, u8 mode);
 
-void dma_xfer(unsigned char channel, unsigned long address, unsigned int length,
-              unsigned char read) {
-  unsigned char page = 0, mode = 0;
-  unsigned int offset = 0;
+void dma_xfer(u8 channel, u32 address, u32 length, u8 read) {
+  u8  page = 0, mode = 0;
+  u32 offset = 0;
 
   if (read)
     mode = 0x48 + channel;
   else
     mode = 0x44 + channel;
 
-  page = address >> 16;
+  page   = address >> 16;
   offset = address & 0xFFFF;
   length--;
 
   _dma_xfer(channel, page, offset, length, mode);
 }
 
-void _dma_xfer(unsigned char DMA_channel, unsigned char page,
-               unsigned int offset, unsigned int length, unsigned char mode) {
+void _dma_xfer(u8 DMA_channel, u8 page, u32 offset, u32 length, u8 mode) {
   /* 我们不想别的事情来打扰 */
   asm("cli");
 

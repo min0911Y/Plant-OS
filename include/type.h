@@ -142,6 +142,8 @@ typedef float128_t f128;
 typedef intmax_t  imax_t;
 typedef uintmax_t umax_t;
 
+typedef int errno_t;
+
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //~ 复数
 
@@ -380,10 +382,6 @@ enum {
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //~ 原子类型
-
-#if NO_STD || !defined(__cplusplus)
-// #  define atomic _Atomic
-#endif
 
 #if NO_STD || !defined(__cplusplus)
 #  define atomic_thread_fence(mo)  __atomic_thread_fence(mo)

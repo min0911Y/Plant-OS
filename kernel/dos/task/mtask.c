@@ -169,24 +169,23 @@ mtask *create_task(unsigned eip, unsigned esp, unsigned ticks, unsigned floor) {
   if (!flags_once) {
     if (memcmp((void *)"FAT12   ", (void *)0x7c00 + BS_FileSysType, 8) == 0 ||
         memcmp((void *)"FAT16   ", (void *)0x7c00 + BS_FileSysType, 8) == 0) {
-      if (*(unsigned char *)(0x7c00 + BS_DrvNum) >= 0x80) {
-        default_drive_number = *(unsigned char *)(0x7c00 + BS_DrvNum) - 0x80 + 0x02;
+      if (*(u8 *)(0x7c00 + BS_DrvNum) >= 0x80) {
+        default_drive_number = *(u8 *)(0x7c00 + BS_DrvNum) - 0x80 + 0x02;
       } else {
-        default_drive_number = *(unsigned char *)(0x7c00 + BS_DrvNum);
+        default_drive_number = *(u8 *)(0x7c00 + BS_DrvNum);
       }
     } else if (memcmp((void *)"FAT32   ", (void *)0x7c00 + BPB_Fat32ExtByts + BS_FileSysType, 8) ==
                0) {
-      if (*(unsigned char *)(0x7c00 + BPB_Fat32ExtByts + BS_DrvNum) >= 0x80) {
-        default_drive_number =
-            *(unsigned char *)(0x7c00 + BPB_Fat32ExtByts + BS_DrvNum) - 0x80 + 0x02;
+      if (*(u8 *)(0x7c00 + BPB_Fat32ExtByts + BS_DrvNum) >= 0x80) {
+        default_drive_number = *(u8 *)(0x7c00 + BPB_Fat32ExtByts + BS_DrvNum) - 0x80 + 0x02;
       } else {
-        default_drive_number = *(unsigned char *)(0x7c00 + BPB_Fat32ExtByts + BS_DrvNum);
+        default_drive_number = *(u8 *)(0x7c00 + BPB_Fat32ExtByts + BS_DrvNum);
       }
     } else {
-      if (*(unsigned char *)(0x7c00) >= 0x80) {
-        default_drive_number = *(unsigned char *)(0x7c00) - 0x80 + 0x02;
+      if (*(u8 *)(0x7c00) >= 0x80) {
+        default_drive_number = *(u8 *)(0x7c00) - 0x80 + 0x02;
       } else {
-        default_drive_number = *(unsigned char *)(0x7c00);
+        default_drive_number = *(u8 *)(0x7c00);
       }
     }
     default_drive = default_drive_number + 0x41;
@@ -557,7 +556,7 @@ int task_fork() {
   memcpy(m, current_task(), sizeof(mtask));
   unsigned stack = page_malloc(STACK_SIZE);
   change_page_task_id(tid, stack, STACK_SIZE);
-  // unsigned int off = m->top - (unsigned)m->esp;
+  // u32 off = m->top - (unsigned)m->esp;
   memcpy(stack, m->top - STACK_SIZE, STACK_SIZE);
   logk("s = %08x \n", m->top - STACK_SIZE);
   m->top = stack += STACK_SIZE;

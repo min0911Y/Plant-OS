@@ -268,12 +268,12 @@ static int parse_vt100(struct tty *res, char *string) {
       if (delta[0] >= 30 && delta[0] <= 37) { // foreground color
         if (res->color_saved == -1) res->color_saved = res->color;
         res->color &= 0xf0;
-        res->color |= (unsigned char)(delta[0] - 30);
+        res->color |= (u8)(delta[0] - 30);
         return 1;
       } else if (delta[0] >= 40 && delta[0] <= 47) {
         if (res->color_saved == -1) res->color_saved = res->color;
         res->color &= 0x0f;
-        res->color |= (unsigned char)(delta[0] - 40) << 4;
+        res->color |= (u8)(delta[0] - 40) << 4;
         return 1;
       } else {
         return 0;
@@ -284,12 +284,12 @@ static int parse_vt100(struct tty *res, char *string) {
       if (delta[1] >= 30 && delta[1] <= 37) { // foreground color
         if (res->color_saved == -1) { res->color_saved = res->color; }
         res->color &= 0xf0;
-        res->color |= (unsigned char)(delta[1] - 30 + 8);
+        res->color |= (u8)(delta[1] - 30 + 8);
         return 1;
       } else if (delta[1] >= 40 && delta[1] <= 47) {
         if (res->color_saved == -1) res->color_saved = res->color;
         res->color &= 0x0f;
-        res->color |= (unsigned char)(delta[1] - 40 + 8) << 4;
+        res->color |= (u8)(delta[1] - 40 + 8) << 4;
         return 1;
       } else {
         return 0;
@@ -440,7 +440,7 @@ void gotoxy(int x1, int y1) {
   }
 }
 
-void Text_Draw_Box(int x, int y, int x1, int y1, unsigned char color) {
+void Text_Draw_Box(int x, int y, int x1, int y1, u8 color) {
   mtask *task = current_task();
   if (task->TTY->is_using != 1) {
     tty_default->Draw_Box(tty_default, x, y, x1, y1, color);

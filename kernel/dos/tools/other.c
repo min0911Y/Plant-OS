@@ -61,10 +61,10 @@ void SetCatchEip(uint32_t eip) {
     current_task()->CatchEIP = eip;
   }
 }
-void print_32bits_ascil(unsigned int n);
+void print_32bits_ascil(u32 n);
 // 保护模式调用BIOS中断的驱动
-void INT(unsigned char intnum, regs16_t *regs) {
-  extern unsigned char      *IVT;
+void INT(u8 intnum, regs16_t *regs) {
+  extern u8                 *IVT;
   struct SEGMENT_DESCRIPTOR *gdt = (struct SEGMENT_DESCRIPTOR *)ADR_GDT;
   // logk("%08x\n",current_task()->pde);
   set_segmdesc(gdt + 1000, 0xffffffff, 0, AR_CODE32_ER); // CODE32
@@ -311,7 +311,7 @@ void strtoupper(char *str) {
     str++;
   }
 }
-int GetCHorEN(unsigned char *str) {
+int GetCHorEN(u8 *str) {
   // 获取这个字符是中文全角还是英文半角
   if (str[0] > 0x80 && str[1] > 0x80) {
     return 1;
@@ -329,7 +329,7 @@ void clean(char *s, int len) {
   }
   return;
 }
-void print_32bits_ascil(unsigned int n) {
+void print_32bits_ascil(u32 n) {
   char str[32];
   int  i = 0;
   for (i = 0; i < 4; i++) {

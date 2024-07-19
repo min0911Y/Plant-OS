@@ -12,17 +12,17 @@ typedef struct {
 } HttpFile;
 List *httpFileList;
 extern struct ide_device {
-  unsigned char  Reserved;     // 0 (Empty) or 1 (This Drive really exists).
-  unsigned char  Channel;      // 0 (Primary Channel) or 1 (Secondary Channel).
-  unsigned char  Drive;        // 0 (Master Drive) or 1 (Slave Drive).
-  unsigned short Type;         // 0: ATA, 1:ATAPI.
-  unsigned short Signature;    // Drive Signature
-  unsigned short Capabilities; // Features.
-  unsigned int   CommandSets;  // Command Sets Supported.
-  unsigned int   Size;         // Size in Sectors.
-  unsigned char  Model[41];    // Model in string.
+  u8  Reserved;     // 0 (Empty) or 1 (This Drive really exists).
+  u8  Channel;      // 0 (Primary Channel) or 1 (Secondary Channel).
+  u8  Drive;        // 0 (Master Drive) or 1 (Slave Drive).
+  u16 Type;         // 0: ATA, 1:ATAPI.
+  u16 Signature;    // Drive Signature
+  u16 Capabilities; // Features.
+  u32 CommandSets;  // Command Sets Supported.
+  u32 Size;         // Size in Sectors.
+  u8  Model[41];    // Model in string.
 } ide_devices[4];
-unsigned char *ramdisk;
+u8 *ramdisk;
 typedef struct base_address_register {
   int      prefetchable;
   uint8_t *address;
@@ -32,11 +32,11 @@ typedef struct base_address_register {
 base_address_register get_base_address_register(uint8_t bus, uint8_t device, uint8_t function,
                                                 uint8_t bar);
 /* vdisk的RW测试函数 */
-void TestRead(char drive, unsigned char *buffer, unsigned int number, unsigned int lba) {
+void                  TestRead(char drive, u8 *buffer, u32 number, u32 lba) {
   // printk("TestRW:Read Lba %d,Read Sectors number %d\n", lba, number);
   memcpy(buffer, ramdisk + lba * 512, number * 512);
 }
-void TestWrite(char drive, unsigned char *buffer, unsigned int number, unsigned int lba) {
+void TestWrite(char drive, u8 *buffer, u32 number, u32 lba) {
   // printk("TestRW:Write Lba %d,Write Sectors number %d\n", lba, number);
   memcpy(ramdisk + lba * 512, buffer, number * 512);
 }
@@ -58,8 +58,8 @@ static void UDP_Socket_Handler(struct Socket *socket, void *base) {
          (uint8_t)(socket->remoteIP), socket->remotePort, data);
 }
 /* 如果开启了HTTP命令，那么接收到HTTP请求会调用这个函数 */
-static unsigned char *html_file;
-static void           HTTP_Socket_Handler(struct Socket *socket, void *base) {
+static u8  *html_file;
+static void HTTP_Socket_Handler(struct Socket *socket, void *base) {
   /* 声明，获取各个协议的标头和数据 */
   struct IPV4Message *ipv4 = (struct IPV4Message *)(base + sizeof(struct EthernetFrame_head));
   struct TCPMessage  *tcp =
@@ -69,31 +69,30 @@ static void           HTTP_Socket_Handler(struct Socket *socket, void *base) {
                   (tcp->headerLength * 4);
   if (http_check(data, size).ok) { // 是HTTP GetHeader
     /* 标头信息 */
-    unsigned char head[500]      = "HTTP/1.1 200 OK\r\n";
-    unsigned char content_type[] = "Content-Type: text/html\r\n";
-    unsigned char content_length[100];
-    unsigned char date[100];
+    u8 head[500]      = "HTTP/1.1 200 OK\r\n";
+    u8 content_type[] = "Content-Type: text/html\r\n";
+    u8 content_length[100];
+    u8 date[100];
     printk("Is Http get header!\n");
     if (strlen(http_check(data, size).path) == 1) { // 只有一个字符，那只能是"/"
       printk("root\n");                             // 根目录
       HttpFile *f = (HttpFile *)FindForCount(1, httpFileList)->val; // 第一个文件就是根目录
       printk("f->path = %s\n", f->path);
-      html_file = (unsigned char *)f->buf; // 设置html_file的地址
+      html_file = (u8 *)f->buf; // 设置html_file的地址
     } else {
       printk("Not root.\n"); // 不是根目录
       for (int i = 1; FindForCount(i, httpFileList) != NULL; i++) {
         HttpFile *f = (HttpFile *)FindForCount(i, httpFileList)->val;
         if (strcmp(f->path, http_check(data, size).path + 1) == 0) { // 判断网站是否有这个文件
-          html_file = (unsigned char *)f->buf;                       // 有，直接返回
+          html_file = (u8 *)f->buf;                                  // 有，直接返回
           goto OK;
         }
       }
-      html_file = (unsigned char
-                       *)("<html><head><title>404 Not Found</title></head><body "
-                                    "bgcolor= white"
-                                    "><center><h1>404 Not "
-                                    "Found</h1></center><hr><center>Powerint DOS "
-                                    "HTTP Server</center></body></html>"); // 啊，没有呢，那就只能给404页面了
+      html_file = (u8 *)("<html><head><title>404 Not Found</title></head><body "
+                         "bgcolor= white"
+                         "><center><h1>404 Not "
+                         "Found</h1></center><hr><center>Powerint DOS "
+                         "HTTP Server</center></body></html>"); // 啊，没有呢，那就只能给404页面了
       strcpy((char *)head, "HTTP/1.1 404 Not Found\r\n"); // 顺便修改一下head
     }
   OK:
@@ -106,16 +105,16 @@ static void           HTTP_Socket_Handler(struct Socket *socket, void *base) {
     strcat((char *)head, "\r\n");
     strcat((char *)head, "\r\n");
     printk("%s", (char *)head);
-    // unsigned char *head = "HTTP/1.1 200 OK\r\n";
-    unsigned char *packet = (unsigned char *)page_malloc(
-        strlen((char *)head) + strlen((char *)html_file) + 1); // 声明最终的packet发送的数据
+    // u8 *head = "HTTP/1.1 200 OK\r\n";
+    u8 *packet = (u8 *)page_malloc(strlen((char *)head) + strlen((char *)html_file) +
+                                   1); // 声明最终的packet发送的数据
     memcpy((void *)packet, (void *)head, strlen((char *)head)); // HTTP 标头
     memcpy((void *)(packet + strlen((char *)head)), (void *)html_file,
-                     strlen((char *)html_file)); // html文件数据
+           strlen((char *)html_file)); // html文件数据
     packet[strlen((char *)head) + strlen((char *)html_file) + 1] =
         0; // 字符串结束符（为了下面调用的strlen函数）
     socket->Send(socket, packet,
-                           strlen((char *)packet) + 1); // 调用Socket API发送
+                 strlen((char *)packet) + 1); // 调用Socket API发送
   } else {
     printk("isn't http get header\n"); // 不是HTTP get header
   }
@@ -139,9 +138,9 @@ static void SocketServerLoop(struct SocketServer *server) { // Socket Server（H
   }
 }
 /* 用UDP协议传输文件 */
-static unsigned int   fudp_size;
-static unsigned char *fudp_buffer;
-static void           FUDP_Socket_Handler(struct Socket *socket, void *base) {
+static u32  fudp_size;
+static u8  *fudp_buffer;
+static void FUDP_Socket_Handler(struct Socket *socket, void *base) {
   /* 获取数据并拷贝到fudp_buffer中 */
   struct IPV4Message *ipv4 = (struct IPV4Message *)(base + sizeof(struct EthernetFrame_head));
   (void)(ipv4);
@@ -547,7 +546,7 @@ int command_run(char *cmdline) {
   //     // io_cli();
   //     // struct TASK* task = AddUserTask("UsrTask", 1, 1146 * 8,
   //     usertasktest,
-  //     // 1145*8,1145*8,(unsigned int)malloc(16*1024)+16*1024); task->tss.ss0
+  //     // 1145*8,1145*8,(u32)malloc(16*1024)+16*1024); task->tss.ss0
   //     =
   //     // 1*8; task->tss.esp0 = malloc(16*1024)+16*1024; io_sti();
   //   } else if(stricmp("SHOW_HEAP",cmdline) == 0) {
@@ -603,14 +602,14 @@ int command_run(char *cmdline) {
   //     cmd_tl();
   //     return;
   //   } else if (strincmp("MD5S ", cmdline, 5) == 0) {
-  //     unsigned char r[16];
+  //     u8 r[16];
   //     printk("\"%s\" = ", cmdline + 5);
   //     md5s(cmdline + 5, strlen(cmdline + 5), (char*)r);
   //     for (int i = 0; i < 16; i++)
   //       printk("%02x", r[i]);
   //     printk("\n");
   //   } else if (strincmp("MD5F ", cmdline, 5) == 0) {
-  //     unsigned char r[16];
+  //     u8 r[16];
   //     printk("\"%s\" = ", cmdline + 5);
   //     md5f(cmdline + 5, r);
   //     for (int i = 0; i < 16; i++)
@@ -761,7 +760,7 @@ int command_run(char *cmdline) {
   //       ;
   //   } else if (strincmp("COLOR ", cmdline, 6) == 0) {
   //     struct TASK* task = current_task();
-  //     unsigned char c = (ascii2num(cmdline[6]) << 4) + ascii2num(cmdline[7]);
+  //     u8 c = (ascii2num(cmdline[6]) << 4) + ascii2num(cmdline[7]);
   //     Text_Draw_Box(0, 0, task->TTY->xsize, task->TTY->ysize, c);
   //     task->TTY->color = c;
   //   } else if (strincmp("MKFILE ", cmdline, 7) == 0) {
@@ -886,8 +885,8 @@ void show_heap(memory *mem) {
 }
 
 void pci_list() {
-  extern int     PCI_ADDR_BASE;
-  unsigned char *pci_drive = (unsigned char *)PCI_ADDR_BASE;
+  extern int PCI_ADDR_BASE;
+  u8        *pci_drive = (u8 *)PCI_ADDR_BASE;
   //输出PCI表的内容
   for (int line = 0;; pci_drive += 0x110 + 4, line++) {
     if (pci_drive[0] == 0xff)

@@ -105,7 +105,7 @@ floppy_int:
 		sti
     IRETD
 
-memtest_sub:	; unsigned int memtest_sub(unsigned int start, unsigned int end)
+memtest_sub:	; u32 memtest_sub(u32 start, u32 end)
 		CLI
 		PUSH	EDI						; （由于还要使用EBX, ESI, EDI）
 		PUSH	ESI

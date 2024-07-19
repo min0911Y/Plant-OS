@@ -1,15 +1,15 @@
-#ifndef _STDIO_H
-#define _STDIO_H
+#pragma once
+#include <copi143-define.h>
+#include <type.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-#include <stdarg.h>
 int printk(const char *format, ...);
 int sprintf(char *s, const char *format, ...);
 int vsprintf(char *s, const char *format, va_list arg);
-int vsnprintf(char *str, unsigned int size, const char *format, va_list ap);
-int snprintf(char *str, unsigned int size, const char *format, ...);
+int vsnprintf(char *str, u32 size, const char *format, va_list ap);
+int snprintf(char *str, u32 size, const char *format, ...);
 #ifdef __cplusplus
 }
-#endif
 #endif

@@ -1,12 +1,12 @@
 /* 网络粘合层 */
 #include <dos.h>
 extern uint8_t mac0, mac1, mac2, mac3, mac4, mac5;
-unsigned long  strtoul(const char *str, char **endptr, int base);
+u32            strtoul(const char *str, char **endptr, int base);
 void           Rtl8139Send(uint8_t *buffer, int size);
 typedef struct {
   bool (*find)();
   void (*init)();
-  void (*Send)(unsigned char *buffer, unsigned int size);
+  void (*Send)(u8 *buffer, u32 size);
   char card_name[50];
   int  use; // 正在使用
   int  flag;
@@ -24,7 +24,7 @@ static uint32_t Find_IP_Packet(uint16_t ident) {
   }
   return -1;
 }
-static void IP_Assembling(struct IPV4Message *ipv4, unsigned char *RawData) {
+static void IP_Assembling(struct IPV4Message *ipv4, u8 *RawData) {
   uint32_t            i_p = Find_IP_Packet(swap16(ipv4->ident));
   struct IPV4Message *ipv4_p =
       (struct IPV4Message *)(IP_Packet_Base[i_p] + sizeof(struct EthernetFrame_head));
@@ -96,7 +96,7 @@ void init_card() {
   }
 }
 
-void netcard_send(unsigned char *buffer, unsigned int size) {
+void netcard_send(u8 *buffer, u32 size) {
   for (int i = 0; i < 25; i++) {
     if (network_card_CTL[i].use) {
       if (DriveSemaphoreTake(GetDriveCode("NETCARD_DRIVE"))) {
@@ -110,7 +110,7 @@ void netcard_send(unsigned char *buffer, unsigned int size) {
   }
 }
 
-void Card_Recv_Handler(unsigned char *RawData) {
+void Card_Recv_Handler(u8 *RawData) {
   struct EthernetFrame_head *header = (struct EthernetFrame_head *)(RawData);
   if (header->type == swap16(IP_PROTOCOL)) { // IP数据报
     struct IPV4Message *ipv4 = (struct IPV4Message *)(RawData + sizeof(struct EthernetFrame_head));

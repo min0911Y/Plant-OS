@@ -1,7 +1,8 @@
-﻿#include <io.h>
+﻿#include <dos.h>
+#include <io.h>
 // 画空心圆
-void Draw_Circle_Hollow_32(unsigned char *vram, int xsize, int x, int y, int r, int Cr, int Cg,
-                           int Cb, int br, int bg, int bb) {
+void Draw_Circle_Hollow_32(u8 *vram, int xsize, int x, int y, int r, int Cr, int Cg, int Cb, int br,
+                           int bg, int bb) {
   int i, j;
   int flag;
   for (i = 0; i <= r; i++) {
@@ -30,7 +31,7 @@ void Draw_Circle_Hollow_32(unsigned char *vram, int xsize, int x, int y, int r, 
   }
 }
 // 转换灰白色
-void black(unsigned char *vram, int xsize, int ysize) {
+void black(u8 *vram, int xsize, int ysize) {
   int i, j;
   int x, y;
   int r, g, b;
@@ -48,15 +49,15 @@ void black(unsigned char *vram, int xsize, int ysize) {
     }
   }
 }
-void PUTCHINESE(int x, int y, char color, unsigned short CH) {
-  int            i, j, k, offset;
-  int            flag;
-  unsigned char  buffer[32];
-  unsigned char  word[2] = {CH & 0xff, (CH & 0xff00) >> 8};
-  unsigned char  key[8]  = {0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01};
-  unsigned char *p       = hzkfont;
-  offset                 = (94 * (unsigned int)(word[0] - 0xa0 - 1) + (word[1] - 0xa0 - 1)) * 32;
-  p                      = p + offset;
+void PUTCHINESE(int x, int y, char color, u16 CH) {
+  int i, j, k, offset;
+  int flag;
+  u8  buffer[32];
+  u8  word[2] = {CH & 0xff, (CH & 0xff00) >> 8};
+  u8  key[8]  = {0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01};
+  u8 *p       = hzkfont;
+  offset      = (94 * (u32)(word[0] - 0xa0 - 1) + (word[1] - 0xa0 - 1)) * 32;
+  p           = p + offset;
   for (i = 0; i < 32; i++) {
     buffer[i] = p[i];
   }
@@ -69,15 +70,15 @@ void PUTCHINESE(int x, int y, char color, unsigned short CH) {
     }
   }
 }
-void PUTCHINESE0(vram_t *vram, int x, int y, color_t color, unsigned short CH, int xsize) {
-  int            i, j, k, offset;
-  int            flag;
-  unsigned char  buffer[32];
-  unsigned char  word[2] = {CH & 0xff, (CH & 0xff00) >> 8}; // 将字符转换为两个字节
-  unsigned char  key[8]  = {0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01};
-  unsigned char *p       = hzkfont;
-  offset                 = (94 * (unsigned int)(word[0] - 0xa0 - 1) + (word[1] - 0xa0 - 1)) * 32;
-  p                      = p + offset;
+void PUTCHINESE0(vram_t *vram, int x, int y, color_t color, u16 CH, int xsize) {
+  int i, j, k, offset;
+  int flag;
+  u8  buffer[32];
+  u8  word[2] = {CH & 0xff, (CH & 0xff00) >> 8}; // 将字符转换为两个字节
+  u8  key[8]  = {0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01};
+  u8 *p       = hzkfont;
+  offset      = (94 * (u32)(word[0] - 0xa0 - 1) + (word[1] - 0xa0 - 1)) * 32;
+  p           = p + offset;
   //读取，并写入到vram中
   for (i = 0; i < 32; i++) {
     buffer[i] = p[i];
@@ -94,35 +95,35 @@ void PUTCHINESE0(vram_t *vram, int x, int y, color_t color, unsigned short CH, i
     }
   }
 }
-void PrintChineseChar(int x, int y, char color, unsigned short Cchar) {
+void PrintChineseChar(int x, int y, char color, u16 Cchar) {
   //提供PUTCHINESE的更深一层调用（XY）
   PUTCHINESE(x * 16, y * 16, color, Cchar);
 }
-void PutChineseChar0(vram_t *vram, int xsize, int x, int y, color_t color, unsigned short cChar) {
+void PutChineseChar0(vram_t *vram, int xsize, int x, int y, color_t color, u16 cChar) {
   PUTCHINESE0(vram, x * 16, y * 16, color, cChar, xsize);
 }
-void PutChineseStr0(vram_t *vram, int xsize, int x, int y, color_t color, unsigned char *str) {
+void PutChineseStr0(vram_t *vram, int xsize, int x, int y, color_t color, u8 *str) {
   int i;
   for (i = 0; i < strlen(str); i += 2) {
-    unsigned char cstr[3] = {str[i], str[i + 1]};
+    u8 cstr[3] = {str[i], str[i + 1]};
     PUTCHINESE0(vram, x + i * 8, y, color, *(short *)(cstr), xsize);
   }
 }
-void PrintChineseStr(int x, int y, char color, unsigned char *str) {
+void PrintChineseStr(int x, int y, char color, u8 *str) {
   int i;
   for (i = 0; i < strlen(str); i += 2) {
-    unsigned char cstr[3] = {str[i], str[i + 1]};
+    u8 cstr[3] = {str[i], str[i + 1]};
     PrintChineseChar(x + i / 2, y, color, *(short *)(cstr));
   }
 }
 void Draw_Px(int x, int y, char color) {
-  unsigned char *vram = (vram_t *)0xA0000;
-  unsigned char *p;
+  u8 *vram = (vram_t *)0xA0000;
+  u8 *p;
   p  = vram + (y * 320 + x);
   *p = color;
   return;
 }
-void Draw_Px_32(unsigned char *buf, int x, int y, char r, char g, char b, int xsize) {
+void Draw_Px_32(u8 *buf, int x, int y, char r, char g, char b, int xsize) {
   // 绘制一个像素点
   int     offset = (x + y * xsize);
   vram_t *vram   = (vram_t *)buf;
@@ -139,8 +140,7 @@ void Draw_Box(int x, int y, int w, int h, char color) {
   return;
 }
 
-void Draw_Box32(unsigned char *vram, int xsize, int x0, int y0, int x1, int y1, int Cr, int Cg,
-                int Cb) {
+void Draw_Box32(u8 *vram, int xsize, int x0, int y0, int x1, int y1, int Cr, int Cg, int Cb) {
   int i, j;
   for (i = x0; i <= x1; i++) {
     for (j = y0; j <= y1; j++) {
@@ -149,10 +149,10 @@ void Draw_Box32(unsigned char *vram, int xsize, int x0, int y0, int x1, int y1, 
   }
 }
 void Draw_Char(int x, int y, char c, char color) {
-  unsigned char *font;
-  font                  = ascfont;
-  font                 += c * 16;
-  unsigned char *vram1  = (unsigned char *)(0xA0000);
+  u8 *font;
+  font       = ascfont;
+  font      += c * 16;
+  u8 *vram1  = (u8 *)(0xA0000);
   for (int i = 0; i < 16; i++) {
     for (int j = 0; j < 8; j++) {
       if (font[i] & (0x80 >> j)) { vram1[(y + i) * 320 + x + j] = color; }
@@ -160,11 +160,11 @@ void Draw_Char(int x, int y, char c, char color) {
   }
   return;
 }
-void Draw_Char_32(unsigned char *vram1, int xsiz, char c, int x, int y, int r, int g, int b) {
-  unsigned char *vram = (vram_t *)vram1;
-  unsigned char *p;
-  unsigned char *font;
-  int            i, j;
+void Draw_Char_32(u8 *vram1, int xsiz, char c, int x, int y, int r, int g, int b) {
+  u8 *vram = (vram_t *)vram1;
+  u8 *p;
+  u8 *font;
+  int i, j;
   font  = ascfont;
   font += c * 16;
   for (i = 0; i < 16; i++) {
@@ -203,7 +203,7 @@ void SDraw_Box(vram_t *vram, int x, int y, int x1, int y1, color_t color, int xs
 void SDraw_Char(vram_t *vram1, int x, int y, char c, color_t color, int xsize) {
   // x *= 8;
   // y *= 16;
-  unsigned char *font;
+  u8 *font;
   font  = ascfont;
   font += c * 16;
   for (int i = 0; i < 16; i++) {
@@ -238,7 +238,7 @@ void putfont(vram_t *vram, int xsize, int x, int y, color_t c, char *font) {
   return;
 }
 
-void putfonts_asc(vram_t *vram, int xsize, int x, int y, color_t c, unsigned char *s) {
+void putfonts_asc(vram_t *vram, int xsize, int x, int y, color_t c, u8 *s) {
   int   flag    = 0;
   char *hankaku = ascfont;
   /* C语言中，字符串都是以0x00结尾 */
@@ -246,7 +246,7 @@ void putfonts_asc(vram_t *vram, int xsize, int x, int y, color_t c, unsigned cha
     if (*s > 0x80 && (*(s + 1) != 0x00 || flag)) {
       if (flag) {
         s--;
-        PUTCHINESE0(vram, x, y, c, *(unsigned short *)(s), xsize);
+        PUTCHINESE0(vram, x, y, c, *(u16 *)(s), xsize);
         x    += 16;
         flag  = 0;
         s++;

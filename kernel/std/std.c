@@ -1,7 +1,7 @@
 #include <dos.h>
 #include <stdio.h>
 #include <string.h>
-void UInt2BinAscii(unsigned int num, char *buf);
+void UInt2BinAscii(u32 num, char *buf);
 #define LONG_MAX 0x7fffffff
 #define LONG_MIN (-LONG_MAX - 1)
 
@@ -62,10 +62,10 @@ void *memset(void *s, int c, size_t n) {
 }
 // strtol
 long strtol(const char *nptr, char **endptr, int base) {
-  long          acc = 0;
-  int           c;
-  unsigned long cutoff;
-  int           neg = 0, any, cutlim;
+  long acc = 0;
+  int  c;
+  u32  cutoff;
+  int  neg = 0, any, cutlim;
 
   /*
    * Skip white space and pick up leading +/- sign if any.
@@ -105,9 +105,9 @@ long strtol(const char *nptr, char **endptr, int base) {
    * a value > 214748364, or equal but the next digit is > 7 (or 8),
    * the number is too big, and we will return a range error.
    */
-  cutoff  = neg ? -(unsigned long)LONG_MIN : LONG_MAX;
-  cutlim  = cutoff % (unsigned long)base;
-  cutoff /= (unsigned long)base;
+  cutoff  = neg ? -(u32)LONG_MIN : LONG_MAX;
+  cutlim  = cutoff % (u32)base;
+  cutoff /= (u32)base;
   for (acc = 0, any = 0;; c = *nptr++) {
     if (isdigit(c))
       c -= '0';
@@ -135,7 +135,7 @@ long strtol(const char *nptr, char **endptr, int base) {
 }
 // memcmp
 int memcmp(const void *s1, const void *s2, size_t n) {
-  const unsigned char *p1 = s1, *p2 = s2;
+  const u8 *p1 = s1, *p2 = s2;
   while (n-- > 0) {
     if (*p1 != *p2) return *p1 - *p2;
     p1++, p2++;
@@ -167,7 +167,7 @@ int isupper(int c) {
 }
 // strncmp
 int strncmp(const char *s1, const char *s2, size_t n) {
-  const unsigned char *p1 = (const unsigned char *)s1, *p2 = (const unsigned char *)s2;
+  const u8 *p1 = (const u8 *)s1, *p2 = (const u8 *)s2;
   while (n-- > 0) {
     if (*p1 != *p2) return *p1 - *p2;
     if (*p1 == '\0') return 0;
@@ -720,43 +720,6 @@ int printk(const char *format, ...) {
   va_end(ap);
   return len;
 }
-void F2S(double d, char *str, int l) {
-  int    n = (int)d; //去掉小数点
-  int    b = 0;
-  int    i, j;
-  double m = d; //
-  char  *buf;
-  buf = malloc(128);
-  sprintf(str, "%d", n);
-  i          = strlen(str);
-  str[i]     = '.'; //小数点
-  str[i + 1] = 0;
-  while (d > 1.0) {
-    d /= 10.0;
-    b++;
-  }
-  for (i = 0; i < l; i++) {
-    m *= 10; //扩大
-  }
-  n = (int)m; //放弃其他小数点
-  sprintf(buf, "%d", n);
-  for (i = b, j = strlen(str); i < strlen(buf); i++, j++) {
-    str[j] = buf[i];
-  }
-  str[j] = 0;
-  free(buf);
-  // 5.55 => 0.555 => <1 = true and b = 1
-  // 1.56 0.156,15.6,156
-}
-// int _Znaj(uint32_t size) {
-//   printk("_Znaj:%d\n", size);
-//   return malloc(size);
-// }
-// void _ZdaPv(void *ptr) {
-//   printk("_ZdaPv:%08x %08x\n", ptr,((uint32_t *)(ptr))[-1]);
-//   free(ptr);
-// }
-// //_ZdlPvj
 void _ZdlPvj(void *ptr, uint32_t size) {
   logk("_ZdlPvj %08x %d\n", ptr, size);
   free(ptr);
@@ -808,7 +771,7 @@ void *memmove(void *dest, const void *src, int n) {
   }
   return dest;
 }
-int vsnprintf(char *str, unsigned int size, const char *format, va_list ap) {
+int vsnprintf(char *str, u32 size, const char *format, va_list ap) {
   return vsprintf(str, format, ap);
 }
 int snprintf(char *str, size_t size, const char *format, ...) {
@@ -822,7 +785,7 @@ void assert(int expression) {
   if (!expression) { logk("AN ERROR\n"); }
 }
 void *memchr(const void *s, int c, size_t n) {
-  unsigned char *p = (unsigned char *)s;
+  u8 *p = (u8 *)s;
   for (; n-- > 0; ++p) {
     if (*p == c) return (void *)p;
   }
@@ -852,8 +815,8 @@ int strincmp(const char *s1, const char *s2, size_t n) {
   free(rs2);
   return result;
 }
-unsigned long int strtoul(const char *nptr, char **endptr, int base) {
-  unsigned long int result = 0;
+u32 strtoul(const char *nptr, char **endptr, int base) {
+  u32 result = 0;
   while (*nptr != '\0') {
     if (*nptr >= '0' && *nptr <= '9') {
       result = result * base + (*nptr - '0');

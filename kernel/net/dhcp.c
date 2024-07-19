@@ -69,7 +69,7 @@ void dhcp_handler(void *base) {
     //printk("IP: %d.%d.%d.%d\n", nip1, nip2, nip3, nip4);
     ip = swap32(ip);
 
-    unsigned char *options = &dhcp->bp_options[0];
+    u8 *options = &dhcp->bp_options[0];
     while (options[0] != 0xff) {
       if (options[0] == MESSAGE_TYPE_DNS) {
         // printk("DNS: %d.%d.%d.%d\n", options[2], options[3], options[4],

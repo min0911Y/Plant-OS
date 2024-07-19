@@ -3,8 +3,8 @@
 #include <ctypes.h>
 #include <stdarg.h>
 #include <stddef.h>
-typedef unsigned int vram_t;
-typedef vram_t       color_t;
+typedef u32    vram_t;
+typedef vram_t color_t;
 
 #define __PACKED__ __attribute__((packed))
 
@@ -42,9 +42,9 @@ typedef vram_t       color_t;
 #define HIGHTEXTMODE         1
 extern struct MOUSE_DEC mdec;
 extern int              gmx, gmy;
-extern unsigned char   *font, *ascfont, *hzkfont;
+extern u8              *font, *ascfont, *hzkfont;
 extern struct TIMERCTL  timerctl;
-extern unsigned int     memsize;
+extern u32              memsize;
 extern uint32_t         running_mode;
 struct PAGE_INFO {
   uint8_t task_id;
@@ -84,13 +84,13 @@ struct mtask;
 typedef struct mtask mtask;
 struct TIMER {
   struct TIMER *next;
-  unsigned int  timeout, flags;
+  u32           timeout, flags;
   struct FIFO8 *fifo;
-  unsigned char data;
+  u8            data;
   mtask        *waiter;
 };
 struct TIMERCTL {
-  unsigned int  count, next;
+  u32           count, next;
   struct TIMER *t0;
   struct TIMER  timers0[MAX_TIMER];
 };
@@ -104,11 +104,11 @@ struct TSS32 {
 #define synchronous     1
 #define asynchronous    2
 typedef struct {
-  void        *data;
-  unsigned int size;
-  int          from_tid;
-  int          flag1;
-  int          flag2;
+  void *data;
+  u32   size;
+  int   from_tid;
+  int   flag1;
+  int   flag2;
 } IPCMessage;
 // lock.c
 typedef struct {
@@ -177,8 +177,8 @@ typedef struct fpu_t {
 //   int drive_number;
 //   char drive;
 //   char *line;
-//   void (*keyboard_press)(unsigned char data, uint32_t task);
-//   void (*keyboard_release)(unsigned char data, uint32_t task);
+//   void (*keyboard_press)(u8 data, uint32_t task);
+//   void (*keyboard_release)(u8 data, uint32_t task);
 //   int nl;
 //   int lock; // 被锁住了？
 //   char forever;
@@ -235,8 +235,8 @@ typedef struct mtask {
   struct FIFO8 *Pkeyfifo, *Ukeyfifo;
   struct FIFO8 *keyfifo, *mousefifo; // 基本输入设备的缓冲区
   char          urgent;
-  void (*keyboard_press)(unsigned char data, uint32_t task);
-  void (*keyboard_release)(unsigned char data, uint32_t task);
+  void (*keyboard_press)(u8 data, uint32_t task);
+  void (*keyboard_release)(u8 data, uint32_t task);
   char          fifosleep;
   int           mx, my;
   char         *line;
@@ -287,8 +287,8 @@ typedef struct intr_frame_t {
 #define PAGE_END      (PTE_ADDRESS + 0x400000)
 #define PAGE_MANNAGER PAGE_END
 struct FIFO8 {
-  unsigned char *buf;
-  int            p, q, size, free, flags;
+  u8 *buf;
+  int p, q, size, free, flags;
 };
 struct ListCtl {
   struct List *start;
@@ -312,21 +312,21 @@ typedef struct List List;
 
 extern uint32_t Path_Addr;
 struct FAT_CACHE {
-  unsigned int         ADR_DISKIMG;
+  u32                  ADR_DISKIMG;
   struct FAT_FILEINFO *root_directory;
   struct List         *directory_list;
   struct List         *directory_clustno_list;
   struct List         *directory_max_list;
   int                 *fat;
   int                  FatMaxTerms;
-  unsigned int         ClustnoBytes;
-  unsigned short       RootMaxFiles;
-  unsigned int         RootDictAddress;
-  unsigned int         FileDataAddress;
-  unsigned int         imgTotalSize;
-  unsigned short       SectorBytes;
-  unsigned int         Fat1Address, Fat2Address;
-  unsigned char       *FatClustnoFlags;
+  u32                  ClustnoBytes;
+  u16                  RootMaxFiles;
+  u32                  RootDictAddress;
+  u32                  FileDataAddress;
+  u32                  imgTotalSize;
+  u16                  SectorBytes;
+  u32                  Fat1Address, Fat2Address;
+  u8                  *FatClustnoFlags;
   int                  type;
 };
 typedef struct {
@@ -345,11 +345,11 @@ typedef enum {
   SYS
 } ftype;
 typedef struct {
-  char           name[255];
-  ftype          type;
-  unsigned int   size;
-  unsigned short year, month, day;
-  unsigned short hour, minute;
+  char  name[255];
+  ftype type;
+  u32   size;
+  u16   year, month, day;
+  u16   hour, minute;
 } vfs_file;
 typedef struct vfs_t {
   List   *path;
@@ -409,33 +409,33 @@ typedef struct vfs_t {
 #define SEEK_CUR         1
 #define SEEK_END         2
 struct FAT_FILEINFO {
-  unsigned char  name[8], ext[3], type;
-  char           reserve;
-  unsigned char  create_time_tenth;
-  unsigned short create_time, create_date, access_date, clustno_high;
-  unsigned short update_time, update_date, clustno_low;
-  unsigned int   size;
+  u8   name[8], ext[3], type;
+  char reserve;
+  u8   create_time_tenth;
+  u16  create_time, create_date, access_date, clustno_high;
+  u16  update_time, update_date, clustno_low;
+  u32  size;
 };
 #define rmfarptr2ptr(x) ((x).seg * 0x10 + (x).offset)
 typedef struct FILE {
-  unsigned int   mode;
-  unsigned int   fileSize;
-  unsigned char *buffer;
-  unsigned int   bufferSize;
-  unsigned int   p;
-  char          *name;
+  u32   mode;
+  u32   fileSize;
+  u8   *buffer;
+  u32   bufferSize;
+  u32   p;
+  char *name;
 } FILE;
 struct DLL_STRPICENV {
   int work[16384];
 };
 struct RGB {
-  unsigned char b, g, r, t;
+  u8 b, g, r, t;
 };
 struct paw_info {
-  unsigned char reserved[12]; // 12 bytes reserved(0xFF)
-  char          oem[3];       // PRA
-  int           xsize;        // xsize
-  int           ysize;        // ysize
+  u8   reserved[12]; // 12 bytes reserved(0xFF)
+  char oem[3];       // PRA
+  int  xsize;        // xsize
+  int  ysize;        // ysize
 };
 
 /* interrupts.h */
@@ -452,8 +452,8 @@ struct paw_info {
 #define PIC1_ICW3 0x00a1
 #define PIC1_ICW4 0x00a1
 typedef struct {
-  unsigned short di, si, bp, sp, bx, dx, cx, ax;
-  unsigned short gs, fs, es, ds, eflags;
+  u16 di, si, bp, sp, bx, dx, cx, ax;
+  u16 gs, fs, es, ds, eflags;
 } regs16_t;
 
 /* io.h */
@@ -474,13 +474,13 @@ typedef enum {
   MODE_m = 'm'
 } vt100_mode_t;
 struct tty {
-  int           is_using;                             // 使用标志
-  void         *vram;                                 // 显存（也可以当做图层）
-  int           x, y;                                 // 目前的 x y 坐标
-  int           xsize, ysize;                         // x 坐标大小 y 坐标大小
-  int           Raw_y;                                // 换行次数
-  int           cur_moving;                           // 光标需要移动吗
-  unsigned char color;                                // 颜色
+  int   is_using;                                     // 使用标志
+  void *vram;                                         // 显存（也可以当做图层）
+  int   x, y;                                         // 目前的 x y 坐标
+  int   xsize, ysize;                                 // x 坐标大小 y 坐标大小
+  int   Raw_y;                                        // 换行次数
+  int   cur_moving;                                   // 光标需要移动吗
+  u8    color;                                        // 颜色
   void (*putchar)(struct tty *res, int c);            // putchar函数
   void (*MoveCursor)(struct tty *res, int x, int y);  // MoveCursor函数
   void (*clear)(struct tty *res);                     // clear函数
@@ -488,10 +488,10 @@ struct tty {
   void (*gotoxy)(struct tty *res, int x, int y);      // gotoxy函数
   void (*print)(struct tty *res, const char *string); // print函数
   void (*Draw_Box)(struct tty *res, int x, int y, int x1, int y1,
-                   unsigned char color); // Draw_Box函数
+                   u8 color); // Draw_Box函数
   int (*fifo_status)(struct tty *res);
   int (*fifo_get)(struct tty *res);
-  unsigned int reserved[4]; // 保留项
+  u32 reserved[4]; // 保留项
 
   //////////////实现VT100需要的//////////////////
 
@@ -503,11 +503,11 @@ struct tty {
   int          color_saved; // 保存的颜色
 };
 struct Input_StacK {
-  char       **Stack;
-  unsigned int Stack_Size;
-  unsigned int free;
-  unsigned int Now;
-  unsigned int times;
+  char **Stack;
+  u32    Stack_Size;
+  u32    free;
+  u32    Now;
+  u32    times;
 };
 #define MAX_SHEETS 256
 struct SHEET {
@@ -519,11 +519,11 @@ struct SHEET {
   void *args;
 };
 struct SHTCTL {
-  vram_t        *vram;
-  unsigned char *map;
-  int            xsize, ysize, top;
-  struct SHEET  *sheets[MAX_SHEETS];
-  struct SHEET   sheets0[MAX_SHEETS];
+  vram_t       *vram;
+  u8           *map;
+  int           xsize, ysize, top;
+  struct SHEET *sheets[MAX_SHEETS];
+  struct SHEET  sheets0[MAX_SHEETS];
 };
 #define COL_000000      0x00000000
 #define COL_FF0000      0x00ff0000
@@ -545,94 +545,94 @@ struct SHTCTL {
 
 /* drivers.h */
 struct ACPI_RSDP {
-  char          Signature[8];
-  unsigned char Checksum;
-  char          OEMID[6];
-  unsigned char Revision;
-  unsigned int  RsdtAddress;
-  unsigned int  Length;
-  unsigned int  XsdtAddress[2];
-  unsigned char ExtendedChecksum;
-  unsigned char Reserved[3];
+  char Signature[8];
+  u8   Checksum;
+  char OEMID[6];
+  u8   Revision;
+  u32  RsdtAddress;
+  u32  Length;
+  u32  XsdtAddress[2];
+  u8   ExtendedChecksum;
+  u8   Reserved[3];
 };
 struct ACPISDTHeader {
-  char          Signature[4];
-  unsigned int  Length;
-  unsigned char Revision;
-  unsigned char Checksum;
-  char          OEMID[6];
-  char          OEMTableID[8];
-  unsigned int  OEMRevision;
-  unsigned int  CreatorID;
-  unsigned int  CreatorRevision;
+  char Signature[4];
+  u32  Length;
+  u8   Revision;
+  u8   Checksum;
+  char OEMID[6];
+  char OEMTableID[8];
+  u32  OEMRevision;
+  u32  CreatorID;
+  u32  CreatorRevision;
 };
 struct ACPI_RSDT {
   struct ACPISDTHeader header;
-  unsigned int         Entry;
+  u32                  Entry;
 };
 typedef struct {
-  unsigned char AddressSpace;
-  unsigned char BitWidth;
-  unsigned char BitOffset;
-  unsigned char AccessSize;
-  unsigned int  Address[2];
+  u8  AddressSpace;
+  u8  BitWidth;
+  u8  BitOffset;
+  u8  AccessSize;
+  u32 Address[2];
 } GenericAddressStructure;
 struct ACPI_FADT {
   struct ACPISDTHeader h;
-  unsigned int         FirmwareCtrl;
-  unsigned int         Dsdt;
+  u32                  FirmwareCtrl;
+  u32                  Dsdt;
 
   // field used in ACPI 1.0; no longer in use, for compatibility only
-  unsigned char Reserved;
+  u8 Reserved;
 
-  unsigned char  PreferredPowerManagementProfile;
-  unsigned short SCI_Interrupt;
-  unsigned int   SMI_CommandPort;
-  unsigned char  AcpiEnable;
-  unsigned char  AcpiDisable;
-  unsigned char  S4BIOS_REQ;
-  unsigned char  PSTATE_Control;
-  unsigned int   PM1aEventBlock;
-  unsigned int   PM1bEventBlock;
-  unsigned int   PM1aControlBlock;
-  unsigned int   PM1bControlBlock;
-  unsigned int   PM2ControlBlock;
-  unsigned int   PMTimerBlock;
-  unsigned int   GPE0Block;
-  unsigned int   GPE1Block;
-  unsigned char  PM1EventLength;
-  unsigned char  PM1ControlLength;
-  unsigned char  PM2ControlLength;
-  unsigned char  PMTimerLength;
-  unsigned char  GPE0Length;
-  unsigned char  GPE1Length;
-  unsigned char  GPE1Base;
-  unsigned char  CStateControl;
-  unsigned short WorstC2Latency;
-  unsigned short WorstC3Latency;
-  unsigned short FlushSize;
-  unsigned short FlushStride;
-  unsigned char  DutyOffset;
-  unsigned char  DutyWidth;
-  unsigned char  DayAlarm;
-  unsigned char  MonthAlarm;
-  unsigned char  Century;
+  u8  PreferredPowerManagementProfile;
+  u16 SCI_Interrupt;
+  u32 SMI_CommandPort;
+  u8  AcpiEnable;
+  u8  AcpiDisable;
+  u8  S4BIOS_REQ;
+  u8  PSTATE_Control;
+  u32 PM1aEventBlock;
+  u32 PM1bEventBlock;
+  u32 PM1aControlBlock;
+  u32 PM1bControlBlock;
+  u32 PM2ControlBlock;
+  u32 PMTimerBlock;
+  u32 GPE0Block;
+  u32 GPE1Block;
+  u8  PM1EventLength;
+  u8  PM1ControlLength;
+  u8  PM2ControlLength;
+  u8  PMTimerLength;
+  u8  GPE0Length;
+  u8  GPE1Length;
+  u8  GPE1Base;
+  u8  CStateControl;
+  u16 WorstC2Latency;
+  u16 WorstC3Latency;
+  u16 FlushSize;
+  u16 FlushStride;
+  u8  DutyOffset;
+  u8  DutyWidth;
+  u8  DayAlarm;
+  u8  MonthAlarm;
+  u8  Century;
 
   // reserved in ACPI 1.0; used since ACPI 2.0+
-  unsigned short BootArchitectureFlags;
+  u16 BootArchitectureFlags;
 
-  unsigned char Reserved2;
-  unsigned int  Flags;
+  u8  Reserved2;
+  u32 Flags;
 
   // 12 byte structure; see below for details
   GenericAddressStructure ResetReg;
 
-  unsigned char ResetValue;
-  unsigned char Reserved3[3];
+  u8 ResetValue;
+  u8 Reserved3[3];
 
   // 64bit pointers - Available on ACPI 2.0+
-  unsigned int X_FirmwareControl[2];
-  unsigned int X_Dsdt[2];
+  u32 X_FirmwareControl[2];
+  u32 X_Dsdt[2];
 
   GenericAddressStructure X_PM1aEventBlock;
   GenericAddressStructure X_PM1bEventBlock;
@@ -666,83 +666,83 @@ struct ACPI_FADT {
 #define MOUSE_ROLL_UP   1
 #define MOUSE_ROLL_DOWN 2
 struct MOUSE_DEC {
-  unsigned char buf[4], phase;
-  int           x, y, btn;
-  int           sleep;
-  char          roll;
+  u8   buf[4], phase;
+  int  x, y, btn;
+  int  sleep;
+  char roll;
 };
 struct pci_config_space_public {
-  unsigned short VendorID;
-  unsigned short DeviceID;
-  unsigned short Command;
-  unsigned short Status;
-  unsigned char  RevisionID;
-  unsigned char  ProgIF;
-  unsigned char  SubClass;
-  unsigned char  BaseClass;
-  unsigned char  CacheLineSize;
-  unsigned char  LatencyTimer;
-  unsigned char  HeaderType;
-  unsigned char  BIST;
-  unsigned int   BaseAddr[6];
-  unsigned int   CardbusCIS;
-  unsigned short SubVendorID;
-  unsigned short SubSystemID;
-  unsigned int   ROMBaseAddr;
-  unsigned char  CapabilitiesPtr;
-  unsigned char  Reserved[3];
-  unsigned int   Reserved1;
-  unsigned char  InterruptLine;
-  unsigned char  InterruptPin;
-  unsigned char  MinGrant;
-  unsigned char  MaxLatency;
+  u16 VendorID;
+  u16 DeviceID;
+  u16 Command;
+  u16 Status;
+  u8  RevisionID;
+  u8  ProgIF;
+  u8  SubClass;
+  u8  BaseClass;
+  u8  CacheLineSize;
+  u8  LatencyTimer;
+  u8  HeaderType;
+  u8  BIST;
+  u32 BaseAddr[6];
+  u32 CardbusCIS;
+  u16 SubVendorID;
+  u16 SubSystemID;
+  u32 ROMBaseAddr;
+  u8  CapabilitiesPtr;
+  u8  Reserved[3];
+  u32 Reserved1;
+  u8  InterruptLine;
+  u8  InterruptPin;
+  u8  MinGrant;
+  u8  MaxLatency;
 };
 typedef struct {
-  unsigned short offset;
-  unsigned short seg;
+  u16 offset;
+  u16 seg;
 } ReadModeFarPointer;
 typedef struct {
-  unsigned short attributes;
-  unsigned char  winA, winB;
-  unsigned short granularity;
-  unsigned short winsize;
-  unsigned short segmentA, segmentB;
+  u16 attributes;
+  u8  winA, winB;
+  u16 granularity;
+  u16 winsize;
+  u16 segmentA, segmentB;
   /* In VBE Specification, this field should be
    * ReadModeFarPointer winPosFunc;
    * However, we overwrite this field in loader n*/
-  unsigned short mode;
-  unsigned short reserved2;
-  unsigned short bytesPerLine;
-  unsigned short width, height;
-  unsigned char  Wchar, Ychar, planes, bitsPerPixel, banks;
-  unsigned char  memory_model, bank_size, image_pages;
-  unsigned char  reserved0;
-  unsigned char  red_mask, red_position;
-  unsigned char  green_mask, green_position;
-  unsigned char  blue_mask, blue_position;
-  unsigned char  rsv_mask, rsv_position;
-  unsigned char  directcolor_attributes;
-  unsigned int   physbase; // your LFB (Linear Framebuffer) address ;)
-  unsigned int   offscreen;
-  unsigned short offsize;
+  u16 mode;
+  u16 reserved2;
+  u16 bytesPerLine;
+  u16 width, height;
+  u8  Wchar, Ychar, planes, bitsPerPixel, banks;
+  u8  memory_model, bank_size, image_pages;
+  u8  reserved0;
+  u8  red_mask, red_position;
+  u8  green_mask, green_position;
+  u8  blue_mask, blue_position;
+  u8  rsv_mask, rsv_position;
+  u8  directcolor_attributes;
+  u32 physbase; // your LFB (Linear Framebuffer) address ;)
+  u32 offscreen;
+  u16 offsize;
 
 } __PACKED__ VESAModeInfo;
 typedef struct {
-  unsigned char      signature[4];
-  unsigned short     Version;
+  u8                 signature[4];
+  u16                Version;
   ReadModeFarPointer oemString;
-  unsigned int       capabilities;
+  u32                capabilities;
   ReadModeFarPointer videoModes;
-  unsigned short     totalMemory;
-  unsigned short     OEMVersion;
+  u16                totalMemory;
+  u16                OEMVersion;
   ReadModeFarPointer vendor;
   ReadModeFarPointer product;
   ReadModeFarPointer revision;
   /* In VBE Specification, this field should be reserved.
    * However, we overwrite this field in loader */
-  unsigned short     modeCount;
-  unsigned char      reserved0[220];
-  unsigned char      oemUse[256];
+  u16                modeCount;
+  u8                 reserved0[220];
+  u8                 oemUse[256];
   VESAModeInfo       modeList[0];
 } __PACKED__ VESAControllerInfo;
 struct VBEINFO {
@@ -834,20 +834,20 @@ struct BufferDescriptor {
 } __PACKED__;
 
 struct IDEHardDiskInfomationBlock {
-  char           reserve1[2];
-  unsigned short CylinesNum;
-  char           reserve2[2];
-  unsigned short HeadersNum;
-  unsigned short TrackBytes;
-  unsigned short SectorBytes;
-  unsigned short TrackSectors;
-  char           reserve3[6];
-  char           OEM[20];
-  char           reserve4[2];
-  unsigned short BuffersBytes;
-  unsigned short EECCheckSumLength;
-  char           Version[8];
-  char           ID[40];
+  char reserve1[2];
+  u16  CylinesNum;
+  char reserve2[2];
+  u16  HeadersNum;
+  u16  TrackBytes;
+  u16  SectorBytes;
+  u16  TrackSectors;
+  char reserve3[6];
+  char OEM[20];
+  char reserve4[2];
+  u16  BuffersBytes;
+  u16  EECCheckSumLength;
+  char Version[8];
+  char ID[40];
 };
 
 /* net */
@@ -1151,11 +1151,11 @@ struct FTP_Client {
   uint32_t       recv_dat_size;
 };
 typedef struct {
-  void (*Read)(char drive, unsigned char *buffer, unsigned int number, unsigned int lba);
-  void (*Write)(char drive, unsigned char *buffer, unsigned int number, unsigned int lba);
-  int          flag;
-  unsigned int size; // 大小
-  char         DriveName[50];
+  void (*Read)(char drive, u8 *buffer, u32 number, u32 lba);
+  void (*Write)(char drive, u8 *buffer, u32 number, u32 lba);
+  int  flag;
+  u32  size; // 大小
+  char DriveName[50];
 } vdisk;
 // signal
 #define SIGINT     0

@@ -73,8 +73,8 @@ uint32_t pci_get_port_base(uint8_t bus, uint8_t slot, uint8_t func) {
 }
 void PCI_GET_DEVICE(uint16_t vendor_id, uint16_t device_id, uint8_t *bus, uint8_t *slot,
                     uint8_t *func) {
-  extern int     PCI_ADDR_BASE;
-  unsigned char *pci_drive = PCI_ADDR_BASE;
+  extern int PCI_ADDR_BASE;
+  u8        *pci_drive = PCI_ADDR_BASE;
   for (;; pci_drive += 0x110 + 4) {
     if (pci_drive[0] == 0xff) {
       struct pci_config_space_public *pci_config_space_puclic;
@@ -91,16 +91,15 @@ void PCI_GET_DEVICE(uint16_t vendor_id, uint16_t device_id, uint8_t *bus, uint8_
     }
   }
 }
-void pci_config(unsigned int bus, unsigned int f, unsigned int equipment, unsigned int adder) {
-  unsigned int cmd = 0;
-  cmd              = 0x80000000 + (unsigned int)adder + ((unsigned int)f << 8) +
-        ((unsigned int)equipment << 11) + ((unsigned int)bus << 16);
+void pci_config(u32 bus, u32 f, u32 equipment, u32 adder) {
+  u32 cmd = 0;
+  cmd     = 0x80000000 + (u32)adder + ((u32)f << 8) + ((u32)equipment << 11) + ((u32)bus << 16);
   // cmd = cmd | 0x01;
   io_out32(PCI_COMMAND_PORT, cmd);
 }
-void init_PCI(unsigned int adder_Base) {
-  unsigned int   i, BUS, Equipment, F, ADDER, *i1;
-  unsigned char *PCI_DATA = adder_Base, *PCI_DATA1;
+void init_PCI(u32 adder_Base) {
+  u32 i, BUS, Equipment, F, ADDER, *i1;
+  u8 *PCI_DATA = adder_Base, *PCI_DATA1;
   for (BUS = 0; BUS < 256; BUS++) {                    //查询总线
     for (Equipment = 0; Equipment < 32; Equipment++) { //查询设备
       for (F = 0; F < 8; F++) {                        //查询功能
@@ -213,7 +212,7 @@ void init_PCI(unsigned int adder_Base) {
   //函数执行完PCI_DATA就是PCI设备表的结束地址
 }
 void PCI_ClassCode_Print(struct pci_config_space_public *pci_config_space_puclic) {
-  unsigned char *pci_drive = (unsigned char *)pci_config_space_puclic - 12;
+  u8 *pci_drive = (u8 *)pci_config_space_puclic - 12;
   printk("BUS:%02x ", pci_drive[1]);
   printk("EQU:%02x ", pci_drive[2]);
   printk("F:%02x ", pci_drive[3]);

@@ -7,7 +7,7 @@
 
 #include <dos.h>
 char dat[255];
-int  send_ipc_message(int to_tid, void *data, unsigned int size, char type) {
+int  send_ipc_message(int to_tid, void *data, u32 size, char type) {
   lock(&(get_task(to_tid)->ipc_header.l));
   IPC_Header *ipc     = &(get_task(to_tid)->ipc_header);
   IPCMessage *ipc_msg = NULL;
@@ -42,7 +42,7 @@ int  send_ipc_message(int to_tid, void *data, unsigned int size, char type) {
   }
   return 0;
 }
-int send_ipc_message_by_name(char *tname, void *data, unsigned int size, char type) {
+int send_ipc_message_by_name(char *tname, void *data, u32 size, char type) {
   // struct TASK *to_task = get_task_by_name(tname);
   // return send_ipc_message((to_task->sel / 8) - 103, data, size, type);
 }
@@ -78,7 +78,7 @@ int get_ipc_message_by_name(void *data, char *tname) {
 int ipc_message_status() {
   return 1;
 }
-unsigned int ipc_message_len(int from_tid) {
+u32 ipc_message_len(int from_tid) {
   lock(&(current_task()->ipc_header.l));
   if (current_task()->ipc_header.now == 0) {
     unlock(&(current_task()->ipc_header.l));
@@ -102,7 +102,7 @@ unsigned int ipc_message_len(int from_tid) {
 // int send_ipc_message_by_tid(int to_tid,        // 收信人
 //                             int y_tid,         // 发信人
 //                             void *data,        // 数据
-//                             unsigned int size, // 大小
+//                             u32 size, // 大小
 //                             char type          // 类型
 // ) {
 //   irq_mask_set(0);

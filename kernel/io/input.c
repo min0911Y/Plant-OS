@@ -1,3 +1,4 @@
+#include <dos.h>
 #include <io.h>
 
 extern char keytable[];

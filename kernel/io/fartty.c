@@ -63,7 +63,7 @@ static void fartty_screen_ne(struct tty *res) {
   res->y     = ny;
   res->color = nc;
 }
-static void fartty_Draw_Box(struct tty *res, int x, int y, int x1, int y1, unsigned char color) {
+static void fartty_Draw_Box(struct tty *res, int x, int y, int x1, int y1, u8 color) {
   uint32_t args[10];
   args[0] = 4;
   args[1] = res->vram;

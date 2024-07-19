@@ -3,29 +3,29 @@ struct ACPI_RSDP *RSDP;
 struct ACPI_RSDT *RSDT;
 struct ACPI_FADT *FADT;
 
-char checksum(unsigned char *addr, unsigned int length) {
-  int           i   = 0;
-  unsigned char sum = 0;
+char checksum(u8 *addr, u32 length) {
+  int i   = 0;
+  u8  sum = 0;
 
   for (i = 0; i < length; i++) {
-    sum += ((unsigned char *)addr)[i];
+    sum += ((u8 *)addr)[i];
   }
 
   return sum == 0;
 }
 
-unsigned int *acpi_find_rsdp() {
-  unsigned int *addr;
+u32 *acpi_find_rsdp() {
+  u32 *addr;
 
-  for (addr = (unsigned int *)0x000e0000; addr < (unsigned int *)0x00100000; addr++) {
+  for (addr = (u32 *)0x000e0000; addr < (u32 *)0x00100000; addr++) {
     if (memcmp(addr, "RSD PTR ", 8) == 0) {
-      if (checksum((unsigned char *)addr, ((struct ACPI_RSDP *)addr)->Length)) { return addr; }
+      if (checksum((u8 *)addr, ((struct ACPI_RSDP *)addr)->Length)) { return addr; }
     }
   }
   return 0;
 }
 
-unsigned int acpi_find_table(char *Signature) {
+u32 acpi_find_table(char *Signature) {
   uint8_t *ptr, *ptr2;
   uint32_t len;
   uint8_t *rsdt = (uint8_t *)RSDT;
@@ -44,10 +44,10 @@ void init_acpi(void) {
   if (RSDP == 0) return;
   RSDT = (struct ACPI_RSDT *)RSDP->RsdtAddress;
   // checksum(RSDT, RSDT->header.Length);
-  if (!checksum((unsigned char *)RSDT, RSDT->header.Length)) return;
+  if (!checksum((u8 *)RSDT, RSDT->header.Length)) return;
 
   FADT = (struct ACPI_FADT *)acpi_find_table("FACP");
-  if (!checksum((unsigned char *)FADT, FADT->h.Length)) return;
+  if (!checksum((u8 *)FADT, FADT->h.Length)) return;
 
   if (!(io_in16(FADT->PM1aControlBlock) & 1)) {
     if (FADT->SMI_CommandPort && FADT->AcpiEnable) {
@@ -92,7 +92,7 @@ void init_acpi(void) {
 
 int acpi_shutdown() {
   int                   i;
-  unsigned short        SLP_TYPa, SLP_TYPb;
+  u16                   SLP_TYPa, SLP_TYPb;
   struct ACPISDTHeader *header     = (struct ACPISDTHeader *)acpi_find_table("DSDT");
   char                 *S5Addr     = (char *)header;
   int                   dsdtLength = (header->Length - sizeof(struct ACPISDTHeader)) / 4;
