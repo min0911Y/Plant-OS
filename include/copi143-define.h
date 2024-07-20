@@ -2,6 +2,8 @@
 
 #define NO_STD 1
 
+#define __PACKED__ __attribute__((packed)) // plos kernel 使用
+
 #if !__BYTE_ORDER__ || !__ORDER_LITTLE_ENDIAN__ || !__ORDER_BIG_ENDIAN__
 #  error "请指定端序"
 #endif
@@ -53,7 +55,7 @@ typedef __builtin_va_list va_list;
 
 // 获取数组的长度
 #ifndef lengthof
-#  define lengthof(arr) (sizeof(arr) / sizeof(*arr))
+#  define lengthof(arr) (sizeof(arr) / sizeof(*(arr)))
 #endif
 
 // 获取表达式的类型，类似于 auto

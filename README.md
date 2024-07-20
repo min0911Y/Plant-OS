@@ -68,7 +68,7 @@
 - [ ] 移植 GCC
 - [ ] 移植 ffmpeg
 - [ ] 移植 QEMU
-  - [ ] 玩原神
+  - [ ] 玩原神 ( \* \* 是这样的)
 - [ ] 移植 bochs
 - [ ] 移植 chromium
 - [ ] 移植 cmake
@@ -95,19 +95,19 @@
 
 在项目根目录中使用 make 命令
 
-其它内容请查看[旧 ReadMe 文档](doc/old-readme/README_zh-cn.md)
+其它内容请查看[旧 ReadMe 文档](doc/old-readme/README_zh-cn.md) <- 当然内容可能过时
 
 ## 开发者
 
-- zhouzhihao <https://github.com/ZhouZhihaos>
+- zhouzhihao [GitHub](https://github.com/ZhouZhihaos)
 
-- min0911_ <https://github.com/min0911Y>
+- min0911_ [GitHub](https://github.com/min0911Y)
 
-- copi143 <https://github.com/copi143>
+- copi143 [GitHub](https://github.com/copi143)
 
 ## 鸣谢
 
-- TheFlySong
+- TheFlySong [GitHub](https://github.com/TheFlySong)
 - yywd_123
 - Oildum-was-ejected
 - wenxuanjun

@@ -1,12 +1,9 @@
-#ifndef _DEFINE_H
-#define _DEFINE_H
+#pragma once
 #include <ctypes.h>
 #include <stdarg.h>
 #include <stddef.h>
 typedef u32    vram_t;
 typedef vram_t color_t;
-
-#define __PACKED__ __attribute__((packed))
 
 /* dos.h */
 #define VERSION      "0.7b" // Version of the program
@@ -1161,4 +1158,3 @@ typedef struct {
 #define SIGINT     0
 #define SIGKIL     1
 #define SIGMASK(n) 1 << n
-#endif

@@ -12,21 +12,17 @@ target_link_libraries(kernel tcc1)
 
 add_custom_target(
   make_img ALL
-  cd ${CMAKE_CURRENT_SOURCE_DIR}
-  COMMAND make make_img
+  COMMAND cd ${CMAKE_CURRENT_SOURCE_DIR} && make make_img
   DEPENDS dosldr boot boot32 boot_pfs kernel)
 add_custom_target(
   make_img_full
-  cd ${CMAKE_CURRENT_SOURCE_DIR}
-  COMMAND make Mimg
+  COMMAND cd ${CMAKE_CURRENT_SOURCE_DIR} && make Mimg
   DEPENDS dosldr boot boot32 boot_pfs kernel)
 add_custom_target(
   img_run
-  cd ${CMAKE_CURRENT_SOURCE_DIR}
-  COMMAND make img_run
+  COMMAND cd ${CMAKE_CURRENT_SOURCE_DIR} && make img_run
   DEPENDS make_img_full)
 add_custom_target(
   run
-  cd ${CMAKE_CURRENT_SOURCE_DIR}
-  COMMAND make run
+  COMMAND cd ${CMAKE_CURRENT_SOURCE_DIR} && make run
   DEPENDS make_img)

@@ -13,10 +13,7 @@ endmacro(add_binary_asm)
 
 macro(add_binary_asm_no_elf name file)
   get_filename_component(absolute_path ${file} ABSOLUTE)
-  add_custom_target(
-    ${name} ALL
-    cd ${CMAKE_CURRENT_SOURCE_DIR}
-    COMMAND nasm -f bin ${absolute_path} -o ${EXECUTABLE_OUTPUT_PATH}/${name}.bin)
+  add_custom_target(${name} ALL COMMAND cd ${CMAKE_CURRENT_SOURCE_DIR} && nasm -f bin ${absolute_path} -o ${EXECUTABLE_OUTPUT_PATH}/${name}.bin)
 endmacro(add_binary_asm_no_elf)
 
 macro(add_binary_exclude name)
