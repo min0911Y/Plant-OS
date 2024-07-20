@@ -203,19 +203,16 @@ void hpet_initialize() {
 #define NANOSEC_IN_SEC 1000000000
 
 void gettime_ns(time_ns_t *ptr) {
-  static u64 time_sec  = 0;
-  static u64 time_ns   = 0;
-  static u64 val_old   = 0;
-  u64        val       = hpetInfo->mainCounterValue * hpetPeriod - val_old;
-  val_old             += val;
-  time_ns             += val;
-  while (time_ns > NANOSEC_IN_SEC) {
-    time_sec += 1;
-    time_ns  -= NANOSEC_IN_SEC;
-  }
+
+  u64        val       = hpetInfo->mainCounterValue * hpetPeriod - current_task()->val_old;
+  current_task()->val_old             += val;
+  current_task()->time_ns             += val;
+  current_task()->time_sec += current_task()->time_ns / NANOSEC_IN_SEC;
+  current_task()->time_ns %= NANOSEC_IN_SEC;
   if (ptr == NULL) return;
-  ptr->sec  = time_sec;
-  ptr->nsec = time_ns;
+  logk("%d\n",current_task()->time_ns);
+  ptr->sec  = current_task()->time_sec;
+  ptr->nsec = current_task()->time_ns;
 }
 
 void usleep(u64 time_us) {

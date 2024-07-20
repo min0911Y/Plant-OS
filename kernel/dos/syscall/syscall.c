@@ -313,6 +313,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
       ;
   } else if (eax == 0x20) {
     // VBE驱动API
+    logk("vbe\n");
     if (running_mode == POWERINTDOS) {
       if (ebx == 0x01) {
         reg[EAX] = SwitchVBEMode(ecx);
@@ -320,11 +321,9 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
         reg[EAX] = check_vbe_mode(ecx, (struct VBEINFO *)VBEINFO_ADDRESS);
       } else if (ebx == 0x05) {
         unsigned v = set_mode(ecx, edx, 32);
-        logk("reg[EAX] = %08x %d\n", v, pages[IDX(0xfd07c2d0)].count);
         reg[EAX]       = v;
         unsigned count = div_round_up(ecx * edx * 4, 0x1000);
         for (int i = 0; i < count; i++) {
-          logk("%08x\n", v + i * 0x1000);
           page_set_physics_attr(v + i * 0x1000, v + i * 0x1000,
                                 7); // PG_P | PG_USU | PG_RWW
         }

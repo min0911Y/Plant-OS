@@ -88,6 +88,9 @@ struct __PACKED__ mtask {
   unsigned      ret_to_app;
   unsigned      times;
   unsigned      signal_disable;
+  u64           time_sec;
+  u64           time_ns;
+  u64           val_old;
 };
 
 #define NULL_TID      11459810

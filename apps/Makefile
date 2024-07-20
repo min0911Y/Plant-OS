@@ -2,7 +2,7 @@ default :
 	mkdir -p lib
 	mkdir -p out
 	make -r -C libp
-	make -r -C plui
+#	make -r -C plui
 	make -r -C zlib
 	make -r -C miniset
 	make -r -C sdl2

@@ -51,6 +51,9 @@ static void init_task(mtask *t, int id) {
   t->times            = 0;
   t->keyboard_press   = NULL;
   t->keyboard_release = NULL;
+  t->val_old = 0;
+  t->time_ns = 0;
+  t->time_sec = 0;
   lock_init(&t->ipc_header.l);
   t->ipc_header.now = 0;
   for (int k = 0; k < MAX_IPC_MESSAGE; k++) {
@@ -281,6 +284,9 @@ void task_kill(unsigned tid) {
   m[tid].waittid    = -1;
   m[tid].state      = WILL_EMPTY;
   m[tid].alloc_addr = 0;
+  m[tid].time_ns = 0;
+  m[tid].time_sec = 0;
+  m[tid].val_old = 0;
   if (m[tid].alloced) {
     free(m[tid].alloc_size);
     m[tid].alloced = 0;
@@ -452,6 +458,9 @@ void                     task_exit(unsigned status) {
   m[tid].waittid    = -1;
   m[tid].state      = DIED;
   m[tid].alloc_addr = 0;
+  m[tid].time_ns = 0;
+  m[tid].time_sec = 0;
+  m[tid].val_old = 0;
   if (m[tid].alloced) {
     free(m[tid].alloc_size);
     m[tid].alloced = 0;

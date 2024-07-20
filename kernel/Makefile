@@ -79,7 +79,7 @@ Mimg : make_img
 	mcopy -i ./disk.img $(APPSOUTPATH)chat.bin ::
 	mcopy -i ./disk.img $(APPSOUTPATH)netgobang.bin ::
 	mcopy -i ./disk.img $(APPSOUTPATH)minewep.bin ::
-	mcopy -i ./disk.img $(APPSOUTPATH)plui.bin ::
+#mcopy -i ./disk.img $(APPSOUTPATH)plui.bin ::
 	mcopy -i ./disk.img $(APPSOUTPATH)bfpp.bin ::
 	mcopy -i ./disk.img $(RESPATH)init.mst ::
 

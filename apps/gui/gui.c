@@ -342,6 +342,7 @@ re:
   xsize_input = 1024;
   ysize_input = 768;
   unsigned vram;
+  printf("CALL SET_MODE\n");
   vram = set_mode(xsize_input, ysize_input);
 
   set_custom_handler(gui_api1);
