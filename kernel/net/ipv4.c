@@ -1,7 +1,7 @@
 #include <dos.h>
 // IPV4
 static u16 ident = 0;
-void IPV4ProviderSend(u8 protocol, uint64_t dest_mac, u32 dest_ip, u32 src_ip, u8 *data, u32 size) {
+void IPV4ProviderSend(u8 protocol, u64 dest_mac, u32 dest_ip, u32 src_ip, u8 *data, u32 size) {
   struct IPV4Message *res = (struct IPV4Message *)page_malloc(sizeof(struct IPV4Message) + size);
   u8                 *dat = (u8 *)res;
   memcpy(dat + sizeof(struct IPV4Message), data, size);

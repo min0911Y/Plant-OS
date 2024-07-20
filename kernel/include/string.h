@@ -1,5 +1,5 @@
 #pragma once
-#include <copi143-define.h>
+#include <define.h>
 #include <type.h>
 
 int    strcmp(const char *s1, const char *s2);

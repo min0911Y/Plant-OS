@@ -1,5 +1,5 @@
 #pragma once
-#include <copi143-define.h>
+#include <define.h>
 #include <type.h>
 
 #define MEMMAN_FREES 4090

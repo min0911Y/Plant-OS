@@ -403,7 +403,7 @@ int command_run(char *cmdline) {
   //     }
   //   } else if (stricmp("ARP", cmdline) == 0) {
   //     extern u32 ARP_write_pointer;
-  //     extern uint64_t ARP_mac_address[MAX_ARP_TABLE];
+  //     extern u64 ARP_mac_address[MAX_ARP_TABLE];
   //     extern u32 ARP_ip_address[MAX_ARP_TABLE];
   //     if (ARP_write_pointer == 0) {
   //       return;

@@ -10,6 +10,8 @@ add_exe_link_flag("-static -Wl,-Ttext -Wl,0x280000 -e KernelMain")
 add_binary_exclude(kernel boot/boot.asm boot/boot32.asm boot/boot_pfs.asm)
 target_link_libraries(kernel tcc1)
 
+add_subdirectory(include)
+
 add_custom_target(
   make_img ALL
   COMMAND cd ${CMAKE_CURRENT_SOURCE_DIR} && make make_img

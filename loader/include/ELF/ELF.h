@@ -1,5 +1,5 @@
 #pragma once
-#include <copi143-define.h>
+#include <define.h>
 #include <type.h>
 // elf documentation: http://www.sco.com/developers/devspecs/gabi41.pdf
 

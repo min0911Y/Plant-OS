@@ -1,7 +1,7 @@
 #include <net.h>
 extern u8 mac0, mac1, mac2, mac3, mac4, mac5;
 // 以太网帧
-void      ether_frame_provider_send(uint64_t dest_mac, u16 type, u8 *buffer, u32 size) {
+void      ether_frame_provider_send(u64 dest_mac, u16 type, u8 *buffer, u32 size) {
   u8                        *buffer2 = (u8 *)page_malloc(sizeof(struct EthernetFrame_head) + size +
                                                               sizeof(struct EthernetFrame_tail));
   struct EthernetFrame_head *header = (struct EthernetFrame_head *)buffer2;

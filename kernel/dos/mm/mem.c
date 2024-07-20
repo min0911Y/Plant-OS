@@ -106,7 +106,7 @@ freeinfo *make_next_freeinfo(memory *mem) {
   }
 
   if (n - s > size) {
-    mem_free_finf(mem, fi, s + size, n - s - size); // 一点也不浪费
+    mem_free_finf(mem, fi, (void *)(s + size), n - s - size); // 一点也不浪费
   }
 
   return fi;
@@ -211,7 +211,7 @@ int mem_free_finf(memory *mem, freeinfo *finf, void *p, u32 size) {
     free_member *n = mem_add(finf); // 找一个空闲的格子放这块内存
     if (!n) return 0;
     // 配置这个格子
-    n->start = p;
+    n->start = (u32)p;
     n->end   = (u32)p + size;
     quicksort(finf->f, 0, mem_get_all_finf(finf) - 1);
     mem_defragmenter(finf);
@@ -268,7 +268,7 @@ void *mem_alloc_finf(memory *mem, freeinfo *finf, u32 size, freeinfo *if_nomore)
   if (choice->end - choice->start == 0) { mem_delete(choice_index, finf); }
   mem->memerrno = ERRNO_NOPE;
   mem_defragmenter(finf);
-  memset(start, 0, size);
+  memset((void *)start, 0, size);
 
   return (void *)start;
 }

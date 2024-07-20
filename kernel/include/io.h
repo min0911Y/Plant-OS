@@ -1,30 +1,30 @@
-#ifndef _IO_H
-#define _IO_H
-#include <define.h>
-// screen.c
-#define argb(a, r, g, b) ((a) << 24 | (r) << 16 | (g) << 8 | (b))
-void        clear();
-void        printchar(char ch);
-void        putchar(char ch);
-void        screen_ne();
-int         get_x();
-int         get_y();
-int         get_raw_y();
-int         get_xsize();
-int         get_ysize();
-void        print(const char *str);
-void        GotoXy_No_Safe(int x1, int y1);
-void        gotoxy(int x1, int y1);
-void        Text_Draw_Box(int x, int y, int x1, int y1, u8 color);
+#pragma once
+#include <kernel.h>
+
+void clear();
+void printchar(char ch);
+void putchar(char ch);
+void screen_ne();
+int  get_x();
+int  get_y();
+int  get_raw_y();
+int  get_xsize();
+int  get_ysize();
+void print(const char *str);
+void GotoXy_No_Safe(int x1, int y1);
+void gotoxy(int x1, int y1);
+void Text_Draw_Box(int x, int y, int x1, int y1, u8 color);
+
 // TextMode.c
-void        MoveCursor_TextMode(struct tty *res, int x, int y);
-void        putchar_TextMode(struct tty *res, int c);
-void        screen_ne_TextMode(struct tty *res);
-void        clear_TextMode(struct tty *res);
-void        Draw_Box_TextMode(struct tty *res, int x, int y, int x1, int y1, u8 color);
-void        AddShell_TextMode();
-void        SwitchShell_TextMode(int i);
-bool        now_tty_TextMode(struct tty *res);
+void MoveCursor_TextMode(struct tty *res, int x, int y);
+void putchar_TextMode(struct tty *res, int c);
+void screen_ne_TextMode(struct tty *res);
+void clear_TextMode(struct tty *res);
+void Draw_Box_TextMode(struct tty *res, int x, int y, int x1, int y1, u8 color);
+void AddShell_TextMode();
+void SwitchShell_TextMode(int i);
+bool now_tty_TextMode(struct tty *res);
+
 // tty.c
 void        init_tty();
 struct tty *tty_alloc(void *vram, int xsize, int ysize, void (*putchar)(struct tty *res, int c),
@@ -35,32 +35,38 @@ struct tty *tty_alloc(void *vram, int xsize, int ysize, void (*putchar)(struct t
 void        tty_free(struct tty *res);
 struct tty *tty_set(mtask *task, struct tty *res);
 struct tty *tty_set_default(struct tty *res);
-void  tty_set_reserved(struct tty *res, u32 reserved1, u32 reserved2, u32 reserved3, u32 reserved4);
+void tty_set_reserved(struct tty *res, u32 reserved1, u32 reserved2, u32 reserved3, u32 reserved4);
+
 // log.c
-void  kprint(char *str);
-void  logk(char *str, ...);
+void kprint(char *str);
+void logk(char *str, ...);
+
 // input.c
-void  input(char *ptr, int len);
-void  input_no_endl(char *ptr, int len);
+void input(char *ptr, int len);
+void input_no_endl(char *ptr, int len);
+
 // Input_Stack.c
-void  Input_Stack_Init(void);
+void  Input_Stack_Init();
 void  input_stack_put(char *str);
 int   input_stack_get_now();
 int   Get_times();
 char *input_stack_pop();
 void  input_stack_set_now(int now);
 int   get_free();
+
 // HighTextMode.c
-void  clear_HighTextMode(struct tty *res);
-void  screen_ne_HighTextMode(struct tty *res);
-void  MoveCursor_HighTextMode(struct tty *res, int x, int y);
-void  putchar_HighTextMode(struct tty *res, int c);
-bool  now_tty_HighTextMode(struct tty *res);
+void clear_HighTextMode(struct tty *res);
+void screen_ne_HighTextMode(struct tty *res);
+void MoveCursor_HighTextMode(struct tty *res, int x, int y);
+void putchar_HighTextMode(struct tty *res, int c);
+bool now_tty_HighTextMode(struct tty *res);
+
 // void Gar_Test_Task();
-void  SwitchToHighTextMode();
-void  Draw_Box_HighTextMode(struct tty *res, int x, int y, int x1, int y1, u8 color);
-void  AddShell_HighTextMode();
-void  SwitchShell_HighTextMode(int i);
+void SwitchToHighTextMode();
+void Draw_Box_HighTextMode(struct tty *res, int x, int y, int x1, int y1, u8 color);
+void AddShell_HighTextMode();
+void SwitchShell_HighTextMode(int i);
+
 // Draw.c
 void Draw_Circle_Hollow_32(u8 *vram, int xsize, int x, int y, int r, int Cr, int Cg, int Cb, int br,
                            int bg, int bb);
@@ -87,6 +93,7 @@ void putfonts_asc(vram_t *vram, int xsize, int x, int y, color_t c, u8 *s);
 void putfont(vram_t *vram, int xsize, int x, int y, color_t c, char *font);
 void Draw_Line_32(u8 *Buffer, int x1, int y1, int x2, int y2, int r, int g, int b, int xsize);
 void Draw_Line(vram_t *Buffer, int x1, int y1, int x2, int y2, color_t c, int xsize);
+
 // sheet.c
 struct SHEET  *sheet_alloc(struct SHTCTL *ctl);
 void           sheet_free(struct SHEET *sht);
@@ -96,16 +103,17 @@ void           sheet_setbuf(struct SHEET *sht, vram_t *buf, int xsize, int ysize
 void           sheet_slide(struct SHEET *sht, int vx0, int vy0);
 void           sheet_updown(struct SHEET *sht, int height);
 void           sheet_refresh(struct SHEET *sht, int bx0, int by0, int bx1, int by1);
-// GraphicMode.c
-void           putchar_GraphicMode(struct tty *res, int c);
-void           clear_GraphicMode(struct tty *res);
-void           MoveCursor_GraphicMode(struct tty *res, int x, int y);
-void           screen_ne_GraphicMode(struct tty *res);
-void           Draw_Box_GraphicMode(struct tty *res, int x, int y, int x1, int y1, u8 color);
-void           AddShell_GraphicMode();
-bool           now_tty_GraphicMode(struct tty *res);
 
-static inline u32 LCD_AlphaBlend(u32 foreground_color, u32 background_color, u8 alpha) {
+// GraphicMode.c
+void putchar_GraphicMode(struct tty *res, int c);
+void clear_GraphicMode(struct tty *res);
+void MoveCursor_GraphicMode(struct tty *res, int x, int y);
+void screen_ne_GraphicMode(struct tty *res);
+void Draw_Box_GraphicMode(struct tty *res, int x, int y, int x1, int y1, u8 color);
+void AddShell_GraphicMode();
+bool now_tty_GraphicMode(struct tty *res);
+
+finline u32 LCD_AlphaBlend(u32 foreground_color, u32 background_color, u8 alpha) {
   if (alpha == 0xff) { return foreground_color; }
   u8 *fg = (u8 *)&foreground_color;
   u8 *bg = (u8 *)&background_color;
@@ -116,4 +124,3 @@ static inline u32 LCD_AlphaBlend(u32 foreground_color, u32 background_color, u8 
 
   return (rb & 0xFF) | ((g & 0xFF) << 8) | ((a & 0xFF) << 16);
 }
-#endif

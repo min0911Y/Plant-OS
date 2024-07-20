@@ -1,5 +1,5 @@
 #pragma once
-#include <copi143-define.h>
+#include <define.h>
 #include <type.h>
 #define BCD_HEX(n) (((n >> 4) * 10) + (n & 0xf))
 #define HEX_BCD(n) (((n / 10) << 4) + (n % 10))

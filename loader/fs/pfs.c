@@ -38,7 +38,7 @@ u32 pfs_alloc_block(vfs_t *vfs, u32 *err) {
           memset(bitmap_new, 0, 512);
           now_pfs_t->write_block(
               now_pfs_t, block2sector((j + i * (total_bits_of_one_sec)), now_pfs_t), 1, bitmap_new);
-          AddVal((unsigned int)bitmap_new, now_pfs_t->bitmap_buffer);
+          AddVal((u32)bitmap_new, now_pfs_t->bitmap_buffer);
           break; // 这个你不能用[doge]
         } else {
           now_pfs_t->write_block(
@@ -82,7 +82,7 @@ u32 pfs_alloc_block_mark(vfs_t *vfs,
           memset(bitmap_new, 0, 512);
           now_pfs_t->write_block(
               now_pfs_t, block2sector((j + i * (total_bits_of_one_sec)), now_pfs_t), 1, bitmap_new);
-          AddVal((unsigned int)bitmap_new, now_pfs_t->bitmap_buffer);
+          AddVal((u32)bitmap_new, now_pfs_t->bitmap_buffer);
           break; // 这个你不能用[doge]
         } else {
           u32 cb = i ? current_block : current_block - now_pfs_t->first_sec_of_bitmap;
@@ -139,12 +139,12 @@ void init_bitmap(vfs_t *vfs) {
   sec = malloc(512);
   now_pfs_t->read_block(now_pfs_t, now_pfs_t->sec_bitmap_start, 1, sec);
   AddVal(now_pfs_t->sec_bitmap_start, now_pfs_t->bitmap);
-  AddVal((unsigned int)sec, now_pfs_t->bitmap_buffer);
+  AddVal((u32)sec, now_pfs_t->bitmap_buffer);
   while (get_next(sec)) {
     AddVal(get_next(sec), now_pfs_t->bitmap);
     sec = malloc(512);
     now_pfs_t->read_block(now_pfs_t, block2sector(get_next(sec), now_pfs_t), 1, sec);
-    AddVal((unsigned int)sec, now_pfs_t->bitmap_buffer);
+    AddVal((u32)sec, now_pfs_t->bitmap_buffer);
   }
 }
 pfs_inode pfs_get_inode_by_index(vfs_t *vfs, u32 index, u32 dict_block) {
@@ -720,7 +720,7 @@ bool pfs_cd(struct vfs_t *vfs, char *dictName) {
   AddVal(now_pfs_t->current_dict_block, now_pfs_t->prev_dict_block);
   char *s = page_malloc(255);
   strcpy(s, dictName);
-  AddVal((unsigned int)s, vfs->path);
+  AddVal((u32)s, vfs->path);
   now_pfs_t->current_dict_block = new_dict_block;
   return true;
 }
@@ -786,7 +786,7 @@ List *pfs_ListFile(struct vfs_t *vfs, char *dictpath) {
         f->size   = pdb.inodes[i].size;
         f->type   = pdb.inodes[i].type == 2 ? DIR : FLE;
         f->year   = 114514;
-        AddVal((unsigned int)f, result);
+        AddVal((u32)f, result);
         mstr_free(s);
       }
     }

@@ -1,4 +1,5 @@
 // bmp.c ：位图解析
+#include <dos.h>
 #include <fs.h>
 bool BMPVIEW8(char *path, u8 *vram, int xsize) {
   if (fsz(path) == -1) { return false; }

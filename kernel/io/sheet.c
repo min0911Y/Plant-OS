@@ -6,6 +6,9 @@
  */
 #include <dos.h>
 #include <io.h>
+
+void sheet_refreshmap(struct SHTCTL *ctl, int vx0, int vy0, int vx1, int vy1, int h0);
+void sheet_refreshsub(struct SHTCTL *ctl, int vx0, int vy0, int vx1, int vy1, int h0, int h1);
 struct int4 {
   int a, b, c, d;
 };

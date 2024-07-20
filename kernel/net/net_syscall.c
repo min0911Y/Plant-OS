@@ -54,7 +54,7 @@ void net_api(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx, int 
     }
     socket->flag = 0;
     socket->buf  = malloc(4096);
-    reg[EAX]     = socket;
+    reg[EAX]     = (u32)socket;
   } else if (eax == 0x02) {
     struct Socket *s = (struct Socket *)ebx;
     if (s->state == SOCKET_TCP_ESTABLISHED) { s->Disconnect(s); }

@@ -8,11 +8,11 @@ typedef struct {
   u8 *ok_flag;
 } packet_header;
 typedef struct {
-  u8       res[2];
-  u16      sectors_of_number;
-  u16      off;
-  u16      seg;
-  uint64_t lba;
+  u8  res[2];
+  u16 sectors_of_number;
+  u16 off;
+  u16 seg;
+  u64 lba;
 } __attribute__((packed)) packet;
 
 void bios_read_hd_sec(unsigned LBA, u8 *buffer) {

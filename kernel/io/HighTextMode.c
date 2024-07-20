@@ -274,7 +274,7 @@ void SwitchToHighTextMode() {
   lock_init(&l1);
   cur_tmr               = NULL;
   struct VBEINFO *vinfo = (struct VBEINFO *)VBEINFO_ADDRESS;
-  shtctl0               = shtctl_init(vinfo->vram, vinfo->xsize, vinfo->ysize);
+  shtctl0               = shtctl_init((vram_t *)vinfo->vram, vinfo->xsize, vinfo->ysize);
   vram_t       *scr_buf = page_malloc((vinfo->xsize + 1) * (vinfo->ysize + 1) * sizeof(color_t));
   vram_t       *cur_buf = page_malloc(16 * 32 * sizeof(color_t));
   struct SHEET *sht_scr = sheet_alloc(shtctl0);
@@ -291,7 +291,7 @@ void SwitchToHighTextMode() {
   t1 = AddTask("t1", 1, 2 * 8, (int)Gar_Test_Task, 1 * 8, 1 * 8,
                stack + 64 * 1024);*/
 
-  cursor = create_task(cur_service, (unsigned)0, 1, 1);
+  cursor = create_task((u32)cur_service, (unsigned)0, 1, 1);
   struct tty *tty_h =
       tty_alloc((void *)sht_scr, vinfo->xsize / 8, vinfo->ysize / 16, putchar_HighTextMode,
                 MoveCursor_HighTextMode, clear_HighTextMode, screen_ne_HighTextMode,

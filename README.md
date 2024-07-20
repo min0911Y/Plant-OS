@@ -5,6 +5,10 @@
 
 <span style="color:cyan">***PLOS 使用 CMake 啦***</span>
 
+*Plant OS 1.0 正在编写中...*
+
+[PLOS 1.0-dev-0.3](log/1.0-dev-0.3.md)
+
 ## TODO （现在是 幻想时间！）
 
 - [ ] 使用 CMake 构建系统
@@ -14,6 +18,10 @@
   - [x] fattools
   - [x] netgobang
   - [ ] apps
+- [ ] 重构代码
+  - [ ] 拆解过长的头文件
+  - [ ] 重写 syscall (类 linux 的系统调用)
+  - [ ] 重构 shell (参考 bash)
 - [ ] 支持在 vscode 中直接使用 gdb 调试
 - [ ] 支持使用 Clang 编译
   - [x] loader (可编译，但无法正常运行)
@@ -22,11 +30,9 @@
   - [ ] fattools
   - [ ] netgobang
   - [ ] apps
-- [ ] 重构 shell (参考 bash)
 - [ ] [stamon](https://github.com/CLimber-Rong/stamon) <-- 去催更
 - [ ] 支持真机启动
 - [ ] eHCI or xHCI 控制器支持
-- [ ] 类 linux 的系统调用 (兼容性)
 - [ ] 声卡API
 - [ ] C++ ABI
 - [ ] 动态链接器

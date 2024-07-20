@@ -1,7 +1,7 @@
-#ifndef __PFS_H__
-#define __PFS_H__
-#include <ctypes.h>
+#pragma once
+#include <define.h>
 #include <dos.h>
+#include <type.h>
 
 #pragma pack(1)
 typedef struct {
@@ -105,4 +105,3 @@ u32 pfs_create_inode(vfs_t *vfs, u32 dict_block);
 //                                 u32* err,
 //                                 u32* idx,
 //                                 u32* dict_block);
-#endif

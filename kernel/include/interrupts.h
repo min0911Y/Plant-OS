@@ -1,6 +1,6 @@
 #ifndef _INTERRUPTS_H
 #define _INTERRUPTS_H
-#include <define.h>
+#include <kernel.h>
 // inthandler.c
 void inthandler20(int cs, int *esp);
 void inthandler21(int *esp);

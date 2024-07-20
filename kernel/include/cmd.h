@@ -1,6 +1,6 @@
 #ifndef _CMD_H
 #define _CMD_H
-#include <define.h>
+#include <kernel.h>
 // command.c
 int  command_run(char *cmdline);
 void show_heap(memory *mem);

@@ -491,7 +491,7 @@ void mkdir(char *dictname, int last_clust, vfs_t *vfs) {
        (get_clustno(finfo->clustno_high, finfo->clustno_low) - 2) * get_dm(vfs).ClustnoBytes) /
           get_dm(vfs).SectorBytes,
       get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes, directory_alloc, vfs->disk_number);
-  AddVal((unsigned int)directory_alloc, get_dm(vfs).directory_list);
+  AddVal((u32)directory_alloc, get_dm(vfs).directory_list);
   AddVal(get_dm(vfs).ClustnoBytes / 32, get_dm(vfs).directory_max_list);
   return;
 }
@@ -706,7 +706,7 @@ int changedict(char *dictname, vfs_t *vfs) {
   if (strcmp(dictname, "..") != 0 && strcmp(dictname, ".") != 0) {
     char *dict = page_malloc(255);
     strcpy(dict, dictname);
-    AddVal((unsigned int)dict, vfs->path);
+    AddVal((u32)dict, vfs->path);
   }
 
   if (strcmp(dictname, "..") == 0) {
@@ -956,7 +956,7 @@ List *Fat_ListFile(struct vfs_t *vfs, char *dictpath) {
           }
           d->name[q] = 0;
           // printk("d->name = %s\n", d->name);
-          AddVal((unsigned int)d, result);
+          AddVal((u32)d, result);
         }
       }
     }

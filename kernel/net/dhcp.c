@@ -1,4 +1,6 @@
+#include <dos.h>
 #include <net.h>
+
 // DHCP
 u32        gateway, submask, dns, ip, dhcp_ip;
 static int fill_dhcp_option(u8 *packet, u8 code, u8 *data, u8 len) {

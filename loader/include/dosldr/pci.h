@@ -1,5 +1,5 @@
 #pragma once
-#include <copi143-define.h>
+#include <define.h>
 #include <type.h>
 struct pci_config_space_public {
   u16 VendorID;

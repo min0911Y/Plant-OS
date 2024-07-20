@@ -1,14 +1,16 @@
-#ifndef _NET_H_
-#define _NET_H_
+#pragma once
 #include <define.h>
+#include <kernel.h>
+#include <type.h>
+
 // 以太网帧
-void     ether_frame_provider_send(uint64_t dest_mac, u16 type, u8 *buffer, u32 size);
+void ether_frame_provider_send(u64 dest_mac, u16 type, u8 *buffer, u32 size);
 // ARP
-u8      *ARP_Packet(uint64_t dest_mac, u32 dest_ip, uint64_t src_mac, u32 src_ip, u16 command);
-uint64_t IPParseMAC(u32 dstIP);
-void     arp_handler(void *base);
+u8  *ARP_Packet(u64 dest_mac, u32 dest_ip, u64 src_mac, u32 src_ip, u16 command);
+u64  IPParseMAC(u32 dstIP);
+void arp_handler(void *base);
 // IPV4
-void IPV4ProviderSend(u8 protocol, uint64_t dest_mac, u32 dest_ip, u32 src_ip, u8 *data, u32 size);
+void IPV4ProviderSend(u8 protocol, u64 dest_mac, u32 dest_ip, u32 src_ip, u8 *data, u32 size);
 u16  CheckSum(u16 *dat, u32 size);
 u32  IP2UINT32_T(u8 *ip);
 // ICMP
@@ -59,4 +61,3 @@ void UnUTCTimeStamp(u32 timestamp, u32 *year, u32 *month, u32 *day, u32 *hour, u
 // FTP
 struct FTP_Client *ftp_client_find(struct Socket *s);
 struct FTP_Client *FTP_Client_Alloc(u32 remoteIP, u32 localIP, u16 localPort);
-#endif

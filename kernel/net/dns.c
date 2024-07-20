@@ -1,4 +1,6 @@
+#include <dos.h>
 #include <net.h>
+
 // DNS
 u32 dns_parse_ip_result = 0;
 u32 dns_parse_ip(u8 *name) {

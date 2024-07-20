@@ -1,5 +1,5 @@
 #pragma once
-#include <copi143-define.h>
+#include <define.h>
 #include <dosldr/list.h>
 #include <dosldr/tsk.h>
 #include <type.h>

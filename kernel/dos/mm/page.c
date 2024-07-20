@@ -4,9 +4,10 @@
 #define TIDX(addr) (((unsigned)addr >> 12) & 0x3ff) // 获取 addr 的页表索引
 #define PAGE(idx)  ((unsigned)idx << 12) // 获取页索引 idx 对应的页开始的位置
 
-void             *page_malloc_one_no_mark();
-void              flush_tlb(unsigned vaddr);
-unsigned          div_round_up(unsigned num, unsigned size);
+void    *page_malloc_one_no_mark();
+void     flush_tlb(unsigned vaddr);
+unsigned div_round_up(unsigned num, unsigned size);
+
 struct PAGE_INFO *pages = (struct PAGE_INFO *)PAGE_MANNAGER;
 
 void init_pdepte(u32 pde_addr, unsigned pte_addr, unsigned page_end) {

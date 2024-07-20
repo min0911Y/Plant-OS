@@ -1,3 +1,4 @@
+#include "type.h"
 #include <dos.h>
 // Socket
 static struct Socket sockets[MAX_SOCKET_NUM];
@@ -84,7 +85,7 @@ struct Socket *socket_alloc(u8 protocol) {
       }
     }
   }
-  return -1;
+  return NULL;
 }
 void socket_free(struct Socket *socket) {
   for (int i = 0; i != MAX_SOCKET_NUM; i++) {
@@ -114,7 +115,7 @@ struct Socket *Socket_Find(u32 dstIP, u16 dstPort, u32 srcIP, u16 srcPort, u8 pr
       return (struct Socket *)&sockets[i];
     }
   }
-  return -1;
+  return NULL;
 }
 
 struct SocketServer *SocketServer_Alloc(void (*Handler)(struct Socket *socket, void *base),

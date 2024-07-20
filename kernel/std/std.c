@@ -360,14 +360,14 @@ static char *uint32_to_str_hex(u32 num, int flag, int width) {
   return str_first;
 }
 
-static char *uint64_to_str_hex(uint64_t num, int flag, int width) {
-  uint64_t num_tmp   = num;
-  char    *p         = num_str_buf;
-  char    *q         = NULL;
-  int      len       = 0;
-  char    *str_first = NULL;
-  char    *str_end   = NULL;
-  char     ch        = 0;
+static char *uint64_to_str_hex(u64 num, int flag, int width) {
+  u64   num_tmp   = num;
+  char *p         = num_str_buf;
+  char *q         = NULL;
+  int   len       = 0;
+  char *str_first = NULL;
+  char *str_end   = NULL;
+  char  ch        = 0;
 
   memset(num_str_buf, 0, sizeof(num_str_buf));
 
@@ -501,22 +501,22 @@ static char *insert_str(char *buf, const char *str) {
 }
 
 int vsprintf(char *buf, const char *fmt, va_list args) {
-  char    *str       = buf;
-  int      flag      = 0;
-  int      int_type  = INT_TYPE_INT;
-  int      tot_width = 0;
-  int      sub_width = 0;
-  char     buf2[64]  = {0};
-  char    *s         = NULL;
-  char     ch        = 0;
-  int8_t   num_8     = 0;
-  u8       num_u8    = 0;
-  int16_t  num_16    = 0;
-  u16      num_u16   = 0;
-  int32_t  num_32    = 0;
-  u32      num_u32   = 0;
-  int64_t  num_64    = 0;
-  uint64_t num_u64   = 0;
+  char   *str       = buf;
+  int     flag      = 0;
+  int     int_type  = INT_TYPE_INT;
+  int     tot_width = 0;
+  int     sub_width = 0;
+  char    buf2[64]  = {0};
+  char   *s         = NULL;
+  char    ch        = 0;
+  int8_t  num_8     = 0;
+  u8      num_u8    = 0;
+  int16_t num_16    = 0;
+  u16     num_u16   = 0;
+  int32_t num_32    = 0;
+  u32     num_u32   = 0;
+  int64_t num_64    = 0;
+  u64     num_u64   = 0;
 
   for (const char *p = fmt; *p; p++) {
     if (*p != '%') {
@@ -641,11 +641,11 @@ int vsprintf(char *buf, const char *fmt, va_list args) {
         str     = insert_str(str, uint32_to_str_hex(num_u32, flag, tot_width));
         break;
       case INT_TYPE_LONG:
-        num_u64 = va_arg(args, uint64_t);
+        num_u64 = va_arg(args, u64);
         str     = insert_str(str, uint64_to_str_hex(num_u64, flag, tot_width));
         break;
       case INT_TYPE_LONG_LONG:
-        num_u64 = va_arg(args, uint64_t);
+        num_u64 = va_arg(args, u64);
         str     = insert_str(str, uint64_to_str_hex(num_u64, flag, tot_width));
         break;
       }

@@ -1,5 +1,5 @@
 #pragma once
-#include <copi143-define.h>
+#include <define.h>
 #include <type.h>
 size_t strlen(const char *s);
 char  *strcpy(char *dest, const char *src);

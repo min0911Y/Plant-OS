@@ -1,6 +1,6 @@
 #ifndef _DRIVERS_H
 #define _DRIVERS_H
-#include <define.h>
+#include <kernel.h>
 // acpi.c
 char checksum(u8 *addr, u32 length);
 u32 *acpi_find_rsdp(void);
@@ -9,12 +9,12 @@ void init_acpi(void);
 int  acpi_shutdown(void);
 
 typedef struct {
-  uint64_t sec;
-  uint64_t nsec;
+  u64 sec;
+  u64 nsec;
 } time_ns_t;
 
 void gettime_ns(time_ns_t *ptr);
-void usleep(uint64_t time_us);
+void usleep(u64 time_us);
 
 // beep.c
 void beep(int point, int notes, int dup);
@@ -141,7 +141,7 @@ bool have_vdisk(char drive);
 bool rtl8139_find_card();
 void init_rtl8139_card();
 // timer.c
-void sleep(uint64_t s);
+void sleep(u64 s);
 // ide.c
 void ide_read_sectors(u8 drive, u8 numsects, u32 lba, u16 es, u32 edi);
 void ide_write_sectors(u8 drive, u8 numsects, u32 lba, u16 es, u32 edi);

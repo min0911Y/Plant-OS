@@ -1,7 +1,8 @@
 #pragma once
-#include <copi143-define.h>
-#include <dosldr/vfs.h>
+#include "vfs.h"
+#include <define.h>
 #include <type.h>
+
 struct FAT_CACHE {
   u32                  ADR_DISKIMG;
   struct FAT_FILEINFO *root_directory;

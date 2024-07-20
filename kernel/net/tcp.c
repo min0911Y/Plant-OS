@@ -48,7 +48,7 @@ void tcp_handler(void *base) {
       (struct TCPMessage *)(base + sizeof(struct EthernetFrame_head) + sizeof(struct IPV4Message));
   struct Socket *socket = Socket_Find(swap32(ipv4->srcIP), swap16(tcp->srcPort),
                                       swap32(ipv4->dstIP), swap16(tcp->dstPort), TCP_PROTOCOL);
-  if (socket == -1) {
+  if (socket == NULL) {
     // printk("Not found %08x %d %08x %d\n",swap32(ipv4->srcIP),
     // swap16(tcp->srcPort), swap32(ipv4->dstIP), swap16(tcp->dstPort));
     return;

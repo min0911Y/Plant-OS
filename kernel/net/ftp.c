@@ -1,3 +1,4 @@
+#include "type.h"
 #include <dos.h>
 #define MAX_FTP_CLIENT_NUM 32
 static struct FTP_Client ftp_c[MAX_FTP_CLIENT_NUM];
@@ -155,7 +156,7 @@ static int Download(struct FTP_Client *ftp_c_, u8 *path_pdos, u8 *path_ftp, int 
   return 0;
 }
 static u8 *Getlist(struct FTP_Client *ftp_c_, u8 *path, int mode) {
-  if (ftp_c_->TransModeChoose(ftp_c_, mode) == -1) { return -1; }
+  if (ftp_c_->TransModeChoose(ftp_c_, mode) == -1) { return NULL; }
   char s[50];
   sprintf(s, "LIST %s\r\n", path);
   ftp_c_->recv_flag_cmd = false;
@@ -188,7 +189,7 @@ struct FTP_Client *FTP_Client_Alloc(u32 remoteIP, u32 localIP, u16 localPort) {
       ftp_c[i].TransModeChoose        = TransModeChoose;
       ftp_c[i].Logout                 = Logout;
       ftp_c[i].Download               = Download;
-      ftp_c[i].Getlist                = Getlist;
+      ftp_c[i].Getlist                = (u8 * (*)(struct FTP_Client *)) Getlist;
       ftp_c[i].recv_buf_cmd           = (u8 *)malloc(128); // 吴用
       ftp_c[i].recv_buf_dat           = (u8 *)NULL;
       ftp_c[i].recv_flag_cmd          = false;

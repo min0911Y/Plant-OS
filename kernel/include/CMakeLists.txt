@@ -1,1 +1,2 @@
-mkheader_recurse(define)
+mkheader_recurse(kernel)
+add_subdirectory(kernel)

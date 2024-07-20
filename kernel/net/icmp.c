@@ -62,7 +62,7 @@ void cmd_ping(char *cmdline) {
   printk("Pinging %d.%d.%d.%d from %d bytes data:\n\n", ip0, ip1, ip2, ip3, PING_SIZE + 2 + 2);
   u8         lost = 0, get = 4;
   extern u32 ip;
-  uint64_t   mac_address = IPParseMAC(dst_ip);
+  u64        mac_address = IPParseMAC(dst_ip);
   u8         data[PING_SIZE];
   for (int i = 0; i != PING_SIZE; i++)
     data[i] = PING_DATA;
@@ -112,7 +112,7 @@ void icmp_handler(void *base) {
     u32 src_ip = ((ipv4->srcIP << 24) & 0xff000000) | ((ipv4->srcIP << 8) & 0x00ff0000) |
                  ((ipv4->srcIP >> 8) & 0xff00) | ((ipv4->srcIP >> 24) & 0xff);
     u8 *packet = ICMP_Packet(0, 0, swap16(icmp->ID), swap16(icmp->sequence), data, size);
-    IPV4ProviderSend(1, *(uint64_t *)&header->src_mac[0], src_ip, ip, packet,
+    IPV4ProviderSend(1, *(u64 *)&header->src_mac[0], src_ip, ip, packet,
                      size + sizeof(struct ICMPMessage)); // 给答复
   } else if (icmp->type == 0 && icmp->code == 0) {       // Ping答复
     memcpy(ping_reply_data, base, 2048);

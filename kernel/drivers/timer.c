@@ -83,7 +83,7 @@ void timer_settime(struct TIMER *timer, u32 timeout) {
 
 #define NANOSEC_IN_SEC 1000000000
 
-void sleep(uint64_t time_s) {
+void sleep(u64 time_s) {
   time_ns_t end_time;
   gettime_ns(&end_time);
   end_time.sec  = time_s / 1000;
@@ -101,7 +101,7 @@ void sleep(uint64_t time_s) {
 u32        mt2flag     = 0;
 int        g           = 0;
 static u32 count       = 0;
-uint64_t   global_time = 0;
+u64        global_time = 0;
 void       inthandler20(int cs, int *esp) {
   //logk("*");
   // printk("CS:EIP=%04x:%08x\n",current_task()->tss.cs,esp[-10]);

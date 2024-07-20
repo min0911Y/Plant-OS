@@ -1,0 +1,72 @@
+#pragma once
+#include <define.h>
+#include <type.h>
+typedef struct {
+  u32 eax, ebx, ecx, edx, esi, edi, ebp;
+  u32 eip;
+} stack_frame;
+enum {
+  CR0_PE = 1 << 0, // Protection Enable 启用保护模式
+  CR0_MP = 1 << 1, // Monitor Coprocessor
+  CR0_EM = 1 << 2, // Emulation 启用模拟，表示没有 FPU
+  CR0_TS = 1 << 3, // Task Switch 任务切换，延迟保存浮点环境
+  CR0_ET = 1 << 3, // Extension Type 保留
+  CR0_NE = 1 << 5, // Numeric Error 启用内部浮点错误报告
+  CR0_WP = 1 << 16, // Write Protect 写保护（禁止超级用户写入只读页）帮助写时复制
+  CR0_AM = 1 << 18, // Alignment Mask 对齐掩码
+  CR0_NW = 1 << 29, // Not Write-Through 不是直写
+  CR0_CD = 1 << 30, // Cache Disable 禁用内存缓冲
+  CR0_PG = 1 << 31, // Paging 启用分页
+};
+typedef struct fpu_t {
+  u16 control;
+  u16 RESERVED1;
+  u16 status;
+  u16 RESERVED2;
+  u16 tag;
+  u16 RESERVED3;
+  u32 fip0;
+  u32 fop0;
+  u32 fdp0;
+  u32 fdp1;
+  u8  regs[80];
+} __PACKED__ fpu_t;
+typedef struct intr_frame_t {
+  unsigned edi;
+  unsigned esi;
+  unsigned ebp;
+  // 虽然 pushad 把 esp 也压入，但 esp 是不断变化的，所以会被 popad 忽略
+  unsigned esp_dummy;
+
+  unsigned ebx;
+  unsigned edx;
+  unsigned ecx;
+  unsigned eax;
+
+  unsigned gs;
+  unsigned fs;
+  unsigned es;
+  unsigned ds;
+
+  unsigned eip;
+  unsigned cs;
+  unsigned eflags;
+  unsigned esp;
+  unsigned ss;
+} intr_frame_t;
+
+struct TSS32 {
+  int backlink, esp0, ss0, esp1, ss1, esp2, ss2, cr3;
+  int eip, eflags, eax, ecx, edx, ebx, esp, ebp, esi, edi;
+  int es, cs, ss, ds, fs, gs;
+  int ldtr, iomap;
+};
+
+typedef struct {
+  u16 di, si, bp, sp, bx, dx, cx, ax;
+  u16 gs, fs, es, ds, eflags;
+} regs16_t;
+typedef struct {
+  u16 offset;
+  u16 seg;
+} ReadModeFarPointer;

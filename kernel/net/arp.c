@@ -1,10 +1,10 @@
 #include <net.h>
 // ARP
-u8       ARP_flags = 1;
-uint64_t ARP_mac_address[MAX_ARP_TABLE];
-u32      ARP_ip_address[MAX_ARP_TABLE];
-u32      ARP_write_pointer = 0;
-u8      *ARP_Packet(uint64_t dest_mac, u32 dest_ip, uint64_t src_mac, u32 src_ip, u16 command) {
+u8  ARP_flags = 1;
+u64 ARP_mac_address[MAX_ARP_TABLE];
+u32 ARP_ip_address[MAX_ARP_TABLE];
+u32 ARP_write_pointer = 0;
+u8 *ARP_Packet(u64 dest_mac, u32 dest_ip, u64 src_mac, u32 src_ip, u16 command) {
   struct ARPMessage *res   = (struct ARPMessage *)page_malloc(sizeof(struct ARPMessage));
   res->hardwareType        = 0x0100;
   res->protocol            = 0x0008;
@@ -29,10 +29,10 @@ u8      *ARP_Packet(uint64_t dest_mac, u32 dest_ip, uint64_t src_mac, u32 src_ip
                 ((src_ip >> 8) & 0xff00) | ((src_ip >> 24) & 0xff);
   return (u8 *)res;
 }
-uint64_t IPParseMAC(u32 dstIP) {
+u64 IPParseMAC(u32 dstIP) {
   extern u8              ARP_flags;
   extern u32             ARP_write_pointer;
-  extern uint64_t        ARP_mac_address[MAX_ARP_TABLE];
+  extern u64             ARP_mac_address[MAX_ARP_TABLE];
   extern u32             ARP_ip_address[MAX_ARP_TABLE];
   extern u32             ip;
   extern u8              mac0;
@@ -45,7 +45,7 @@ uint64_t IPParseMAC(u32 dstIP) {
   ARP_flags = 1;
   //printk("send\n");
   ether_frame_provider_send(0xffffffffffff, 0x0806,
-                            ARP_Packet(0xffffffffffff, dstIP, *(uint64_t *)&mac0, ip, 1),
+                            ARP_Packet(0xffffffffffff, dstIP, *(u64 *)&mac0, ip, 1),
                             sizeof(struct ARPMessage));
   //printk("ok\n");
   u32 time = timerctl.count;
@@ -58,13 +58,13 @@ void arp_handler(void *base) {
   extern u32                 ip;
   extern u8                  mac0;
   struct EthernetFrame_head *header = (struct EthernetFrame_head *)(base);
-  if ((*(uint64_t *)&header->dest_mac[0] & 0xffffffffffff) ==
-      (*(uint64_t *)&mac0 & 0xffffffffffff)) { // ARP广播回应
+  if ((*(u64 *)&header->dest_mac[0] & 0xffffffffffff) ==
+      (*(u64 *)&mac0 & 0xffffffffffff)) { // ARP广播回应
     struct ARPMessage *arp = (struct ARPMessage *)(base + sizeof(struct EthernetFrame_head));
     if (arp->command == 0x0200) {
       // printk("ARP MAC Address Reply\n");
       if (ARP_write_pointer < MAX_ARP_TABLE) {
-        ARP_mac_address[ARP_write_pointer] = *(uint64_t *)&header->src_mac[0] & 0xffffffffffff;
+        ARP_mac_address[ARP_write_pointer] = *(u64 *)&header->src_mac[0] & 0xffffffffffff;
         ARP_ip_address[ARP_write_pointer]  = swap32(arp->src_ip);
         ARP_write_pointer++;
         ARP_flags = 0;
@@ -72,7 +72,7 @@ void arp_handler(void *base) {
     }
     // 如果发送方不知道我们的MAC地址
     // 要发ARP数据包返回给发送方 告诉发送方我的MAC地址（确立联系）
-  } else if ((*(uint64_t *)&header->dest_mac[0] & 0xffffffffffff) ==
+  } else if ((*(u64 *)&header->dest_mac[0] & 0xffffffffffff) ==
              0xffffffffffff) { // dest_mac = 0xffffffffffff && ARP广播请求
     struct ARPMessage *arp = (struct ARPMessage *)(base + sizeof(struct EthernetFrame_head));
     if (arp->command == 0x0100 && arp->dest_ip == swap32(ip)) {
@@ -80,8 +80,8 @@ void arp_handler(void *base) {
       u32 src_ip = ((arp->src_ip << 24) & 0xff000000) | ((arp->src_ip << 8) & 0x00ff0000) |
                    ((arp->src_ip >> 8) & 0xff00) | ((arp->src_ip >> 24) & 0xff);
       ether_frame_provider_send(
-          *(uint64_t *)&header->src_mac[0], 0x0806,
-          ARP_Packet(*(uint64_t *)&header->src_mac[0], src_ip, *(uint64_t *)&mac0, ip, 2),
+          *(u64 *)&header->src_mac[0], 0x0806,
+          ARP_Packet(*(u64 *)&header->src_mac[0], src_ip, *(u64 *)&mac0, ip, 2),
           sizeof(struct ARPMessage));
     }
   }

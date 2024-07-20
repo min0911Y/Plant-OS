@@ -1,11 +1,11 @@
 #pragma once
 #include <cmd.h>
 #include <ctypes.h>
-#include <define.h>
 #include <drivers.h>
 #include <fs.h>
 #include <interrupts.h>
 #include <io.h>
+#include <kernel.h>
 #include <net.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -19,8 +19,8 @@ void init_gdtidt();
 void register_intr_handler(int num, int addr);
 
 // timer.c
-void          init_pit(void);
-struct TIMER *timer_alloc(void);
+void          init_pit();
+struct TIMER *timer_alloc();
 void          timer_free(struct TIMER *timer);
 void          timer_init(struct TIMER *timer, struct FIFO8 *fifo, u8 data);
 void          timer_settime(struct TIMER *timer, u32 timeout);
@@ -35,32 +35,33 @@ void          inthandler20(int cs, int *esp);
 #define SA_RPL2          2
 #define SA_RPL3          3
 #define GET_SEL(cs, rpl) ((cs & SA_RPL_MASK & SA_TI_MASK) | (rpl))
-mtask          *current_task();
-mtask          *get_task(unsigned tid);
-mtask          *create_task(unsigned eip, unsigned esp, unsigned ticks, unsigned floor);
-void            task_to_user_mode_elf(char *filename);
-void            task_kill(unsigned tid);
-void            task_exit(unsigned status);
-int             os_execute(char *filename, char *line);
-int             os_execute_shell(char *line);
-void            idle();
-void            init();
-extern uint64_t global_time;
-void            set_cr3(u32 pde);
-struct FIFO8   *task_get_key_fifo(mtask *task);
-void            task_fifo_sleep(mtask *task);
-struct FIFO8   *task_get_mouse_fifo(mtask *task);
-void            task_lock();
-void            task_unlock();
-void            task_to_user_mode(unsigned eip, unsigned esp);
-void            task_set_fifo(mtask *task, struct FIFO8 *kfifo, struct FIFO8 *mfifo);
-void            os_execute_no_ret(char *filename, char *line);
-u32             get_father_tid(mtask *t);
-int             waittid(u32 tid);
-void            task_fall_blocked(enum STATE state);
-void            task_run(mtask *task);
-void            mtask_run_now(mtask *obj);
-int             task_fork();
+mtask        *current_task();
+mtask        *get_task(unsigned tid);
+mtask        *create_task(unsigned eip, unsigned esp, unsigned ticks, unsigned floor);
+void          task_to_user_mode_elf(char *filename);
+void          task_kill(unsigned tid);
+void          task_exit(unsigned status);
+int           os_execute(char *filename, char *line);
+int           os_execute_shell(char *line);
+void          idle();
+void          init();
+extern u64    global_time;
+void          set_cr3(u32 pde);
+struct FIFO8 *task_get_key_fifo(mtask *task);
+void          task_fifo_sleep(mtask *task);
+struct FIFO8 *task_get_mouse_fifo(mtask *task);
+void          task_lock();
+void          task_unlock();
+void          task_to_user_mode(unsigned eip, unsigned esp);
+void          task_set_fifo(mtask *task, struct FIFO8 *kfifo, struct FIFO8 *mfifo);
+void          os_execute_no_ret(char *filename, char *line);
+u32           get_father_tid(mtask *t);
+int           waittid(u32 tid);
+void          task_fall_blocked(enum STATE state);
+void          task_run(mtask *task);
+void          mtask_run_now(mtask *obj);
+int           task_fork();
+int           into_mtask();
 
 // page.c
 void  C_init_page();
@@ -107,9 +108,9 @@ void asm_inthandler2c();
 void asm_inthandler20();
 void asm_inthandler21();
 void asm_ide_irq();
-void io_cli(void);
-void io_sti(void);
-void io_stihlt(void);
+void io_cli();
+void io_sti();
+void io_stihlt();
 void load_tr(int tr);
 void io_out8(int port, int data);
 void io_out16(int port, int data);
@@ -195,6 +196,7 @@ void ClearExpFlag();
 void SetCatchEip(u32 eip);
 void SwitchPublic();
 void SwitchPrivate();
+
 // syscall.c
 void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx, int eax);
 
@@ -296,3 +298,5 @@ u32 call_across_page(u32 (*f)(void *arg), unsigned cr3, void *a);
 
 // fartty.c
 struct tty *fartty_alloc(void *vram, unsigned handle, unsigned cr3, int xsize, int ysize);
+
+int isdigit(int c);

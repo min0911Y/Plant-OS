@@ -10,20 +10,20 @@ extern "C" {
 #include "dosldr/cpu.h"
 #include "dosldr/debug.h"
 #include "dosldr/dma.h"
-#include "dosldr/fat.h"
 #include "dosldr/fdc.h"
 #include "dosldr/file.h"
+#include "dosldr/fs/fat.h"
+#include "dosldr/fs/pfs.h"
+#include "dosldr/fs/vfs.h"
 #include "dosldr/ide.h"
 #include "dosldr/kbd.h"
 #include "dosldr/list.h"
 #include "dosldr/mem.h"
 #include "dosldr/pci.h"
-#include "dosldr/pfs.h"
 #include "dosldr/screen.h"
 #include "dosldr/str.h"
 #include "dosldr/tsk.h"
 #include "dosldr/vdisk.h"
-#include "dosldr/vfs.h"
 #ifdef __cplusplus
 }
 #endif

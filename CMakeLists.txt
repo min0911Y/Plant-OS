@@ -66,6 +66,7 @@ add_compile_flag("-m32 -mfpmath=387 -fno-builtin -mno-mmx -mno-sse -nostdlib -no
 
 if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
   add_compile_flag("-emit-obj")
+  add_compile_flag("-fheinous-gnu-extensions")
 endif()
 
 add_compile_flag("-finput-charset=UTF-8 -fexec-charset=UTF-8")

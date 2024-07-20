@@ -26,8 +26,7 @@ void pfs_format(pfs_t p, char *volid) {
   pfs_mbr *pm           = (pfs_mbr *)mbr;
   pm->resd_sector_start = p.resd_sec_start;
   pm->resd_sector_end   = p.resd_sec_end;
-  // pm->sec_bitmap_start =
-  //     p.resd_sec_end != 0 ? p.resd_sec_end + 1 : 1 /* 跳过mbr */;
+  // pm->sec_bitmap_start = p.resd_sec_end != 0 ? p.resd_sec_end + 1 : 1 /* 跳过mbr */;
   pm->sec_bitmap_start       = p.sec_bitmap_start;
   pm->sign[0]                = 'P';
   pm->sign[1]                = 'F';

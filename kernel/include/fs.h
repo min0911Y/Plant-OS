@@ -1,6 +1,6 @@
 #ifndef _FS_H
 #define _FS_H
-#include <define.h>
+#include <kernel.h>
 // fat.c
 void      Register_fat_fileSys();
 // file.c

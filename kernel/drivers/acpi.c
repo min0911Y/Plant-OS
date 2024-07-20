@@ -32,7 +32,7 @@ u32 acpi_find_table(char *Signature) {
   // iterate on ACPI table pointers
   for (len = *((u32 *)(rsdt + 4)), ptr2 = rsdt + 36; ptr2 < rsdt + len;
        ptr2 += rsdt[0] == 'X' ? 8 : 4) {
-    ptr = (u8 *)(uintptr_t)(rsdt[0] == 'X' ? *((uint64_t *)ptr2) : *((u32 *)ptr2));
+    ptr = (u8 *)(uintptr_t)(rsdt[0] == 'X' ? *((u64 *)ptr2) : *((u32 *)ptr2));
     if (!memcmp(ptr, Signature, 4)) { return (unsigned)ptr; }
   }
   // printk("not found.\n");
@@ -123,32 +123,32 @@ int acpi_shutdown() {
 }
 // copy from EXOS(https://gitee.com/yywd123/EXOS)
 typedef struct {
-  char     sign[4];
-  u32      len;
-  char     revision;
-  char     checksum;
-  char     oemid[6];
-  uint64_t oem_table_id;
-  u32      oem_revision;
-  u32      creator_id;
-  u32      creator_revision;
+  char sign[4];
+  u32  len;
+  char revision;
+  char checksum;
+  char oemid[6];
+  u64  oem_table_id;
+  u32  oem_revision;
+  u32  creator_id;
+  u32  creator_revision;
 } __attribute__((packed)) MADT;
 typedef struct {
-  uint64_t configurationAndCapability;
-  uint64_t comparatorValue;
-  uint64_t fsbInterruptRoute;
-  uint64_t unused;
+  u64 configurationAndCapability;
+  u64 comparatorValue;
+  u64 fsbInterruptRoute;
+  u64 unused;
 } __attribute__((packed)) HpetTimer;
 
 typedef struct {
-  uint64_t  generalCapabilities;
-  uint64_t  reserved0;
-  uint64_t  generalConfiguration;
-  uint64_t  reserved1;
-  uint64_t  generalIntrruptStatus;
+  u64       generalCapabilities;
+  u64       reserved0;
+  u64       generalConfiguration;
+  u64       reserved1;
+  u64       generalIntrruptStatus;
   u8        reserved3[0xc8];
-  uint64_t  mainCounterValue;
-  uint64_t  reserved4;
+  u64       mainCounterValue;
+  u64       reserved4;
   HpetTimer timers[0];
 } __attribute__((packed)) HpetInfo;
 
@@ -183,7 +183,7 @@ typedef struct {
 } __attribute__((packed)) HPET;
 
 static HpetInfo *hpetInfo   = NULL;
-static uint64_t  hpetPeriod = 0;
+static u64       hpetPeriod = 0;
 
 void hpet_initialize() {
   HPET *hpet = acpi_find_table("HPET");
@@ -203,12 +203,12 @@ void hpet_initialize() {
 #define NANOSEC_IN_SEC 1000000000
 
 void gettime_ns(time_ns_t *ptr) {
-  static uint64_t time_sec  = 0;
-  static uint64_t time_ns   = 0;
-  static uint64_t val_old   = 0;
-  uint64_t        val       = hpetInfo->mainCounterValue * hpetPeriod - val_old;
-  val_old                  += val;
-  time_ns                  += val;
+  static u64 time_sec  = 0;
+  static u64 time_ns   = 0;
+  static u64 val_old   = 0;
+  u64        val       = hpetInfo->mainCounterValue * hpetPeriod - val_old;
+  val_old             += val;
+  time_ns             += val;
   while (time_ns > NANOSEC_IN_SEC) {
     time_sec += 1;
     time_ns  -= NANOSEC_IN_SEC;
@@ -218,7 +218,7 @@ void gettime_ns(time_ns_t *ptr) {
   ptr->nsec = time_ns;
 }
 
-void usleep(uint64_t time_us) {
+void usleep(u64 time_us) {
   time_ns_t end_time;
   gettime_ns(&end_time);
   end_time.sec  = time_us / 1000000;

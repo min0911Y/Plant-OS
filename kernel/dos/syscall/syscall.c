@@ -72,8 +72,14 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
   memory *current_mm = task->mm;
   int    *reg        = &eax + 1; /* eax后面的地址*/
                                  /*强行改写通过PUSHAD保存的值*/
-  /* reg[0] : EDI,   reg[1] : ESI,   reg[2] : EBP,   reg[3] : ESP */
-  /* reg[4] : EBX,   reg[5] : EDX,   reg[6] : ECX,   reg[7] : EAX */
+  // reg[0] : EDI
+  // reg[1] : ESI
+  // reg[2] : EBP
+  // reg[3] : ESP
+  // reg[4] : EBX
+  // reg[5] : EDX
+  // reg[6] : ECX
+  // reg[7] : EAX
   if (eax == 0x01) {
     reg[EDX] = 0x302e3762;
   } else if (eax == 0x02) {

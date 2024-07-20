@@ -2,12 +2,12 @@
 static void fartty_putchar(struct tty *res, int c) {
   u32 args[10];
   args[0] = 0;
-  args[1] = res->vram;
+  args[1] = (u32)res->vram;
   args[2] = c;
   args[7] = res->x;
   args[8] = res->y;
   args[9] = res->color;
-  call_across_page(res->reserved[0], res->reserved[1], args);
+  call_across_page((u32(*)(void *))res->reserved[0], res->reserved[1], args);
 
   int nx, ny, nc;
   nx         = args[7];
@@ -18,9 +18,9 @@ static void fartty_putchar(struct tty *res, int c) {
   res->color = nc;
 }
 static void fartty_MoveCursor(struct tty *res, int x, int y) {
-  u32 *args[10];
+  u32 args[10];
   args[0] = 1;
-  args[1] = res->vram;
+  args[1] = (u32)res->vram;
   args[2] = x;
   args[3] = y;
   args[7] = res->x;
@@ -29,16 +29,16 @@ static void fartty_MoveCursor(struct tty *res, int x, int y) {
   res->x  = x;
   res->y  = y;
   if (res->cur_moving == 0) { return; }
-  call_across_page(res->reserved[0], res->reserved[1], args);
+  call_across_page((u32(*)(void *))res->reserved[0], res->reserved[1], args);
 }
 static void fartty_clear(struct tty *res) {
   u32 args[10];
   args[0] = 2;
-  args[1] = res->vram;
+  args[1] = (u32)res->vram;
   args[7] = res->x;
   args[8] = res->y;
   args[9] = res->color;
-  call_across_page(res->reserved[0], res->reserved[1], args);
+  call_across_page((u32(*)(void *))res->reserved[0], res->reserved[1], args);
   int nx, ny, nc;
   nx         = args[7];
   ny         = args[8];
@@ -50,11 +50,11 @@ static void fartty_clear(struct tty *res) {
 static void fartty_screen_ne(struct tty *res) {
   u32 args[10];
   args[0] = 3;
-  args[1] = res->vram;
+  args[1] = (u32)res->vram;
   args[7] = res->x;
   args[8] = res->y;
   args[9] = res->color;
-  call_across_page(res->reserved[0], res->reserved[1], args);
+  call_across_page((u32(*)(void *))res->reserved[0], res->reserved[1], args);
   int nx, ny, nc;
   nx         = args[7];
   ny         = args[8];
@@ -66,7 +66,7 @@ static void fartty_screen_ne(struct tty *res) {
 static void fartty_Draw_Box(struct tty *res, int x, int y, int x1, int y1, u8 color) {
   u32 args[10];
   args[0] = 4;
-  args[1] = res->vram;
+  args[1] = (u32)res->vram;
   args[2] = x;
   args[3] = y;
   args[4] = x1;
@@ -75,7 +75,7 @@ static void fartty_Draw_Box(struct tty *res, int x, int y, int x1, int y1, u8 co
   args[7] = res->x;
   args[8] = res->y;
   args[9] = res->color;
-  call_across_page(res->reserved[0], res->reserved[1], args);
+  call_across_page((u32(*)(void *))res->reserved[0], res->reserved[1], args);
   int nx, ny, nc;
   nx         = args[7];
   ny         = args[8];
@@ -87,11 +87,11 @@ static void fartty_Draw_Box(struct tty *res, int x, int y, int x1, int y1, u8 co
 static int fartty_fifo_status(struct tty *res) {
   u32 args[10];
   args[0] = 5;
-  args[1] = res->vram;
+  args[1] = (u32)res->vram;
   args[7] = res->x;
   args[8] = res->y;
   args[9] = res->color;
-  call_across_page(res->reserved[0], res->reserved[1], args);
+  call_across_page((u32(*)(void *))res->reserved[0], res->reserved[1], args);
   int nx, ny, nc;
   nx         = args[7];
   ny         = args[8];
@@ -104,11 +104,11 @@ static int fartty_fifo_status(struct tty *res) {
 static int fartty_fifo_get(struct tty *res) {
   u32 args[10];
   args[0] = 6;
-  args[1] = res->vram;
+  args[1] = (u32)res->vram;
   args[7] = res->x;
   args[8] = res->y;
   args[9] = res->color;
-  call_across_page(res->reserved[0], res->reserved[1], args);
+  call_across_page((u32(*)(void *))res->reserved[0], res->reserved[1], args);
   int nx, ny, nc;
   nx         = args[7];
   ny         = args[8];

@@ -1,6 +1,8 @@
+#include <dos.h>
 #include <io.h>
+
 char              **Input_Stack; // 1024个字符串
-struct Input_StacK *STACK = NULL;
+struct input_stack *STACK = NULL;
 
 void Input_Stack_Init() {
   int i;
@@ -15,34 +17,34 @@ void Input_Stack_Init() {
       Input_Stack[i][j] = 0;
     }
   }
-  STACK->Stack      = Input_Stack;
-  STACK->Stack_Size = 1024;
+  STACK->stack      = Input_Stack;
+  STACK->stack_size = 1024;
   STACK->free       = 1023;
-  STACK->Now        = 1023;
+  STACK->now        = 1023;
   STACK->times      = 0;
 }
 
 void input_stack_put(char *str) {
   int i;
 
-  if (STACK->Now == 0) {
+  if (STACK->now == 0) {
     for (i = 0; i < 1024; i++) {
-      STACK->Stack[i] = NULL;
+      STACK->stack[i] = NULL;
     }
     STACK->free  = 1023;
-    STACK->Now   = 1023;
+    STACK->now   = 1023;
     STACK->times = 0;
     input_stack_put(str);
   } else {
-    strcpy(STACK->Stack[STACK->Now], str);
+    strcpy(STACK->stack[STACK->now], str);
     STACK->free--;
-    STACK->Now--;
+    STACK->now--;
     STACK->times++;
   }
 }
 
 int input_stack_get_now() {
-  return STACK->Now;
+  return STACK->now;
 }
 
 int Get_times() {
@@ -50,11 +52,11 @@ int Get_times() {
 }
 
 char *input_stack_pop() {
-  return STACK->Stack[STACK->Now + 1];
+  return STACK->stack[STACK->now + 1];
 }
 
 void input_stack_set_now(int now) {
-  STACK->Now = now;
+  STACK->now = now;
 }
 
 int get_free() {
