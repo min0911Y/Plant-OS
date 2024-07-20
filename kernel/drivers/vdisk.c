@@ -119,7 +119,7 @@ u32 disk_Size(char drive) {
     int indx = drive1 - 'A';
     return vdisk_ctl[indx].size;
   } else {
-    logk("Disk Not Ready.\n");
+    logk("Disk Not Ready.");
     return 0;
   }
 

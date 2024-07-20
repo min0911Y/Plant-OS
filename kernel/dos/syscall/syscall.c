@@ -204,12 +204,12 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
       input((char *)(edx + ds_base), ecx);
     }
   } else if (eax == 0x19) {
-    logk("--------------------------------\n");
-    logk("c: %08x %s\n", task->pde, (char *)(edx + ds_base));
+    logk("--------------------------------");
+    logk("c: %08x %s", task->pde, (char *)(edx + ds_base));
     reg[EAX] = command_run((char *)(edx + ds_base));
     // asm("xchg %bx,%bx");
-    logk("n: %08x\n", task->pde);
-    logk("--------------------------------\n");
+    logk("n: %08x", task->pde);
+    logk("--------------------------------");
   } else if (eax == 0x1a) {
     if (ebx == 0x01) {
       int fsize = vfs_filesize((char *)(edx + ds_base));
@@ -234,11 +234,11 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
       char *Ptr      = (char *)ds_base + esi;
       int   length   = ecx;
       int   offset   = edi;
-      logk("EDIT %s\n", FilePath);
+      logk("EDIT %s", FilePath);
       EDIT_FILE(FilePath, Ptr, length, offset);
     } else if (ebx == 0x06) {
       char        *Path = (char *)(ds_base + edx);
-      //  logk("listfile %s\n",Path);
+      //  logk("listfile %s",Path);
       struct List *file_list = vfs_listfile(Path);
       int          number;
       for (number = 1; FindForCount(number, file_list) != NULL; number++)
@@ -284,7 +284,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
     // frame->fs = i->fs;
     // frame->es = i->es;
     // frame->ds = i->ds;
-    // logk("%08x\n", i->eip);
+    // logk("%08x", i->eip);
     // frame->eip = i->eip;
     // frame->eip1 = return_to_app;
     // i->eip = test;
@@ -293,7 +293,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
     // while (true)
     //   ;
     if (!(*(u8 *)(0xf0000000))) {
-      logk("here\n");
+      logk("here");
       while (FindForCount(1, vfs_now->path) != NULL) {
         free(FindForCount(vfs_now->path->ctl->all, vfs_now->path)->val);
         DeleteVal(vfs_now->path->ctl->all, vfs_now->path);
@@ -320,11 +320,11 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
         reg[EAX] = check_vbe_mode(ecx, (struct VBEINFO *)VBEINFO_ADDRESS);
       } else if (ebx == 0x05) {
         unsigned v = set_mode(ecx, edx, 32);
-        logk("reg[EAX] = %08x %d\n", v, pages[IDX(0xfd07c2d0)].count);
+        logk("reg[EAX] = %08x %d", v, pages[IDX(0xfd07c2d0)].count);
         reg[EAX]       = v;
         unsigned count = div_round_up(ecx * edx * 4, 0x1000);
         for (int i = 0; i < count; i++) {
-          logk("%08x\n", v + i * 0x1000);
+          logk("%08x", v + i * 0x1000);
           page_set_physics_attr(v + i * 0x1000, v + i * 0x1000,
                                 7); // PG_P | PG_USU | PG_RWW
         }
@@ -391,7 +391,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
       }
       set_cr3(pde);
       io_sti();
-      logk("OK\n");
+      logk("OK");
       // while (true)
       //   ;
       mtask *t      = create_task(user_thread_into, (unsigned)0, 1, 1);
@@ -595,7 +595,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
   } else if (eax == 0x47) {
     vfs_renamefile(ebx, ecx);
   } else if (eax == 0x48) {
-    logk(ebx);
+    logk("%s", ebx);
   } else if (eax == 0x49) {
     unsigned old = current_task()->handler[ebx];
     set_signal_handler(ebx, ecx);

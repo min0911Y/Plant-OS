@@ -37,10 +37,6 @@ struct tty *tty_set(mtask *task, struct tty *res);
 struct tty *tty_set_default(struct tty *res);
 void tty_set_reserved(struct tty *res, u32 reserved1, u32 reserved2, u32 reserved3, u32 reserved4);
 
-// log.c
-void kprint(char *str);
-void logk(char *str, ...);
-
 // input.c
 void input(char *ptr, int len);
 void input_no_endl(char *ptr, int len);

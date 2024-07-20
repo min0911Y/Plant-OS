@@ -90,8 +90,23 @@ typedef __builtin_va_list va_list;
 #define STR_ERROR "[" COLOR_ERROR "Error" CEND "] "
 #define STR_FATAL "[" COLOR_FATAL "Fatal" CEND "] "
 
-#define ARG_LOGINFO __func__, __LINE__
-#define STR_LOGINFO "[" CRGB(128, 192, 255) "%s" CEND ":" CRGB(192, 64, 192) "%d" CEND "] "
+static const char *_log_basename_(const char *path) {
+  int i = 0;
+  while (path[i])
+    i++;
+  for (i--; i >= 0; i--) {
+    if (path[i] == '/' || path[i] == '\\') break;
+  }
+  return path + i + 1;
+}
+
+#define ARG_LOGINFO_FILE _log_basename_(__FILE__)
+#define STR_LOGINFO_FILE "[" CRGB(192, 64, 255) "%s" CEND "] "
+#define ARG_LOGINFO_FUNC __func__, __LINE__
+#define STR_LOGINFO_FUNC "[" CRGB(128, 192, 255) "%s" CEND ":" CRGB(192, 64, 192) "%d" CEND "] "
+
+#define ARG_LOGINFO ARG_LOGINFO_FILE, ARG_LOGINFO_FUNC
+#define STR_LOGINFO STR_LOGINFO_FILE STR_LOGINFO_FUNC
 
 #define _LOG(type, fmt, ...)                                                                       \
   printf(CONCAT(STR, type) STR_LOGINFO CONCAT(COLOR, type) fmt CEND "\n", ARG_LOGINFO,             \

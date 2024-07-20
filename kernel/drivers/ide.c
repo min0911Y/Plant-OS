@@ -128,7 +128,7 @@ void ide_initialize(u32 BAR0, u32 BAR1, u32 BAR2, u32 BAR3, u32 BAR4) {
                                                            // 2- Disable IRQs:
   ide_write(ATA_PRIMARY, ATA_REG_CONTROL, 2);
   ide_write(ATA_SECONDARY, ATA_REG_CONTROL, 2);
-  logk("w1\n");
+  logk("w1");
   // 3- Detect ATA-ATAPI Devices:
   for (int i = 0; i < 2; i++)
     for (j = 0; j < 2; j++) {
@@ -138,19 +138,19 @@ void ide_initialize(u32 BAR0, u32 BAR1, u32 BAR2, u32 BAR3, u32 BAR4) {
       // (I) Select Drive:
       ide_write(i, ATA_REG_HDDEVSEL, 0xA0 | (j << 4)); // Select Drive.
       sleep(1);                                        // Wait 1ms for drive select to work.
-      logk("I\n");
+      logk("I");
       // (II) Send ATA Identify Command:
       ide_write(i, ATA_REG_COMMAND, ATA_CMD_IDENTIFY);
       sleep(1); // This function should be implemented in your OS. which waits
                 // for 1 ms. it is based on System Timer Device Driver.
-      logk("II\n");
+      logk("II");
       // (III) Polling:
       if (ide_read(i, ATA_REG_STATUS) == 0) continue; // If Status = 0, No Device.
-      logk("III\n");
+      logk("III");
       while (1) {
-        logk("read ide....\n");
+        logk("read ide....");
         status = ide_read(i, ATA_REG_STATUS);
-        logk("read ok\n");
+        logk("read ok");
         if ((status & ATA_SR_ERR)) {
           err = 1;
           break;
@@ -159,7 +159,7 @@ void ide_initialize(u32 BAR0, u32 BAR1, u32 BAR2, u32 BAR3, u32 BAR4) {
       }
 
       // (IV) Probe for ATAPI Devices:
-      logk("IV\n");
+      logk("IV");
       if (err != 0) {
         u8 cl = ide_read(i, ATA_REG_LBA1);
         u8 ch = ide_read(i, ATA_REG_LBA2);
@@ -176,11 +176,11 @@ void ide_initialize(u32 BAR0, u32 BAR1, u32 BAR2, u32 BAR3, u32 BAR4) {
       }
 
       // (V) Read Identification Space of the Device:
-      logk("V\n");
+      logk("V");
       ide_read_buffer(i, ATA_REG_DATA, (u32)ide_buf, 128);
 
       // (VI) Read Device Parameters:
-      logk("VI\n");
+      logk("VI");
       ide_devices[count].Reserved     = 1;
       ide_devices[count].Type         = type;
       ide_devices[count].Channel      = i;
@@ -190,7 +190,7 @@ void ide_initialize(u32 BAR0, u32 BAR1, u32 BAR2, u32 BAR3, u32 BAR4) {
       ide_devices[count].CommandSets  = *((u32 *)(ide_buf + ATA_IDENT_COMMANDSETS));
 
       // (VII) Get Size:
-      logk("VII\n");
+      logk("VII");
       if (ide_devices[count].CommandSets & (1 << 26))
         // Device uses 48-Bit Addressing:
         ide_devices[count].Size = *((u32 *)(ide_buf + ATA_IDENT_MAX_LBA_EXT));
@@ -200,7 +200,7 @@ void ide_initialize(u32 BAR0, u32 BAR1, u32 BAR2, u32 BAR3, u32 BAR4) {
 
       // (VIII) String indicates model of device (like Western Digital HDD and
       // SONY DVD-RW...):
-      logk("VIII\n");
+      logk("VIII");
       for (k = 0; k < 40; k += 2) {
         ide_devices[count].Model[k]     = ide_buf[ATA_IDENT_MODEL + k + 1];
         ide_devices[count].Model[k + 1] = ide_buf[ATA_IDENT_MODEL + k];
@@ -214,7 +214,7 @@ void ide_initialize(u32 BAR0, u32 BAR1, u32 BAR2, u32 BAR3, u32 BAR4) {
   vdisk vd;
   for (int i = 0; i < 4; i++)
     if (ide_devices[i].Reserved == 1) {
-      logk(" %d Found %s Drive %dMB - %s\n", i,
+      logk(" %d Found %s Drive %dMB - %s", i,
            (const char *[]){"ATA", "ATAPI"}[ide_devices[i].Type], /* Type */
            ide_devices[i].Size / 1024 / 2,                        /* Size */
            ide_devices[i].Model);

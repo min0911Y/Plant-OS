@@ -645,11 +645,11 @@ int deldir(char *path, vfs_t *vfs) {
   return 1;
 }
 int mkfile(char *name, vfs_t *vfs) {
-  logk("mkfile : %s\n", name);
+  logk("mkfile : %s", name);
   char                 s[12];
   int                  i, j;
   struct FAT_FILEINFO *finfo = Get_dictaddr(name, vfs);
-  logk("finfo = %08x\n", finfo);
+  logk("finfo = %08x", finfo);
   if (finfo == NULL) { return 0; }
   int max = get_directory_max(finfo, vfs);
 
@@ -1167,7 +1167,7 @@ void Fat_DeleteFs(struct vfs_t *vfs) {
 bool Fat_Check(u8 disk_number) {
   u8 *boot_sec = malloc(512);
   Disk_Read(0, 1, boot_sec, disk_number);
-  logk("disk number = %02x\n", disk_number);
+  logk("disk number = %02x", disk_number);
   if (memcmp(boot_sec + BS_FileSysType, "FAT12   ", 8) == 0 ||
       memcmp(boot_sec + BS_FileSysType, "FAT16   ", 8) == 0 ||
       memcmp(boot_sec + BS_FileSysType + BPB_Fat32ExtByts, "FAT32   ", 8) == 0) {

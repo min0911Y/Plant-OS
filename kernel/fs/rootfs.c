@@ -17,12 +17,12 @@ static bool dev_check(u8 disk_number) {
   Disk_Read(0, 1, b, disk_number);
   if (*b != bmp) { return false; }
   if (**b) {
-    logk("this.\n");
+    logk("this.");
     page_free(b, 512);
     page_free(*b, 4);
     return true;
   } else {
-    logk("false.\n");
+    logk("false.");
     page_free(b, 512);
     page_free(*b, 4);
     return false;

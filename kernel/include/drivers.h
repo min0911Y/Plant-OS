@@ -13,6 +13,17 @@ typedef struct {
   u64 nsec;
 } time_ns_t;
 
+#define NANOSEC_IN_SEC ((i64)1000000000)
+
+static void time_ns_carry(time_ns_t *t) {
+  logk("I: %d", t->nsec);
+  while (t->nsec >= NANOSEC_IN_SEC) {
+    t->sec  += 1;
+    t->nsec -= NANOSEC_IN_SEC;
+  }
+  logk("O: %d", t->nsec);
+}
+
 void gettime_ns(time_ns_t *ptr);
 void usleep(u64 time_us);
 

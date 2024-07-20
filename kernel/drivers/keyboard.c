@@ -206,7 +206,7 @@ void   inthandler21(int *esp) {
                                           keyboard_use_task->tid); // 处理按下键
     }
     if (current_task() != keyboard_use_task) {
-      //   logk("SET 1\n");
+      //   logk("SET 1");
       keyboard_use_task->timeout = 5;
       keyboard_use_task->ready   = 1;
       keyboard_use_task->urgent  = 1;
@@ -238,7 +238,7 @@ void   inthandler21(int *esp) {
       }
       // 一般进程
     THROUGH:
-      //    logk("send\n");
+      //    logk("send");
       if (e0_flag) { fifo8_put(task_get_key_fifo(task), 0xe0); }
       fifo8_put(task_get_key_fifo(task), data);
     }

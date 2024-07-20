@@ -18,7 +18,7 @@ void task_app() {
   filename             = r[0];
   current_task()->line = r[1];
   page_free_one(r);
-  logk("%08x\n", current_task()->top);
+  logk("%08x", current_task()->top);
 
   char *kfifo = (char *)page_malloc_one();
   char *mfifo = (char *)page_malloc_one();
@@ -34,7 +34,7 @@ void task_app() {
   unsigned pde                  = current_task()->pde;
   io_cli();
   set_cr3(PDE_ADDRESS);
-  logk("P1 %08x\n", current_task()->pde);
+  logk("P1 %08x", current_task()->pde);
   for (int i = DIDX(0x70000000) * 4; i < 0x1000; i += 4) {
     u32 *pde_entry = (u32 *)(pde + i);
 
@@ -163,7 +163,7 @@ void task_to_user_mode_shell() {
   unsigned alloc_addr = (elf32_get_max_vaddr(p) & 0xfffff000) + 0x1000;
   unsigned pg         = div_round_up(*(current_task()->alloc_size), 0x1000);
   for (int i = 0; i < pg + 128; i++) {
-    // logk("%d\n",i);
+    // logk("%d",i);
     page_link(alloc_addr + i * 0x1000);
   }
   unsigned alloced_esp  = alloc_addr + 128 * 0x1000;
@@ -244,15 +244,15 @@ void task_to_user_mode_elf(char *filename) {
     *(u8 *)(0xf0000000) = 0;
   }
   // *(u32 *)(0xb5000000) = 2;
-  // logk("value = %08x\n",*(u32 *)(0xb5000000));
+  // logk("value = %08x",*(u32 *)(0xb5000000));
   current_task()->alloc_addr = alloc_addr;
   iframe->eip                = load_elf(p);
-  logk("eip = %08x\n", &(iframe->eip));
+  logk("eip = %08x", &(iframe->eip));
   current_task()->user_mode = 1;
   tss.esp0                  = current_task()->top;
   change_page_task_id(current_task()->tid, p, vfs_filesize(filename));
   change_page_task_id(current_task()->tid, iframe->esp - 512 * 1024, 512 * 1024);
-  logk("%d\n", get_interrupt_state());
+  logk("%d", get_interrupt_state());
   asm volatile("movl %0, %%esp\n"
                "popa\n"
                "pop %%gs\n"

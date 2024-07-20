@@ -282,7 +282,7 @@ void PCNET_IRQ(int *esp) {
   io_out16(io_base + RAP16, CSR0);
   io_out16(io_base + RDP16, temp); // 通知PCNET网卡 中断处理完毕
 
-  if ((temp & 0x0100) == 0x0100) logk("PCNET INIT DONE\n");
+  if ((temp & 0x0100) == 0x0100) logk("PCNET INIT DONE");
 
   // 通知PIC中断处理完毕
   io_out8(PIC1_OCW2, (0x60 + pci_get_drive_irq(bus, dev, func) - 0x8));

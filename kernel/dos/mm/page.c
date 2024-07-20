@@ -147,7 +147,7 @@ void page_link_pde_share(unsigned addr, unsigned pde) {
   if (pages[IDX(*physics)].count > 1) { pages[IDX(*physics)].count--; }
   int flag = 0;
   if (*physics & PG_SHARED) {
-    logk("THIS\n");
+    logk("THIS");
     flag = 1;
   }
   *physics  = (unsigned)page_malloc_one_count_from_4gb();
@@ -166,7 +166,7 @@ void page_link_pde_paddr(unsigned addr, unsigned pde, unsigned *paddr1, unsigned
   t             = DIDX(addr);
   p             = (addr >> 12) & 0x3ff;
   unsigned *pte = (u32 *)((pde + t * 4));
-  // logk("*pte = %08x\n",*pte);
+  // logk("*pte = %08x",*pte);
   if (pages[IDX(*pte)].count > 1 && !(*pte & PG_SHARED)) {
     int flag;
     if (*pte & PG_SHARED) flag = 1;
@@ -508,7 +508,7 @@ void copy_on_write(u32 vaddr) {
     void *phy     = (void *)(old_pte & 0xfffff000);
 
     // 分配一个页
-    //  logk("UPDATE %08x\n", vaddr);
+    //  logk("UPDATE %08x", vaddr);
     void *new_page = page_malloc_one_count_from_4gb();
     memcpy(new_page, phy, 0x1000);
 

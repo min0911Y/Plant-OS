@@ -9,6 +9,7 @@ void kprint(char *str) {
   }
 }
 
+#undef logk
 void logk(char *str, ...) {
   int     len;
   va_list ap;

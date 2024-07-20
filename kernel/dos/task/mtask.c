@@ -232,7 +232,7 @@ void task_to_user_mode(unsigned eip, unsigned esp) {
   iframe->esp        = esp; // 设置用户态堆栈
   current->user_mode = 1;
   tss.esp0           = current->top;
-  logk("TTT %d\n", current_task()->tid);
+  logk("TTT %d", current_task()->tid);
   // task_exit(0);
   // change_page_task_id(current_task()->tid, iframe->esp - 64 * 1024, 64 *
   // 1024);
@@ -493,7 +493,7 @@ int waittid(u32 tid) {
     task_fall_blocked(WAITING);
   }
   unsigned status = t->status;
-  logk("task exit with code %d\n", status);
+  logk("task exit with code %d", status);
   t->state = EMPTY;
   return status;
 }
@@ -520,9 +520,9 @@ mtask *mtask_get_free() {
   mtask *t = NULL;
   for (int i = 1; i < 255; i++) {
     if (m[i].state == EMPTY || m[i].state == WILL_EMPTY || m[i].state == READY) {
-      logk("f:%d\n", i);
+      logk("f:%d", i);
       t = &(m[i]);
-      logk("%d\n", t->tid);
+      logk("%d", t->tid);
       break;
     }
   }
@@ -531,7 +531,7 @@ mtask *mtask_get_free() {
 // THE FUNCTION CAN ONLY BE CALLED IN USER MODE!!!!
 void interrput_exit();
 void roc() {
-  logk("ROCT\n");
+  logk("ROCT");
   while (true)
     ;
 }
@@ -540,7 +540,7 @@ static void build_fork_stack(mtask *task) {
   addr                 -= sizeof(intr_frame_t);
   intr_frame_t *iframe  = (intr_frame_t *)addr;
   iframe->eax           = 0;
-  logk("iframe = %08x\n", iframe->eip);
+  logk("iframe = %08x", iframe->eip);
   addr                -= sizeof(stack_frame);
   stack_frame *sframe  = (stack_frame *)addr;
   sframe->ebp          = 0x114514;
@@ -554,8 +554,8 @@ static void build_fork_stack(mtask *task) {
 int task_fork() {
   mtask *m = mtask_get_free();
   if (!m) { return -1; }
-  logk("get free %08x\n", m);
-  logk("current = %08x\n", get_tid(current_task()));
+  logk("get free %08x", m);
+  logk("current = %08x", get_tid(current_task()));
   bool state = interrupt_disable();
   int  tid   = 0;
   tid        = m->tid;
@@ -564,7 +564,7 @@ int task_fork() {
   change_page_task_id(tid, stack, STACK_SIZE);
   // u32 off = m->top - (unsigned)m->esp;
   memcpy(stack, m->top - STACK_SIZE, STACK_SIZE);
-  logk("s = %08x \n", m->top - STACK_SIZE);
+  logk("s = %08x", m->top - STACK_SIZE);
   m->top = stack += STACK_SIZE;
   stack          += STACK_SIZE;
   m->esp          = stack;
@@ -593,7 +593,7 @@ int task_fork() {
     m->mousefifo->buf = (char *)page_malloc_one();
     memcpy(m->mousefifo->buf, current_task()->mousefifo->buf, 4096);
   }
-  logk("copy vfs\n");
+  logk("copy vfs");
   copy_vfs(current_task(), m);
   m->pde     = pde_clone(current_task()->pde);
   m->running = 0;
@@ -602,9 +602,9 @@ int task_fork() {
   m->state   = RUNNING;
   m->ptid    = get_tid(current_task());
   m->tid     = tid;
-  logk("m->tid = %d\n", m->tid);
+  logk("m->tid = %d", m->tid);
   tid = m->tid;
-  logk("BUILD FORK STACK\n");
+  logk("BUILD FORK STACK");
   build_fork_stack(m);
   set_interrupt_state(state);
   return tid;

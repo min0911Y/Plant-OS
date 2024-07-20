@@ -81,17 +81,13 @@ void timer_settime(struct TIMER *timer, u32 timeout) {
   }
 }
 
-#define NANOSEC_IN_SEC 1000000000
-
 void sleep(u64 time_s) {
+  logk("sleep %d", time_s);
   time_ns_t end_time;
   gettime_ns(&end_time);
   end_time.sec  = time_s / 1000;
   end_time.nsec = time_s % 1000 * 1000000;
-  if (end_time.nsec > NANOSEC_IN_SEC) {
-    end_time.sec  += 1;
-    end_time.nsec -= NANOSEC_IN_SEC;
-  }
+  time_ns_carry(&end_time);
   time_ns_t now_time;
   do {
     gettime_ns(&now_time);
@@ -103,12 +99,11 @@ int        g           = 0;
 static u32 count       = 0;
 u64        global_time = 0;
 void       inthandler20(int cs, int *esp) {
-  //logk("*");
   // printk("CS:EIP=%04x:%08x\n",current_task()->tss.cs,esp[-10]);
   io_out8(PIC0_OCW2, 0x60); /* 把IRQ-00接收信号结束的信息通知给PIC */
   extern mtask *current;
   if (global_time + 1 == 0) {
-    logk("reset\n");
+    logk("reset");
     extern mtask m[255];
     for (int i = 0; i < 255; i++) {
       m[i].jiffies = 0;
@@ -118,7 +113,7 @@ void       inthandler20(int cs, int *esp) {
   global_time++;
   struct TIMER *timer;
 
-  gettime_ns(NULL); // 更新时间
+  if ((timerctl.count & 63) == 0) gettime_ns(NULL); // 更新时间
 
   timerctl.count++;
 

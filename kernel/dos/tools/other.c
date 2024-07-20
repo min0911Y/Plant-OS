@@ -66,7 +66,7 @@ void print_32bits_ascil(u32 n);
 void INT(u8 intnum, regs16_t *regs) {
   extern u8                 *IVT;
   struct SEGMENT_DESCRIPTOR *gdt = (struct SEGMENT_DESCRIPTOR *)ADR_GDT;
-  // logk("%08x\n",current_task()->pde);
+  // logk("%08x",current_task()->pde);
   set_segmdesc(gdt + 1000, 0xffffffff, 0, AR_CODE32_ER); // CODE32
   set_segmdesc(gdt + 1001, 0xfffff, 0, AR_CODE16_ER);    // CODE16
   set_segmdesc(gdt + 1002, 0xfffff, 0, AR_DATA16_RW);    // DATA16
@@ -102,7 +102,7 @@ void fpu_enable(mtask *task) {
     asm volatile("fnclex \n"
                  "fninit \n");
     memset(&task->fpu, 0, sizeof(fpu_t));
-    logk("FPU create state for task 0x%08x\n", task);
+    logk("FPU create state for task 0x%08x", task);
   } else {
     asm volatile("frstor (%%eax) \n" ::"a"(&(task->fpu)));
   }
@@ -166,7 +166,7 @@ void ERROR(int CODE, char *TIPS) {
   } else {
     current_task()->flagOfexp = 1;
   }
-  logk("DisableExpFlag = %d\n", public_catch ? DisableExpFlag : current_task()->DisableExpFlag);
+  logk("DisableExpFlag = %d", public_catch ? DisableExpFlag : current_task()->DisableExpFlag);
   if (public_catch) {
     if (DisableExpFlag) { return; }
   } else {
@@ -174,8 +174,8 @@ void ERROR(int CODE, char *TIPS) {
   }
   io_cli();
   irq_mask_set(0);
-  logk("%s\n", TIPS);
-  logk("Error Code: %d\n", CODE);
+  logk("%s", TIPS);
+  logk("Error Code: %d", CODE);
   SwitchToText8025_BIOS();
   extern struct tty *tty_default;
   tty_set(current_task(), tty_default);

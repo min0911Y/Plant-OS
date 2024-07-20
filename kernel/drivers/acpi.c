@@ -189,44 +189,37 @@ void hpet_initialize() {
   HPET *hpet = acpi_find_table("HPET");
   if (!hpet) { logk("can not found acpi hpet table"); }
   hpetInfo = (HpetInfo *)hpet->hpetAddress.address;
-  logk("hpetInfo %016x\n", hpetInfo);
+  logk("hpetInfo %016x", hpetInfo);
 
   u32 counterClockPeriod = hpetInfo->generalCapabilities >> 32;
   hpetPeriod             = counterClockPeriod / 1000000;
-  logk("hpet period: 0x%016x\n", hpetPeriod);
+  logk("hpet period: 0x%016x", hpetPeriod);
 
   hpetInfo->generalConfiguration |= 1; //  启用hpet
-
-  // Logger::log(Logger::INFO, "hpet successfully enabled");
 }
 
-#define NANOSEC_IN_SEC 1000000000
-
 void gettime_ns(time_ns_t *ptr) {
-  static u64 time_sec  = 0;
-  static u64 time_ns   = 0;
-  static u64 val_old   = 0;
-  u64        val       = hpetInfo->mainCounterValue * hpetPeriod - val_old;
-  val_old             += val;
-  time_ns             += val;
-  while (time_ns > NANOSEC_IN_SEC) {
-    time_sec += 1;
-    time_ns  -= NANOSEC_IN_SEC;
-  }
-  if (ptr == NULL) return;
-  ptr->sec  = time_sec;
-  ptr->nsec = time_ns;
+  static time_ns_t time     = {};
+  static u64       val_old  = 0;
+  static bool      is_using = false;
+  bool             tmp      = false;
+  while (!atom_cexch(&is_using, &tmp, true)) {}
+  u64 val_now  = hpetInfo->mainCounterValue * hpetPeriod;
+  time.nsec   += val_now - val_old;
+  val_old      = val_now;
+  logk("sec %d, nsec %d", (i32)time.sec, (i32)time.nsec);
+  time_ns_carry(&time);
+  if (ptr) *ptr = time;
+  atom_clr(&is_using);
 }
 
 void usleep(u64 time_us) {
+  logk("usleep %d", time_us);
   time_ns_t end_time;
   gettime_ns(&end_time);
-  end_time.sec  = time_us / 1000000;
-  end_time.nsec = time_us % 1000000 * 1000;
-  if (end_time.nsec > NANOSEC_IN_SEC) {
-    end_time.sec  += 1;
-    end_time.nsec -= NANOSEC_IN_SEC;
-  }
+  end_time.sec  += time_us / 1000000;
+  end_time.nsec += time_us % 1000000 * 1000;
+  time_ns_carry(&end_time);
   time_ns_t now_time;
   do {
     gettime_ns(&now_time);
@@ -235,8 +228,8 @@ void usleep(u64 time_us) {
 
 void lapic_find() {
   MADT *p = acpi_find_table("APIC");
-  logk("%08x\n", p);
-  logk("MADT : len = %08x\n", p->len);
+  logk("%08x", p);
+  logk("MADT : len = %08x", p->len);
   logk("oemid : ");
   for (int i = 0; i < 6; i++) {
     logk("%c", p->oemid[i]);

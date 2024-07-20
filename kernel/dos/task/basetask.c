@@ -22,7 +22,7 @@ void init() {
   ret_to_app = page_malloc_one_no_mark();
   memcpy(ret_to_app, return_to_app, 0x1000);
   page_set_physics_attr((u32)ret_to_app, ret_to_app, page_get_attr(ret_to_app) | PG_USU);
-  logk("init task has been started!\n");
+  logk("init task has been started!");
 
   PCI_ADDR_BASE = (u32)page_malloc(1 * 1024 * 1024);
   init_PCI(PCI_ADDR_BASE);
@@ -51,7 +51,7 @@ void init() {
     env_save();
   }
   if (strcmp(env_read("network"), "enable") == 0) {
-    logk("init card\n");
+    logk("init card");
     init_card();
   }
   if (strcmp("HIGHTEXTMODE", env_read("video_mode")) == 0) {
