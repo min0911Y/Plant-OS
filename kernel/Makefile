@@ -213,11 +213,17 @@ Mimg : make_img
 
 img_run:
 	sudo qemu-system-i386 -enable-kvm $(QEMU_ARGS) \
-		-fda ./img/Powerint_DOS_386.img \
-		-hda ./img/Disk2.img \
-		-hdb ./img/Disk3.img \
-		-hdc ./img/res.img \
-		-hdd disk.img \
+		-hda disk.img \
+		-hdb ./img/Disk2.img \
+		-hdc ./img/Disk3.img \
+		-hdd ./img/res.img \
+		-boot a -m 4096
+img_run_nokvm:
+	qemu-system-i386 $(QEMU_ARGS) \
+		-hda disk.img \
+		-hdb ./img/Disk2.img \
+		-hdc ./img/Disk3.img \
+		-hdd ./img/res.img \
 		-boot a -m 4096
 run:
 	qemu-system-i386 -d in_asm -no-reboot $(QEMU_ARGS) \

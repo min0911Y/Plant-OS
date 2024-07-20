@@ -113,7 +113,7 @@ void       inthandler20(int cs, int *esp) {
   global_time++;
   struct TIMER *timer;
 
-  if ((timerctl.count & 63) == 0) gettime_ns(NULL); // 更新时间
+  if ((timerctl.count & 63) == 0) gettime_ns(null); // 更新时间
 
   timerctl.count++;
 

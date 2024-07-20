@@ -80,6 +80,7 @@ int32:
 		add	esp,8							; 丢弃栈中数据
 		mov eax,0x400000
 		mov cr3,eax
+		sti
 		ret
 reloc:                               		; by Napalm
 		mov  [REBASE(stack32_ptr)], esp        ; 保存保护模式的esp
