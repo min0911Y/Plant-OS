@@ -14,8 +14,8 @@
 // gdtidt.c
 void set_segmdesc(struct SEGMENT_DESCRIPTOR *sd, u32 limit, int base, int ar);
 void set_gatedesc(struct GATE_DESCRIPTOR *gd, int offset, int selector, int ar);
-void init_pic(void);
-void init_gdtidt(void);
+void init_pic();
+void init_gdtidt();
 void register_intr_handler(int num, int addr);
 
 // timer.c

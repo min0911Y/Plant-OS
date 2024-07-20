@@ -7,9 +7,9 @@
 
 //* float32
 
-static cf32      fftf_wn[64] = {};
-static cf32      aft_wn[64]  = {};
-static atom bool fftf_inited = false;
+static cf32 fftf_wn[64] = {};
+static cf32 aft_wn[64]  = {};
+static bool fftf_inited = false;
 
 static void fftf_init() {
   if (atom_tas(&fftf_inited)) return;

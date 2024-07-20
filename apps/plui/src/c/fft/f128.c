@@ -9,9 +9,9 @@
 
 //* float128
 
-static cf128     fftl_wn[64] = {};
-static cf128     aft_wn[64]  = {};
-static atom bool fftl_inited = false;
+static cf128 fftl_wn[64] = {};
+static cf128 aft_wn[64]  = {};
+static bool  fftl_inited = false;
 
 static void fftl_init() {
   if (atom_tas(&fftl_inited)) return;

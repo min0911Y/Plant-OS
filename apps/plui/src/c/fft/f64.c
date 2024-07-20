@@ -7,9 +7,9 @@
 
 //* float64
 
-static cf64      fft_wn[64] = {};
-static cf64      aft_wn[64] = {};
-static atom bool fft_inited = false;
+static cf64 fft_wn[64] = {};
+static cf64 aft_wn[64] = {};
+static bool fft_inited = false;
 
 static void fft_init() {
   if (atom_tas(&fft_inited)) return;

@@ -17,9 +17,9 @@
 // --------------------------------------------------
 //;
 
-finline int abs(int x) {
-  return x >= 0 ? x : -x;
-}
+// finline int abs(int x) {
+//   return x >= 0 ? x : -x;
+// }
 
 finline double fmod(double x, double y) {
   return x - (long)(x / y) * y;
