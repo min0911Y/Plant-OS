@@ -1,5 +1,5 @@
 
-中文
+重构中，请移步[新储存库](https://github.com/plos-clan/Plant-OS)
 
 # Plant OS 史诗级大更新
 
