@@ -175,9 +175,11 @@ H:
   task_switch(next); // 调度
 }
 
-mtask *create_task(uintptr_t eip, unsigned esp, unsigned ticks, unsigned floor) {
+static mtask *create_task_impl(uintptr_t eip, unsigned esp, unsigned ticks,
+                               unsigned floor, bool share_pde) {
   mtask *t = NULL;
-  for (int i = 0; i < 255; i++) {
+  int first = (current == NULL && m[0].state == EMPTY) ? 0 : 1;
+  for (int i = first; i < 255; i++) {
     if (m[i].state == EMPTY || m[i].state == WILL_EMPTY ||
         m[i].state == READY) {
       t = &(m[i]);
@@ -187,6 +189,7 @@ mtask *create_task(uintptr_t eip, unsigned esp, unsigned ticks, unsigned floor) 
   if (!t) {
     return NULL;
   }
+  t->tid = (uint64_t)(t - m);
   uintptr_t esp_alloced = (uintptr_t)page_malloc(STACK_SIZE) + STACK_SIZE;
   change_page_task_id(t->tid, (void *)(esp_alloced - STACK_SIZE), STACK_SIZE);
   t->esp = (stack_frame *)(esp_alloced - sizeof(stack_frame)); // switch用到的栈帧
@@ -195,6 +198,10 @@ mtask *create_task(uintptr_t eip, unsigned esp, unsigned ticks, unsigned floor) 
   if (current == NULL) {                      // 还没启用多任务
     t->pde = PDE_ADDRESS;                     // 所以先用预设好的页表
     t->times = PDE_ADDRESS;
+  } else if (share_pde) {
+    t->pde = current_task()->pde;
+    t->times = t->pde;
+    pde_retain(t->pde);
   } else {
     t->pde = pde_clone(current_task()->pde); // 启用了就复制一个
     t->times = t->pde;
@@ -212,6 +219,13 @@ mtask *create_task(uintptr_t eip, unsigned esp, unsigned ticks, unsigned floor) 
     vfs_change_disk_for_task(t->drive, t);
   }
   return t;
+}
+mtask *create_task(uintptr_t eip, unsigned esp, unsigned ticks, unsigned floor) {
+  return create_task_impl(eip, esp, ticks, floor, false);
+}
+mtask *create_thread_task(uintptr_t eip, unsigned esp, unsigned ticks,
+                          unsigned floor) {
+  return create_task_impl(eip, esp, ticks, floor, true);
 }
 mtask *get_task(unsigned tid) {
   if (tid >= 255) {

@@ -45,7 +45,7 @@ char *env_read(char *name) {
   if (MST_get_var(name, MST_get_root_space(env)) == NULL) {
     return NULL;
   } else {
-    MST_get_string_in_space(env, name, MST_get_root_space(env));
+    return MST_get_string_in_space(env, name, MST_get_root_space(env));
   }
 }
 void env_save() {

@@ -42,6 +42,8 @@ void inthandler20(int cs, perf_irq_frame_t *frame);
 mtask *current_task();
 mtask *get_task(unsigned tid);
 mtask *create_task(uintptr_t eip, unsigned esp, unsigned ticks, unsigned floor);
+mtask *create_thread_task(uintptr_t eip, unsigned esp, unsigned ticks,
+                          unsigned floor);
 void task_set_default_drive(char drive);
 void task_to_user_mode_elf(char *filename);
 void task_kill(unsigned tid);
@@ -97,11 +99,12 @@ void copy_from_phy_to_line(unsigned phy, unsigned line, unsigned pde,
                            unsigned size);
 uint32_t page_get_attr_pde(unsigned vaddr, unsigned pde);
 void set_line_address(unsigned val, unsigned line, unsigned pde, unsigned size);
-void page_link_pde(unsigned addr, unsigned pde);
+int page_link_pde(unsigned addr, unsigned pde);
 uint32_t page_get_phy_pde(unsigned vaddr, unsigned pde);
 void page_links(unsigned start, unsigned numbers);
-void page_link(unsigned addr);
-void page_link_share(unsigned addr);
+int page_link(unsigned addr);
+int page_link_share(unsigned addr);
+void pde_retain(unsigned addr);
 // nasmfunc.asm
 void int32(unsigned char intnum, regs16_t *regs);
 void floppy_int(void);

@@ -3,11 +3,7 @@
 #define DIDX(addr) (((unsigned)addr >> 22) & 0x3ff) // 获取 addr 的页目录索引
 #define TIDX(addr) (((unsigned)addr >> 12) & 0x3ff) // 获取 addr 的页表索引
 #define PAGE(idx) ((unsigned)idx << 12) // 获取页索引 idx 对应的页开始的位置
-#define PAGE_SIZE_BYTES 0x1000u
-#define PAGE_ENTRY_BYTES sizeof(uint32_t)
-#define PAGE_ENTRY_ADDR_MASK 0xfffff000u
-#define PAGE_ENTRY_FLAG_MASK 0x00000fffu
-#define PAGE_USER_CLONE_BASE 0x70000000u
+#define USER_HEAP_END 0xf0000000u
 unsigned div_round_up(unsigned num, unsigned size);
 extern struct PAGE_INFO *pages;
 unsigned custom_handler = 0;
@@ -16,61 +12,6 @@ void page_set_physics_attr_pde(uint32_t vaddr, void *paddr, uint32_t attr,
                                unsigned pde_backup);
 mtask *custom_handler_owner;
 
-static inline unsigned page_entry_addr(uint32_t entry) {
-  return entry & PAGE_ENTRY_ADDR_MASK;
-}
-
-static inline uint32_t page_entry_flags(uint32_t entry) {
-  return entry & PAGE_ENTRY_FLAG_MASK;
-}
-
-static inline uint32_t page_entry_make(unsigned addr, uint32_t flags) {
-  return (addr & PAGE_ENTRY_ADDR_MASK) | (flags & PAGE_ENTRY_FLAG_MASK);
-}
-
-static inline uint32_t page_entry_add_flags(uint32_t entry, uint32_t flags) {
-  return page_entry_make(page_entry_addr(entry), page_entry_flags(entry) | flags);
-}
-
-static inline bool page_entry_has_any(uint32_t entry, uint32_t flags) {
-  return (entry & flags) != 0;
-}
-
-static inline bool page_entry_has_all(uint32_t entry, uint32_t flags) {
-  return (entry & flags) == flags;
-}
-
-static inline uint32_t *page_table_entry_from_dir(uint32_t pde_entry,
-                                                  unsigned index) {
-  return (uint32_t *)(page_entry_addr(pde_entry) + index * PAGE_ENTRY_BYTES);
-}
-
-static void task_mark_user_space_shared(unsigned pde) {
-  for (int i = 0; i < 0x1000; i += 4) {
-    uint32_t *pde_entry = (uint32_t *)(pde + i);
-    if (!page_entry_has_all(*pde_entry, PG_P | PG_USU)) {
-      continue;
-    }
-    if (pages[IDX(*pde_entry)].count > 1 && !page_entry_has_any(*pde_entry, PG_SHARED)) {
-      uint32_t old = page_entry_addr(*pde_entry);
-      uint32_t attr = page_entry_flags(*pde_entry);
-      *pde_entry = (unsigned)page_malloc_one_count_from_4gb();
-      memcpy((void *)(*pde_entry), (void *)old, PAGE_SIZE_BYTES);
-      pages[IDX(old)].count--;
-      *pde_entry = page_entry_add_flags(*pde_entry, attr | PG_SHARED);
-    } else {
-      *pde_entry = page_entry_add_flags(*pde_entry, PG_SHARED);
-    }
-    for (int j = 0; j < 0x1000 / 4; j++) {
-      uint32_t *pte_entry = page_table_entry_from_dir(*pde_entry, (unsigned)j);
-      if (page_entry_has_all(*pte_entry, PG_P | PG_USU) &&
-          pages[IDX(*pte_entry)].count == 1 &&
-          !page_entry_has_any(*pte_entry, PG_SHARED)) {
-        *pte_entry = page_entry_add_flags(*pte_entry, PG_SHARED);
-      }
-    }
-  }
-}
 void kbd_press(uint8_t dat, uint32_t task) {
   fifo8_put(get_task(task)->Pkeyfifo, dat);
 }
@@ -378,7 +319,7 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
         for (int i = 0; i < count; i++) {
           logk("%08x\n", v + i * 0x1000);
           page_set_physics_attr(v + i * 0x1000, (void *)(uintptr_t)(v + i * 0x1000),
-                                7); // PG_P | PG_USU | PG_RWW
+                                PG_P | PG_USU | PG_RWW | PG_SHARED);
         }
       }
     }
@@ -416,16 +357,12 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
       // *stack = (unsigned int)(esi);
       // stack--;
       // *stack = (unsigned int)(edx);
-      unsigned pde = current_task()->pde;
-      io_cli();
-      set_cr3(PDE_ADDRESS);
-      task_mark_user_space_shared(pde);
-      set_cr3(pde);
-      io_sti();
-      logk("OK\n");
-      // for (;;)
-      //   ;
-      mtask *t = create_task((uintptr_t)user_thread_into, (unsigned)0, 1, 1);
+      mtask *t = create_thread_task((uintptr_t)user_thread_into,
+                                    (unsigned)0, 1, 1);
+      if (t == NULL) {
+        reg[EAX] = -1;
+        return;
+      }
       init_ok_flag = 1;
       t->alloc_addr = task->alloc_addr;
       t->alloc_size = task->alloc_size;
@@ -572,13 +509,23 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
   } else if (eax == 0x34) {
     reg[EAX] = fifo8_get(current_task()->Ukeyfifo);
   } else if (eax == 0x35) {
-    unsigned start_addr = task->alloc_addr + *(task->alloc_size);
-    for (int i = 0; i < (ebx / 0x1000); i++) {
-    //  logk("LINK %08x\n", start_addr + (i) * 0x1000);
-      page_link_share(start_addr + (i) * 0x1000);
+    uint32_t old_size = task->alloc_size ? *task->alloc_size : 0;
+    uint32_t start_addr = task->alloc_addr + old_size;
+    uint32_t request = ((uint32_t)ebx + 0xfffu) & 0xfffff000u;
+    if (task->alloc_size == NULL || ebx <= 0 || request < (uint32_t)ebx ||
+        start_addr < task->alloc_addr || start_addr >= USER_HEAP_END ||
+        request > USER_HEAP_END - start_addr) {
+      reg[EAX] = -1;
+    } else {
+      for (uint32_t offset = 0; offset < request; offset += 0x1000) {
+        if (!page_link(start_addr + offset)) {
+          reg[EAX] = -1;
+          return;
+        }
+      }
+      *task->alloc_size = old_size + request;
+      reg[EAX] = 0;
     }
-    // page_links(start_addr,ebx / 0x1000);
-    *(task->alloc_size) += ebx;
   } else if (eax == 0x36) {
     char *s = env_read((char *)(uintptr_t)(ebx + ds_base));
     if (s) {
@@ -689,8 +636,9 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
     for (int i = 0; i < count; i++) {
       unsigned paddr;
       paddr = page_get_phy_pde(b1 + i * 0x1000, b_pde);
-      page_set_physics_attr_pde(a1 + i * 0x1000, (void *)(uintptr_t)paddr, 7,
-                                a_pde); // PG_P | PG_USU | PG_RWW
+      page_set_physics_attr_pde(
+          a1 + i * 0x1000, (void *)(uintptr_t)paddr,
+          PG_P | PG_USU | PG_RWW | PG_SHARED, a_pde);
     }
     io_sti();
   } else if (eax == 0x58) {

@@ -1,6 +1,6 @@
 #include <ELF.h>
 #include <dos.h>
-void page_link(unsigned addr);
+int page_link(unsigned addr);
 #define MAX(a, b) a > b ? a : b
 bool elf32Validate(Elf32_Ehdr *hdr) {
   return hdr->e_ident[EI_MAG0] == ELFMAG0 && hdr->e_ident[EI_MAG1] == ELFMAG1 &&

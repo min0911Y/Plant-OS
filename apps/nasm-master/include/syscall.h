@@ -92,7 +92,7 @@ uint8_t key_up_status();
 uint8_t get_key_press();
 uint8_t get_key_up();
 unsigned api_heapsize();
-void sbrk(unsigned size);
+int sbrk(unsigned size);
 int api_current_drive();
 int exec(char *filename, char *cmdline);
 void clear();

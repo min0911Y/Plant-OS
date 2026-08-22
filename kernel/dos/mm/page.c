@@ -371,6 +371,11 @@ unsigned pde_clone(unsigned addr) {
 
   return result;
 }
+void pde_retain(unsigned addr) {
+  if (addr != PDE_ADDRESS) {
+    page_ref_inc_idx(IDX(addr));
+  }
+}
 void pde_reset(unsigned addr) {
   for (int i = 0; i < 0x1000; i += 4) {
     unsigned int *pde_entry = (unsigned int *)(addr + i);
@@ -384,6 +389,10 @@ void pde_reset(unsigned addr) {
 void free_pde(unsigned addr) {
   if (addr == PDE_ADDRESS)
     return;
+  if (page_refcount_idx(IDX(addr)) > 1) {
+    page_ref_dec_idx(IDX(addr));
+    return;
+  }
   for (int i = 0; i < DIDX(PAGE_PDE_FREE_END) * 4; i += 4) {
     unsigned int *pde_entry = (unsigned int *)(addr + i);
     unsigned p = page_entry_addr(*pde_entry);
@@ -407,21 +416,43 @@ void flush_tlb(unsigned vaddr) {
   asm volatile("invlpg (%0)" ::"r"(vaddr) : "memory");
 }
 
-void page_link_pde(unsigned addr, unsigned pde) {
+static int page_ensure_user_table(uint32_t *pde_entry) {
+  if (page_entry_has_any(*pde_entry, PG_P)) {
+    return 1;
+  }
+  void *table = page_malloc_one_count_from_4gb();
+  if (table == NULL) {
+    return 0;
+  }
+  memset(table, 0, PAGE_SIZE_BYTES);
+  *pde_entry = page_entry_make((unsigned)table, PAGE_USER_RW_FLAGS);
+  return 1;
+}
+
+int page_link_pde(unsigned addr, unsigned pde) {
 
   unsigned pde_backup = current_task()->pde;
+  int result = 0;
   current_task()->pde = PDE_ADDRESS;
   set_cr3(PDE_ADDRESS);
   unsigned t, p;
   t = DIDX(addr);
   p = (addr >> 12) & 0x3ff;
   uint32_t *pte = (uint32_t *)((pde + t * 4));
+
+  if (!page_ensure_user_table(pte)) {
+    goto restore;
+  }
 
   if (page_refcount_entry(*pte) > 1) {
     // 这个页目录还有人引用，所以需要复制
+    void *new_table = page_malloc_one_count_from_4gb();
+    if (new_table == NULL) {
+      goto restore;
+    }
     page_ref_dec_entry(*pte);
     uint32_t old = page_entry_addr(*pte);
-    *pte = (unsigned)page_malloc_one_count_from_4gb();
+    *pte = (unsigned)new_table;
     memcpy((void *)(*pte), (void *)old, 0x1000);
     *pte = page_entry_add_flags(*pte, PAGE_USER_RW_FLAGS);
   } else {
@@ -430,20 +461,28 @@ void page_link_pde(unsigned addr, unsigned pde) {
 
   uint32_t *physics =
       (uint32_t *)(page_entry_addr(*pte) + p * PAGE_ENTRY_BYTES); // PTE页表
+  void *new_page = page_malloc_one_count_from_4gb();
+  if (new_page == NULL) {
+    goto restore;
+  }
   // COW
-  if (page_refcount_entry(*physics) > 1) {
+  if (page_entry_has_all(*physics, PAGE_USER_PRESENT_FLAGS)) {
     page_ref_dec_entry(*physics);
   }
-  *physics = (unsigned)page_malloc_one_count_from_4gb();
+  *physics = (unsigned)new_page;
   *physics = page_entry_add_flags(*physics, PAGE_USER_RW_FLAGS);
   flush_tlb((unsigned)pte);
   flush_tlb(addr);
+  result = 1;
+restore:
   current_task()->pde = pde_backup;
   set_cr3(pde_backup);
+  return result;
 }
-void page_link_pde_share(unsigned addr, unsigned pde) {
+int page_link_pde_share(unsigned addr, unsigned pde) {
 
   unsigned pde_backup = current_task()->pde;
+  int result = 0;
   current_task()->pde = PDE_ADDRESS;
   set_cr3(PDE_ADDRESS);
   unsigned t, p;
@@ -451,11 +490,19 @@ void page_link_pde_share(unsigned addr, unsigned pde) {
   p = (addr >> 12) & 0x3ff;
   uint32_t *pte = (uint32_t *)((pde + t * 4));
 
+  if (!page_ensure_user_table(pte)) {
+    goto restore;
+  }
+
   if (page_refcount_entry(*pte) > 1 && !page_entry_has_any(*pte, PG_SHARED)) {
     // 这个页目录还有人引用，所以需要复制
+    void *new_table = page_malloc_one_count_from_4gb();
+    if (new_table == NULL) {
+      goto restore;
+    }
     page_ref_dec_entry(*pte);
     uint32_t old = page_entry_addr(*pte);
-    *pte = (unsigned)page_malloc_one_count_from_4gb();
+    *pte = (unsigned)new_table;
     memcpy((void *)(*pte), (void *)old, 0x1000);
     *pte = page_entry_add_flags(*pte, PAGE_USER_RW_FLAGS);
   } else {
@@ -464,8 +511,12 @@ void page_link_pde_share(unsigned addr, unsigned pde) {
 
   uint32_t *physics =
       (uint32_t *)(page_entry_addr(*pte) + p * PAGE_ENTRY_BYTES); // PTE页表
+  void *new_page = page_malloc_one_count_from_4gb();
+  if (new_page == NULL) {
+    goto restore;
+  }
   // COW
-  if (page_refcount_entry(*physics) > 1) {
+  if (page_entry_has_all(*physics, PAGE_USER_PRESENT_FLAGS)) {
     page_ref_dec_entry(*physics);
   }
   int flag = 0;
@@ -473,15 +524,18 @@ void page_link_pde_share(unsigned addr, unsigned pde) {
     logk("THIS\n");
     flag = 1;
   }
-  *physics = (unsigned)page_malloc_one_count_from_4gb();
+  *physics = (unsigned)new_page;
   *physics = page_entry_add_flags(*physics, PAGE_USER_RW_FLAGS);
   if (flag) {
     *physics = page_entry_add_flags(*physics, PG_SHARED);
   }
   flush_tlb((unsigned)pte);
   flush_tlb(addr);
+  result = 1;
+restore:
   current_task()->pde = pde_backup;
   set_cr3(pde_backup);
+  return result;
 }
 void page_link_pde_paddr(unsigned addr, unsigned pde, unsigned *paddr1,
                          unsigned paddr2) {
@@ -561,9 +615,11 @@ void page_links_pde(unsigned start, unsigned numbers, unsigned pde) {
 void page_links(unsigned start, unsigned numbers) {
   page_links_pde(start, numbers, current_task()->pde);
 }
-void page_link(unsigned addr) { page_link_pde(addr, current_task()->pde); }
-void page_link_share(unsigned addr) {
-  page_link_pde_share(addr, current_task()->pde);
+int page_link(unsigned addr) {
+  return page_link_pde(addr, current_task()->pde);
+}
+int page_link_share(unsigned addr) {
+  return page_link_pde_share(addr, current_task()->pde);
 }
 void copy_from_phy_to_line(unsigned phy, unsigned line, unsigned pde,
                            unsigned size) {
@@ -908,9 +964,14 @@ void page_set_physics_attr(uint32_t vaddr, void *paddr, uint32_t attr) {
   uint32_t *physics =
       (uint32_t *)(page_entry_addr(*pte) + p * PAGE_ENTRY_BYTES);
 
-  if (page_refcount_entry(*physics) > 1) {
-    page_ref_dec_entry(*physics);
+  uint32_t old_mapping = *physics;
+  if (page_entry_has_all(old_mapping, PAGE_USER_PRESENT_FLAGS) &&
+      page_entry_addr(old_mapping) != (unsigned)paddr) {
+    page_ref_dec_entry(old_mapping);
   }
+  if (!page_entry_has_all(old_mapping, PAGE_USER_PRESENT_FLAGS) ||
+      page_entry_addr(old_mapping) != (unsigned)paddr)
+    page_ref_inc_idx(IDX(paddr));
   *physics = page_entry_make((unsigned)paddr, attr);
   flush_tlb((unsigned)pte);
   flush_tlb(vaddr);
@@ -936,9 +997,14 @@ void page_set_physics_attr_pde(uint32_t vaddr, void *paddr, uint32_t attr,
   uint32_t *physics =
       (uint32_t *)(page_entry_addr(*pte) + p * PAGE_ENTRY_BYTES);
 
-  // if (pages[IDX(*physics)].count > 1) {
-  //   pages[IDX(*physics)].count--;
-  // }
+  uint32_t old_mapping = *physics;
+  if (page_entry_has_all(old_mapping, PAGE_USER_PRESENT_FLAGS) &&
+      page_entry_addr(old_mapping) != (unsigned)paddr) {
+    page_ref_dec_entry(old_mapping);
+  }
+  if (!page_entry_has_all(old_mapping, PAGE_USER_PRESENT_FLAGS) ||
+      page_entry_addr(old_mapping) != (unsigned)paddr)
+    page_ref_inc_idx(IDX(paddr));
   *physics = page_entry_make((unsigned)paddr, attr);
   flush_tlb((unsigned)pte);
   flush_tlb(vaddr);

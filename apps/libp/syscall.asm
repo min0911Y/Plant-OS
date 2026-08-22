@@ -960,11 +960,9 @@ get_key_up:
 	ret
 sbrk:
 	push ebx
-	push eax
-	mov ebx,[esp+4+8]
+	mov ebx,[esp+8]
 	mov eax,0x35
 	int 0x36
-	pop eax
 	pop ebx
 	ret
 api_listfile:
