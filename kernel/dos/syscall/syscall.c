@@ -41,6 +41,110 @@ void user_thread_into() {
 }
 
 void test(unsigned int b) { return; }
+
+/* ---------------- IPC / RPC 系统调用 (int 36h, eax = 0x5d) ---------------- */
+#define IPC_SYS_SEND 0x01
+#define IPC_SYS_RECV 0x02
+#define IPC_SYS_PEEK 0x03
+#define IPC_SYS_PENDING 0x04
+#define IPC_SYS_REGISTER 0x05
+#define IPC_SYS_UNREGISTER 0x06
+#define IPC_SYS_LOOKUP 0x07
+#define IPC_SYS_GENERATION 0x08
+#define USER_SPACE_START 0x70000000u
+
+// 用户传进来的指针必须落在用户地址空间里，否则应用可以骗内核去读写内核内存
+static int user_range_ok(uint32_t addr, uint32_t size) {
+  if (addr < USER_SPACE_START) {
+    return 0;
+  }
+  if (size > USER_HEAP_END - addr) {
+    return 0;
+  }
+  return 1;
+}
+
+static int ipc_syscall(uint32_t sub, uint32_t arg1, uint32_t arg2) {
+  switch (sub) {
+  case IPC_SYS_SEND: {
+    if (!user_range_ok(arg1, sizeof(ipc_user_msg_t))) {
+      return IPC_ERR_INVAL;
+    }
+    ipc_user_msg_t *m = (ipc_user_msg_t *)(uintptr_t)arg1;
+    if (m->size &&
+        !user_range_ok((uint32_t)(uintptr_t)m->data, m->size)) {
+      return IPC_ERR_INVAL;
+    }
+    return ipc_send(m->peer_tid, m->peer_generation, m->type, m->id, m->data,
+                    m->size, m->flags, m->timeout_ms);
+  }
+  case IPC_SYS_RECV: {
+    if (!user_range_ok(arg1, sizeof(ipc_user_msg_t))) {
+      return IPC_ERR_INVAL;
+    }
+    ipc_user_msg_t *m = (ipc_user_msg_t *)(uintptr_t)arg1;
+    if (m->size &&
+        !user_range_ok((uint32_t)(uintptr_t)m->data, m->size)) {
+      return IPC_ERR_INVAL;
+    }
+    ipc_msg_info_t info;
+    int result = ipc_recv(m->data, m->size, &info, m->from_filter, m->flags,
+                          m->timeout_ms);
+    if (result >= 0 || result == IPC_ERR_TOOBIG) {
+      m->peer_tid = info.from_tid;
+      m->peer_generation = info.from_generation;
+      m->type = info.type;
+      m->id = info.id;
+      m->size = info.size;
+    }
+    return result;
+  }
+  case IPC_SYS_PEEK: {
+    if (!user_range_ok(arg1, sizeof(ipc_user_msg_t))) {
+      return IPC_ERR_INVAL;
+    }
+    ipc_user_msg_t *m = (ipc_user_msg_t *)(uintptr_t)arg1;
+    ipc_msg_info_t info;
+    int result = ipc_peek(&info, m->from_filter);
+    if (result == IPC_OK) {
+      m->peer_tid = info.from_tid;
+      m->peer_generation = info.from_generation;
+      m->type = info.type;
+      m->id = info.id;
+      m->size = info.size;
+    }
+    return result;
+  }
+  case IPC_SYS_PENDING:
+    return ipc_pending();
+  case IPC_SYS_REGISTER:
+    if (!user_range_ok(arg1, 1)) {
+      return IPC_ERR_INVAL;
+    }
+    return ipc_service_register((const char *)(uintptr_t)arg1);
+  case IPC_SYS_UNREGISTER:
+    if (!user_range_ok(arg1, 1)) {
+      return IPC_ERR_INVAL;
+    }
+    return ipc_service_unregister((const char *)(uintptr_t)arg1);
+  case IPC_SYS_LOOKUP: {
+    if (!user_range_ok(arg1, 1)) {
+      return IPC_ERR_INVAL;
+    }
+    uint32_t generation = 0;
+    int tid = ipc_service_lookup((const char *)(uintptr_t)arg1, &generation);
+    if (arg2 && user_range_ok(arg2, sizeof(uint32_t))) {
+      *(uint32_t *)(uintptr_t)arg2 = generation;
+    }
+    return tid;
+  }
+  case IPC_SYS_GENERATION:
+    return (int)current_task()->generation;
+  default:
+    return IPC_ERR_INVAL;
+  }
+}
+
 void *mem_alloc_nb(memory *mem, uint32_t size, uint32_t n) {
   size = (size + 0xfff) & 0xfffff000;
   return mem_alloc(mem, size);
@@ -675,6 +779,8 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
     reg[EAX] = module_unload((const char *)(uintptr_t)(ebx + ds_base));
   } else if (eax == 0x5c) {
     reg[EAX] = module_list((module_handle_t *)(uintptr_t)(ebx + ds_base), ecx);
+  } else if (eax == 0x5d) {
+    reg[EAX] = ipc_syscall(ebx, (uint32_t)ecx, (uint32_t)edx);
   }
   return;
 }

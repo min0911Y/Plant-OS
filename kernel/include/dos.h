@@ -274,6 +274,21 @@ void *malloc(int size);
 void free(void *p);
 void *realloc(void *ptr, uint32_t size);
 // ipc.c
+void ipc_header_init(IPC_Header *ipc);
+void ipc_task_init(mtask *task);
+void ipc_task_cleanup(mtask *task);
+int ipc_send(uint32_t to_tid, uint32_t to_generation, uint32_t type, uint32_t id,
+             const void *data, uint32_t size, uint32_t flags,
+             uint32_t timeout_ms);
+int ipc_recv(void *buf, uint32_t bufsize, ipc_msg_info_t *info,
+             uint32_t from_filter, uint32_t flags, uint32_t timeout_ms);
+int ipc_peek(ipc_msg_info_t *info, uint32_t from_filter);
+int ipc_pending(void);
+void ipc_tick(void);
+int ipc_service_register(const char *name);
+int ipc_service_unregister(const char *name);
+int ipc_service_lookup(const char *name, uint32_t *generation);
+// ipc.c（旧接口，保留兼容）
 int send_ipc_message(int to_tid, void *data, unsigned int size, char type);
 int send_ipc_message_by_name(char *tname, void *data, unsigned int size,
                              char type);

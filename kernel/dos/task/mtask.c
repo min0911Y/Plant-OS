@@ -78,13 +78,7 @@ static void init_task() {
     m[i].times = 0;
     m[i].keyboard_press = NULL;
     m[i].keyboard_release = NULL;
-    lock_init(&(m[i].ipc_header.l));
-    m[i].ipc_header.now = 0;
-    for (int k = 0; k < MAX_IPC_MESSAGE; k++) {
-      m[i].ipc_header.messages[k].from_tid = -1;
-      m[i].ipc_header.messages[k].flag1 = 0;
-      m[i].ipc_header.messages[k].flag2 = 0;
-    }
+    ipc_task_init(&m[i]);
     for (int k = 0; k < 30; k++) {
       m[i].handler[k] = 0;
     }
@@ -300,37 +294,8 @@ static bool task_slot_in_use(const mtask *task) {
 }
 
 static void task_clear_ipc_refs(mtask *task) {
-  for (int i = 0; i < 255; i++) {
-    mtask *peer = &m[i];
-    if (!task_slot_in_use(peer)) {
-      continue;
-    }
-    lock_t *lock = &peer->ipc_header.l;
-    if (lock->owner == task) {
-      lock->owner = NULL;
-      lock->value = LOCK_UNLOCKED;
-      if (lock->waiter && lock->waiter != task) {
-        task_run(lock->waiter);
-      }
-      lock->waiter = NULL;
-    } else if (lock->waiter == task) {
-      lock->waiter = NULL;
-    }
-    for (int k = 0; k < MAX_IPC_MESSAGE; k++) {
-      IPCMessage *message = &peer->ipc_header.messages[k];
-      if (message->from_tid != (int)task->tid) {
-        continue;
-      }
-      if (message->flag1 && peer->ipc_header.now > 0) {
-        peer->ipc_header.now--;
-      }
-      message->from_tid = -1;
-      message->flag1 = 0;
-      message->flag2 = 0;
-      message->data = NULL;
-      message->size = 0;
-    }
-  }
+  /* 丢掉自己队列里没读完的消息、注销服务名、唤醒等着给它发消息的任务 */
+  ipc_task_cleanup(task);
 }
 
 static void task_clear_external_refs(mtask *task) {
@@ -424,7 +389,6 @@ static void task_release_resources(mtask *task) {
   task->running = 0;
   task->ready = 0;
   task->pde = 0;
-  task->ipc_header.now = 0;
   task->sigint_up = 0;
   task->train = 0;
   task->times = 0;
@@ -434,12 +398,6 @@ static void task_release_resources(mtask *task) {
   task->keyboard_release = NULL;
   task->group_lock_owner = TASK_ID_NONE;
   task->group_lock_depth = 0;
-  lock_init(&(task->ipc_header.l));
-  for (int k = 0; k < MAX_IPC_MESSAGE; k++) {
-    task->ipc_header.messages[k].from_tid = -1;
-    task->ipc_header.messages[k].flag1 = 0;
-    task->ipc_header.messages[k].flag2 = 0;
-  }
   for (int k = 0; k < 30; k++) {
     task->handler[k] = 0;
   }
@@ -780,10 +738,7 @@ static void reset_task_slot(mtask *task, int tid) {
   task->waittid = TASK_ID_NONE;
   task->wait_reason = WAIT_REASON_NONE;
   task->group_lock_owner = TASK_ID_NONE;
-  lock_init(&(task->ipc_header.l));
-  for (int i = 0; i < MAX_IPC_MESSAGE; i++) {
-    task->ipc_header.messages[i].from_tid = -1;
-  }
+  ipc_task_init(task);
 }
 mtask *mtask_get_free() {
   mtask *t = NULL;
@@ -861,15 +816,8 @@ int task_fork() {
   m->mm = NULL;
   m->alloced = 0;
   m->alloc_size = NULL;
-  m->ipc_header.now = 0;
-  for (int i = 0; i < MAX_IPC_MESSAGE; i++) {
-    m->ipc_header.messages[i].from_tid = -1;
-    m->ipc_header.messages[i].flag1 = 0;
-    m->ipc_header.messages[i].flag2 = 0;
-    m->ipc_header.messages[i].size = 0;
-    m->ipc_header.messages[i].data = NULL;
-  }
-  lock_init(&(m->ipc_header.l));
+  /* 消息队列不继承：父进程队列里的负载归父进程所有 */
+  ipc_task_init(m);
   m->waittid = TASK_ID_NONE;
   m->wait_generation = 0;
   m->wait_reason = WAIT_REASON_NONE;

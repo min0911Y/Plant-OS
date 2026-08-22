@@ -101,16 +101,57 @@ struct TSS32 {
   int es, cs, ss, ds, fs, gs;
   int ldtr, iomap;
 };
-#define MAX_IPC_MESSAGE 5 // 一次最多存放5个IPC_MESSAGE
+#define MAX_IPC_MESSAGE 16   // 每个任务的消息队列深度
+#define IPC_MAX_MSG_SIZE 4096 // 单条消息负载的最大字节数
+#define IPC_NAME_MAX 32       // 服务名最大长度（含结尾的 '\0'）
+#define IPC_MAX_SERVICE 32    // 全局最多注册的服务名数量
+// 旧接口保留的消息类型
 #define synchronous 1
 #define asynchronous 2
-typedef struct {
-  void *data;
-  unsigned int size;
-  int from_tid;
-  volatile int flag1;
-  volatile int flag2;
+// ipc_send / ipc_recv 的标志位
+#define IPC_NOWAIT 0x01     // 队列满/无消息时立刻返回，不阻塞
+#define IPC_ANY_TID ((uint32_t)-1) // ipc_recv：接收任意发送者的消息
+// IPC 返回值（0 或正数表示成功）
+#define IPC_OK 0
+#define IPC_ERR_INVAL -1    // 参数错误
+#define IPC_ERR_NOTASK -2   // 目标任务不存在（或世代号不匹配）
+#define IPC_ERR_FULL -3     // 目标队列已满
+#define IPC_ERR_EMPTY -4    // 没有消息可读
+#define IPC_ERR_TOOBIG -5   // 负载超过 IPC_MAX_MSG_SIZE
+#define IPC_ERR_EXIST -6    // 服务名已被占用
+#define IPC_ERR_NOMEM -7    // 内核内存不足
+#define IPC_ERR_TIMEOUT -8  // 等待超时
+#define IPC_ERR_NOTFOUND -9 // 服务名不存在
+typedef struct {            // 一条消息
+  void *data;               // 内核堆里的负载副本
+  uint32_t size;            // 负载字节数
+  uint32_t from_tid;        // 发送者 tid
+  uint32_t from_generation; // 发送者的世代号（tid 会复用）
+  uint32_t type;            // 用户自定义类型（RPC 用它区分请求/应答）
+  uint32_t id;              // 用户自定义关联号（RPC 的调用序号）
+  uint64_t seq;             // 入队序号，用于保证先进先出
+  volatile int used;        // 该槽位是否有消息
 } IPCMessage;
+// 传给系统调用的消息描述符，apps/include/ipc.h 里有一份完全相同的定义
+typedef struct {
+  uint32_t peer_tid;        // 发送：目标 tid；接收：输出发送者 tid
+  uint32_t peer_generation; // 发送：0 表示不校验；接收：输出发送者世代号
+  uint32_t type;            // 消息类型
+  uint32_t id;              // 关联号
+  uint32_t size;            // 发送：负载长度；接收：入参为缓冲区容量，出参为实际长度
+  uint32_t flags;           // IPC_NOWAIT ...
+  uint32_t timeout_ms;      // 0 表示一直等待
+  uint32_t from_filter;     // 接收：只收该 tid 的消息，IPC_ANY_TID 表示不过滤
+  void *data;               // 负载缓冲区
+} ipc_user_msg_t;
+// 收到消息后回填给内核调用者的信息
+typedef struct {
+  uint32_t from_tid;
+  uint32_t from_generation;
+  uint32_t type;
+  uint32_t id;
+  uint32_t size;
+} ipc_msg_info_t;
 // lock.c
 typedef struct {
   mtask *owner;
@@ -120,9 +161,9 @@ typedef struct {
 #define LOCK_UNLOCKED 0
 #define LOCK_LOCKED 1
 typedef struct { // IPC头（在TASK结构体中的头）
-  int now;
+  uint32_t count; // 队列中的消息数
+  uint64_t seq;   // 下一条消息的入队序号
   IPCMessage messages[MAX_IPC_MESSAGE];
-  lock_t l;
 } IPC_Header;
 // struct THREAD {
 //   struct TASK *father;
@@ -218,7 +259,8 @@ enum WAIT_REASON {
   WAIT_REASON_LOCK,
   WAIT_REASON_DISK,
   WAIT_REASON_TIMER,
-  WAIT_REASON_TASK_GROUP_LOCK
+  WAIT_REASON_TASK_GROUP_LOCK,
+  WAIT_REASON_IPC
 };
 typedef struct mtask {
   stack_frame *esp;
@@ -259,6 +301,9 @@ typedef struct mtask {
   volatile char *line;
   struct TIMER *timer;
   IPC_Header ipc_header;
+  uint32_t ipc_wait_peer;    /* 阻塞发送时等待的目标 tid，TASK_ID_NONE 表示没有 */
+  uint32_t ipc_deadline;     /* 带超时的 IPC 等待到期的时钟节拍 */
+  uint32_t ipc_deadline_set; /* 上面的 ipc_deadline 是否有效 */
   uint32_t waittid;
   uint32_t wait_generation;
   enum WAIT_REASON wait_reason;

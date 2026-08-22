@@ -1,167 +1,575 @@
-// 进程间通讯
+// 进程间通讯（消息队列 + 服务名注册）
 // Copyright (C) zhouzhihao & min0911_ 2022
-// 核心代码：zhouzhihao编写
-// UPDATE: min0911_ : 增加了一个新的函数 可以用来修改发信人
-// BUGFIX: min0911_ :
-// GetIPCMessage函数 如果有多个消息 会返回最后一个消息 而不是最近发送的消息
+// 2026: 重写为「带世代号的先进先出消息队列 + 阻塞收发 + 服务名注册」，
+//       用户态的 RPC 库（apps/libp/rpc.c）就建立在这套原语之上。
+//
+// 设计要点：
+//  * 单核内核，临界区直接用关中断实现，不再借用 lock.c 里的锁，
+//    这样收发消息的路径上不会再发生「拿着锁去调度」的情况。
+//  * 负载放在内核堆（public_heap）里，它由 page_malloc 分配，位于所有
+//    页目录都映射的低端地址，因此收发双方在各自的地址空间里都能访问。
+//  * 每条消息带 seq，接收时取序号最小的匹配消息，保证先进先出；
+//    带过滤条件（只收某个 tid）时顺序也不会乱。
+//  * 阻塞是「置 WAITING + 由对端 task_run 唤醒」，带超时的等待退化为
+//    让出时间片的轮询（内核里的 sleep() 本身也是这么做的）。
 
 #include <dos.h>
-char dat[255];
-int send_ipc_message(int to_tid, void *data, unsigned int size, char type) {
-  lock(&(get_task(to_tid)->ipc_header.l));
-  IPC_Header *ipc = &(get_task(to_tid)->ipc_header);
-  IPCMessage *ipc_msg = NULL;
+
+#define TASK_ID_NONE ((uint32_t)-1)
+#define IPC_TICK_MS 10 /* 一个时钟节拍 10ms */
+
+bool interrupt_disable(void);
+void set_interrupt_state(bool state);
+
+typedef struct {
+  char name[IPC_NAME_MAX];
+  uint32_t tid;
+  uint32_t generation;
+  int used;
+} ipc_service_t;
+
+static ipc_service_t ipc_services[IPC_MAX_SERVICE];
+
+/* ------------------------------------------------------------------ */
+/* 队列的基础操作                                                      */
+/* ------------------------------------------------------------------ */
+
+// 只清空队列结构，不释放负载。fork 出来的子进程用它抹掉从父进程复制过来的
+// 槽位（那些负载归父进程所有，不能在这里释放）。
+void ipc_header_init(IPC_Header *ipc) {
+  if (!ipc) {
+    return;
+  }
+  ipc->count = 0;
+  ipc->seq = 0;
   for (int i = 0; i < MAX_IPC_MESSAGE; i++) {
-    if (ipc->messages[i].flag1 + ipc->messages[i].flag2 == 0) {
-      ipc_msg = &(ipc->messages[i]);
+    ipc->messages[i].used = 0;
+    ipc->messages[i].data = NULL;
+    ipc->messages[i].size = 0;
+    ipc->messages[i].from_tid = TASK_ID_NONE;
+    ipc->messages[i].from_generation = 0;
+    ipc->messages[i].type = 0;
+    ipc->messages[i].id = 0;
+    ipc->messages[i].seq = 0;
+  }
+}
+
+// 任务槽初始化（不释放任何内存）
+void ipc_task_init(mtask *task) {
+  if (!task) {
+    return;
+  }
+  ipc_header_init(&task->ipc_header);
+  task->ipc_wait_peer = TASK_ID_NONE;
+  task->ipc_deadline = 0;
+  task->ipc_deadline_set = 0;
+}
+
+static void ipc_drop_message(IPC_Header *ipc, IPCMessage *msg) {
+  if (msg->data) {
+    free(msg->data);
+    msg->data = NULL;
+  }
+  msg->used = 0;
+  msg->size = 0;
+  msg->from_tid = TASK_ID_NONE;
+  msg->from_generation = 0;
+  msg->type = 0;
+  msg->id = 0;
+  msg->seq = 0;
+  if (ipc->count) {
+    ipc->count--;
+  }
+}
+
+// 找出队列里序号最小（也就是最早入队）的匹配消息
+static IPCMessage *ipc_find_oldest(IPC_Header *ipc, uint32_t from_filter) {
+  IPCMessage *found = NULL;
+  for (int i = 0; i < MAX_IPC_MESSAGE; i++) {
+    IPCMessage *msg = &ipc->messages[i];
+    if (!msg->used) {
+      continue;
+    }
+    if (from_filter != IPC_ANY_TID && msg->from_tid != from_filter) {
+      continue;
+    }
+    if (!found || msg->seq < found->seq) {
+      found = msg;
+    }
+  }
+  return found;
+}
+
+static IPCMessage *ipc_find_free(IPC_Header *ipc) {
+  for (int i = 0; i < MAX_IPC_MESSAGE; i++) {
+    if (!ipc->messages[i].used) {
+      return &ipc->messages[i];
+    }
+  }
+  return NULL;
+}
+
+// 唤醒所有因为「目标队列满」而阻塞在 to_tid 上的发送者
+static void ipc_wake_senders(uint32_t to_tid) {
+  extern mtask m[255];
+  for (int i = 0; i < 255; i++) {
+    mtask *task = &m[i];
+    if (task->state != WAITING || task->wait_reason != WAIT_REASON_IPC) {
+      continue;
+    }
+    if (task->ipc_wait_peer == to_tid) {
+      task_run(task);
+    }
+  }
+}
+
+static void ipc_wake_receiver(mtask *task) {
+  if (task->state == WAITING && task->wait_reason == WAIT_REASON_IPC &&
+      task->ipc_wait_peer == TASK_ID_NONE) {
+    task_run(task);
+  }
+}
+
+// 任务退出时的清理：丢掉自己没读完的消息、注销服务名、放走等它收信的发送者。
+// 已经投递给别人的消息不会被撤回（它们是独立的副本），对方读到时可以通过
+// from_generation 判断发送者是否还活着。
+void ipc_task_cleanup(mtask *task) {
+  if (!task) {
+    return;
+  }
+  IPC_Header *ipc = &task->ipc_header;
+  for (int i = 0; i < MAX_IPC_MESSAGE; i++) {
+    if (ipc->messages[i].used) {
+      ipc_drop_message(ipc, &ipc->messages[i]);
+    }
+  }
+  ipc_header_init(ipc);
+  for (int i = 0; i < IPC_MAX_SERVICE; i++) {
+    if (ipc_services[i].used && ipc_services[i].tid == task->tid &&
+        ipc_services[i].generation == task->generation) {
+      ipc_services[i].used = 0;
+      ipc_services[i].name[0] = '\0';
+    }
+  }
+  task->ipc_wait_peer = TASK_ID_NONE;
+  ipc_wake_senders(task->tid);
+}
+
+/* ------------------------------------------------------------------ */
+/* 等待辅助                                                            */
+/* ------------------------------------------------------------------ */
+
+static uint32_t ipc_deadline(uint32_t timeout_ms) {
+  uint32_t ticks = (timeout_ms + IPC_TICK_MS - 1) / IPC_TICK_MS;
+  if (ticks == 0) {
+    ticks = 1;
+  }
+  return timerctl.count + ticks;
+}
+
+static bool ipc_deadline_passed(uint32_t deadline) {
+  return (int32_t)(timerctl.count - deadline) >= 0;
+}
+
+// 让出 CPU 等待事件（有消息到达、队列腾出位置，或者等到超时）。
+// 调用前必须处于关中断状态，返回时中断已经打开。
+//
+// 注意：task_next() / task_switch() 不可重入，如果开着中断去切换，
+// 时钟中断可能正好落在切换过程中再调一次 task_next，把任务的内核栈指针搞乱
+// （表现为返回用户态时 eip 变成随机值）。所以这里一直关着中断切换，
+// 切回来之后再开中断。
+static void ipc_wait(mtask *self, uint32_t peer_tid, uint32_t deadline,
+                     int use_deadline) {
+  if (self->ready) {
+    // 已经有人唤醒过我们了，直接回去重新检查
+    self->ready = 0;
+    io_sti();
+    return;
+  }
+  self->ipc_wait_peer = peer_tid;
+  self->ipc_deadline = deadline;
+  self->ipc_deadline_set = use_deadline ? 1 : 0;
+  self->state = WAITING;
+  self->wait_reason = WAIT_REASON_IPC;
+  task_next();
+  io_sti();
+  self->ipc_wait_peer = TASK_ID_NONE;
+  self->ipc_deadline_set = 0;
+  if (self->wait_reason == WAIT_REASON_IPC) {
+    self->wait_reason = WAIT_REASON_NONE;
+  }
+}
+
+// 由时钟中断调用：把等到超时的 IPC 等待者唤醒
+void ipc_tick(void) {
+  extern mtask m[255];
+  for (int i = 0; i < 255; i++) {
+    mtask *task = &m[i];
+    if (task->state != WAITING || task->wait_reason != WAIT_REASON_IPC ||
+        !task->ipc_deadline_set) {
+      continue;
+    }
+    if ((int32_t)(timerctl.count - task->ipc_deadline) >= 0) {
+      task_run(task);
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* 发送 / 接收                                                         */
+/* ------------------------------------------------------------------ */
+
+// 向 to_tid 投递一条消息。
+// to_generation 非 0 时会校验目标的世代号，避免 tid 复用后投错进程。
+// 返回 IPC_OK 或负的错误码。
+int ipc_send(uint32_t to_tid, uint32_t to_generation, uint32_t type, uint32_t id,
+             const void *data, uint32_t size, uint32_t flags,
+             uint32_t timeout_ms) {
+  mtask *self = current_task();
+  void *payload = NULL;
+  uint32_t deadline = 0;
+  int result;
+
+  if (size > IPC_MAX_MSG_SIZE) {
+    return IPC_ERR_TOOBIG;
+  }
+  if (size && !data) {
+    return IPC_ERR_INVAL;
+  }
+  if (to_tid >= 255) {
+    return IPC_ERR_NOTASK;
+  }
+  if (size) {
+    payload = malloc(size);
+    if (!payload) {
+      return IPC_ERR_NOMEM;
+    }
+    // 还在发送者的地址空间里，可以直接拷用户数据
+    memcpy(payload, data, size);
+  }
+  if (timeout_ms) {
+    deadline = ipc_deadline(timeout_ms);
+  }
+
+  for (;;) {
+    bool state = interrupt_disable();
+    mtask *to = get_task(to_tid);
+    if (!to || to->state == DIED ||
+        (to_generation && to->generation != to_generation)) {
+      set_interrupt_state(state);
+      result = IPC_ERR_NOTASK;
+      break;
+    }
+    IPC_Header *ipc = &to->ipc_header;
+    IPCMessage *slot = ipc_find_free(ipc);
+    if (slot) {
+      slot->data = payload;
+      slot->size = size;
+      slot->from_tid = self->tid;
+      slot->from_generation = self->generation;
+      slot->type = type;
+      slot->id = id;
+      slot->seq = ipc->seq++;
+      slot->used = 1;
+      ipc->count++;
+      ipc_wake_receiver(to);
+      set_interrupt_state(state);
+      return IPC_OK;
+    }
+    if (flags & IPC_NOWAIT) {
+      set_interrupt_state(state);
+      result = IPC_ERR_FULL;
+      break;
+    }
+    if (timeout_ms && ipc_deadline_passed(deadline)) {
+      set_interrupt_state(state);
+      result = IPC_ERR_TIMEOUT;
+      break;
+    }
+    // 队列满：等目标取走消息后再试（等待期间中断会被打开）
+    ipc_wait(self, to_tid, deadline, timeout_ms != 0);
+  }
+
+  if (payload) {
+    free(payload);
+  }
+  return result;
+}
+
+// 取出一条消息。bufsize 是 buf 的容量，负载超出容量时返回 IPC_ERR_TOOBIG，
+// 消息会保留在队列里（info 里能看到真实长度）。
+// 成功时返回实际拷贝的字节数（>= 0）。
+int ipc_recv(void *buf, uint32_t bufsize, ipc_msg_info_t *info,
+             uint32_t from_filter, uint32_t flags, uint32_t timeout_ms) {
+  mtask *self = current_task();
+  IPC_Header *ipc = &self->ipc_header;
+  uint32_t deadline = 0;
+
+  if (timeout_ms) {
+    deadline = ipc_deadline(timeout_ms);
+  }
+  for (;;) {
+    bool state = interrupt_disable();
+    IPCMessage *msg = ipc_find_oldest(ipc, from_filter);
+    if (msg) {
+      uint32_t size = msg->size;
+      if (info) {
+        info->from_tid = msg->from_tid;
+        info->from_generation = msg->from_generation;
+        info->type = msg->type;
+        info->id = msg->id;
+        info->size = size;
+      }
+      if (size > bufsize) {
+        set_interrupt_state(state);
+        return IPC_ERR_TOOBIG;
+      }
+      if (size && buf) {
+        memcpy(buf, msg->data, size);
+      }
+      ipc_drop_message(ipc, msg);
+      ipc_wake_senders(self->tid);
+      set_interrupt_state(state);
+      return (int)size;
+    }
+    if (flags & IPC_NOWAIT) {
+      set_interrupt_state(state);
+      return IPC_ERR_EMPTY;
+    }
+    if (timeout_ms && ipc_deadline_passed(deadline)) {
+      set_interrupt_state(state);
+      return IPC_ERR_TIMEOUT;
+    }
+    ipc_wait(self, TASK_ID_NONE, deadline, timeout_ms != 0);
+  }
+}
+
+// 查看下一条消息的信息但不取走
+int ipc_peek(ipc_msg_info_t *info, uint32_t from_filter) {
+  bool state = interrupt_disable();
+  IPCMessage *msg = ipc_find_oldest(&current_task()->ipc_header, from_filter);
+  if (!msg) {
+    set_interrupt_state(state);
+    return IPC_ERR_EMPTY;
+  }
+  if (info) {
+    info->from_tid = msg->from_tid;
+    info->from_generation = msg->from_generation;
+    info->type = msg->type;
+    info->id = msg->id;
+    info->size = msg->size;
+  }
+  set_interrupt_state(state);
+  return IPC_OK;
+}
+
+// 当前任务队列里的消息数
+int ipc_pending(void) {
+  bool state = interrupt_disable();
+  int count = (int)current_task()->ipc_header.count;
+  set_interrupt_state(state);
+  return count;
+}
+
+/* ------------------------------------------------------------------ */
+/* 服务名注册                                                          */
+/* ------------------------------------------------------------------ */
+
+static int ipc_name_valid(const char *name) {
+  if (!name || !name[0]) {
+    return 0;
+  }
+  for (int i = 0; i < IPC_NAME_MAX; i++) {
+    if (name[i] == '\0') {
+      return 1;
+    }
+  }
+  return 0; // 太长
+}
+
+static void ipc_name_copy(char *dest, const char *src) {
+  int i = 0;
+  for (; i < IPC_NAME_MAX - 1 && src[i]; i++) {
+    dest[i] = src[i];
+  }
+  dest[i] = '\0';
+}
+
+// 把当前任务注册成名字为 name 的服务
+int ipc_service_register(const char *name) {
+  if (!ipc_name_valid(name)) {
+    return IPC_ERR_INVAL;
+  }
+  mtask *self = current_task();
+  bool state = interrupt_disable();
+  int free_index = -1;
+  for (int i = 0; i < IPC_MAX_SERVICE; i++) {
+    if (!ipc_services[i].used) {
+      if (free_index < 0) {
+        free_index = i;
+      }
+      continue;
+    }
+    if (strcmp(ipc_services[i].name, name) == 0) {
+      mtask *owner = get_task(ipc_services[i].tid);
+      if (owner && owner->generation == ipc_services[i].generation &&
+          owner->state != DIED) {
+        set_interrupt_state(state);
+        return owner == self ? IPC_OK : IPC_ERR_EXIST;
+      }
+      // 原来的服务进程已经不在了，回收这个名字
+      free_index = i;
+      ipc_services[i].used = 0;
       break;
     }
   }
-  if (!ipc_msg) {
-    unlock(&(get_task(to_tid)->ipc_header.l));
-    return -1;
+  if (free_index < 0) {
+    set_interrupt_state(state);
+    return IPC_ERR_FULL;
   }
-  ipc_msg->size = size;
-  ipc_msg->data = (void *)page_malloc(size);
-  memcpy(ipc_msg->data, data, size);
-  ipc_msg->flag1 = 1;
-  ipc_msg->from_tid = get_tid(current_task());
-  if (type == synchronous) {
-    ipc_msg->flag2 = 1;
-  } else {
-    ipc_msg->flag2 = 0;
-  }
-  ipc->now++;
-  unlock(&(get_task(to_tid)->ipc_header.l));
-  if (type == synchronous) {
-    while (ipc_msg->flag1)
-      ;
-    lock(&(get_task(to_tid)->ipc_header.l));
-    ipc_msg->flag2 = 0;
-    unlock(&(get_task(to_tid)->ipc_header.l));
-  }
-  return 0;
-}
-int send_ipc_message_by_name(char *tname, void *data, unsigned int size,
-                             char type) {
-  // struct TASK *to_task = get_task_by_name(tname);
-  // return send_ipc_message((to_task->sel / 8) - 103, data, size, type);
+  ipc_name_copy(ipc_services[free_index].name, name);
+  ipc_services[free_index].tid = self->tid;
+  ipc_services[free_index].generation = self->generation;
+  ipc_services[free_index].used = 1;
+  set_interrupt_state(state);
+  return IPC_OK;
 }
 
+int ipc_service_unregister(const char *name) {
+  if (!ipc_name_valid(name)) {
+    return IPC_ERR_INVAL;
+  }
+  mtask *self = current_task();
+  bool state = interrupt_disable();
+  for (int i = 0; i < IPC_MAX_SERVICE; i++) {
+    if (!ipc_services[i].used || strcmp(ipc_services[i].name, name) != 0) {
+      continue;
+    }
+    if (ipc_services[i].tid != self->tid) {
+      set_interrupt_state(state);
+      return IPC_ERR_INVAL; // 只能注销自己注册的名字
+    }
+    ipc_services[i].used = 0;
+    ipc_services[i].name[0] = '\0';
+    set_interrupt_state(state);
+    return IPC_OK;
+  }
+  set_interrupt_state(state);
+  return IPC_ERR_NOTFOUND;
+}
+
+// 查询服务名对应的 tid，generation 非空时同时输出世代号
+int ipc_service_lookup(const char *name, uint32_t *generation) {
+  if (!ipc_name_valid(name)) {
+    return IPC_ERR_INVAL;
+  }
+  bool state = interrupt_disable();
+  for (int i = 0; i < IPC_MAX_SERVICE; i++) {
+    if (!ipc_services[i].used || strcmp(ipc_services[i].name, name) != 0) {
+      continue;
+    }
+    mtask *owner = get_task(ipc_services[i].tid);
+    if (!owner || owner->generation != ipc_services[i].generation ||
+        owner->state == DIED) {
+      ipc_services[i].used = 0;
+      ipc_services[i].name[0] = '\0';
+      break;
+    }
+    int tid = (int)ipc_services[i].tid;
+    if (generation) {
+      *generation = ipc_services[i].generation;
+    }
+    set_interrupt_state(state);
+    return tid;
+  }
+  set_interrupt_state(state);
+  return IPC_ERR_NOTFOUND;
+}
+
+/* ------------------------------------------------------------------ */
+/* 兼容旧接口                                                          */
+/* ------------------------------------------------------------------ */
+
+// 旧接口：type == synchronous 时等到对方把消息取走再返回
+int send_ipc_message(int to_tid, void *data, unsigned int size, char type) {
+  if (to_tid < 0) {
+    return -1;
+  }
+  int result = ipc_send((uint32_t)to_tid, 0, (uint32_t)type, 0, data, size, 0, 0);
+  if (result != IPC_OK) {
+    return -1;
+  }
+  if (type == synchronous) {
+    // 等目标把队列清空到不含我们这条消息为止
+    for (;;) {
+      bool state = interrupt_disable();
+      mtask *to = get_task((uint32_t)to_tid);
+      if (!to) {
+        set_interrupt_state(state);
+        return 0;
+      }
+      IPCMessage *mine = NULL;
+      for (int i = 0; i < MAX_IPC_MESSAGE; i++) {
+        IPCMessage *msg = &to->ipc_header.messages[i];
+        if (msg->used && msg->from_tid == current_task()->tid) {
+          mine = msg;
+          break;
+        }
+      }
+      if (!mine) {
+        set_interrupt_state(state);
+        return 0;
+      }
+      /* 关中断切换，理由同 ipc_wait */
+      task_next();
+      io_sti();
+    }
+  }
+  return 0;
+}
+
+int send_ipc_message_by_name(char *tname, void *data, unsigned int size,
+                             char type) {
+  int tid = ipc_service_lookup(tname, NULL);
+  if (tid < 0) {
+    return -1;
+  }
+  return send_ipc_message(tid, data, size, type);
+}
+
+// 旧接口：阻塞地取一条来自 from_tid 的消息，调用者必须保证缓冲区足够大
 int get_ipc_message(void *data, int from_tid) {
-  lock(&(current_task()->ipc_header.l));
-  if (current_task()->ipc_header.now == 0) {
-    unlock(&(current_task()->ipc_header.l));
-    return -1;
-  }
-  IPC_Header *ipc = &(current_task()->ipc_header);
-  IPCMessage *ipc_msg = NULL;
-  for (int i = 0; i < MAX_IPC_MESSAGE; i++) {
-    if (ipc->messages[i].flag1 == 1 && ipc->messages[i].from_tid == from_tid) {
-      ipc_msg = &(ipc->messages[i]);
-    }
-  }
-  if (!ipc_msg) {
-    unlock(&(current_task()->ipc_header.l));
-    return -1;
-  }
-  memcpy(data, ipc_msg->data, ipc_msg->size);
-  page_free(ipc_msg->data, ipc_msg->size);
-  ipc_msg->flag1 = 0;
-  ipc->now--;
-  unlock(&(current_task()->ipc_header.l));
-  return 0;
+  ipc_msg_info_t info;
+  int result = ipc_recv(data, IPC_MAX_MSG_SIZE, &info,
+                        from_tid < 0 ? IPC_ANY_TID : (uint32_t)from_tid,
+                        IPC_NOWAIT, 0);
+  return result < 0 ? -1 : 0;
 }
+
 int get_ipc_message_by_name(void *data, char *tname) {
-  // mtask *from_task = get_task_by_name(tname);
-  // return get_ipc_message(data, (from_task->sel / 8) - 103);
+  int tid = ipc_service_lookup(tname, NULL);
+  if (tid < 0) {
+    return -1;
+  }
+  return get_ipc_message(data, tid);
 }
-int ipc_message_status() { return 1; }
+
+int ipc_message_status() { return ipc_pending(); }
+
 unsigned int ipc_message_len(int from_tid) {
-  lock(&(current_task()->ipc_header.l));
-  if (current_task()->ipc_header.now == 0) {
-    unlock(&(current_task()->ipc_header.l));
-    return -1;
+  ipc_msg_info_t info;
+  if (ipc_peek(&info, from_tid < 0 ? IPC_ANY_TID : (uint32_t)from_tid) !=
+      IPC_OK) {
+    return (unsigned int)-1;
   }
-  IPC_Header *ipc = &(current_task()->ipc_header);
-  IPCMessage *ipc_msg = NULL;
-  for (int i = 0; i < MAX_IPC_MESSAGE; i++) {
-    if (ipc->messages[i].flag1 == 1 && ipc->messages[i].from_tid == from_tid) {
-      ipc_msg = &(ipc->messages[i]);
-    }
-  }
-  if (!ipc_msg) {
-    unlock(&(current_task()->ipc_header.l));
-    return -1;
-  }
-  unlock(&(current_task()->ipc_header.l));
-  return ipc_msg->size;
+  return info.size;
 }
-// 废弃
-// int send_ipc_message_by_tid(int to_tid,        // 收信人
-//                             int y_tid,         // 发信人
-//                             void *data,        // 数据
-//                             unsigned int size, // 大小
-//                             char type          // 类型
-// ) {
-//   irq_mask_set(0);
-//   mtask *to_task = get_task(to_tid), *this_task = current_task();
-//   // int levelold = this_task->level;
-//   if (to_task->ipc_header.now == MAX_IPC_MESSAGE - 1) {
-//     irq_mask_clear(0);
-//     return -1;
-//   }
-//   void *now_data = page_malloc(size);
-//   memcpy(now_data, data, size);
-//   IPCMessage msg;
-//   msg.data = now_data;
-//   msg.size = size;
-//   msg.from_tid = y_tid;
-//   to_task->ipc_header.messages[to_task->ipc_header.now] = msg;
-//   to_task->ipc_header.now++;
-//   int now = to_task->ipc_header.now;
-//   irq_mask_clear(0);
-//   // sleep(10);
-//   if (type == synchronous) { // 同步
-//     while (to_task->ipc_header.now != now - 1)
-//       ;
-//   }
-//   return 0;
-// }
-bool have_msg() {
-  lock(&(current_task()->ipc_header.l));
-  IPC_Header *ipc = &(current_task()->ipc_header);
-  IPCMessage *ipc_msg = NULL;
-  for (int i = 0; i < MAX_IPC_MESSAGE; i++) {
-    if (ipc->messages[i].flag1 == 1) {
-      ipc_msg = &(ipc->messages[i]);
-    }
-  }
-  if (!ipc_msg) {
-    unlock(&(current_task()->ipc_header.l));
-    return false;
-  }
-  unlock(&(current_task()->ipc_header.l));
-  return true;
-}
+
+bool have_msg() { return ipc_pending() != 0; }
+
+// 旧接口：取任意一条消息
 int get_msg_all(void *data) {
-  lock(&(current_task()->ipc_header.l));
-  IPC_Header *ipc = &(current_task()->ipc_header);
-  IPCMessage *ipc_msg = NULL;
-  for (int i = 0; i < MAX_IPC_MESSAGE; i++) {
-    if (ipc->messages[i].flag1 == 1) {
-      ipc_msg = &(ipc->messages[i]);
-    }
-  }
-  if (!ipc_msg) {
-    unlock(&(current_task()->ipc_header.l));
-    return -1;
-  }
-  memcpy(data, ipc_msg->data, ipc_msg->size);
-  page_free(ipc_msg->data, ipc_msg->size);
-  ipc_msg->flag1 = 0;
-  unlock(&(current_task()->ipc_header.l));
-  while (ipc_msg->flag2)
-    ;
-  return 0;
+  ipc_msg_info_t info;
+  int result = ipc_recv(data, IPC_MAX_MSG_SIZE, &info, IPC_ANY_TID, IPC_NOWAIT, 0);
+  return result < 0 ? -1 : 0;
 }

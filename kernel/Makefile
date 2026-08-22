@@ -125,6 +125,7 @@ Mimg : make_dir $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $
 		mcopy -i ./disk.img $(APPSOUTPATH)minewep.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)copydir.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)dktest.bin ::
+		mcopy -i ./disk.img $(APPSOUTPATH)rpctest.bin ::
 
 		mcopy -i ./disk.img $(RESPATH)init.mst ::
 
@@ -166,6 +167,7 @@ Mimg : make_dir $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $
 		mcopy -i boot.img $(APPSOUTPATH)my_basic.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)copydir.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)dktest.bin ::
+		mcopy -i boot.img $(APPSOUTPATH)rpctest.bin ::
 		mcopy -i boot.img $(FONTPATH)font.bin ::
 		mcopy -i boot.img $(FONTPATH)HZK16 ::
 		mcopy -i boot.img $(BIDPATH)nasm.zip ::

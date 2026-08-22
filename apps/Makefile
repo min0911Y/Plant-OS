@@ -43,6 +43,7 @@ default : Makefile
 	make -r -C doomcpy
 	make -r -C doomgeneric
 	make -r -C diskio_test
+	make -r -C rpctest
 	make -r -C minizip
 	make -r -C duktape
 	make -r -C mmake
