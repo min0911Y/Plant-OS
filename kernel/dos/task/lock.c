@@ -90,7 +90,7 @@ void lock(lock_t *key) {
       if (current_task()->ready == 1) {
         current_task()->ready = 0;
       }
-      task_fall_blocked(WAITING);
+      task_fall_blocked_reason(WAITING, WAIT_REASON_LOCK);
       
     }
   }

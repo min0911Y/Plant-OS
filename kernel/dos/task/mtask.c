@@ -1,6 +1,9 @@
 // 多任务重构 -- mtask.c (区别与以前的多任务)
 #include <dos.h>
 #define STACK_SIZE 1024 * 1024
+#define REAPER_TID 0u
+#define TASK_ID_NONE ((uint32_t)-1)
+#define TASK_KILLED_STATUS ((unsigned)-1)
 void free_pde(unsigned addr);
 unsigned pde_clone(unsigned addr);
 void gc(unsigned tid);
@@ -9,6 +12,7 @@ bool interrupt_disable(void);
 void set_interrupt_state(bool state);
 void fpu_disable(void);
 void task_switch(mtask *next);
+static void reset_task_slot(mtask *task, int tid);
 char default_drive = 'A';
 mtask m[255];
 struct TSS32 tss;
@@ -41,6 +45,9 @@ static void init_task() {
     m[i].state = EMPTY; // EMPTY
     m[i].tid = i;       // task id
     m[i].ptid = -1;     // parent task id
+    m[i].tgid = i;
+    m[i].generation = 0;
+    m[i].kind = TASK_PROCESS;
     /* keyboard hook */
     m[i].keyboard_press = NULL;
     m[i].keyboard_release = NULL;
@@ -54,6 +61,10 @@ static void init_task() {
     m[i].nfs = NULL;
     m[i].mm = NULL;
     m[i].waittid = -1;
+    m[i].wait_generation = 0;
+    m[i].wait_reason = WAIT_REASON_NONE;
+    m[i].group_lock_owner = TASK_ID_NONE;
+    m[i].group_lock_depth = 0;
     m[i].alloc_addr = 0;
     m[i].alloc_size = 0;
     m[i].alloced = 0;
@@ -101,10 +112,8 @@ void task_next() {
     current->running = 0;
   mtask *next = NULL;
   int i;
-  mtask *j = NULL;
   if (next_set) {
     i = next_set->tid;
-    j = next_set;
     next_set = NULL;
   } else {
     i = 0;
@@ -123,16 +132,8 @@ void task_next() {
         if (p->ready) {
           p->ready = 0;
           p->state = RUNNING;
+          p->wait_reason = WAIT_REASON_NONE;
           goto OK;
-        }
-        if (p->waittid == -1)
-          continue;
-        if ((m[i].state == EMPTY || m[i].state == WILL_EMPTY ||
-             m[i].state == READY) ||
-            m[p->waittid].ptid != p->tid) {
-          p->state = RUNNING;
-          p->waittid = -1;
-          i--;
         }
       }
       continue;
@@ -148,7 +149,6 @@ void task_next() {
         next = p;
       }
   }
-H:
   if (next == NULL) {
     next = idle_task;
   }
@@ -178,19 +178,33 @@ H:
 static mtask *create_task_impl(uintptr_t eip, unsigned esp, unsigned ticks,
                                unsigned floor, bool share_pde) {
   mtask *t = NULL;
+  bool interrupt_state = interrupt_disable();
   int first = (current == NULL && m[0].state == EMPTY) ? 0 : 1;
   for (int i = first; i < 255; i++) {
-    if (m[i].state == EMPTY || m[i].state == WILL_EMPTY ||
-        m[i].state == READY) {
+    if (m[i].state == EMPTY) {
       t = &(m[i]);
       break;
     }
   }
   if (!t) {
+    set_interrupt_state(interrupt_state);
     return NULL;
   }
-  t->tid = (uint64_t)(t - m);
-  uintptr_t esp_alloced = (uintptr_t)page_malloc(STACK_SIZE) + STACK_SIZE;
+  int tid = (int)(t - m);
+  uint32_t generation = t->generation + 1;
+  reset_task_slot(t, tid);
+  t->generation = generation;
+  t->kind = share_pde ? TASK_THREAD : TASK_PROCESS;
+  t->tgid = share_pde && current != NULL ? current_task()->tgid : (uint32_t)tid;
+  t->ptid = share_pde && current != NULL ? current_task()->ptid : TASK_ID_NONE;
+  t->state = ALLOCATING;
+  set_interrupt_state(interrupt_state);
+  void *stack_base = page_malloc(STACK_SIZE);
+  if (stack_base == NULL) {
+    reset_task_slot(t, tid);
+    return NULL;
+  }
+  uintptr_t esp_alloced = (uintptr_t)stack_base + STACK_SIZE;
   change_page_task_id(t->tid, (void *)(esp_alloced - STACK_SIZE), STACK_SIZE);
   t->esp = (stack_frame *)(esp_alloced - sizeof(stack_frame)); // switch用到的栈帧
   t->esp->eip = eip;                          // 设置跳转地址
@@ -232,7 +246,7 @@ mtask *get_task(unsigned tid) {
     return NULL;
   }
   if (m[tid].state == EMPTY || m[tid].state == WILL_EMPTY ||
-      m[tid].state == READY) {
+      m[tid].state == READY || m[tid].state == ALLOCATING) {
     return NULL;
   }
   return &(m[tid]);
@@ -280,82 +294,239 @@ void task_to_user_mode(unsigned eip, unsigned esp) {
     ;
 }
 
-void task_kill(unsigned tid) {
-  if (mouse_use_task == current_task()) {
-    mouse_sleep(&mdec);
-  }
+static bool task_slot_in_use(const mtask *task) {
+  return task != NULL && task->state != EMPTY && task->state != WILL_EMPTY &&
+         task->state != READY && task->state != ALLOCATING;
+}
+
+static void task_clear_ipc_refs(mtask *task) {
   for (int i = 0; i < 255; i++) {
-    if (m[i].state == EMPTY || m[i].state == WILL_EMPTY || m[i].state == READY)
+    mtask *peer = &m[i];
+    if (!task_slot_in_use(peer)) {
       continue;
-    if (m[i].tid == tid)
-      continue;
-    if (m[i].ptid == tid) {
-      task_kill(m[i].tid);
+    }
+    lock_t *lock = &peer->ipc_header.l;
+    if (lock->owner == task) {
+      lock->owner = NULL;
+      lock->value = LOCK_UNLOCKED;
+      if (lock->waiter && lock->waiter != task) {
+        task_run(lock->waiter);
+      }
+      lock->waiter = NULL;
+    } else if (lock->waiter == task) {
+      lock->waiter = NULL;
+    }
+    for (int k = 0; k < MAX_IPC_MESSAGE; k++) {
+      IPCMessage *message = &peer->ipc_header.messages[k];
+      if (message->from_tid != (int)task->tid) {
+        continue;
+      }
+      if (message->flag1 && peer->ipc_header.now > 0) {
+        peer->ipc_header.now--;
+      }
+      message->from_tid = -1;
+      message->flag1 = 0;
+      message->flag2 = 0;
+      message->data = NULL;
+      message->size = 0;
     }
   }
-  io_cli();
-  if (get_task(tid) == current_task()) {
-    set_cr3(PDE_ADDRESS);
-  }
-  free_pde(m[tid].pde);
-  gc(tid); // 释放内存
-  if (m[tid].Pkeyfifo) {
-    page_free(m[tid].Pkeyfifo->buf, 4096);
-    free(m[tid].Pkeyfifo);
-  }
-  if (m[tid].Ukeyfifo) {
-    page_free(m[tid].Ukeyfifo->buf, 4096);
-    free(m[tid].Ukeyfifo);
-  }
-  if (m[tid].nfs) {
-    vfs_free_task_instance(m[tid].nfs);
-    m[tid].nfs = NULL;
-  }
-  m[tid].urgent = 0;
-  m[tid].fpu_flag = 0;
-  m[tid].fifosleep = 0;
-  m[tid].mx = 0;
-  m[tid].my = 0;
-  m[tid].line = NULL;
-  m[tid].jiffies = 0;
-  m[tid].timer = NULL;
-  m[tid].mm = NULL;
-  m[tid].waittid = -1;
-  m[tid].state = WILL_EMPTY;
-  m[tid].alloc_addr = 0;
-  if (m[tid].alloced) {
-    free(m[tid].alloc_size);
-    m[tid].alloced = 0;
-  }
-  m[tid].alloc_size = 0;
-  m[tid].running = 0;
-  m[tid].ready = 0;
-  m[tid].pde = 0;
-  m[tid].ipc_header.now = 0;
-  m[tid].sigint_up = 0;
-  m[tid].train = 0;
-  m[tid].times = 0;
-  m[tid].signal_disable = 0;
-  m[tid].keyboard_press = NULL;
-  m[tid].keyboard_release = NULL;
-  lock_init(&(m[tid].ipc_header.l));
-  for (int k = 0; k < MAX_IPC_MESSAGE; k++) {
-    m[tid].ipc_header.messages[k].from_tid = -1;
-    m[tid].ipc_header.messages[k].flag1 = 0;
-    m[tid].ipc_header.messages[k].flag2 = 0;
-  }
-  for (int k = 0; k < 30; k++) {
-    m[tid].handler[k] = 0;
-  }
-  if (m[tid].ptid != -1 && m[m[tid].ptid].waittid == tid) {
-    m[m[tid].ptid].state = RUNNING;
+}
+
+static void task_clear_external_refs(mtask *task) {
+  extern mtask *keyboard_use_task;
+  extern int disable_flag;
+  extern unsigned custom_handler;
+  extern unsigned custom_handler_pde;
+  extern mtask *custom_handler_owner;
+
+  mtask *leader = get_task(task->tgid);
+  if (leader && leader->group_lock_owner == task->tid) {
+    leader->group_lock_owner = TASK_ID_NONE;
+    leader->group_lock_depth = 0;
+    for (int i = 0; i < 255; i++) {
+      if (task_slot_in_use(&m[i]) && m[i].tgid == task->tgid &&
+          m[i].state == WAITING &&
+          m[i].wait_reason == WAIT_REASON_TASK_GROUP_LOCK) {
+        task_run(&m[i]);
+      }
+    }
   }
 
-  m[tid].ptid = -1;
-  io_sti();
-  if (get_task(tid) == current_task())
+  if (next_set == task) {
+    next_set = NULL;
+  }
+  if (mouse_use_task == task) {
+    mouse_sleep(&mdec);
+  }
+  if (keyboard_use_task == task) {
+    keyboard_use_task = NULL;
+    disable_flag = 0;
+  }
+  if (custom_handler_owner == task) {
+    custom_handler = 0;
+    custom_handler_pde = 0;
+    custom_handler_owner = NULL;
+  }
+  for (int i = 0; i < MAX_TIMER; i++) {
+    if (timerctl.timers0[i].waiter == task) {
+      timerctl.timers0[i].waiter = NULL;
+    }
+  }
+  task_clear_ipc_refs(task);
+  sb16_remove_task(task);
+  vdisk_remove_task(task->tid);
+}
+
+static void task_release_resources(mtask *task) {
+  unsigned tid = task->tid;
+
+  task_clear_external_refs(task);
+  if (task == current_task()) {
+    set_cr3(PDE_ADDRESS);
+  }
+  if (task->pde) {
+    free_pde(task->pde);
+  }
+  gc(tid);
+  if (task->Pkeyfifo) {
+    page_free(task->Pkeyfifo->buf, 4096);
+    free(task->Pkeyfifo);
+    task->Pkeyfifo = NULL;
+  }
+  if (task->Ukeyfifo) {
+    page_free(task->Ukeyfifo->buf, 4096);
+    free(task->Ukeyfifo);
+    task->Ukeyfifo = NULL;
+  }
+  if (task->nfs) {
+    vfs_free_task_instance(task->nfs);
+    task->nfs = NULL;
+  }
+  if (task->alloced && task->alloc_size) {
+    free(task->alloc_size);
+  }
+  task->alloc_addr = 0;
+  task->alloc_size = NULL;
+  task->alloced = 0;
+  task->urgent = 0;
+  task->fpu_flag = 0;
+  task->fifosleep = 0;
+  task->mx = 0;
+  task->my = 0;
+  task->line = NULL;
+  task->jiffies = 0;
+  task->timer = NULL;
+  task->mm = NULL;
+  task->waittid = TASK_ID_NONE;
+  task->wait_generation = 0;
+  task->wait_reason = WAIT_REASON_NONE;
+  task->running = 0;
+  task->ready = 0;
+  task->pde = 0;
+  task->ipc_header.now = 0;
+  task->sigint_up = 0;
+  task->train = 0;
+  task->times = 0;
+  task->signal = 0;
+  task->signal_disable = 0;
+  task->keyboard_press = NULL;
+  task->keyboard_release = NULL;
+  task->group_lock_owner = TASK_ID_NONE;
+  task->group_lock_depth = 0;
+  lock_init(&(task->ipc_header.l));
+  for (int k = 0; k < MAX_IPC_MESSAGE; k++) {
+    task->ipc_header.messages[k].from_tid = -1;
+    task->ipc_header.messages[k].flag1 = 0;
+    task->ipc_header.messages[k].flag2 = 0;
+  }
+  for (int k = 0; k < 30; k++) {
+    task->handler[k] = 0;
+  }
+}
+
+static void wake_child_waiter(mtask *child) {
+  if (child->ptid == TASK_ID_NONE || child->ptid == REAPER_TID) {
+    return;
+  }
+  for (int i = 0; i < 255; i++) {
+    mtask *waiter = &m[i];
+    if (!task_slot_in_use(waiter) || waiter->tgid != child->ptid ||
+        waiter->state != WAITING ||
+        waiter->wait_reason != WAIT_REASON_CHILD ||
+        waiter->waittid != child->tid ||
+        waiter->wait_generation != child->generation) {
+      continue;
+    }
+    task_run(waiter);
+  }
+}
+
+static void reparent_children(uint32_t old_parent, uint32_t new_parent) {
+  for (int i = 0; i < 255; i++) {
+    mtask *child = &m[i];
+    if (!task_slot_in_use(child) || child->kind != TASK_PROCESS ||
+        child->ptid != old_parent) {
+      continue;
+    }
+    child->ptid = new_parent;
+    for (int j = 0; j < 255; j++) {
+      if (task_slot_in_use(&m[j]) && m[j].kind == TASK_THREAD &&
+          m[j].tgid == child->tgid) {
+        m[j].ptid = new_parent;
+      }
+    }
+    if (child->state == DIED && new_parent == REAPER_TID) {
+      reset_task_slot(child, i);
+    }
+  }
+}
+
+static void finish_task(mtask *task, unsigned status, bool waitable) {
+  bool is_current = task == current_task();
+  task_release_resources(task);
+  task->status = status;
+  if (waitable) {
+    task->state = DIED;
+    wake_child_waiter(task);
+  } else if (is_current) {
+    task->state = WILL_EMPTY;
+  } else {
+    reset_task_slot(task, task->tid);
+  }
+}
+
+static void terminate_thread_group(uint32_t tgid, mtask *except) {
+  for (int i = 0; i < 255; i++) {
+    mtask *thread = &m[i];
+    if (thread == except || !task_slot_in_use(thread) ||
+        thread->kind != TASK_THREAD || thread->tgid != tgid) {
+      continue;
+    }
+    finish_task(thread, TASK_KILLED_STATUS, false);
+  }
+}
+
+void task_kill(unsigned tid) {
+  mtask *task = get_task(tid);
+  if (!task || task->state == DIED) {
+    return;
+  }
+  bool interrupt_state = interrupt_disable();
+  bool is_current = task == current_task();
+  if (task->kind == TASK_PROCESS) {
+    terminate_thread_group(task->tgid, task);
+    reparent_children(task->tgid, REAPER_TID);
+  }
+  bool waitable = task->kind == TASK_PROCESS && task->ptid != TASK_ID_NONE &&
+                  task->ptid != REAPER_TID;
+  finish_task(task, TASK_KILLED_STATUS, waitable);
+  if (is_current) {
+    io_sti();
     for (;;)
       ;
+  }
+  set_interrupt_state(interrupt_state);
 }
 
 mtask *current_task() {
@@ -389,13 +560,19 @@ void task_set_fifo(mtask *task, struct FIFO8 *kfifo, struct FIFO8 *mfifo) {
 struct FIFO8 *task_get_key_fifo(mtask *task) { return task->keyfifo; }
 void task_sleep(mtask *task) {
   task->state = SLEEPING;
+  task->wait_reason = WAIT_REASON_GENERIC;
   task->fifosleep = 1;
 }
 void task_wake_up(mtask *task) {
   task->state = RUNNING;
+  task->wait_reason = WAIT_REASON_NONE;
   task->fifosleep = 0;
 }
 void task_run(mtask *task) {
+  if (!task || task->state == EMPTY || task->state == WILL_EMPTY ||
+      task->state == READY || task->state == ALLOCATING || task->state == DIED) {
+    return;
+  }
   // 加急一下
   task->urgent = 1;
   task->ready = 1;
@@ -403,167 +580,134 @@ void task_run(mtask *task) {
 }
 void task_fifo_sleep(mtask *task) { task->fifosleep = 1; }
 struct FIFO8 *task_get_mouse_fifo(mtask *task) { return task->mousefifo; }
+static mtask *task_group_leader(mtask *task) {
+  mtask *leader = get_task(task->tgid);
+  return leader ? leader : task;
+}
+
 void task_lock() {
-  if (current_task()->ptid == -1) {
-    for (int i = 0; i < 255; i++) {
-      if (m[i].state == EMPTY || m[i].state == WILL_EMPTY ||
-          m[i].state == READY)
-        continue;
-      if (m[i].tid == get_tid(current_task()))
-        continue;
-      if (m[i].ptid == get_tid(current_task()) && m[i].state == 1) {
-        m[i].state = WAITING; // WAITING
-      }
+  mtask *self = current_task();
+  mtask *leader = task_group_leader(self);
+  for (;;) {
+    bool interrupt_state = interrupt_disable();
+    if (leader->group_lock_owner == TASK_ID_NONE ||
+        leader->group_lock_owner == self->tid) {
+      leader->group_lock_owner = self->tid;
+      leader->group_lock_depth++;
+      set_interrupt_state(interrupt_state);
+      return;
     }
-  } else {
-    for (int i = 0; i < 255; i++) {
-      if (m[i].state == EMPTY || m[i].state == WILL_EMPTY ||
-          m[i].state == READY)
-        continue;
-      if (m[i].tid == get_tid(current_task()))
-        continue;
-      if ((m[i].tid == current_task()->ptid ||
-           m[i].ptid == current_task()->ptid) &&
-          m[i].state == RUNNING) {
-        m[i].state = WAITING; // WAITING
-      }
-    }
+    self->state = WAITING;
+    self->wait_reason = WAIT_REASON_TASK_GROUP_LOCK;
+    self->ready = 0;
+    io_sti();
+    task_next();
   }
 }
+
 void task_unlock() {
-  if (current_task()->ptid == -1) {
+  mtask *self = current_task();
+  mtask *leader = task_group_leader(self);
+  bool interrupt_state = interrupt_disable();
+  if (leader->group_lock_owner != self->tid || leader->group_lock_depth == 0) {
+    set_interrupt_state(interrupt_state);
+    return;
+  }
+  leader->group_lock_depth--;
+  if (leader->group_lock_depth == 0) {
+    leader->group_lock_owner = TASK_ID_NONE;
     for (int i = 0; i < 255; i++) {
-      if (m[i].state == EMPTY || m[i].state == WILL_EMPTY ||
-          m[i].state == READY)
-        continue;
-      if (m[i].tid == get_tid(current_task()))
-        continue;
-      if (m[i].ptid == get_tid(current_task()) && m[i].state == 2) {
-        m[i].state = RUNNING; // RUNNING
-      }
-    }
-  } else {
-    for (int i = 0; i < 255; i++) {
-      if (m[i].state == EMPTY || m[i].state == WILL_EMPTY ||
-          m[i].state == READY)
-        continue;
-      if (m[i].tid == get_tid(current_task()))
-        continue;
-      if ((m[i].tid == current_task()->ptid ||
-           m[i].ptid == current_task()->ptid) &&
-          m[i].state == WAITING) {
-        m[i].state = RUNNING; // RUNNING
+      if (task_slot_in_use(&m[i]) && m[i].tgid == self->tgid &&
+          m[i].state == WAITING &&
+          m[i].wait_reason == WAIT_REASON_TASK_GROUP_LOCK) {
+        task_run(&m[i]);
       }
     }
   }
+  set_interrupt_state(interrupt_state);
 }
 uint32_t get_father_tid(mtask *t) {
-  if (t->ptid == -1) {
-    return get_tid(t);
+  if (!t) {
+    return TASK_ID_NONE;
   }
-  return get_father_tid(get_task(t->ptid));
+  if (t->ptid == TASK_ID_NONE || t->ptid == REAPER_TID) {
+    return t->tgid;
+  }
+  mtask *parent = get_task(t->ptid);
+  return parent ? get_father_tid(parent) : t->tgid;
 }
-void task_fall_blocked(enum STATE state) {
+void task_fall_blocked_reason(enum STATE state, enum WAIT_REASON reason) {
   if (current_task()->ready == 1) {
     current_task()->ready = 0;
+    current_task()->wait_reason = WAIT_REASON_NONE;
     return;
   }
   current_task()->state = state;
+  current_task()->wait_reason = reason;
   current_task()->ready = 0;
   io_sti();
   task_next();
 }
+void task_fall_blocked(enum STATE state) {
+  task_fall_blocked_reason(state, WAIT_REASON_GENERIC);
+}
 extern struct PAGE_INFO *pages;
 void task_exit(unsigned status) {
-  if (mouse_use_task == current_task()) {
-    mouse_sleep(&mdec);
+  mtask *task = current_task();
+  interrupt_disable();
+  if (task->kind == TASK_PROCESS) {
+    terminate_thread_group(task->tgid, task);
+    reparent_children(task->tgid, REAPER_TID);
   }
-  unsigned tid = current_task()->tid;
-  for (int i = 0; i < 255; i++) {
-    if (m[i].state == EMPTY || m[i].state == WILL_EMPTY || m[i].state == READY)
-      continue;
-    if (m[i].tid == tid)
-      continue;
-    if (m[i].ptid == tid) {
-      task_kill(m[i].tid);
-    }
-  }
-  io_cli();
-  set_cr3(PDE_ADDRESS);
-  free_pde(m[tid].pde);
-  gc(tid); // 释放内存
-  if (m[tid].Pkeyfifo) {
-    page_free(m[tid].Pkeyfifo->buf, 4096);
-    free(m[tid].Pkeyfifo);
-  }
-  if (m[tid].Ukeyfifo) {
-    page_free(m[tid].Ukeyfifo->buf, 4096);
-    free(m[tid].Ukeyfifo);
-  }
-  if (m[tid].nfs) {
-    vfs_free_task_instance(m[tid].nfs);
-    m[tid].nfs = NULL;
-  }
-  m[tid].urgent = 0;
-  m[tid].fpu_flag = 0;
-  m[tid].fifosleep = 0;
-  m[tid].mx = 0;
-  m[tid].my = 0;
-  m[tid].line = NULL;
-  m[tid].jiffies = 0;
-  m[tid].timer = NULL;
-  m[tid].mm = NULL;
-  m[tid].waittid = -1;
-  m[tid].state = DIED;
-  m[tid].alloc_addr = 0;
-  if (m[tid].alloced) {
-    free(m[tid].alloc_size);
-    m[tid].alloced = 0;
-  }
-  m[tid].alloc_size = 0;
-  m[tid].running = 0;
-  m[tid].ready = 0;
-  m[tid].pde = 0;
-  m[tid].ipc_header.now = 0;
-  m[tid].sigint_up = 0;
-  m[tid].train = 0;
-  m[tid].status = status;
-  m[tid].times = 0;
-  m[tid].signal_disable = 0;
-  m[tid].keyboard_press = NULL;
-  m[tid].keyboard_release = NULL;
-  lock_init(&(m[tid].ipc_header.l));
-  for (int k = 0; k < MAX_IPC_MESSAGE; k++) {
-    m[tid].ipc_header.messages[k].from_tid = -1;
-    m[tid].ipc_header.messages[k].flag1 = 0;
-    m[tid].ipc_header.messages[k].flag2 = 0;
-  }
-  for (int k = 0; k < 30; k++) {
-    m[tid].handler[k] = 0;
-  }
-  if (m[tid].ptid != -1 && m[m[tid].ptid].waittid == tid) {
-    task_run(&(m[m[tid].ptid]));
-  }
-
-  m[tid].ptid = -1;
+  bool waitable = task->kind == TASK_PROCESS && task->ptid != TASK_ID_NONE &&
+                  task->ptid != REAPER_TID;
+  finish_task(task, status, waitable);
   io_sti();
   for (;;)
     ;
 }
 int waittid(uint32_t tid) {
-  mtask *t = get_task(tid);
-  if (!t)
+  mtask *self = current_task();
+  uint32_t generation;
+
+  bool interrupt_state = interrupt_disable();
+  mtask *child = get_task(tid);
+  if (!child || child->kind != TASK_PROCESS || child->ptid != self->tgid) {
+    set_interrupt_state(interrupt_state);
     return -1;
-  if (t->ptid != current_task()->tid)
-    return -1;
-  current_task()->waittid = tid;
-  while (t->state != DIED && t->ptid == current_task()->tid) {
-    task_fall_blocked(WAITING);
   }
-  unsigned status = t->status;
-  logk("task exit with code %d\n", status);
-  t->state = EMPTY;
-  return status;
+  generation = child->generation;
+  set_interrupt_state(interrupt_state);
+
+  for (;;) {
+    interrupt_state = interrupt_disable();
+    child = get_task(tid);
+    if (!child || child->generation != generation ||
+        child->kind != TASK_PROCESS || child->ptid != self->tgid) {
+      self->waittid = TASK_ID_NONE;
+      self->wait_generation = 0;
+      self->wait_reason = WAIT_REASON_NONE;
+      set_interrupt_state(interrupt_state);
+      return -1;
+    }
+    if (child->state == DIED) {
+      unsigned status = child->status;
+      self->waittid = TASK_ID_NONE;
+      self->wait_generation = 0;
+      self->wait_reason = WAIT_REASON_NONE;
+      reset_task_slot(child, tid);
+      set_interrupt_state(interrupt_state);
+      logk("task exit with code %d\n", status);
+      return status;
+    }
+    self->waittid = tid;
+    self->wait_generation = generation;
+    self->wait_reason = WAIT_REASON_CHILD;
+    self->state = WAITING;
+    self->ready = 0;
+    io_sti();
+    task_next();
+  }
 }
 void mtask_stop() { mtask_stop_flag = 1; }
 void mtask_start() { mtask_stop_flag = 0; }
@@ -625,11 +769,17 @@ static bool clone_task_fifo(struct FIFO8 **dest, struct FIFO8 *src,
   return true;
 }
 static void reset_task_slot(mtask *task, int tid) {
+  uint32_t generation = task->generation;
   memset(task, 0, sizeof(mtask));
   task->tid = tid;
-  task->ptid = -1;
+  task->ptid = TASK_ID_NONE;
+  task->tgid = tid;
+  task->generation = generation;
+  task->kind = TASK_PROCESS;
   task->state = EMPTY;
-  task->waittid = -1;
+  task->waittid = TASK_ID_NONE;
+  task->wait_reason = WAIT_REASON_NONE;
+  task->group_lock_owner = TASK_ID_NONE;
   lock_init(&(task->ipc_header.l));
   for (int i = 0; i < MAX_IPC_MESSAGE; i++) {
     task->ipc_header.messages[i].from_tid = -1;
@@ -638,8 +788,7 @@ static void reset_task_slot(mtask *task, int tid) {
 mtask *mtask_get_free() {
   mtask *t = NULL;
   for (int i = 1; i < 255; i++) {
-    if (m[i].state == EMPTY || m[i].state == WILL_EMPTY ||
-        m[i].state == READY) {
+    if (m[i].state == EMPTY) {
       logk("f:%d\n", i);
       t = &(m[i]);
       logk("%d\n", t->tid);
@@ -673,15 +822,22 @@ static void build_fork_stack(mtask *task) {
 }
 int task_fork() {
   mtask *parent = current_task();
+  bool state = interrupt_disable();
   mtask *m = mtask_get_free();
   if (!m) {
+    set_interrupt_state(state);
     return -1;
   }
   logk("get free %08x\n", m);
   logk("current = %08x\n", get_tid(parent));
-  bool state = interrupt_disable();
   int tid = m->tid;
+  uint32_t generation = m->generation + 1;
   memcpy(m, parent, sizeof(mtask));
+  m->tid = tid;
+  m->generation = generation;
+  m->kind = TASK_PROCESS;
+  m->tgid = tid;
+  m->ptid = parent->tgid;
   uintptr_t stack = (uintptr_t)page_malloc(STACK_SIZE);
   if (stack == 0) {
     reset_task_slot(m, tid);
@@ -714,7 +870,11 @@ int task_fork() {
     m->ipc_header.messages[i].data = NULL;
   }
   lock_init(&(m->ipc_header.l));
-  m->waittid = -1;
+  m->waittid = TASK_ID_NONE;
+  m->wait_generation = 0;
+  m->wait_reason = WAIT_REASON_NONE;
+  m->group_lock_owner = TASK_ID_NONE;
+  m->group_lock_depth = 0;
   m->ready = 0;
   m->urgent = 0;
   m->line = NULL;
@@ -753,7 +913,9 @@ int task_fork() {
   m->jiffies = 0;
   m->timeout = 1;
   m->state = RUNNING;
-  m->ptid = get_tid(parent);
+  m->ptid = parent->tgid;
+  m->tgid = tid;
+  m->kind = TASK_PROCESS;
   m->tid = tid;
   logk("m->tid = %d\n", m->tid);
   tid = m->tid;

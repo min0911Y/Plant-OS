@@ -52,9 +52,59 @@ static void read_back(const char *path) {
   free(buf);
 }
 
+static int delayed_wait_reuse_test(void) {
+  int pid = fork();
+  if (pid < 0) {
+    printf("reuse fork failed\n");
+    return 10;
+  }
+  if (pid == 0) {
+    exit(23);
+  }
+  sleep(100);
+  int status = waittid(pid);
+  printf("dktest reuse_tid=%d status=%d\n", pid, status);
+  return status == 23 ? 0 : 11;
+}
+
+static int orphan_survival_test(const char *path) {
+  int parent = fork();
+  if (parent < 0) {
+    printf("orphan parent fork failed\n");
+    return 12;
+  }
+  if (parent == 0) {
+    int worker = fork();
+    if (worker < 0) {
+      exit(13);
+    }
+    if (worker == 0) {
+      sleep(50);
+      write_pattern_file(path, "orphan", 4, 128);
+      exit(24);
+    }
+    exit(37);
+  }
+
+  sleep(100);
+  int status = waittid(parent);
+  if (status != 37) {
+    printf("orphan parent status=%d\n", status);
+    return 14;
+  }
+  sleep(200);
+  if (filesize((char *)path) < 0) {
+    printf("orphan child was killed with its parent\n");
+    return 15;
+  }
+  read_back(path);
+  return 0;
+}
+
 int main(void) {
   const char *parent_path = "parent.log";
   const char *child_path = "child.log";
+  const char *orphan_path = "orphan.log";
   const int rounds = 64;
   const int chunk_size = 512;
 
@@ -63,6 +113,9 @@ int main(void) {
   }
   if (filesize((char *)child_path) != -1) {
     vfs_delfile((char *)child_path);
+  }
+  if (filesize((char *)orphan_path) != -1) {
+    vfs_delfile((char *)orphan_path);
   }
 
   int pid = fork();
@@ -78,9 +131,19 @@ int main(void) {
   }
 
   write_pattern_file(parent_path, "parent", rounds, chunk_size);
+  sleep(100);
   int status = waittid(pid);
   read_back(parent_path);
   read_back(child_path);
   printf("dktest child_status=%d\n", status);
+  if (status != 0) {
+    return 7;
+  }
+  status = delayed_wait_reuse_test();
+  if (status != 0) {
+    return status;
+  }
+  status = orphan_survival_test(orphan_path);
+  printf("dktest lifecycle_status=%d\n", status);
   return status;
 }

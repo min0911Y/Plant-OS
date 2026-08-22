@@ -327,6 +327,11 @@ int os_execute(char *filename, char *line) {
   init_ok_flag = 0;
 
   mtask *t = create_task((uintptr_t)task_app, 0, 1, 1);
+  if (t == NULL) {
+    init_ok_flag = 1;
+    free(fm);
+    return -1;
+  }
   // 轮询
   t->train = 0;
   vfs_change_disk_for_task(current_task()->nfs->drive, t);
@@ -338,7 +343,7 @@ int os_execute(char *filename, char *line) {
     t->nfs->cd(t->nfs, path);
   }
   init_ok_flag = 1;
-  t->ptid = current_task()->tid;
+  t->ptid = current_task()->tgid;
   int old = current_task()->sigint_up;
   current_task()->sigint_up = 0;
   t->sigint_up = 1;
@@ -374,13 +379,17 @@ int os_execute_shell(char *line) {
   extern int init_ok_flag;
   init_ok_flag = 0;
   mtask *t = create_task((uintptr_t)task_shell, 0, 1, 1);
+  if (t == NULL) {
+    init_ok_flag = 1;
+    return -1;
+  }
   vfs_clone_for_task(current_task(), t);
   t->train = 1;
   int old = current_task()->sigint_up;
   current_task()->sigint_up = 0;
   t->sigint_up = 1;
   init_ok_flag = 1;
-  t->ptid = current_task()->tid;
+  t->ptid = current_task()->tgid;
   struct tty *tty_backup = current_task()->TTY;
   t->TTY = current_task()->TTY;
   current_task()->TTY = NULL;
@@ -399,6 +408,10 @@ int os_execute_shell(char *line) {
 }
 void os_execute_no_ret(char *filename, char *line) {
   mtask *t = create_task((uintptr_t)task_app, 0, 1, 1);
+  if (t == NULL) {
+    return;
+  }
+  t->ptid = 0; /* detached tasks are adopted by the idle reaper */
   struct tty *tty_backup = current_task()->TTY;
   t->TTY = current_task()->TTY;
   current_task()->TTY = NULL;

@@ -32,7 +32,7 @@ static bool drive_wait_turn(unsigned int drive_code) {
     return true;
   }
   while (drive_buf[drive_code][drive_fifo[drive_code].q] != get_tid(current_task())) {
-    task_fall_blocked(WAITING);
+    task_fall_blocked_reason(WAITING, WAIT_REASON_DISK);
   }
   return true;
 }
@@ -160,6 +160,32 @@ void DriveSemaphoreGive(unsigned int drive_code) {
     mtask *next = get_task(drive_buf[drive_code][drive_fifo[drive_code].q]);
     if (next) {
       mtask_run_now(next);
+      task_run(next);
+    }
+  }
+}
+
+void vdisk_remove_task(unsigned tid) {
+  for (unsigned int drive_code = 0; drive_code < 16; drive_code++) {
+    struct FIFO8 *fifo = &drive_fifo[drive_code];
+    unsigned char keep[256];
+    int keep_count = 0;
+    int count = fifo8_status(fifo);
+    bool removed = false;
+
+    for (int i = 0; i < count; i++) {
+      int queued_tid = fifo8_get(fifo);
+      if ((unsigned)queued_tid == tid) {
+        removed = true;
+        continue;
+      }
+      keep[keep_count++] = (unsigned char)queued_tid;
+    }
+    for (int i = 0; i < keep_count; i++) {
+      fifo8_put(fifo, keep[i]);
+    }
+    if (removed && fifo8_status(fifo) > 0) {
+      mtask *next = get_task(drive_buf[drive_code][fifo->q]);
       task_run(next);
     }
   }

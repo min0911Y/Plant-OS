@@ -772,7 +772,7 @@ TaskLock:
 	mov ebx,0x0b
 	int 36h
 	pop ebx
-	pop ebx
+	pop eax
 	ret
 TaskUnlock:
 	push eax
@@ -781,7 +781,7 @@ TaskUnlock:
 	mov ebx,0x0c
 	int 36h
 	pop ebx
-	pop ebx
+	pop eax
 	ret
 SubThread:
 	push eax ; 4

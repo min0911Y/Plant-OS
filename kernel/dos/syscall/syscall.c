@@ -297,7 +297,12 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
         mouse_sleep(&mdec);
       }
     } else {
-      vfs_clone_for_task(task, get_task(task->ptid));
+      mtask *parent = task->ptid == 0 || task->ptid == (uint32_t)-1
+                          ? NULL
+                          : get_task(task->ptid);
+      if (parent && parent->kind == TASK_PROCESS && parent->state != DIED) {
+        vfs_clone_for_task(task, parent);
+      }
     }
     //  for(;;);
     asm volatile("nop");
@@ -368,7 +373,9 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
       t->alloc_size = task->alloc_size;
       t->TTY = current_task()->TTY;
       vfs_clone_for_task(task, t);
-      t->ptid = task->tid;
+      t->ptid = task->ptid;
+      t->tgid = task->tgid;
+      t->kind = TASK_THREAD;
       t->mx = 0;
       t->my = 0;
       unsigned *r = page_malloc_one_no_mark();
@@ -382,7 +389,10 @@ void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
     } else if (ebx == 0x0c) {
       task_unlock();
     } else if (ebx == 0x0d) {
-      task_kill(ecx);
+      mtask *target = get_task(ecx);
+      if (target && target->kind == TASK_THREAD && target->tgid == task->tgid) {
+        task_kill(ecx);
+      }
     }
   } else if (eax == 0x23) {
     if (ebx == 0x01) {

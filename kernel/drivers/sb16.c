@@ -68,6 +68,11 @@ struct sb16 {
   uint8_t flag;
 };
 struct sb16 sb;
+void sb16_remove_task(mtask *task) {
+  if (sb.use_task == task) {
+    sb.use_task = NULL;
+  }
+}
 void sb16_handler(int* esp) {
   send_eoi(5);
 

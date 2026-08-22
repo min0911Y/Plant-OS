@@ -65,6 +65,7 @@ void os_execute_no_ret(char *filename, char *line);
 uint32_t get_father_tid(mtask *t);
 int waittid(uint32_t tid);
 void task_fall_blocked(enum STATE state);
+void task_fall_blocked_reason(enum STATE state, enum WAIT_REASON reason);
 void task_run(mtask *task);
 void mtask_run_now(mtask *obj);
 int task_fork();
@@ -232,6 +233,8 @@ bool SetDrive(unsigned char *name);
 unsigned int GetDriveCode(unsigned char *name);
 bool DriveSemaphoreTake(unsigned int drive_code);
 void DriveSemaphoreGive(unsigned int drive_code);
+void vdisk_remove_task(unsigned tid);
+void sb16_remove_task(mtask *task);
 unsigned int disk_Size(char drive);
 void Disk_Read(unsigned int lba, unsigned int number, void *buffer, char drive);
 void Disk_Write(unsigned int lba, unsigned int number, void *buffer,

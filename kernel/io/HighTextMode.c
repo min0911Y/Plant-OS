@@ -242,7 +242,7 @@ void cur_service() {
         j = 1;
       }
       unlock(&l);
-      task_fall_blocked(WAITING);
+      task_fall_blocked_reason(WAITING, WAIT_REASON_TIMER);
     }
     if(j) {
       fifo8_get(&fifo);

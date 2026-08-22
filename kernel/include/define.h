@@ -200,7 +200,26 @@ typedef struct {
   uint32_t eax, ebx, ecx, edx, esi, edi, ebp;
   uint32_t eip;
 } stack_frame;
-enum STATE { EMPTY, RUNNING, WAITING, SLEEPING, WILL_EMPTY, READY, DIED };
+enum STATE {
+  EMPTY,
+  RUNNING,
+  WAITING,
+  SLEEPING,
+  WILL_EMPTY,
+  READY,
+  ALLOCATING,
+  DIED
+};
+enum TASK_KIND { TASK_PROCESS, TASK_THREAD };
+enum WAIT_REASON {
+  WAIT_REASON_NONE,
+  WAIT_REASON_GENERIC,
+  WAIT_REASON_CHILD,
+  WAIT_REASON_LOCK,
+  WAIT_REASON_DISK,
+  WAIT_REASON_TIMER,
+  WAIT_REASON_TASK_GROUP_LOCK
+};
 typedef struct mtask {
   stack_frame *esp;
   unsigned pde;
@@ -213,7 +232,11 @@ typedef struct mtask {
                     // （SLEEPING）的时候不执行 ，0 EMPTY 空闲格子
   uint64_t jiffies;
   struct vfs_t *nfs;
-  uint64_t tid, ptid;
+  uint32_t tid;
+  uint32_t ptid; /* parent process id; it does not own this task's lifetime */
+  uint32_t tgid; /* process/thread-group leader tid */
+  uint32_t generation;
+  enum TASK_KIND kind;
   memory *mm;
   uint32_t alloc_addr;
   uint32_t *alloc_size;
@@ -237,6 +260,10 @@ typedef struct mtask {
   struct TIMER *timer;
   IPC_Header ipc_header;
   uint32_t waittid;
+  uint32_t wait_generation;
+  enum WAIT_REASON wait_reason;
+  uint32_t group_lock_owner;
+  uint32_t group_lock_depth;
   int ready; // 如果为waiting 则无视wating
   int sigint_up;
   uint8_t train; // 轮询
