@@ -1,0 +1,41 @@
+# Shared compiler flags for kernel C/C++ builds.
+KERNEL_UBSAN_FLAGS =
+KERNEL_KASAN_FLAGS =
+KERNEL_FRAME_POINTER_FLAGS = -fomit-frame-pointer
+ifeq ($(KASAN),1)
+KERNEL_KASAN_FLAGS = -DKERNEL_KASAN -fsanitize=kernel-address
+endif
+
+ifeq ($(PERF),1)
+CDEFS += -DKERNEL_PERF
+KERNEL_FRAME_POINTER_FLAGS = -fno-omit-frame-pointer
+endif
+
+ifeq ($(BENCH),0)
+CDEFS += -DKERNEL_DISABLE_BOOT_BENCH
+endif
+
+ifeq ($(MEMTEST),0)
+ifeq ($(MEMSIZE_MB),)
+$(error MEMTEST=0 requires MEMSIZE_MB=<megabytes>)
+endif
+CDEFS += -DKERNEL_DISABLE_MEMTEST -DKERNEL_MEMSIZE_MB=$(MEMSIZE_MB)
+endif
+
+KERNEL_COMMON_CFLAGS = \
+	-m32 -I$(incpath_src) -nostdinc -nolibc -nostdlib -fno-builtin \
+	-ffreestanding -fno-stack-protector -Qn -fno-pic -fno-pie \
+	-fno-asynchronous-unwind-tables $(KERNEL_FRAME_POINTER_FLAGS) \
+	-finput-charset=UTF-8 -fexec-charset=GB2312 \
+	-mno-mmx -mno-sse -mfpmath=387 \
+	$(KERNEL_UBSAN_FLAGS) $(KERNEL_KASAN_FLAGS) $(CDEFS)
+
+KERNEL_NOKASAN_CFLAGS = \
+	$(filter-out -fsanitize=kernel-address,$(KERNEL_COMMON_CFLAGS)) \
+	-fno-sanitize=kernel-address
+
+KERNEL_COMMON_CXXFLAGS = \
+	$(KERNEL_COMMON_CFLAGS) \
+	-fno-use-cxa-atexit -fno-exceptions -fno-rtti
+
+KERNEL_PACKED_BITFIELD_FLAGS = -Wno-packed-bitfield-compat

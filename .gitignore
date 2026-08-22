@@ -1,0 +1,33 @@
+# /apps
+apps/nasm-master/config.log
+apps/nasm-master/config.status
+apps/nasm-master/configure.lineno
+apps/*/*.o
+apps/*/*.obj
+apps/*/*/*.o
+apps/out
+apps/libs
+apps/doomgeneric/*.o
+apps/sdl2/*.o
+apps/sdl2_old/*.o
+
+# /
+.vscode
+c.py
+cloc.exe
+
+Loader/out
+
+fattools/fattools
+
+# /kernel
+kernel/*.img
+kernel/*.log
+kernel/disk.vhd
+kernel/obj
+kernel/img
+
+# /kernel64
+kernel64/bin
+kernel64/obj
+kernel64/build

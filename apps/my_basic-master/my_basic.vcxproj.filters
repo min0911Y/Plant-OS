@@ -1,0 +1,52 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="core">
+      <UniqueIdentifier>{300908e3-b31f-4025-842a-773d593de4e1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="doc">
+      <UniqueIdentifier>{a28a632a-dde9-4f27-ab1f-6eb5a66dd70e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="res">
+      <UniqueIdentifier>{d3d65b1c-646a-4f71-a673-efe6878b3705}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="core\my_basic.c">
+      <Filter>core</Filter>
+    </ClCompile>
+    <ClCompile Include="shell\main.c" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="core\my_basic.h">
+      <Filter>core</Filter>
+    </ClInclude>
+    <ClInclude Include="resource\resource.h">
+      <Filter>res</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="HISTORY">
+      <Filter>doc</Filter>
+    </None>
+    <None Include="LICENSE">
+      <Filter>doc</Filter>
+    </None>
+    <None Include="MY-BASIC Quick Reference.pdf">
+      <Filter>doc</Filter>
+    </None>
+    <None Include="README.md">
+      <Filter>doc</Filter>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="resource\icon.ico">
+      <Filter>res</Filter>
+    </Image>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="resource\my_basic.rc">
+      <Filter>res</Filter>
+    </ResourceCompile>
+  </ItemGroup>
+</Project>

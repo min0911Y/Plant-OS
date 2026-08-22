@@ -1,0 +1,58 @@
+program: { statement }
+
+statement: def_var | def_func | def_class
+            | (expression ";")
+            | statement_if | statement_while | statement_for
+            | "break;" | "continue;" | ";"
+            | sfn | statement_return
+
+sfn:    "sfn" IDEN "," IDEN ";"
+
+block: "{" {statement} "}"
+        | ":" statement
+
+def_var: "def" IDEN "=|+=|-=|/=|%=|&=|^=|\|=|<<=|>>=" expression { "," IDEN "=" expression } ";"
+def_func: "func" IDEN [ "("   IDEN { "," IDEN }   ")" ] block
+def_class: IDEN "class" IDEN "{" def_var | def_func | def_class "}"
+
+statement_if: "if" expression block [ statement_else ]
+statement_else: "else" block
+statement_while: "while" expression block
+statement_for: "for" IDEN "in" expression block
+statement_return: "return" expression ";"
+
+expression: ( left_value "=" expression )
+            | binary_operator
+left_value: IDEN { left_postfix }
+left_postfix: ( "." IDEN ) | ( "[" expression "]" )
+
+binary_operator: ( binary_operator "op..."  other_binary_operators )
+                | other_binary_operators
+
+...此处省略双目运算符的EBNF，双目运算符最后会匹配到unary_operator...
+
+unary_operator: ( "+|-|~|!" unary_operator )
+                | ( quark { postfix } )
+
+postfix: arguments
+        | ( "[" expression "]" )
+        | ( "." IDEN )
+        | ( ".new" [arguments] )
+
+arguments: "(" [ expression { "," expression } ] ")"
+
+quark: "(" expression ")"
+        | IDEN
+        | NUM
+        | STRING
+        | NULL
+        | TRUE | FALSE
+        | array_iteral
+        | list_literal
+        | anon_func
+        | anon_class
+
+array_literal: "[" expression "]"
+list_literal: "{" [ expression { "," expression } ] "}"
+anon_func: "func" [ "(" IDEN { "," IDEN } ")" ] block
+anon_class: "class" [ "extends" IDEN ] "{" { def_var | def_func | def_class } "}"
