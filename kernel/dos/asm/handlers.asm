@@ -1,65 +1,57 @@
 [BITS 32]
 section .data
-GLOBAL	asm_inthandler21, asm_inthandler20,asm_inthandler72
-EXTERN	inthandler21,inthandler20,inthandler36,inthandler2c,signal_deal
-GLOBAL	asm_inthandler36,asm_inthandler2c,floppy_int,interrput_exit
+GLOBAL asm_inthandler21, asm_inthandler20
+EXTERN inthandler21, inthandler20, inthandler2c, signal_deal
+EXTERN x86_syscall_dispatch, x86_custom_syscall_dispatch
+GLOBAL x86_syscall_entry, x86_custom_syscall_entry
+GLOBAL asm_inthandler2c, floppy_int, interrput_exit
 section .text
 global null_inthandler
 %define PDE_ADDRESS 0x400000
 null_inthandler:
 	IRETD
 
-asm_inthandler36:
-	push ds
+x86_syscall_entry:
+  push ds
   push es
   push fs
   push gs
   pusha
-	PUSH	DS
-	PUSH	ES
-	PUSHAD			; 用于保存的PUSH
-	PUSHAD
-	MOV		AX,SS
-	MOV		DS,AX ; 将操作系统用段地址存入DS和ES
-	MOV		ES,AX
-	CALL	inthandler36
-	ADD		ESP,32
-	call signal_deal
-	POPAD
-	POP		ES
-	POP		DS
-  add esp,32
+  mov eax, esp
+  push eax
+  mov ax, ss
+  mov ds, ax
+  mov es, ax
+  call x86_syscall_dispatch
+  add esp, 4
+  call signal_deal
+  popa
   pop gs
   pop fs
   pop es
   pop ds
-	IRETD
-extern custom_inthandler
-asm_inthandler72:
-	push ds
+  iretd
+
+x86_custom_syscall_entry:
+  push ds
   push es
   push fs
   push gs
   pusha
-	PUSH	DS
-	PUSH	ES
-	PUSHAD			; 用于保存的PUSH
-	PUSHAD
-	MOV		AX,SS
-	MOV		DS,AX ; 将操作系统用段地址存入DS和ES
-	MOV		ES,AX
-	CALL	custom_inthandler
-	ADD		ESP,32
-	call signal_deal
-	POPAD
-	POP		ES
-	POP		DS
-  add esp,32
+  mov eax, esp
+  push eax
+  mov ax, ss
+  mov ds, ax
+  mov es, ax
+  call x86_custom_syscall_dispatch
+  add esp, 4
+  call signal_deal
+  popa
   pop gs
   pop fs
   pop es
   pop ds
-	IRETD
+  iretd
 extern flint
 floppy_int:
 	push ds

@@ -1,4 +1,5 @@
 // 多任务重构 -- mtask.c (区别与以前的多任务)
+#include <arch/x86/interrupt.h>
 #include <dos.h>
 #define STACK_SIZE 1024 * 1024
 #define REAPER_TID 0u
@@ -249,8 +250,8 @@ void task_to_user_mode(unsigned eip, unsigned esp) {
 
   unsigned addr = (unsigned)current->top;
 
-  addr -= sizeof(intr_frame_t);
-  intr_frame_t *iframe = (intr_frame_t *)(addr);
+  addr -= sizeof(x86_interrupt_frame_t);
+  x86_interrupt_frame_t *iframe = (x86_interrupt_frame_t *)(addr);
 
   iframe->edi = 1;
   iframe->esi = 2;
@@ -761,8 +762,8 @@ void roc() {
 }
 static void build_fork_stack(mtask *task) {
   uintptr_t addr = task->top;
-  addr -= sizeof(intr_frame_t);
-  intr_frame_t *iframe = (intr_frame_t *)addr;
+  addr -= sizeof(x86_interrupt_frame_t);
+  x86_interrupt_frame_t *iframe = (x86_interrupt_frame_t *)addr;
   iframe->eax = 0;
   logk("iframe = %08x\n", iframe->eip);
   addr -= sizeof(stack_frame);

@@ -319,29 +319,6 @@ typedef struct mtask {
   unsigned times;
   unsigned signal_disable;
 } mtask;
-typedef struct intr_frame_t {
-  unsigned edi;
-  unsigned esi;
-  unsigned ebp;
-  // 虽然 pushad 把 esp 也压入，但 esp 是不断变化的，所以会被 popad 忽略
-  unsigned esp_dummy;
-
-  unsigned ebx;
-  unsigned edx;
-  unsigned ecx;
-  unsigned eax;
-
-  unsigned gs;
-  unsigned fs;
-  unsigned es;
-  unsigned ds;
-
-  unsigned eip;
-  unsigned cs;
-  unsigned eflags;
-  unsigned esp;
-  unsigned ss;
-} intr_frame_t;
 #define vfs_now current_task()->nfs
 #define PG_P 1
 #define PG_USU 4

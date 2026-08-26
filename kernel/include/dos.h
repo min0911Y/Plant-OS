@@ -113,8 +113,6 @@ int get_eip();
 void farjmp(int eip, int cs);
 void farcall(int eip, int cs);
 void ASM_call(int i);
-void asm_inthandler36();
-void asm_inthandler72();
 void asm_gui_api();
 void asm_net_api();
 void asm_inthandler2c();
@@ -211,9 +209,6 @@ void SetCatchEip(uint32_t eip);
 void SwitchPublic();
 void SwitchPrivate();
 void *krealloc(void *ptr, uint32_t size);
-// syscall.c
-void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
-                  int eax);
 // fifo.c
 void fifo8_init(struct FIFO8 *fifo, int size, unsigned char *buf);
 int fifo8_put(struct FIFO8 *fifo, unsigned char data);

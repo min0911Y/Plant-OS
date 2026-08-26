@@ -1,6 +1,7 @@
 // GDTIDT的初始化
 //  Copyright (C) 2021-2022 zhouzhihao & min0911_
 //  ------------------------------------------------
+#include <arch/x86/interrupt.h>
 #include <dos.h>
 void ide_irq();
 void set_segmdesc(struct SEGMENT_DESCRIPTOR *sd, unsigned int limit, int base,
@@ -85,9 +86,9 @@ void init_gdtidt(void) {
                AR_INTGATE32); // 计时器中断
   set_gatedesc(idt + 0x21, (int)asm_inthandler21, 2 * 8,
                AR_INTGATE32); // 键盘中断
-  set_gatedesc(idt + 0x36, (int)asm_inthandler36, 2 * 8,
+  set_gatedesc(idt + 0x36, (int)x86_syscall_entry, 2 * 8,
                AR_INTGATE32 | 3 << 5); // 系统API
-  set_gatedesc(idt + 0x72, (int)asm_inthandler72, 2 * 8,
+  set_gatedesc(idt + 0x72, (int)x86_custom_syscall_entry, 2 * 8,
                AR_INTGATE32 | 3 << 5); // 系统API
   set_gatedesc(idt + 0x2c, (int)asm_inthandler2c, 2 * 8,
                AR_INTGATE32); // 鼠标中断

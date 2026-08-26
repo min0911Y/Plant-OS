@@ -1,826 +1,1201 @@
+#include <arch/x86/interrupt.h>
 #include <dos.h>
-#define IDX(addr) ((unsigned)addr >> 12)            // 获取 addr 的页索引
-#define DIDX(addr) (((unsigned)addr >> 22) & 0x3ff) // 获取 addr 的页目录索引
-#define TIDX(addr) (((unsigned)addr >> 12) & 0x3ff) // 获取 addr 的页表索引
-#define PAGE(idx) ((unsigned)idx << 12) // 获取页索引 idx 对应的页开始的位置
+
+#define USER_SPACE_START 0x70000000u
 #define USER_HEAP_END 0xf0000000u
+
 unsigned div_round_up(unsigned num, unsigned size);
 extern struct PAGE_INFO *pages;
-unsigned custom_handler = 0;
-unsigned custom_handler_pde = 0;
-void page_set_physics_attr_pde(uint32_t vaddr, void *paddr, uint32_t attr,
-                               unsigned pde_backup);
+
+unsigned custom_handler;
+unsigned custom_handler_pde;
 mtask *custom_handler_owner;
 
-void kbd_press(uint8_t dat, uint32_t task) {
-  fifo8_put(get_task(task)->Pkeyfifo, dat);
+void page_set_physics_attr_pde(uint32_t vaddr, void *paddr, uint32_t attr,
+                               unsigned pde_backup);
+
+static void keyboard_press(uint8_t data, uint32_t tid) {
+  fifo8_put(get_task(tid)->Pkeyfifo, data);
 }
-void kbd_up(uint8_t dat, uint32_t task) {
-  fifo8_put(get_task(task)->Ukeyfifo, dat);
+
+static void keyboard_release(uint8_t data, uint32_t tid) {
+  fifo8_put(get_task(tid)->Ukeyfifo, data);
 }
-void user_thread_into() {
-  while (!current_task()->line)
-    ; // 等待配置
-  unsigned *r = (unsigned *)current_task()->line;
-  unsigned eip;
-  unsigned esp;
-  eip = r[1];
-  esp = r[0];
-  page_free_one(r);
-  char *kfifo = (char *)page_malloc_one();
-  char *mfifo = (char *)page_malloc_one();
-  char *kbuf = (char *)page_malloc_one();
-  char *mbuf = (char *)page_malloc_one();
-  fifo8_init((struct FIFO8 *)kfifo, 4096, (unsigned char *)kbuf);
-  fifo8_init((struct FIFO8 *)mfifo, 4096, (unsigned char *)mbuf);
-  task_set_fifo(current_task(), (struct FIFO8 *)kfifo, (struct FIFO8 *)mfifo);
-  char tmp[100];
+
+static void user_thread_entry(void) {
+  while (!current_task()->line) {
+  }
+
+  unsigned *request = (unsigned *)current_task()->line;
+  unsigned esp = request[0];
+  unsigned eip = request[1];
+  page_free_one(request);
+
+  struct FIFO8 *key_fifo = page_malloc_one();
+  struct FIFO8 *mouse_fifo = page_malloc_one();
+  unsigned char *key_buffer = page_malloc_one();
+  unsigned char *mouse_buffer = page_malloc_one();
+  fifo8_init(key_fifo, 4096, key_buffer);
+  fifo8_init(mouse_fifo, 4096, mouse_buffer);
+  task_set_fifo(current_task(), key_fifo, mouse_fifo);
   task_to_user_mode(eip, esp);
+
   for (;;) {
   }
 }
 
-void test(unsigned int b) { return; }
-
-/* ---------------- IPC / RPC 系统调用 (int 36h, eax = 0x5d) ---------------- */
-#define IPC_SYS_SEND 0x01
-#define IPC_SYS_RECV 0x02
-#define IPC_SYS_PEEK 0x03
-#define IPC_SYS_PENDING 0x04
-#define IPC_SYS_REGISTER 0x05
-#define IPC_SYS_UNREGISTER 0x06
-#define IPC_SYS_LOOKUP 0x07
-#define IPC_SYS_GENERATION 0x08
-#define USER_SPACE_START 0x70000000u
-
-// 用户传进来的指针必须落在用户地址空间里，否则应用可以骗内核去读写内核内存
 static int user_range_ok(uint32_t addr, uint32_t size) {
-  if (addr < USER_SPACE_START) {
+  if (addr < USER_SPACE_START || addr > USER_HEAP_END) {
     return 0;
   }
-  if (size > USER_HEAP_END - addr) {
-    return 0;
-  }
-  return 1;
+  return size <= USER_HEAP_END - addr;
 }
 
-static int ipc_syscall(uint32_t sub, uint32_t arg1, uint32_t arg2) {
-  switch (sub) {
-  case IPC_SYS_SEND: {
-    if (!user_range_ok(arg1, sizeof(ipc_user_msg_t))) {
-      return IPC_ERR_INVAL;
-    }
-    ipc_user_msg_t *m = (ipc_user_msg_t *)(uintptr_t)arg1;
-    if (m->size &&
-        !user_range_ok((uint32_t)(uintptr_t)m->data, m->size)) {
-      return IPC_ERR_INVAL;
-    }
-    return ipc_send(m->peer_tid, m->peer_generation, m->type, m->id, m->data,
-                    m->size, m->flags, m->timeout_ms);
-  }
-  case IPC_SYS_RECV: {
-    if (!user_range_ok(arg1, sizeof(ipc_user_msg_t))) {
-      return IPC_ERR_INVAL;
-    }
-    ipc_user_msg_t *m = (ipc_user_msg_t *)(uintptr_t)arg1;
-    if (m->size &&
-        !user_range_ok((uint32_t)(uintptr_t)m->data, m->size)) {
-      return IPC_ERR_INVAL;
-    }
-    ipc_msg_info_t info;
-    int result = ipc_recv(m->data, m->size, &info, m->from_filter, m->flags,
-                          m->timeout_ms);
-    if (result >= 0 || result == IPC_ERR_TOOBIG) {
-      m->peer_tid = info.from_tid;
-      m->peer_generation = info.from_generation;
-      m->type = info.type;
-      m->id = info.id;
-      m->size = info.size;
-    }
-    return result;
-  }
-  case IPC_SYS_PEEK: {
-    if (!user_range_ok(arg1, sizeof(ipc_user_msg_t))) {
-      return IPC_ERR_INVAL;
-    }
-    ipc_user_msg_t *m = (ipc_user_msg_t *)(uintptr_t)arg1;
-    ipc_msg_info_t info;
-    int result = ipc_peek(&info, m->from_filter);
-    if (result == IPC_OK) {
-      m->peer_tid = info.from_tid;
-      m->peer_generation = info.from_generation;
-      m->type = info.type;
-      m->id = info.id;
-      m->size = info.size;
-    }
-    return result;
-  }
-  case IPC_SYS_PENDING:
-    return ipc_pending();
-  case IPC_SYS_REGISTER:
-    if (!user_range_ok(arg1, 1)) {
-      return IPC_ERR_INVAL;
-    }
-    return ipc_service_register((const char *)(uintptr_t)arg1);
-  case IPC_SYS_UNREGISTER:
-    if (!user_range_ok(arg1, 1)) {
-      return IPC_ERR_INVAL;
-    }
-    return ipc_service_unregister((const char *)(uintptr_t)arg1);
-  case IPC_SYS_LOOKUP: {
-    if (!user_range_ok(arg1, 1)) {
-      return IPC_ERR_INVAL;
-    }
-    uint32_t generation = 0;
-    int tid = ipc_service_lookup((const char *)(uintptr_t)arg1, &generation);
-    if (arg2 && user_range_ok(arg2, sizeof(uint32_t))) {
-      *(uint32_t *)(uintptr_t)arg2 = generation;
-    }
-    return tid;
-  }
-  case IPC_SYS_GENERATION:
-    return (int)current_task()->generation;
-  default:
+enum ipc_syscall_id {
+  IPC_SYSCALL_SEND = 0x01,
+  IPC_SYSCALL_RECEIVE = 0x02,
+  IPC_SYSCALL_PEEK = 0x03,
+  IPC_SYSCALL_PENDING = 0x04,
+  IPC_SYSCALL_REGISTER = 0x05,
+  IPC_SYSCALL_UNREGISTER = 0x06,
+  IPC_SYSCALL_LOOKUP = 0x07,
+  IPC_SYSCALL_GENERATION = 0x08,
+  IPC_SYSCALL_COUNT,
+};
+
+typedef int (*ipc_syscall_handler_t)(uint32_t arg1, uint32_t arg2);
+
+static int ipc_syscall_send(uint32_t arg1, uint32_t arg2) {
+  (void)arg2;
+  if (!user_range_ok(arg1, sizeof(ipc_user_msg_t))) {
     return IPC_ERR_INVAL;
   }
+
+  ipc_user_msg_t *message = (ipc_user_msg_t *)(uintptr_t)arg1;
+  if (message->size &&
+      !user_range_ok((uint32_t)(uintptr_t)message->data, message->size)) {
+    return IPC_ERR_INVAL;
+  }
+  return ipc_send(message->peer_tid, message->peer_generation, message->type,
+                  message->id, message->data, message->size, message->flags,
+                  message->timeout_ms);
 }
 
-void *mem_alloc_nb(memory *mem, uint32_t size, uint32_t n) {
-  size = (size + 0xfff) & 0xfffff000;
-  return mem_alloc(mem, size);
+static int ipc_syscall_receive(uint32_t arg1, uint32_t arg2) {
+  (void)arg2;
+  if (!user_range_ok(arg1, sizeof(ipc_user_msg_t))) {
+    return IPC_ERR_INVAL;
+  }
+
+  ipc_user_msg_t *message = (ipc_user_msg_t *)(uintptr_t)arg1;
+  if (message->size &&
+      !user_range_ok((uint32_t)(uintptr_t)message->data, message->size)) {
+    return IPC_ERR_INVAL;
+  }
+
+  ipc_msg_info_t info;
+  int result = ipc_recv(message->data, message->size, &info,
+                        message->from_filter, message->flags,
+                        message->timeout_ms);
+  if (result >= 0 || result == IPC_ERR_TOOBIG) {
+    message->peer_tid = info.from_tid;
+    message->peer_generation = info.from_generation;
+    message->type = info.type;
+    message->id = info.id;
+    message->size = info.size;
+  }
+  return result;
 }
 
-void *malloc_app_heap(void *alloc_addr, uint32_t ds_base, uint32_t size) {
-  void *p = mem_alloc_nb(alloc_addr, size + sizeof(int), 0x1000);
-  *(int *)p = size;
-  return (char *)p + sizeof(int);
+static int ipc_syscall_peek(uint32_t arg1, uint32_t arg2) {
+  (void)arg2;
+  if (!user_range_ok(arg1, sizeof(ipc_user_msg_t))) {
+    return IPC_ERR_INVAL;
+  }
+
+  ipc_user_msg_t *message = (ipc_user_msg_t *)(uintptr_t)arg1;
+  ipc_msg_info_t info;
+  int result = ipc_peek(&info, message->from_filter);
+  if (result == IPC_OK) {
+    message->peer_tid = info.from_tid;
+    message->peer_generation = info.from_generation;
+    message->type = info.type;
+    message->id = info.id;
+    message->size = info.size;
+  }
+  return result;
 }
-void free_app_heap(void *alloc_addr, uint32_t ds_base, void *p) {}
-enum { EDI, ESI, EBP, ESP, EBX, EDX, ECX, EAX, M_PDE, C_PDE };
-void inthandler36(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
-                  int eax) {
-  // PowerintDOS API
-  io_sti();
+
+static int ipc_syscall_pending(uint32_t arg1, uint32_t arg2) {
+  (void)arg1;
+  (void)arg2;
+  return ipc_pending();
+}
+
+static int ipc_syscall_register(uint32_t arg1, uint32_t arg2) {
+  (void)arg2;
+  if (!user_range_ok(arg1, IPC_NAME_MAX)) {
+    return IPC_ERR_INVAL;
+  }
+  return ipc_service_register((const char *)(uintptr_t)arg1);
+}
+
+static int ipc_syscall_unregister(uint32_t arg1, uint32_t arg2) {
+  (void)arg2;
+  if (!user_range_ok(arg1, IPC_NAME_MAX)) {
+    return IPC_ERR_INVAL;
+  }
+  return ipc_service_unregister((const char *)(uintptr_t)arg1);
+}
+
+static int ipc_syscall_lookup(uint32_t arg1, uint32_t arg2) {
+  if (!user_range_ok(arg1, IPC_NAME_MAX) ||
+      (arg2 && !user_range_ok(arg2, sizeof(uint32_t)))) {
+    return IPC_ERR_INVAL;
+  }
+
+  uint32_t generation;
+  int tid = ipc_service_lookup((const char *)(uintptr_t)arg1, &generation);
+  if (tid >= 0 && arg2) {
+    *(uint32_t *)(uintptr_t)arg2 = generation;
+  }
+  return tid;
+}
+
+static int ipc_syscall_generation(uint32_t arg1, uint32_t arg2) {
+  (void)arg1;
+  (void)arg2;
+  return (int)current_task()->generation;
+}
+
+static const ipc_syscall_handler_t ipc_syscall_handlers[IPC_SYSCALL_COUNT] = {
+    [IPC_SYSCALL_SEND] = ipc_syscall_send,
+    [IPC_SYSCALL_RECEIVE] = ipc_syscall_receive,
+    [IPC_SYSCALL_PEEK] = ipc_syscall_peek,
+    [IPC_SYSCALL_PENDING] = ipc_syscall_pending,
+    [IPC_SYSCALL_REGISTER] = ipc_syscall_register,
+    [IPC_SYSCALL_UNREGISTER] = ipc_syscall_unregister,
+    [IPC_SYSCALL_LOOKUP] = ipc_syscall_lookup,
+    [IPC_SYSCALL_GENERATION] = ipc_syscall_generation,
+};
+
+static int ipc_syscall_dispatch(uint32_t id, uint32_t arg1, uint32_t arg2) {
+  if (id >= IPC_SYSCALL_COUNT || ipc_syscall_handlers[id] == NULL) {
+    return IPC_ERR_INVAL;
+  }
+  return ipc_syscall_handlers[id](arg1, arg2);
+}
+
+enum syscall_id {
+  SYSCALL_VERSION = 0x01,
+  SYSCALL_PRINT_CHARACTER = 0x02,
+  SYSCALL_LEGACY_GRAPHICS = 0x03,
+  SYSCALL_SET_CURSOR = 0x04,
+  SYSCALL_PRINT_STRING = 0x05,
+  SYSCALL_SLEEP = 0x06,
+  SYSCALL_HEAP_ADDRESS = 0x08,
+  SYSCALL_HEAP_SIZE = 0x09,
+  SYSCALL_TEXT_BOX = 0x0c,
+  SYSCALL_BEEP = 0x0d,
+  SYSCALL_CURSOR_POSITION = 0x0e,
+  SYSCALL_MOUSE_EVENT = 0x0f,
+  SYSCALL_MOUSE_SUPPORTED = 0x10,
+  SYSCALL_INPUT = 0x16,
+  SYSCALL_RUN_COMMAND = 0x19,
+  SYSCALL_FILE_OPERATION = 0x1a,
+  SYSCALL_COMMAND_LINE = 0x1b,
+  SYSCALL_COPY = 0x1c,
+  SYSCALL_KEYBOARD_HIT = 0x1d,
+  SYSCALL_EXIT = 0x1e,
+  SYSCALL_VBE_CONTROL = 0x20,
+  SYSCALL_BIOS_VIDEO = 0x21,
+  SYSCALL_TASK_CONTROL = 0x22,
+  SYSCALL_TTY_COLOR = 0x23,
+  SYSCALL_TIMER_CONTROL = 0x24,
+  SYSCALL_FORMAT = 0x25,
+  SYSCALL_RTC = 0x26,
+  SYSCALL_DRAW_PIXEL = 0x27,
+  SYSCALL_READ_PIXEL = 0x28,
+  SYSCALL_COPY_FRAMEBUFFER = 0x29,
+  SYSCALL_DRAW_BUFFER = 0x2a,
+  SYSCALL_SCROLL_FRAMEBUFFER = 0x2b,
+  SYSCALL_DRAW_BOX = 0x2c,
+  SYSCALL_TIMESTAMP = 0x2d,
+  SYSCALL_UPTIME = 0x2e,
+  SYSCALL_RESET_FPU = 0x2f,
+  SYSCALL_KEYBOARD_SETUP = 0x30,
+  SYSCALL_KEY_PRESS_PENDING = 0x31,
+  SYSCALL_KEY_RELEASE_PENDING = 0x32,
+  SYSCALL_KEY_PRESS_READ = 0x33,
+  SYSCALL_KEY_RELEASE_READ = 0x34,
+  SYSCALL_GROW_HEAP = 0x35,
+  SYSCALL_READ_ENV = 0x36,
+  SYSCALL_PATH_WITHOUT_DRIVE = 0x37,
+  SYSCALL_CURRENT_DRIVE = 0x38,
+  SYSCALL_EXECUTE = 0x39,
+  SYSCALL_CLEAR = 0x3a,
+  SYSCALL_MOUNT_CHECK = 0x3b,
+  SYSCALL_MOUNT = 0x3c,
+  SYSCALL_CHANGE_DISK = 0x3d,
+  SYSCALL_MEMORY_SIZE = 0x3e,
+  SYSCALL_USED_PAGES = 0x3f,
+  SYSCALL_DELETE_FILE = 0x40,
+  SYSCALL_CHANGE_PATH = 0x41,
+  SYSCALL_CURSOR_START = 0x42,
+  SYSCALL_CURSOR_STOP = 0x43,
+  SYSCALL_UNMOUNT = 0x44,
+  SYSCALL_TTY_WIDTH = 0x45,
+  SYSCALL_TTY_HEIGHT = 0x46,
+  SYSCALL_RENAME = 0x47,
+  SYSCALL_LOG = 0x48,
+  SYSCALL_SIGNAL_HANDLER = 0x49,
+  SYSCALL_FORK = 0x4a,
+  SYSCALL_WAIT = 0x4b,
+  SYSCALL_SET_RT = 0x4c,
+  SYSCALL_MOUSE_ENABLE = 0x4d,
+  SYSCALL_MOUSE_PENDING = 0x4e,
+  SYSCALL_MOUSE_READ = 0x4f,
+  SYSCALL_YIELD = 0x50,
+  SYSCALL_TTY_ALLOC = 0x51,
+  SYSCALL_TTY_SET = 0x52,
+  SYSCALL_TTY_FREE = 0x53,
+  SYSCALL_RETURN_TO_APP = 0x54,
+  SYSCALL_USE_KEYBOARD = 0x55,
+  SYSCALL_CUSTOM_HANDLER = 0x56,
+  SYSCALL_MAP_MEMORY = 0x57,
+  SYSCALL_TASK_LEVEL_HIGH = 0x58,
+  SYSCALL_TASK_LEVEL_NORMAL = 0x59,
+  SYSCALL_MODULE_LOAD = 0x5a,
+  SYSCALL_MODULE_UNLOAD = 0x5b,
+  SYSCALL_MODULE_LIST = 0x5c,
+  SYSCALL_IPC = 0x5d,
+  SYSCALL_COUNT,
+};
+
+typedef void (*syscall_handler_t)(x86_interrupt_frame_t *frame);
+
+static void syscall_version(x86_interrupt_frame_t *frame) {
+  frame->edx = 0x302e3762;
+}
+
+static void syscall_print_character(x86_interrupt_frame_t *frame) {
+  printchar(frame->edx & 0xff);
+}
+
+static void syscall_legacy_graphics(x86_interrupt_frame_t *frame) {
+  if (running_mode != POWERINTDOS) {
+    return;
+  }
+
+  switch (frame->ebx) {
+  case 0x01:
+    SwitchToText8025();
+    break;
+  case 0x02:
+    SwitchTo320X200X256();
+    break;
+  case 0x03:
+    Draw_Char(frame->ecx, frame->edx, frame->esi, frame->edi);
+    break;
+  case 0x04:
+    PrintChineseChar(frame->ecx, frame->edx, frame->edi, frame->esi);
+    break;
+  case 0x05:
+    Draw_Box(frame->ecx, frame->edx, frame->esi, frame->edi, frame->ebp);
+    break;
+  case 0x06:
+    Draw_Px(frame->ecx, frame->edx, frame->esi);
+    break;
+  case 0x07:
+    Draw_Str(frame->ecx, frame->edx, (char *)(uintptr_t)frame->esi,
+             frame->edi);
+    break;
+  case 0x08:
+    PrintChineseStr(frame->ecx, frame->edx, frame->edi,
+                    (unsigned char *)(uintptr_t)frame->esi);
+    break;
+  }
+}
+
+static void syscall_set_cursor(x86_interrupt_frame_t *frame) {
+  gotoxy(frame->edx, frame->ecx);
+}
+
+static void syscall_print_string(x86_interrupt_frame_t *frame) {
+  print((char *)(uintptr_t)frame->edx);
+}
+
+static void syscall_sleep(x86_interrupt_frame_t *frame) {
+  sleep(frame->edx);
+}
+
+static void syscall_heap_info(x86_interrupt_frame_t *frame) {
   mtask *task = current_task();
-  int ds_base = 0;
-  void *alloc_addr = (void *)(uintptr_t)task->alloc_addr;
-  int alloc_size = *(task->alloc_size);
-  memory *current_mm = task->mm;
-  int *reg = &eax + 1; /* eax后面的地址*/
-                       /*强行改写通过PUSHAD保存的值*/
-  /* reg[0] : EDI,   reg[1] : ESI,   reg[2] : EBP,   reg[3] : ESP */
-  /* reg[4] : EBX,   reg[5] : EDX,   reg[6] : ECX,   reg[7] : EAX */
-  if (eax == 0x01) {
-    reg[EDX] = 0x302e3762;
-  } else if (eax == 0x02) {
-    printchar((edx & 0x000000ff));
-  } else if (eax == 0x03) {
-    if (running_mode == POWERINTDOS) {
-      if (ebx == 0x01) {
-        SwitchToText8025();
-      } else if (ebx == 0x02) {
-        SwitchTo320X200X256();
-      } else if (ebx == 0x03) {
-        Draw_Char(ecx, edx, esi, edi);
-      } else if (ebx == 0x04) {
-        PrintChineseChar(ecx, edx, edi, esi);
-      } else if (ebx == 0x05) {
-        Draw_Box(ecx, edx, esi, edi, ebp);
-      } else if (ebx == 0x06) {
-        Draw_Px(ecx, edx, esi);
-      } else if (ebx == 0x07) {
-        Draw_Str(ecx, edx, (char *)esi + ds_base, edi);
-      } else if (ebx == 0x08) {
-        PrintChineseStr(ecx, edx, edi, (unsigned char *)esi + ds_base);
-      }
-    }
-  } else if (eax == 0x04) {
-    gotoxy(edx, ecx);
-  } else if (eax == 0x05) {
-    print((char *)edx + ds_base);
-  } else if (eax == 0x06) {
-    sleep(edx);
-  } else if (eax == 0x08) {
-    reg[EDX] = ((int)alloc_addr - ds_base);
-  } else if (eax == 0x09) {
-    reg[EDX] = alloc_size;
-  } else if (eax == 0x0c) {
-    Text_Draw_Box(ecx, ebx, esi, edx, (unsigned char)edi);
-  } else if (eax == 0x0e) {
-    reg[ECX] = get_y();
-    reg[EDX] = get_x();
-  } else if (eax == 0x0d) {
-    beep(ebx, ecx, edx);
-  } else if (eax == 0x0f) {
-    if (running_mode == POWERINTDOS) {
-      mtask *task = current_task();
-      int i, mx1 = task->mx, my1 = task->my, bufx = task->mx * 8,
-             bufy = task->my * 16;
-      int bx = mx1;
-      int by = my1;
-      int bmp =
-          *(char *)(task->TTY->vram + by * task->TTY->xsize * 2 + bx * 2 + 1);
-      if (mdec.sleep == 1)
-        mouse_ready(&mdec);
-      for (;;) {
-        if (fifo8_status(task_get_mouse_fifo(task)) == 0) {
-          task_next();
-          signal_deal();
-        } else {
-          i = fifo8_get(task_get_mouse_fifo(task));
-          if (mouse_decode(&mdec, i) != 0) {
-            if (task->TTY != now_tty() && task->TTY->using1 == 1) {
-              continue;
-            }
-            if (mdec.roll != MOUSE_ROLL_NONE) {
-              reg[ECX] = task->mx;
-              reg[EDX] = task->my;
-              reg[ESI] = 3 + mdec.roll;
-              //   mouse_sleep(&mdec);
-              *(char *)(task->TTY->vram + task->my * task->TTY->xsize * 2 +
-                        task->mx * 2 + 1) = bmp;
-              task->mx = mx1;
-              task->my = my1;
-              return;
-            }
-            mx1 = task->mx;
-            my1 = task->my;
-            bufx += mdec.x;
-            bufy += mdec.y;
+  if (frame->eax == SYSCALL_HEAP_ADDRESS) {
+    frame->edx = task->alloc_addr;
+  } else {
+    frame->edx = task->alloc_size ? *task->alloc_size : 0;
+  }
+}
 
-            if (bufx > (task->TTY->xsize - 1) * 8) {
-              bufx = (task->TTY->xsize - 1) * 8;
-            } else if (bufx < 0) {
-              bufx = 0;
-            }
-            if (bufy > (task->TTY->ysize - 1) * 16) {
-              bufy = (task->TTY->ysize - 1) * 16;
-            } else if (bufy < 0) {
-              bufy = 0;
-            }
-            task->mx = bufx / 8;
-            task->my = bufy / 16;
-            *(char *)(task->TTY->vram + my1 * task->TTY->xsize * 2 + mx1 * 2 +
-                      1) = bmp;
-            bmp = *(char *)(task->TTY->vram + task->my * task->TTY->xsize * 2 +
-                            task->mx * 2 + 1);
-            *(char *)(task->TTY->vram + task->my * task->TTY->xsize * 2 +
-                      task->mx * 2 + 1) = ~bmp;
-            if ((mdec.btn & 0x01) != 0) {
-              reg[ECX] = task->mx;
-              reg[EDX] = task->my;
-              reg[ESI] = 1;
-              break;
-            } else if ((mdec.btn & 0x02) != 0) {
-              reg[ECX] = task->mx;
-              reg[EDX] = task->my;
-              reg[ESI] = 2;
-              break;
-            } else if ((mdec.btn & 0x04) != 0) {
-              reg[ECX] = task->mx;
-              int alloc_size = *(task->alloc_size);
-              reg[EDX] = task->my;
-              reg[ESI] = 3;
-              break;
-            }
-          }
-        }
-      }
-      *(char *)(task->TTY->vram + task->my * task->TTY->xsize * 2 +
-                task->mx * 2 + 1) = bmp;
-      task->mx = mx1;
-      task->my = my1;
-    }
-  } else if (eax == 0x10) { // mouse_support
-    extern mtask *mouse_use_task;
-    logk("%d\n",running_mode == POWERINTDOS && mouse_use_task == NULL);
-    reg[EAX] = running_mode == POWERINTDOS && mouse_use_task == NULL;
-  } else if (eax == 0x16) {
-    if (ebx == 0x01) {
-      reg[EDX] = getch();
-    } else if (ebx == 0x02) {
-      reg[EDX] = input_char_inSM();
-    } else if (ebx == 0x03) {
-      input((char *)(edx + ds_base), ecx);
-    }
-  } else if (eax == 0x19) {
-    logk("--------------------------------\n");
-    logk("c: %08x %s\n", task->pde, (char *)(edx + ds_base));
-    reg[EAX] = command_run((char *)(edx + ds_base));
-    // asm("xchg %bx,%bx");
-    logk("n: %08x\n", task->pde);
-    logk("--------------------------------\n");
-  } else if (eax == 0x1a) {
-    if (ebx == 0x01) {
-      int fsize = vfs_filesize((char *)(edx + ds_base));
-      reg[EDX] = fsize;
-    } else if (ebx == 0x02) {
-      int fsize = vfs_filesize((char *)(ds_base + edx));
-      if (fsize != -1) {
-        char *q = (char *)ds_base + esi;
-        vfs_readfile((char *)(ds_base + edx), q);
-        reg[EAX] = 1;
-      } else {
-        reg[EAX] = 0;
-      }
-    } else if (ebx == 0x03) {
-      char *FilePath = (char *)(ds_base + edx);
-      reg[EAX] = vfs_createfile(FilePath);
-    } else if (ebx == 0x04) {
-      char *FilePath = (char *)(ds_base + edx);
-      reg[EAX] = vfs_createdict(FilePath);
-    } else if (ebx == 0x05) {
-      char *FilePath = (char *)(ds_base + edx);
-      char *Ptr = (char *)ds_base + esi;
-      int length = ecx;
-      int offset = edi;
-      logk("EDIT %s\n", FilePath);
-      EDIT_FILE(FilePath, Ptr, length, offset);
-    } else if (ebx == 0x06) {
-      char *Path = (char *)(ds_base + edx);
-      //  logk("listfile %s\n",Path);
-      struct List *file_list = vfs_listfile(Path);
-      int number;
-      for (number = 1; FindForCount(number, file_list) != NULL; number++)
-        ;
-      char *p = (char *)(uintptr_t)ecx;
-      for (int i = 1; FindForCount(i, file_list) != NULL; i++) {
-        if (p) {
-          memcpy((void *)(p + sizeof(vfs_file) * (i - 1)),
-                 (void *)FindForCount(i, file_list)->val, sizeof(vfs_file));
-        }
-        free((void *)FindForCount(i, file_list)->val);
-      }
-      if (p)
-        memset((void *)(p + (number - 1) * sizeof(vfs_file)), 0,
-               sizeof(vfs_file));
-    e:
-      DeleteList(file_list);
-      reg[EAX] = (int)p - ds_base;
-    }
-  } else if (eax == 0x1b) {
-    int i;
-    char *bes = (char *)(edx + ds_base);
-    while (!task->line)
-      ;
-    for (i = 0; i < strlen(task->line); i++) {
-      bes[i] = task->line[i];
-    }
-    bes[i] = 0;
-  } else if (eax == 0x1c) {
-    reg[EAX] = Copy((char *)(edx + ds_base), (char *)(esi + ds_base));
-  } else if (eax == 0x1d) {
-    reg[EAX] = kbhit();
-  } else if (eax == 0x1e) {
-    // intr_frame_t *i = current_task()->top - sizeof(intr_frame_t);
-    // intr_frame1_t *frame = (unsigned *)(i->esp - sizeof(intr_frame1_t));
-    // frame->edi = i->edi;
-    // frame->esi = i->esi;
-    // frame->ebp = i->ebp;
-    // frame->esp_dummy = i->esp_dummy;
-    // frame->ebx = i->ebx;
-    // frame->ecx = i->ecx;
-    // frame->edx = i->edx;
-    // frame->eax = i->eax;
-    // frame->gs = i->gs;
-    // frame->fs = i->fs;
-    // frame->es = i->es;
-    // frame->ds = i->ds;
-    // logk("%08x\n", i->eip);
-    // frame->eip = i->eip;
-    // frame->eip1 = return_to_app;
-    // i->eip = test;
-    // i->esp = frame;
-    // return;
-    // for (;;)
-    //   ;
-    if (!(*(unsigned char *)(0xf0000000))) {
-      logk("here\n");
-      extern mtask *mouse_use_task;
-      if (mouse_use_task == task) {
-        mouse_sleep(&mdec);
-      }
-    } else {
-      mtask *parent = task->ptid == 0 || task->ptid == (uint32_t)-1
-                          ? NULL
-                          : get_task(task->ptid);
-      if (parent && parent->kind == TASK_PROCESS && parent->state != DIED) {
-        vfs_clone_for_task(task, parent);
-      }
-    }
-    //  for(;;);
-    asm volatile("nop");
-    task_exit(ebx);
-    for (;;)
-      ;
-  } else if (eax == 0x20) {
-    // VBE驱动API
-    if (running_mode == POWERINTDOS) {
-      if (ebx == 0x01) {
-        reg[EAX] = SwitchVBEMode(ecx);
-      } else if (ebx == 0x02) {
-        reg[EAX] = check_vbe_mode(ecx, (struct VBEINFO *)VBEINFO_ADDRESS);
-      } else if (ebx == 0x05) {
-        unsigned v = set_mode(ecx, edx, 32);
-        logk("reg[EAX] = %08x %d\n", v, pages[IDX(0xfd07c2d0)].count);
-        reg[EAX] = v;
-        unsigned count = div_round_up(ecx * edx * 4, 0x1000);
-        for (int i = 0; i < count; i++) {
-          logk("%08x\n", v + i * 0x1000);
-          page_set_physics_attr(v + i * 0x1000, (void *)(uintptr_t)(v + i * 0x1000),
-                                PG_P | PG_USU | PG_RWW | PG_SHARED);
-        }
-      }
-    }
-  } else if (eax == 0x21) {
-    if (running_mode == POWERINTDOS) {
-      if (ebx == 0x01) {
-        SwitchToText8025_BIOS();
-        clear();
-      } else if (ebx == 0x02) {
-        SwitchTo320X200X256_BIOS();
-      }
-    }
-  } else if (eax == 0x22) {
-    // 任务API
-    if (ebx == 0x03) {
-      //   task->forever = 1;
-    } else if (ebx == 0x04) {
-      send_ipc_message(ecx, (void *)(ds_base + edx), esi, asynchronous);
-    } else if (ebx == 0x05) {
-      get_ipc_message((void *)(ds_base + edx), ecx);
-    } else if (ebx == 0x06) {
-      reg[EAX] = ipc_message_len(ecx);
-    } else if (ebx == 0x07) {
-      reg[EAX] = get_tid(task);
-    } else if (ebx == 0x08) {
-      reg[EAX] = have_msg();
-    } else if (ebx == 0x09) {
-      get_msg_all((void *)(ds_base + edx));
-    } else if (ebx == 0x0a) {
+static void syscall_text_box(x86_interrupt_frame_t *frame) {
+  Text_Draw_Box(frame->ecx, frame->ebx, frame->esi, frame->edx,
+                (unsigned char)frame->edi);
+}
 
-      extern int init_ok_flag;
-      init_ok_flag = 0;
-      // unsigned int *stack = page_malloc_one() + 0x1000;
-      // stack--;
-      // *stack = (unsigned int)(esi);
-      // stack--;
-      // *stack = (unsigned int)(edx);
-      mtask *t = create_thread_task((uintptr_t)user_thread_into,
-                                    (unsigned)0, 1, 1);
-      if (t == NULL) {
-        reg[EAX] = -1;
-        return;
-      }
-      init_ok_flag = 1;
-      t->alloc_addr = task->alloc_addr;
-      t->alloc_size = task->alloc_size;
-      t->TTY = current_task()->TTY;
-      vfs_clone_for_task(task, t);
-      t->ptid = task->ptid;
-      t->tgid = task->tgid;
-      t->kind = TASK_THREAD;
-      t->mx = 0;
-      t->my = 0;
-      unsigned *r = page_malloc_one_no_mark();
-      r[0] = esi;
-      r[1] = edx;
+static void syscall_beep(x86_interrupt_frame_t *frame) {
+  beep(frame->ebx, frame->ecx, frame->edx);
+}
 
-      t->line = (char *)r;
-      reg[EAX] = t->tid;
-    } else if (ebx == 0x0b) {
-      task_lock();
-    } else if (ebx == 0x0c) {
-      task_unlock();
-    } else if (ebx == 0x0d) {
-      mtask *target = get_task(ecx);
-      if (target && target->kind == TASK_THREAD && target->tgid == task->tgid) {
-        task_kill(ecx);
-      }
-    }
-  } else if (eax == 0x23) {
-    if (ebx == 0x01) {
-      reg[EAX] = task->TTY->color;
-    } else if (ebx == 0x02) {
-      task->TTY->color = ecx;
-    }
-  } else if (eax == 0x24) {
-    // 计时器API
-    if (ebx == 0x00) {
-      task->timer = timer_alloc();
-      task->timer->fifo = (struct FIFO8 *)page_malloc(sizeof(struct FIFO8));
-      task->timer->fifo->buf =
-          (unsigned char *)page_malloc(50 * sizeof(unsigned char));
-      fifo8_init(task->timer->fifo, 50, task->timer->fifo->buf);
-      timer_init(task->timer, task->timer->fifo, 1);
-    } else if (ebx == 0x01) {
-      timer_settime(task->timer, ecx);
-    } else if (ebx == 0x02) {
-      if (fifo8_get(task->timer->fifo) == 1) {
-        reg[EAX] = 1;
-      } else {
-        reg[EAX] = 0;
-      }
-    } else if (ebx == 0x03) {
-      page_free((void *)task->timer->fifo->buf, 50 * sizeof(unsigned char));
-      page_free((void *)task->timer->fifo, sizeof(struct FIFO8));
-      timer_free(task->timer);
-    }
-  } else if (eax == 0x25) {
-    reg[EAX] = vfs_format(ebx, (char *)(ecx + ds_base));
-  } else if (eax == 0x26) {
-    // CMOS时间
-    if (ebx == 0x00) {
-      reg[EAX] = get_hour_hex();
-    } else if (ebx == 0x01) {
-      reg[EAX] = get_min_hex();
-    } else if (ebx == 0x02) {
-      reg[EAX] = get_sec_hex();
-    } else if (ebx == 0x03) {
-      reg[EAX] = get_day_of_month();
-    } else if (ebx == 0x04) {
-      reg[EAX] = get_day_of_week();
-    } else if (ebx == 0x05) {
-      reg[EAX] = get_mon_hex();
-    } else if (ebx == 0x06) {
-      reg[EAX] = get_year();
-    }
-  } else if (eax == 0x27) {
-    if (running_mode == POWERINTDOS) {
-      struct VBEINFO *vbe = (struct VBEINFO *)VBEINFO_ADDRESS;
-      SDraw_Px((vram_t *)vbe->vram, ebx, ecx, edx, vbe->xsize);
-    }
-  } else if (eax == 0x28) {
-    if (running_mode == POWERINTDOS) {
-      struct VBEINFO *vbe = (struct VBEINFO *)VBEINFO_ADDRESS;
-      vram_t *r = (vram_t *)vbe->vram;
-      reg[EAX] = r[ebx * vbe->xsize + ecx];
-    }
-  } else if (eax == 0x29) {
-    if (running_mode == POWERINTDOS) {
-      struct VBEINFO *vbe = (struct VBEINFO *)VBEINFO_ADDRESS;
-      vram_t *r = (vram_t *)vbe->vram;
-      memcpy((void *)(ebx + ds_base), r, vbe->xsize * vbe->ysize * 4);
-    }
-  } else if (eax == 0x2a) {
-    if (running_mode == POWERINTDOS) {
-      struct VBEINFO *vbe = (struct VBEINFO *)VBEINFO_ADDRESS;
-      vram_t *r = (vram_t *)vbe->vram;
-      int x = ebx;
-      int y = ecx;
-      int w = edx;
-      int h = esi;
-      unsigned int *buffer = (unsigned int *)(edi + ds_base);
-      for (int i = x; i < x + w; i++) {
-        for (int j = y; j < y + h; j++) {
-          r[j * vbe->xsize + i] = buffer[(j - y) * w + (i - x)];
-        }
-      }
-    }
-  } else if (eax == 0x2b) {
-    if (running_mode == POWERINTDOS) {
-      int a, c;
-      a = 0;
-      c = ebx;
-      struct VBEINFO *vbe = (struct VBEINFO *)VBEINFO_ADDRESS;
-      vram_t *vram_buffer = (vram_t *)vbe->vram;
-      for (; c <= vbe->ysize; c++, a++) {
-        for (int i = 0; i < vbe->xsize; i++) {
-          vram_buffer[a * vbe->xsize + i] = vram_buffer[c * vbe->xsize + i];
-        }
-      }
-      SDraw_Box(vram_buffer, 0, a, vbe->xsize, vbe->ysize, 0x0, vbe->xsize);
-    }
-  } else if (eax == 0x2c) {
-    if (running_mode == POWERINTDOS) {
-      struct VBEINFO *vbe = (struct VBEINFO *)VBEINFO_ADDRESS;
-      vram_t *vram_buffer = (vram_t *)vbe->vram;
-      (void)(vram_buffer);
-      SDraw_Box((vram_t *)vbe->vram, ebx, ecx, edx, esi, edi, vbe->xsize);
-    }
-  } else if (eax == 0x2d) {
-    reg[EAX] = UTCTimeStamp(get_year(), get_mon_hex(), get_day_of_month(),
-                            get_hour_hex(), get_min_hex(), get_sec_hex());
-  } else if (eax == 0x2e) {
-    reg[EAX] = timerctl.count * 10;
-  } else if (eax == 0x2f) {
-    task->fpu_flag = 0;
-  } else if (eax == 0x30) {
-    current_task()->Pkeyfifo = malloc(sizeof(struct FIFO8));
-    current_task()->Ukeyfifo = malloc(sizeof(struct FIFO8));
-    unsigned char *kbuf = (unsigned char *)page_malloc(4096);
-    unsigned char *mbuf = (unsigned char *)page_malloc(4096);
-    fifo8_init(current_task()->Pkeyfifo, 4096, kbuf);
-    fifo8_init(current_task()->Ukeyfifo, 4096, mbuf);
-    current_task()->keyboard_press = kbd_press;
-    current_task()->keyboard_release = kbd_up;
-  } else if (eax == 0x31) {
-    reg[EAX] = fifo8_status(current_task()->Pkeyfifo);
-  } else if (eax == 0x32) {
-    reg[EAX] = fifo8_status(current_task()->Ukeyfifo);
-  } else if (eax == 0x33) {
-    reg[EAX] = fifo8_get(current_task()->Pkeyfifo);
-  } else if (eax == 0x34) {
-    reg[EAX] = fifo8_get(current_task()->Ukeyfifo);
-  } else if (eax == 0x35) {
-    uint32_t old_size = task->alloc_size ? *task->alloc_size : 0;
-    uint32_t start_addr = task->alloc_addr + old_size;
-    uint32_t request = ((uint32_t)ebx + 0xfffu) & 0xfffff000u;
-    if (task->alloc_size == NULL || ebx <= 0 || request < (uint32_t)ebx ||
-        start_addr < task->alloc_addr || start_addr >= USER_HEAP_END ||
-        request > USER_HEAP_END - start_addr) {
-      reg[EAX] = -1;
-    } else {
-      for (uint32_t offset = 0; offset < request; offset += 0x1000) {
-        if (!page_link(start_addr + offset)) {
-          reg[EAX] = -1;
-          return;
-        }
-      }
-      *task->alloc_size = old_size + request;
-      reg[EAX] = 0;
-    }
-  } else if (eax == 0x36) {
-    char *s = env_read((char *)(uintptr_t)(ebx + ds_base));
-    if (s) {
-      strcpy((char *)(uintptr_t)(ecx + ds_base), s);
-      reg[EAX] = 1;
-    } else {
-      reg[EAX] = 0;
-    }
-  } else if (eax == 0x37) {
-    vfs_getPath_no_drive((char *)(uintptr_t)(ebx + ds_base));
-  } else if (eax == 0x38) {
-    reg[EAX] = task->nfs->drive;
-  } else if (eax == 0x39) {
-    reg[EAX] = os_execute((char *)(uintptr_t)ebx, (char *)(uintptr_t)ecx);
-  } else if (eax == 0x3a) {
-    clear();
-  } else if (eax == 0x3b) {
-    reg[EAX] = vfs_check_mount(ebx);
-  } else if (eax == 0x3c) {
-    reg[EAX] = vfs_mount_disk(ebx, ecx);
-  } else if (eax == 0x3d) {
-    vfs_change_disk(ebx);
-  } else if (eax == 0x3e) {
-    reg[EAX] = memsize;
-  } else if (eax == 0x3f) {
-    extern struct PAGE_INFO *pages;
-    uint32_t r = 0;
-    for (int i = 0; i < div_round_up(memsize, 0x1000); i++) {
-      if (pages[i].count) {
-        r++;
-      }
-    }
-    reg[EAX] = r;
-  } else if (eax == 0x40) {
-    reg[EAX] = vfs_delfile((char *)(edx + ds_base));
-  } else if (eax == 0x41) {
-    reg[EAX] = vfs_change_path((char *)(edx + ds_base));
-  } else if (eax == 0x42) {
-    tty_start_curor_moving(task->TTY);
-  } else if (eax == 0x43) {
-    tty_stop_cursor_moving(task->TTY);
-  } else if (eax == 0x44) {
-    vfs_unmount_disk(ebx);
-  } else if (eax == 0x45) {
-    reg[EAX] = task->TTY->xsize;
-  } else if (eax == 0x46) {
-    reg[EAX] = task->TTY->ysize;
-  } else if (eax == 0x47) {
-    vfs_renamefile((char *)(uintptr_t)ebx, (char *)(uintptr_t)ecx);
-  } else if (eax == 0x48) {
-    logk((char *)(uintptr_t)ebx);
-  } else if (eax == 0x49) {
-    unsigned old = current_task()->handler[ebx];
-    set_signal_handler(ebx, ecx);
-    reg[EAX] = old;
-  } else if (eax == 0x4a) {
-    reg[EAX] = task_fork();
-  } else if (eax == 0x4b) {
-    reg[EAX] = waittid(ebx);
-  } else if (eax == 0x4c) {
-    extern unsigned m_eip, m_cr3;
-    m_eip = reg[EBX];
-    m_cr3 = current_task()->pde;
-  } else if (eax == 0x4d) {
+static void syscall_cursor_position(x86_interrupt_frame_t *frame) {
+  frame->ecx = get_y();
+  frame->edx = get_x();
+}
+
+static void syscall_mouse_event(x86_interrupt_frame_t *frame) {
+  if (running_mode != POWERINTDOS) {
+    return;
+  }
+
+  mtask *task = current_task();
+  int old_mouse_x = task->mx;
+  int old_mouse_y = task->my;
+  int buffer_x = task->mx * 8;
+  int buffer_y = task->my * 16;
+  int background = *(char *)(task->TTY->vram + old_mouse_y *
+                                                    task->TTY->xsize * 2 +
+                            old_mouse_x * 2 + 1);
+  if (mdec.sleep == 1) {
     mouse_ready(&mdec);
-  } else if (eax == 0x4e) {
-    unsigned i;
-    i = fifo8_status(task_get_mouse_fifo(task));
-    reg[EAX] = i;
-  } else if (eax == 0x4f) {
-    reg[EAX] = fifo8_get(task_get_mouse_fifo(task));
-  } else if (eax == 0x50) {
-    if (current_task()->ready == 0) {
-      io_cli();
-      //      current_task()->timeout = 1;
+  }
+
+  for (;;) {
+    if (fifo8_status(task_get_mouse_fifo(task)) == 0) {
       task_next();
-      io_sti();
+      signal_deal();
+      continue;
+    }
+
+    int data = fifo8_get(task_get_mouse_fifo(task));
+    if (mouse_decode(&mdec, data) == 0) {
+      continue;
+    }
+    if (task->TTY != now_tty() && task->TTY->using1 == 1) {
+      continue;
+    }
+    if (mdec.roll != MOUSE_ROLL_NONE) {
+      frame->ecx = task->mx;
+      frame->edx = task->my;
+      frame->esi = 3 + mdec.roll;
+      *(char *)(task->TTY->vram + task->my * task->TTY->xsize * 2 +
+                task->mx * 2 + 1) = background;
+      task->mx = old_mouse_x;
+      task->my = old_mouse_y;
+      return;
+    }
+
+    old_mouse_x = task->mx;
+    old_mouse_y = task->my;
+    buffer_x += mdec.x;
+    buffer_y += mdec.y;
+    if (buffer_x > (task->TTY->xsize - 1) * 8) {
+      buffer_x = (task->TTY->xsize - 1) * 8;
+    } else if (buffer_x < 0) {
+      buffer_x = 0;
+    }
+    if (buffer_y > (task->TTY->ysize - 1) * 16) {
+      buffer_y = (task->TTY->ysize - 1) * 16;
+    } else if (buffer_y < 0) {
+      buffer_y = 0;
+    }
+
+    task->mx = buffer_x / 8;
+    task->my = buffer_y / 16;
+    *(char *)(task->TTY->vram + old_mouse_y * task->TTY->xsize * 2 +
+              old_mouse_x * 2 + 1) = background;
+    background = *(char *)(task->TTY->vram + task->my * task->TTY->xsize * 2 +
+                           task->mx * 2 + 1);
+    *(char *)(task->TTY->vram + task->my * task->TTY->xsize * 2 +
+              task->mx * 2 + 1) = ~background;
+
+    if (mdec.btn & 0x01) {
+      frame->esi = 1;
+    } else if (mdec.btn & 0x02) {
+      frame->esi = 2;
+    } else if (mdec.btn & 0x04) {
+      frame->esi = 3;
     } else {
-      current_task()->ready = 0;
+      continue;
     }
-  } else if (eax == 0x51) {
-    reg[EAX] = (uintptr_t)fartty_alloc((void *)(uintptr_t)ebx, ecx, current_task()->pde, edx, esi);
-  } else if (eax == 0x52) {
-    tty_set(get_task(ebx), (struct tty *)(uintptr_t)ecx);
-  } else if (eax == 0x53) {
-    tty_free((struct tty *)(uintptr_t)ebx);
-  } else if (eax == 0x54) {
-    current_task()->ret_to_app = ebx;
-  } else if (eax == 0x55) {
-    extern int disable_flag;
-    disable_flag = 1;
-    extern mtask* keyboard_use_task;
-    keyboard_use_task = task;
-  } else if (eax == 0x56) {
-    if (!custom_handler) {
-      custom_handler = ebx;
-      custom_handler_pde = current_task()->pde;
-      custom_handler_owner = current_task();
+    frame->ecx = task->mx;
+    frame->edx = task->my;
+    break;
+  }
+
+  *(char *)(task->TTY->vram + task->my * task->TTY->xsize * 2 + task->mx * 2 +
+            1) = background;
+  task->mx = old_mouse_x;
+  task->my = old_mouse_y;
+}
+
+static void syscall_mouse_supported(x86_interrupt_frame_t *frame) {
+  extern mtask *mouse_use_task;
+  frame->eax = running_mode == POWERINTDOS && mouse_use_task == NULL;
+}
+
+static void syscall_input(x86_interrupt_frame_t *frame) {
+  switch (frame->ebx) {
+  case 0x01:
+    frame->edx = getch();
+    break;
+  case 0x02:
+    frame->edx = input_char_inSM();
+    break;
+  case 0x03:
+    input((char *)(uintptr_t)frame->edx, frame->ecx);
+    break;
+  }
+}
+
+static void syscall_run_command(x86_interrupt_frame_t *frame) {
+  frame->eax = command_run((char *)(uintptr_t)frame->edx);
+}
+
+static void syscall_file_operation(x86_interrupt_frame_t *frame) {
+  switch (frame->ebx) {
+  case 0x01:
+    frame->edx = vfs_filesize((char *)(uintptr_t)frame->edx);
+    break;
+  case 0x02: {
+    int file_size = vfs_filesize((char *)(uintptr_t)frame->edx);
+    if (file_size != -1) {
+      vfs_readfile((char *)(uintptr_t)frame->edx,
+                   (char *)(uintptr_t)frame->esi);
+      frame->eax = 1;
+    } else {
+      frame->eax = 0;
     }
-  } else if (eax == 0x57) {
-    unsigned a1 = reg[EBX] & 0xfffff000;
-    unsigned sz = reg[ECX];
-    unsigned a_pde = reg[EDX];
-    unsigned b1 = reg[ESI] & 0xfffff000;
-    unsigned b_pde = reg[EDI];
-    unsigned count = div_round_up(sz, 0x1000);
+    break;
+  }
+  case 0x03:
+    frame->eax = vfs_createfile((char *)(uintptr_t)frame->edx);
+    break;
+  case 0x04:
+    frame->eax = vfs_createdict((char *)(uintptr_t)frame->edx);
+    break;
+  case 0x05:
+    EDIT_FILE((char *)(uintptr_t)frame->edx,
+              (char *)(uintptr_t)frame->esi, frame->ecx, frame->edi);
+    break;
+  case 0x06: {
+    struct List *file_list = vfs_listfile((char *)(uintptr_t)frame->edx);
+    int count;
+    for (count = 1; FindForCount(count, file_list) != NULL; count++) {
+    }
+    char *files = (char *)(uintptr_t)frame->ecx;
+    for (int i = 1; FindForCount(i, file_list) != NULL; i++) {
+      if (files) {
+        memcpy(files + sizeof(vfs_file) * (i - 1),
+               (void *)FindForCount(i, file_list)->val, sizeof(vfs_file));
+      }
+      free((void *)FindForCount(i, file_list)->val);
+    }
+    if (files) {
+      memset(files + (count - 1) * sizeof(vfs_file), 0, sizeof(vfs_file));
+    }
+    DeleteList(file_list);
+    frame->eax = (uintptr_t)files;
+    break;
+  }
+  }
+}
+
+static void syscall_command_line(x86_interrupt_frame_t *frame) {
+  mtask *task = current_task();
+  while (!task->line) {
+  }
+  strcpy((char *)(uintptr_t)frame->edx, (const char *)task->line);
+}
+
+static void syscall_copy(x86_interrupt_frame_t *frame) {
+  frame->eax = Copy((char *)(uintptr_t)frame->edx,
+                    (char *)(uintptr_t)frame->esi);
+}
+
+static void syscall_keyboard_hit(x86_interrupt_frame_t *frame) {
+  frame->eax = kbhit();
+}
+
+static void syscall_exit(x86_interrupt_frame_t *frame) {
+  mtask *task = current_task();
+  if (!*(unsigned char *)0xf0000000) {
+    extern mtask *mouse_use_task;
+    if (mouse_use_task == task) {
+      mouse_sleep(&mdec);
+    }
+  } else {
+    mtask *parent = task->ptid == 0 || task->ptid == (uint32_t)-1
+                        ? NULL
+                        : get_task(task->ptid);
+    if (parent && parent->kind == TASK_PROCESS && parent->state != DIED) {
+      vfs_clone_for_task(task, parent);
+    }
+  }
+  task_exit(frame->ebx);
+  for (;;) {
+  }
+}
+
+static void syscall_vbe_control(x86_interrupt_frame_t *frame) {
+  if (running_mode != POWERINTDOS) {
+    return;
+  }
+
+  if (frame->ebx == 0x01) {
+    frame->eax = SwitchVBEMode(frame->ecx);
+  } else if (frame->ebx == 0x02) {
+    frame->eax = check_vbe_mode(frame->ecx, (struct VBEINFO *)VBEINFO_ADDRESS);
+  } else if (frame->ebx == 0x05) {
+    unsigned framebuffer = set_mode(frame->ecx, frame->edx, 32);
+    frame->eax = framebuffer;
+    unsigned count = div_round_up(frame->ecx * frame->edx * 4, 0x1000);
+    for (unsigned i = 0; i < count; i++) {
+      unsigned address = framebuffer + i * 0x1000;
+      page_set_physics_attr(address, (void *)(uintptr_t)address,
+                            PG_P | PG_USU | PG_RWW | PG_SHARED);
+    }
+  }
+}
+
+static void syscall_bios_video(x86_interrupt_frame_t *frame) {
+  if (running_mode != POWERINTDOS) {
+    return;
+  }
+  if (frame->ebx == 0x01) {
+    SwitchToText8025_BIOS();
+    clear();
+  } else if (frame->ebx == 0x02) {
+    SwitchTo320X200X256_BIOS();
+  }
+}
+
+static void syscall_task_control(x86_interrupt_frame_t *frame) {
+  mtask *task = current_task();
+  switch (frame->ebx) {
+  case 0x04:
+    send_ipc_message(frame->ecx, (void *)(uintptr_t)frame->edx, frame->esi,
+                     asynchronous);
+    break;
+  case 0x05:
+    get_ipc_message((void *)(uintptr_t)frame->edx, frame->ecx);
+    break;
+  case 0x06:
+    frame->eax = ipc_message_len(frame->ecx);
+    break;
+  case 0x07:
+    frame->eax = get_tid(task);
+    break;
+  case 0x08:
+    frame->eax = have_msg();
+    break;
+  case 0x09:
+    get_msg_all((void *)(uintptr_t)frame->edx);
+    break;
+  case 0x0a: {
+    extern int init_ok_flag;
+    init_ok_flag = 0;
+    mtask *thread = create_thread_task((uintptr_t)user_thread_entry, 0, 1, 1);
+    if (thread == NULL) {
+      frame->eax = -1;
+      return;
+    }
+    init_ok_flag = 1;
+    thread->alloc_addr = task->alloc_addr;
+    thread->alloc_size = task->alloc_size;
+    thread->TTY = task->TTY;
+    vfs_clone_for_task(task, thread);
+    thread->ptid = task->ptid;
+    thread->tgid = task->tgid;
+    thread->kind = TASK_THREAD;
+    thread->mx = 0;
+    thread->my = 0;
+    unsigned *request = page_malloc_one_no_mark();
+    request[0] = frame->esi;
+    request[1] = frame->edx;
+    thread->line = (char *)request;
+    frame->eax = thread->tid;
+    break;
+  }
+  case 0x0b:
+    task_lock();
+    break;
+  case 0x0c:
+    task_unlock();
+    break;
+  case 0x0d: {
+    mtask *target = get_task(frame->ecx);
+    if (target && target->kind == TASK_THREAD && target->tgid == task->tgid) {
+      task_kill(frame->ecx);
+    }
+    break;
+  }
+  }
+}
+
+static void syscall_tty_color(x86_interrupt_frame_t *frame) {
+  if (frame->ebx == 0x01) {
+    frame->eax = current_task()->TTY->color;
+  } else if (frame->ebx == 0x02) {
+    current_task()->TTY->color = frame->ecx;
+  }
+}
+
+static void syscall_timer_control(x86_interrupt_frame_t *frame) {
+  mtask *task = current_task();
+  switch (frame->ebx) {
+  case 0x00:
+    task->timer = timer_alloc();
+    task->timer->fifo = page_malloc(sizeof(struct FIFO8));
+    task->timer->fifo->buf = page_malloc(50 * sizeof(unsigned char));
+    fifo8_init(task->timer->fifo, 50, task->timer->fifo->buf);
+    timer_init(task->timer, task->timer->fifo, 1);
+    break;
+  case 0x01:
+    timer_settime(task->timer, frame->ecx);
+    break;
+  case 0x02:
+    frame->eax = fifo8_get(task->timer->fifo) == 1;
+    break;
+  case 0x03:
+    page_free(task->timer->fifo->buf, 50 * sizeof(unsigned char));
+    page_free(task->timer->fifo, sizeof(struct FIFO8));
+    timer_free(task->timer);
+    break;
+  }
+}
+
+static void syscall_format(x86_interrupt_frame_t *frame) {
+  frame->eax = vfs_format(frame->ebx, (char *)(uintptr_t)frame->ecx);
+}
+
+static void syscall_rtc(x86_interrupt_frame_t *frame) {
+  switch (frame->ebx) {
+  case 0x00:
+    frame->eax = get_hour_hex();
+    break;
+  case 0x01:
+    frame->eax = get_min_hex();
+    break;
+  case 0x02:
+    frame->eax = get_sec_hex();
+    break;
+  case 0x03:
+    frame->eax = get_day_of_month();
+    break;
+  case 0x04:
+    frame->eax = get_day_of_week();
+    break;
+  case 0x05:
+    frame->eax = get_mon_hex();
+    break;
+  case 0x06:
+    frame->eax = get_year();
+    break;
+  }
+}
+
+static void syscall_framebuffer(x86_interrupt_frame_t *frame) {
+  if (running_mode != POWERINTDOS) {
+    return;
+  }
+
+  struct VBEINFO *vbe = (struct VBEINFO *)VBEINFO_ADDRESS;
+  vram_t *framebuffer = (vram_t *)vbe->vram;
+  switch (frame->eax) {
+  case SYSCALL_DRAW_PIXEL:
+    SDraw_Px(framebuffer, frame->ebx, frame->ecx, frame->edx, vbe->xsize);
+    break;
+  case SYSCALL_READ_PIXEL:
+    frame->eax = framebuffer[frame->ebx * vbe->xsize + frame->ecx];
+    break;
+  case SYSCALL_COPY_FRAMEBUFFER:
+    memcpy((void *)(uintptr_t)frame->ebx, framebuffer,
+           vbe->xsize * vbe->ysize * sizeof(vram_t));
+    break;
+  case SYSCALL_DRAW_BUFFER: {
+    int x = frame->ebx;
+    int y = frame->ecx;
+    int width = frame->edx;
+    int height = frame->esi;
+    unsigned *buffer = (unsigned *)(uintptr_t)frame->edi;
+    for (int i = x; i < x + width; i++) {
+      for (int j = y; j < y + height; j++) {
+        framebuffer[j * vbe->xsize + i] =
+            buffer[(j - y) * width + (i - x)];
+      }
+    }
+    break;
+  }
+  case SYSCALL_SCROLL_FRAMEBUFFER: {
+    int destination_row = 0;
+    int source_row = frame->ebx;
+    for (; source_row < vbe->ysize; source_row++, destination_row++) {
+      for (int x = 0; x < vbe->xsize; x++) {
+        framebuffer[destination_row * vbe->xsize + x] =
+            framebuffer[source_row * vbe->xsize + x];
+      }
+    }
+    SDraw_Box(framebuffer, 0, destination_row, vbe->xsize, vbe->ysize, 0,
+              vbe->xsize);
+    break;
+  }
+  case SYSCALL_DRAW_BOX:
+    SDraw_Box(framebuffer, frame->ebx, frame->ecx, frame->edx, frame->esi,
+              frame->edi, vbe->xsize);
+    break;
+  }
+}
+
+static void syscall_timestamp(x86_interrupt_frame_t *frame) {
+  frame->eax = UTCTimeStamp(get_year(), get_mon_hex(), get_day_of_month(),
+                            get_hour_hex(), get_min_hex(), get_sec_hex());
+}
+
+static void syscall_uptime(x86_interrupt_frame_t *frame) {
+  frame->eax = timerctl.count * 10;
+}
+
+static void syscall_reset_fpu(x86_interrupt_frame_t *frame) {
+  (void)frame;
+  current_task()->fpu_flag = 0;
+}
+
+static void syscall_keyboard_setup(x86_interrupt_frame_t *frame) {
+  (void)frame;
+  mtask *task = current_task();
+  task->Pkeyfifo = malloc(sizeof(struct FIFO8));
+  task->Ukeyfifo = malloc(sizeof(struct FIFO8));
+  unsigned char *press_buffer = page_malloc(4096);
+  unsigned char *release_buffer = page_malloc(4096);
+  fifo8_init(task->Pkeyfifo, 4096, press_buffer);
+  fifo8_init(task->Ukeyfifo, 4096, release_buffer);
+  task->keyboard_press = keyboard_press;
+  task->keyboard_release = keyboard_release;
+}
+
+static void syscall_keyboard_fifo(x86_interrupt_frame_t *frame) {
+  mtask *task = current_task();
+  switch (frame->eax) {
+  case SYSCALL_KEY_PRESS_PENDING:
+    frame->eax = fifo8_status(task->Pkeyfifo);
+    break;
+  case SYSCALL_KEY_RELEASE_PENDING:
+    frame->eax = fifo8_status(task->Ukeyfifo);
+    break;
+  case SYSCALL_KEY_PRESS_READ:
+    frame->eax = fifo8_get(task->Pkeyfifo);
+    break;
+  case SYSCALL_KEY_RELEASE_READ:
+    frame->eax = fifo8_get(task->Ukeyfifo);
+    break;
+  }
+}
+
+static void syscall_grow_heap(x86_interrupt_frame_t *frame) {
+  mtask *task = current_task();
+  uint32_t old_size = task->alloc_size ? *task->alloc_size : 0;
+  uint32_t start_addr = task->alloc_addr + old_size;
+  uint32_t request = (frame->ebx + 0xfffu) & 0xfffff000u;
+  if (task->alloc_size == NULL || (int32_t)frame->ebx <= 0 ||
+      request < frame->ebx || start_addr < task->alloc_addr ||
+      start_addr >= USER_HEAP_END || request > USER_HEAP_END - start_addr) {
+    frame->eax = -1;
+    return;
+  }
+
+  for (uint32_t offset = 0; offset < request; offset += 0x1000) {
+    if (!page_link(start_addr + offset)) {
+      frame->eax = -1;
+      return;
+    }
+  }
+  *task->alloc_size = old_size + request;
+  frame->eax = 0;
+}
+
+static void syscall_read_env(x86_interrupt_frame_t *frame) {
+  char *value = env_read((char *)(uintptr_t)frame->ebx);
+  if (value) {
+    strcpy((char *)(uintptr_t)frame->ecx, value);
+    frame->eax = 1;
+  } else {
+    frame->eax = 0;
+  }
+}
+
+static void syscall_path_without_drive(x86_interrupt_frame_t *frame) {
+  vfs_getPath_no_drive((char *)(uintptr_t)frame->ebx);
+}
+
+static void syscall_current_drive(x86_interrupt_frame_t *frame) {
+  frame->eax = current_task()->nfs->drive;
+}
+
+static void syscall_execute(x86_interrupt_frame_t *frame) {
+  frame->eax = os_execute((char *)(uintptr_t)frame->ebx,
+                          (char *)(uintptr_t)frame->ecx);
+}
+
+static void syscall_clear(x86_interrupt_frame_t *frame) {
+  (void)frame;
+  clear();
+}
+
+static void syscall_mount_operation(x86_interrupt_frame_t *frame) {
+  switch (frame->eax) {
+  case SYSCALL_MOUNT_CHECK:
+    frame->eax = vfs_check_mount(frame->ebx);
+    break;
+  case SYSCALL_MOUNT:
+    frame->eax = vfs_mount_disk(frame->ebx, frame->ecx);
+    break;
+  case SYSCALL_CHANGE_DISK:
+    vfs_change_disk(frame->ebx);
+    break;
+  case SYSCALL_UNMOUNT:
+    vfs_unmount_disk(frame->ebx);
+    break;
+  }
+}
+
+static void syscall_memory_info(x86_interrupt_frame_t *frame) {
+  if (frame->eax == SYSCALL_MEMORY_SIZE) {
+    frame->eax = memsize;
+    return;
+  }
+
+  uint32_t used_pages = 0;
+  for (unsigned i = 0; i < div_round_up(memsize, 0x1000); i++) {
+    if (pages[i].count) {
+      used_pages++;
+    }
+  }
+  frame->eax = used_pages;
+}
+
+static void syscall_delete_file(x86_interrupt_frame_t *frame) {
+  frame->eax = vfs_delfile((char *)(uintptr_t)frame->edx);
+}
+
+static void syscall_change_path(x86_interrupt_frame_t *frame) {
+  frame->eax = vfs_change_path((char *)(uintptr_t)frame->edx);
+}
+
+static void syscall_tty_cursor(x86_interrupt_frame_t *frame) {
+  if (frame->eax == SYSCALL_CURSOR_START) {
+    tty_start_curor_moving(current_task()->TTY);
+  } else {
+    tty_stop_cursor_moving(current_task()->TTY);
+  }
+}
+
+static void syscall_tty_size(x86_interrupt_frame_t *frame) {
+  if (frame->eax == SYSCALL_TTY_WIDTH) {
+    frame->eax = current_task()->TTY->xsize;
+  } else {
+    frame->eax = current_task()->TTY->ysize;
+  }
+}
+
+static void syscall_rename(x86_interrupt_frame_t *frame) {
+  vfs_renamefile((char *)(uintptr_t)frame->ebx,
+                 (char *)(uintptr_t)frame->ecx);
+}
+
+static void syscall_log(x86_interrupt_frame_t *frame) {
+  logk((char *)(uintptr_t)frame->ebx);
+}
+
+static void syscall_signal_handler(x86_interrupt_frame_t *frame) {
+  if (frame->ebx >= sizeof(current_task()->handler) /
+                        sizeof(current_task()->handler[0])) {
+    frame->eax = -1;
+    return;
+  }
+  unsigned old_handler = current_task()->handler[frame->ebx];
+  set_signal_handler(frame->ebx, frame->ecx);
+  frame->eax = old_handler;
+}
+
+static void syscall_fork(x86_interrupt_frame_t *frame) {
+  frame->eax = task_fork();
+}
+
+static void syscall_wait(x86_interrupt_frame_t *frame) {
+  frame->eax = waittid(frame->ebx);
+}
+
+static void syscall_set_rt(x86_interrupt_frame_t *frame) {
+  extern unsigned m_eip, m_cr3;
+  m_eip = frame->ebx;
+  m_cr3 = current_task()->pde;
+}
+
+static void syscall_mouse_enable(x86_interrupt_frame_t *frame) {
+  (void)frame;
+  mouse_ready(&mdec);
+}
+
+static void syscall_mouse_data(x86_interrupt_frame_t *frame) {
+  if (frame->eax == SYSCALL_MOUSE_PENDING) {
+    frame->eax = fifo8_status(task_get_mouse_fifo(current_task()));
+  } else {
+    frame->eax = fifo8_get(task_get_mouse_fifo(current_task()));
+  }
+}
+
+static void syscall_yield(x86_interrupt_frame_t *frame) {
+  (void)frame;
+  if (current_task()->ready == 0) {
     io_cli();
-    for (int i = 0; i < count; i++) {
-      unsigned paddr;
-      paddr = page_get_phy_pde(b1 + i * 0x1000, b_pde);
-      page_set_physics_attr_pde(
-          a1 + i * 0x1000, (void *)(uintptr_t)paddr,
-          PG_P | PG_USU | PG_RWW | PG_SHARED, a_pde);
-    }
+    task_next();
     io_sti();
-  } else if (eax == 0x58) {
-    io_cli();
-    mtask *t = get_task(ebx);
-    if(t->urgent) {
+  } else {
+    current_task()->ready = 0;
+  }
+}
+
+static void syscall_tty_object(x86_interrupt_frame_t *frame) {
+  switch (frame->eax) {
+  case SYSCALL_TTY_ALLOC:
+    frame->eax = (uintptr_t)fartty_alloc(
+        (void *)(uintptr_t)frame->ebx, frame->ecx, current_task()->pde,
+        frame->edx, frame->esi);
+    break;
+  case SYSCALL_TTY_SET:
+    tty_set(get_task(frame->ebx), (struct tty *)(uintptr_t)frame->ecx);
+    break;
+  case SYSCALL_TTY_FREE:
+    tty_free((struct tty *)(uintptr_t)frame->ebx);
+    break;
+  }
+}
+
+static void syscall_return_to_app(x86_interrupt_frame_t *frame) {
+  current_task()->ret_to_app = frame->ebx;
+}
+
+static void syscall_use_keyboard(x86_interrupt_frame_t *frame) {
+  (void)frame;
+  extern int disable_flag;
+  extern mtask *keyboard_use_task;
+  disable_flag = 1;
+  keyboard_use_task = current_task();
+}
+
+static void syscall_custom_handler(x86_interrupt_frame_t *frame) {
+  if (!custom_handler) {
+    custom_handler = frame->ebx;
+    custom_handler_pde = current_task()->pde;
+    custom_handler_owner = current_task();
+  }
+}
+
+static void syscall_map_memory(x86_interrupt_frame_t *frame) {
+  unsigned target = frame->ebx & 0xfffff000;
+  unsigned size = frame->ecx;
+  unsigned target_pde = frame->edx;
+  unsigned source = frame->esi & 0xfffff000;
+  unsigned source_pde = frame->edi;
+  unsigned count = div_round_up(size, 0x1000);
+
+  io_cli();
+  for (unsigned i = 0; i < count; i++) {
+    unsigned physical = page_get_phy_pde(source + i * 0x1000, source_pde);
+    page_set_physics_attr_pde(
+        target + i * 0x1000, (void *)(uintptr_t)physical,
+        PG_P | PG_USU | PG_RWW | PG_SHARED, target_pde);
+  }
+  io_sti();
+}
+
+static void syscall_task_level(x86_interrupt_frame_t *frame) {
+  io_cli();
+  mtask *task = get_task(frame->ebx);
+  if (task == NULL) {
+    io_sti();
+    return;
+  }
+
+  if (frame->eax == SYSCALL_TASK_LEVEL_HIGH) {
+    if (task->urgent) {
       io_sti();
       return;
     }
-    t->urgent = 1;
-    t->timeout = 5;
-    t->running = 0;
-    io_sti();
-  } else if (eax == 0x59) {
-    io_cli();
-    mtask *t = get_task(ebx);
-    t->timeout = 1;
-    t->running = 0;
-    t->urgent = 0;
-    io_sti();
-  } else if (eax == 0x5a) {
-    reg[EAX] = module_load((const char *)(uintptr_t)(ebx + ds_base));
-  } else if (eax == 0x5b) {
-    reg[EAX] = module_unload((const char *)(uintptr_t)(ebx + ds_base));
-  } else if (eax == 0x5c) {
-    reg[EAX] = module_list((module_handle_t *)(uintptr_t)(ebx + ds_base), ecx);
-  } else if (eax == 0x5d) {
-    reg[EAX] = ipc_syscall(ebx, (uint32_t)ecx, (uint32_t)edx);
+    task->urgent = 1;
+    task->timeout = 5;
+  } else {
+    task->urgent = 0;
+    task->timeout = 1;
   }
-  return;
+  task->running = 0;
+  io_sti();
 }
 
-void custom_inthandler(int edi, int esi, int ebp, int esp, int ebx, int edx,
-                       int ecx, int eax) {
-  unsigned *alloc_sz = current_task()->alloc_size;
-  unsigned alloc_ar = current_task()->alloc_addr;
-  unsigned tid = current_task()->tid;
-  if (!custom_handler)
-    return;
+static void syscall_module(x86_interrupt_frame_t *frame) {
+  switch (frame->eax) {
+  case SYSCALL_MODULE_LOAD:
+    frame->eax = module_load((const char *)(uintptr_t)frame->ebx);
+    break;
+  case SYSCALL_MODULE_UNLOAD:
+    frame->eax = module_unload((const char *)(uintptr_t)frame->ebx);
+    break;
+  case SYSCALL_MODULE_LIST:
+    frame->eax = module_list((module_handle_t *)(uintptr_t)frame->ebx,
+                             frame->ecx);
+    break;
+  }
+}
 
-  current_task()->alloc_size = custom_handler_owner->alloc_size;
-  current_task()->alloc_addr = custom_handler_owner->alloc_addr;
-  current_task()->tid = custom_handler_owner->tid;
-  int *reg = &eax + 1; /* eax后面的地址*/
-  unsigned args[] = {edi,
-                     esi,
-                     ebp,
-                     esp,
-                     ebx,
-                     edx,
-                     ecx,
-                     eax,
-                     custom_handler_pde,
-                     current_task()->pde,
-                     tid};
-  if (ebx) {
-    char *s1 = malloc(strlen((char *)(uintptr_t)ebx) + 1);
-    memcpy(s1, (void *)(uintptr_t)ebx, strlen((char *)(uintptr_t)ebx) + 1);
-    args[EBX] = (uintptr_t)s1;
+static void syscall_ipc(x86_interrupt_frame_t *frame) {
+  frame->eax = ipc_syscall_dispatch(frame->ebx, frame->ecx, frame->edx);
+}
+
+static const syscall_handler_t syscall_handlers[SYSCALL_COUNT] = {
+    [SYSCALL_VERSION] = syscall_version,
+    [SYSCALL_PRINT_CHARACTER] = syscall_print_character,
+    [SYSCALL_LEGACY_GRAPHICS] = syscall_legacy_graphics,
+    [SYSCALL_SET_CURSOR] = syscall_set_cursor,
+    [SYSCALL_PRINT_STRING] = syscall_print_string,
+    [SYSCALL_SLEEP] = syscall_sleep,
+    [SYSCALL_HEAP_ADDRESS] = syscall_heap_info,
+    [SYSCALL_HEAP_SIZE] = syscall_heap_info,
+    [SYSCALL_TEXT_BOX] = syscall_text_box,
+    [SYSCALL_BEEP] = syscall_beep,
+    [SYSCALL_CURSOR_POSITION] = syscall_cursor_position,
+    [SYSCALL_MOUSE_EVENT] = syscall_mouse_event,
+    [SYSCALL_MOUSE_SUPPORTED] = syscall_mouse_supported,
+    [SYSCALL_INPUT] = syscall_input,
+    [SYSCALL_RUN_COMMAND] = syscall_run_command,
+    [SYSCALL_FILE_OPERATION] = syscall_file_operation,
+    [SYSCALL_COMMAND_LINE] = syscall_command_line,
+    [SYSCALL_COPY] = syscall_copy,
+    [SYSCALL_KEYBOARD_HIT] = syscall_keyboard_hit,
+    [SYSCALL_EXIT] = syscall_exit,
+    [SYSCALL_VBE_CONTROL] = syscall_vbe_control,
+    [SYSCALL_BIOS_VIDEO] = syscall_bios_video,
+    [SYSCALL_TASK_CONTROL] = syscall_task_control,
+    [SYSCALL_TTY_COLOR] = syscall_tty_color,
+    [SYSCALL_TIMER_CONTROL] = syscall_timer_control,
+    [SYSCALL_FORMAT] = syscall_format,
+    [SYSCALL_RTC] = syscall_rtc,
+    [SYSCALL_DRAW_PIXEL] = syscall_framebuffer,
+    [SYSCALL_READ_PIXEL] = syscall_framebuffer,
+    [SYSCALL_COPY_FRAMEBUFFER] = syscall_framebuffer,
+    [SYSCALL_DRAW_BUFFER] = syscall_framebuffer,
+    [SYSCALL_SCROLL_FRAMEBUFFER] = syscall_framebuffer,
+    [SYSCALL_DRAW_BOX] = syscall_framebuffer,
+    [SYSCALL_TIMESTAMP] = syscall_timestamp,
+    [SYSCALL_UPTIME] = syscall_uptime,
+    [SYSCALL_RESET_FPU] = syscall_reset_fpu,
+    [SYSCALL_KEYBOARD_SETUP] = syscall_keyboard_setup,
+    [SYSCALL_KEY_PRESS_PENDING] = syscall_keyboard_fifo,
+    [SYSCALL_KEY_RELEASE_PENDING] = syscall_keyboard_fifo,
+    [SYSCALL_KEY_PRESS_READ] = syscall_keyboard_fifo,
+    [SYSCALL_KEY_RELEASE_READ] = syscall_keyboard_fifo,
+    [SYSCALL_GROW_HEAP] = syscall_grow_heap,
+    [SYSCALL_READ_ENV] = syscall_read_env,
+    [SYSCALL_PATH_WITHOUT_DRIVE] = syscall_path_without_drive,
+    [SYSCALL_CURRENT_DRIVE] = syscall_current_drive,
+    [SYSCALL_EXECUTE] = syscall_execute,
+    [SYSCALL_CLEAR] = syscall_clear,
+    [SYSCALL_MOUNT_CHECK] = syscall_mount_operation,
+    [SYSCALL_MOUNT] = syscall_mount_operation,
+    [SYSCALL_CHANGE_DISK] = syscall_mount_operation,
+    [SYSCALL_MEMORY_SIZE] = syscall_memory_info,
+    [SYSCALL_USED_PAGES] = syscall_memory_info,
+    [SYSCALL_DELETE_FILE] = syscall_delete_file,
+    [SYSCALL_CHANGE_PATH] = syscall_change_path,
+    [SYSCALL_CURSOR_START] = syscall_tty_cursor,
+    [SYSCALL_CURSOR_STOP] = syscall_tty_cursor,
+    [SYSCALL_UNMOUNT] = syscall_mount_operation,
+    [SYSCALL_TTY_WIDTH] = syscall_tty_size,
+    [SYSCALL_TTY_HEIGHT] = syscall_tty_size,
+    [SYSCALL_RENAME] = syscall_rename,
+    [SYSCALL_LOG] = syscall_log,
+    [SYSCALL_SIGNAL_HANDLER] = syscall_signal_handler,
+    [SYSCALL_FORK] = syscall_fork,
+    [SYSCALL_WAIT] = syscall_wait,
+    [SYSCALL_SET_RT] = syscall_set_rt,
+    [SYSCALL_MOUSE_ENABLE] = syscall_mouse_enable,
+    [SYSCALL_MOUSE_PENDING] = syscall_mouse_data,
+    [SYSCALL_MOUSE_READ] = syscall_mouse_data,
+    [SYSCALL_YIELD] = syscall_yield,
+    [SYSCALL_TTY_ALLOC] = syscall_tty_object,
+    [SYSCALL_TTY_SET] = syscall_tty_object,
+    [SYSCALL_TTY_FREE] = syscall_tty_object,
+    [SYSCALL_RETURN_TO_APP] = syscall_return_to_app,
+    [SYSCALL_USE_KEYBOARD] = syscall_use_keyboard,
+    [SYSCALL_CUSTOM_HANDLER] = syscall_custom_handler,
+    [SYSCALL_MAP_MEMORY] = syscall_map_memory,
+    [SYSCALL_TASK_LEVEL_HIGH] = syscall_task_level,
+    [SYSCALL_TASK_LEVEL_NORMAL] = syscall_task_level,
+    [SYSCALL_MODULE_LOAD] = syscall_module,
+    [SYSCALL_MODULE_UNLOAD] = syscall_module,
+    [SYSCALL_MODULE_LIST] = syscall_module,
+    [SYSCALL_IPC] = syscall_ipc,
+};
+
+void x86_syscall_dispatch(x86_interrupt_frame_t *frame) {
+  io_sti();
+  if (frame->eax >= SYSCALL_COUNT || syscall_handlers[frame->eax] == NULL) {
+    return;
   }
-  call_across_page((uint32_t (*)(void *))(uintptr_t)custom_handler, custom_handler_pde, args);
-  if (ebx)
-    free((void *)(uintptr_t)args[EBX]);
-  args[EBX] = ebx;
-  for (int i = 0; i < 8; i++) {
-    reg[i] = args[i];
+  syscall_handlers[frame->eax](frame);
+}
+
+void x86_custom_syscall_dispatch(x86_interrupt_frame_t *frame) {
+  if (!custom_handler || custom_handler_owner == NULL) {
+    return;
   }
-  current_task()->alloc_size = alloc_sz;
-  current_task()->alloc_addr = alloc_ar;
-  current_task()->tid = tid;
+
+  mtask *task = current_task();
+  unsigned *alloc_size = task->alloc_size;
+  unsigned alloc_addr = task->alloc_addr;
+  unsigned tid = task->tid;
+  task->alloc_size = custom_handler_owner->alloc_size;
+  task->alloc_addr = custom_handler_owner->alloc_addr;
+  task->tid = custom_handler_owner->tid;
+
+  unsigned args[] = {
+      frame->edi,         frame->esi, frame->ebp, frame->esp_dummy,
+      frame->ebx,         frame->edx, frame->ecx, frame->eax,
+      custom_handler_pde, task->pde,  tid,
+  };
+  char *argument_copy = NULL;
+  if (frame->ebx) {
+    char *source = (char *)(uintptr_t)frame->ebx;
+    argument_copy = malloc(strlen(source) + 1);
+    strcpy(argument_copy, source);
+    args[4] = (uintptr_t)argument_copy;
+  }
+
+  call_across_page((uint32_t(*)(void *))(uintptr_t)custom_handler,
+                   custom_handler_pde, args);
+  if (argument_copy) {
+    free(argument_copy);
+    args[4] = frame->ebx;
+  }
+
+  frame->edi = args[0];
+  frame->esi = args[1];
+  frame->ebp = args[2];
+  frame->esp_dummy = args[3];
+  frame->ebx = args[4];
+  frame->edx = args[5];
+  frame->ecx = args[6];
+  frame->eax = args[7];
+  task->alloc_size = alloc_size;
+  task->alloc_addr = alloc_addr;
+  task->tid = tid;
 }

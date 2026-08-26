@@ -1,4 +1,5 @@
 #include <ELF.h>
+#include <arch/x86/interrupt.h>
 #include <dos.h>
 extern char *shell_data;
 extern struct TSS32 tss;
@@ -18,6 +19,7 @@ unsigned div_round_up(unsigned num, unsigned size);
 bool get_interrupt_state(void);
 void task_to_user_mode_shell(void);
 
+#ifdef KERNEL_PERF
 static int task_is_boot_shell_name(const char *filename) {
   const char *suffix;
   unsigned len;
@@ -39,6 +41,7 @@ static int task_is_boot_shell_name(const char *filename) {
          (suffix[5] == 'i' || suffix[5] == 'I') &&
          (suffix[6] == 'n' || suffix[6] == 'N');
 }
+#endif
 
 static inline unsigned page_entry_addr(uint32_t entry) {
   return entry & PAGE_ENTRY_ADDR_MASK;
@@ -146,7 +149,6 @@ void task_app() {
   task_app_setup_memory_size();
   pde = task_app_get_pde();
   task_app_clone_user_space(pde);
-  char tmp[100];
   task_to_user_mode_elf(filename);
   for (;;)
     ;
@@ -171,7 +173,6 @@ void task_shell() {
   task_clone_user_page_tables(pde);
   io_sti();
   set_cr3(pde);
-  char tmp[100];
   task_to_user_mode_shell();
   for (;;)
     ;
@@ -180,8 +181,8 @@ void task_to_user_mode_shell() {
 
   unsigned addr = (unsigned)current_task()->top;
 
-  addr -= sizeof(intr_frame_t);
-  intr_frame_t *iframe = (intr_frame_t *)(addr);
+  addr -= sizeof(x86_interrupt_frame_t);
+  x86_interrupt_frame_t *iframe = (x86_interrupt_frame_t *)(addr);
 
   iframe->edi = 1;
   iframe->esi = 2;
@@ -247,8 +248,8 @@ void task_to_user_mode_elf(char *filename) {
 
   unsigned addr = (unsigned)current_task()->top;
 
-  addr -= sizeof(intr_frame_t);
-  intr_frame_t *iframe = (intr_frame_t *)(addr);
+  addr -= sizeof(x86_interrupt_frame_t);
+  x86_interrupt_frame_t *iframe = (x86_interrupt_frame_t *)(addr);
 
   iframe->edi = 1;
   iframe->esi = 2;
@@ -412,7 +413,6 @@ void os_execute_no_ret(char *filename, char *line) {
     return;
   }
   t->ptid = 0; /* detached tasks are adopted by the idle reaper */
-  struct tty *tty_backup = current_task()->TTY;
   t->TTY = current_task()->TTY;
   current_task()->TTY = NULL;
   unsigned *r = page_malloc_one_no_mark();
