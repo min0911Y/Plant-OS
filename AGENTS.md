@@ -30,7 +30,9 @@
 - `kernel/fs/`：FAT、PFS、ISO9660、VFS、ELF 加载及路径/文件实现。
 - `kernel/io/`：文本/图形显示、TTY、输入栈和日志。
 - `kernel/net/`：以太网到 TCP/UDP、DHCP、DNS、HTTP、FTP 等协议实现。
-- `kernel/cmd/`、`kernel/mst/`、`kernel/std/`、`kernel/modules/`：内核命令、MST 脚本、基础运行库和可加载模块。
+<!-- 过时：`kernel/cmd/` 保存内核命令实现。 -->
+- `kernel/cmd/`：系统调用到用户态 `apps/psh` 命令模式的适配层。不得恢复旧内核 `if/else` 命令解析器及其 `chat`、`netgobang` 实现；构造执行请求时 `argv[0]` 必须是实际 shell `psh.bin`。
+- `kernel/mst/`、`kernel/std/`、`kernel/modules/`：MST 脚本、基础运行库和可加载模块。
 - `kernel/include/`：内核公共声明；很多模块通过 `dos.h`、`define.h` 等大头文件耦合。
 - `kernel/include/arch/x86/`：x86 专属的中断帧、入口和其他架构 ABI 声明；通用内核头文件不应重新定义这些布局。
 - `kernel/res/`：打包进镜像的资源；资源是否进入镜像由 `kernel/Makefile` 中显式的 `mcopy` 命令决定。

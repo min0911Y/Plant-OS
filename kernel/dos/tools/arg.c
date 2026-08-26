@@ -1,4 +1,3 @@
-#include <cmd.h>
 #include <string.h>
 int Get_Arg(char *Arg, char *CmdLine, int Count) {
   if (Count == 0) {

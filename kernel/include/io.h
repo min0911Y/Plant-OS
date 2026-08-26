@@ -23,7 +23,6 @@ void screen_ne_TextMode(struct tty *res);
 void clear_TextMode(struct tty *res);
 void Draw_Box_TextMode(struct tty *res, int x, int y, int x1, int y1,
                        unsigned char color);
-void AddShell_TextMode();
 void SwitchShell_TextMode(int i);
 bool now_tty_TextMode(struct tty *res);
 // tty.c
@@ -66,7 +65,6 @@ bool now_tty_HighTextMode(struct tty *res);
 void SwitchToHighTextMode();
 void Draw_Box_HighTextMode(struct tty *res, int x, int y, int x1, int y1,
                            unsigned char color);
-void AddShell_HighTextMode();
 void SwitchShell_HighTextMode(int i);
 // Draw.c
 void Draw_Circle_Hollow_32(unsigned char *vram, int xsize, int x, int y, int r,

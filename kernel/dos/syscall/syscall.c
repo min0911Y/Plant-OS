@@ -1,5 +1,7 @@
 #include <arch/x86/interrupt.h>
+#include <cmd.h>
 #include <dos.h>
+#include <limits.h>
 
 #define USER_SPACE_START 0x70000000u
 #define USER_HEAP_END 0xf0000000u
@@ -49,6 +51,31 @@ static int user_range_ok(uint32_t addr, uint32_t size) {
     return 0;
   }
   return size <= USER_HEAP_END - addr;
+}
+
+static char *copy_user_string(uint32_t addr, size_t *length_out) {
+  if (!user_range_ok(addr, 1)) {
+    return NULL;
+  }
+
+  const char *source = (const char *)(uintptr_t)addr;
+  const size_t available = USER_HEAP_END - addr;
+  size_t length = 0;
+  while (length < available && source[length] != '\0') {
+    length++;
+  }
+  if (length == available || length >= INT_MAX) {
+    return NULL;
+  }
+
+  char *copy = malloc(length + 1);
+  if (copy == NULL) {
+    return NULL;
+  }
+  memcpy(copy, source, length);
+  copy[length] = '\0';
+  *length_out = length;
+  return copy;
 }
 
 enum ipc_syscall_id {
@@ -457,8 +484,16 @@ static void syscall_input(x86_interrupt_frame_t *frame) {
   }
 }
 
-static void syscall_run_command(x86_interrupt_frame_t *frame) {
-  frame->eax = command_run((char *)(uintptr_t)frame->edx);
+static void syscall_run_shell_command(x86_interrupt_frame_t *frame) {
+  size_t command_length;
+  char *command = copy_user_string(frame->edx, &command_length);
+  if (command == NULL) {
+    frame->eax = -1;
+    return;
+  }
+
+  frame->eax = run_shell_command(command, command_length);
+  free(command);
 }
 
 static void syscall_file_operation(x86_interrupt_frame_t *frame) {
@@ -1076,7 +1111,7 @@ static const syscall_handler_t syscall_handlers[SYSCALL_COUNT] = {
     [SYSCALL_MOUSE_EVENT] = syscall_mouse_event,
     [SYSCALL_MOUSE_SUPPORTED] = syscall_mouse_supported,
     [SYSCALL_INPUT] = syscall_input,
-    [SYSCALL_RUN_COMMAND] = syscall_run_command,
+    [SYSCALL_RUN_COMMAND] = syscall_run_shell_command,
     [SYSCALL_FILE_OPERATION] = syscall_file_operation,
     [SYSCALL_COMMAND_LINE] = syscall_command_line,
     [SYSCALL_COPY] = syscall_copy,

@@ -1,90 +1,11 @@
 // Powerint DOS 386
 // Copyright (C) 2021-2022 zhouzhihao & min0911
 #include <dos.h>
-#include <mst.h>
 uint32_t running_mode = POWERINTDOS;  // 运行模式
 uint32_t Path_Addr;
 unsigned char *font, *ascfont, *hzkfont;
 unsigned char* IVT;
 
-void c_pgui_main(void);
-void shell(void) {
-//   ide_initialize(0x1F0, 0x3F6, 0x170, 0x376, 0x000);
-//   init_palette();
-//   vfs_mount_disk(current_task()->drive, current_task()->drive);
-//   vfs_change_disk(current_task()->drive);
-//   env_init();
-//   init_networkCTL();
-//   init_network();
-
-//   if (env_read("network") == NULL) {
-//     printk("would you like to enable network?(y/n)\n");
-//     switch (getch()) {
-//       case 'y':
-//       case 'Y':
-//         env_write("network", "enable");
-//         break;
-//       default:
-//         env_write("network", "disable");
-//         break;
-//     }
-//   }
-//   if (strcmp(env_read("network"), "enable") == 0) {
-//     init_card();
-//     //for(;;);
-//   }
-//   init_ok_flag = 1;
-//   /*到这里 系统的初始化才真正结束*/
-//   font = (unsigned char*)"/other/font.bin";
-//   FILE* fp = fopen("/other/font.bin", "r");
-//   ascfont = fp->buffer;
-//   fp = fopen("/other/hzk16", "r");
-//   hzkfont = fp->buffer;
-// retry:
-//   if (!(Path_Addr = env_read("path"))) {
-//     env_write("path", "");
-//     goto retry;
-//   }
-//   clear();
-
-//   printk("Please choose your boot mode:\n");
-//   printk("1. TextMode 80 * 25\n");
-//   printk("2. HighTextMode 128 * 48\n");
-//   printk("Input:");
-//   unsigned char choice;
-//   for (;;) {
-//     choice = getch();
-//     if (choice == '1') {
-//       running_mode = POWERINTDOS;
-//       clear();
-//       break;
-//     } else if (choice == '2') {
-//       running_mode = HIGHTEXTMODE;
-//       SwitchToHighTextMode();
-//       break;
-//     }
-//   }
-//   if (fsz("AUTOEXEC.BAT") == -1) {
-//     printk("Boot Warning:No AUTOEXEC.BAT in Drive %c\n", current_task()->drive);
-//   } else {
-//     run_bat("AUTOEXEC.BAT");
-//   }
-//   extern struct tty* tty_default;
-//   tty_set(current_task(), tty_default);
-//   shell_handler();
-}
-void shell_handler() {
-  // struct TASK* task = current_task();
-  // task->line = (char*)page_malloc(1024);
-  // char buf[255];
-  // while (1) {
-  //   vfs_getPath(buf);
-  //   printk("%s>", buf);
-  //   clean(task->line, 1024);
-  //   input(task->line, 1024);
-  //   command_run(task->line);
-  // }
-}
 struct tty *now_tty() {
   extern struct List *tty_list;
   struct tty *n;
@@ -95,6 +16,7 @@ struct tty *now_tty() {
       return n;
     }
   }
+  return NULL;
 }
 
 

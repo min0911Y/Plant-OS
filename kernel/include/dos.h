@@ -1,6 +1,5 @@
 #ifndef _DOS_H
 #define _DOS_H
-#include <cmd.h>
 #include <ctypes.h>
 #include <define.h>
 #include <drivers.h>
@@ -49,7 +48,7 @@ void task_to_user_mode_elf(char *filename);
 void task_kill(unsigned tid);
 void task_exit(unsigned status);
 int os_execute(char *filename, char *line);
-int os_execute_shell(char *line);
+int os_execute_shell(const char *line, size_t line_length);
 void idle();
 void init();
 extern uint64_t global_time;
@@ -239,8 +238,6 @@ bool CDROM_Read(unsigned int lba, unsigned int number, void *buffer,
 bool DiskReady(char drive);
 int getReadyDisk();
 // kernelc.c
-void shell(void);
-void shell_handler();
 struct tty *now_tty();
 void task_sr1();
 void task_sr2();

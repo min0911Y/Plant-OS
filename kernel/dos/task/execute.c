@@ -1,6 +1,7 @@
 #include <ELF.h>
 #include <arch/x86/interrupt.h>
 #include <dos.h>
+#include <limits.h>
 extern char *shell_data;
 extern struct TSS32 tss;
 extern struct PAGE_INFO *pages;
@@ -376,12 +377,24 @@ int os_execute(char *filename, char *line) {
 
   return status;
 }
-int os_execute_shell(char *line) {
+int os_execute_shell(const char *line, size_t line_length) {
+  if (line == NULL || line_length >= INT_MAX) {
+    return -1;
+  }
+
+  char *line_copy = malloc(line_length + 1);
+  if (line_copy == NULL) {
+    return -1;
+  }
+  memcpy(line_copy, line, line_length);
+  line_copy[line_length] = '\0';
+
   extern int init_ok_flag;
   init_ok_flag = 0;
   mtask *t = create_task((uintptr_t)task_shell, 0, 1, 1);
   if (t == NULL) {
     init_ok_flag = 1;
+    free(line_copy);
     return -1;
   }
   vfs_clone_for_task(current_task(), t);
@@ -394,15 +407,13 @@ int os_execute_shell(char *line) {
   struct tty *tty_backup = current_task()->TTY;
   t->TTY = current_task()->TTY;
   current_task()->TTY = NULL;
-  char *p1 = malloc(strlen(line) + 1);
-  strcpy(p1, line);
   int o = current_task()->fifosleep;
   current_task()->fifosleep = 1;
-  t->line = p1;
+  t->line = line_copy;
   // io_sti();
   unsigned status = waittid(t->tid);
   current_task()->fifosleep = o;
-  free(p1);
+  free(line_copy);
   current_task()->TTY = tty_backup;
   current_task()->sigint_up = old;
   return status;

@@ -84,32 +84,6 @@ void Draw_Box_TextMode(struct tty *res, int x, int y, int x1, int y1,
     }
   }
 }
-void AddShell_TextMode() {
-  // char *vram = page_malloc(160 * 25);
-  // struct tty *ntty =
-  //     tty_alloc(vram, 80, 25, putchar_TextMode, MoveCursor_TextMode,
-  //               clear_TextMode, screen_ne_TextMode, Draw_Box_TextMode);
-  // io_cli();
-  // mtask *ntask =
-  //     register_task("Shell", 1, 2 * 8, (int)shell_handler, 1 * 8, 1 * 8,
-  //             (unsigned int)page_malloc(128 * 1024) + 128 * 1024);
-  // char *kfifo = (struct FIFO8 *)page_malloc(sizeof(struct FIFO8));
-  // char *mfifo = (struct FIFO8 *)page_malloc(sizeof(struct FIFO8));
-  // char *kbuf = (char *)page_malloc(4096);
-  // char *mbuf = (char *)page_malloc(4096);
-  // fifo8_init(kfifo, 4096, kbuf);
-  // fifo8_init(mfifo, 4096, mbuf);
-  // task_set_fifo(ntask, kfifo, mfifo);
-  // void *alloc_addr = (void *)page_malloc(512 * 1024);
-  // ntask->alloc_addr = alloc_addr;
-  // ntask->alloc_size = 512 * 1024;
-  // ntask->mm = memory_init((uint32_t)alloc_addr, 512 * 1024);
-  // ntask->fifosleep = 3;
-  // int fg = tty_set(ntask, ntty);
-  // //  printk("set vram = %08x\n",ntty->vram);
-  // ntty->clear(ntty);
-  // io_sti();
-}
 void SwitchShell_TextMode(int i) {
   // io_cli();
   // extern struct List *tty_list;
