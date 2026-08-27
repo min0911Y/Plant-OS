@@ -1,5 +1,6 @@
 #ifndef _DEFINE_H
 #define _DEFINE_H
+#include <arch.h>
 #include <ctypes.h>
 #include <stdarg.h>
 #include <stddef.h>
@@ -189,10 +190,6 @@ typedef struct fpu_t {
 //   uint32_t *gdt_data;
 //   uint32_t pde;
 // } __attribute__((packed));
-typedef struct {
-  uint32_t eax, ebx, ecx, edx, esi, edi, ebp;
-  uint32_t eip;
-} stack_frame;
 enum STATE {
   EMPTY,
   RUNNING,
@@ -215,7 +212,7 @@ enum WAIT_REASON {
   WAIT_REASON_IPC
 };
 typedef struct mtask {
-  stack_frame *esp;
+  arch_task_context_t *context;
   unsigned pde;
   unsigned user_mode;
   unsigned top;

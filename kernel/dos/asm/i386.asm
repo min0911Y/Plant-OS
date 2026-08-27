@@ -302,46 +302,6 @@ check:
 	int 36h
 .hlt:
 	jmp .hlt
-extern current
-global task_switch,task_start
-task_switch:
-	push ebp
-	mov ebp,esp
-	push edi
-	push esi
-	push edx
-	push ecx
-	push ebx
-	push eax
-	mov eax,[current]
-	mov [eax],esp ; 保存esp
-	mov eax,[ebp + 8] ; next
-	mov [current],eax 
-	mov esp,[eax]
-	mov eax,[eax+4]
-	mov cr3,eax
-	pop eax
-	pop ebx
-	pop ecx
-	pop edx
-	pop esi
-	pop edi
-	pop ebp
-	ret
-task_start:
-	mov eax,[esp + 4 ] ; next
-	mov [current],eax 
-	mov esp,[eax]
-	mov eax,[eax+4]
-	mov cr3,eax
-	pop eax
-	pop ebx
-	pop ecx
-	pop edx
-	pop esi
-	pop edi
-	pop ebp
-	ret
 return_to_app:
   mov eax,0x56
   int 0x36

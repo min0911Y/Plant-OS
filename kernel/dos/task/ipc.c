@@ -172,7 +172,7 @@ static bool ipc_deadline_passed(uint32_t deadline) {
 // 让出 CPU 等待事件（有消息到达、队列腾出位置，或者等到超时）。
 // 调用前必须处于关中断状态，返回时中断已经打开。
 //
-// 注意：task_next() / task_switch() 不可重入，如果开着中断去切换，
+// 注意：task_next() / arch_task_switch() 不可重入，如果开着中断去切换，
 // 时钟中断可能正好落在切换过程中再调一次 task_next，把任务的内核栈指针搞乱
 // （表现为返回用户态时 eip 变成随机值）。所以这里一直关着中断切换，
 // 切回来之后再开中断。

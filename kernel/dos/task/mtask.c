@@ -12,8 +12,6 @@
 void free_pde(unsigned addr);
 unsigned pde_clone(unsigned addr);
 void gc(unsigned tid);
-void task_start(mtask *task);
-void task_switch(mtask *next);
 static void reset_task_slot(mtask *task, int tid);
 char default_drive = 'A';
 mtask m[255];
@@ -161,7 +159,7 @@ void task_next() {
     current_task()->state = READY;
   }
   
-  task_switch(next); // 调度
+  arch_task_switch(&current->context, next->context, next->pde, &current, next);
 }
 
 static mtask *create_task_impl(uintptr_t eip, unsigned esp, unsigned ticks,
@@ -196,8 +194,9 @@ static mtask *create_task_impl(uintptr_t eip, unsigned esp, unsigned ticks,
   }
   uintptr_t esp_alloced = (uintptr_t)stack_base + STACK_SIZE;
   change_page_task_id(t->tid, (void *)(esp_alloced - STACK_SIZE), STACK_SIZE);
-  t->esp = (stack_frame *)(esp_alloced - sizeof(stack_frame)); // switch用到的栈帧
-  t->esp->eip = eip;                          // 设置跳转地址
+  t->context =
+      (arch_task_context_t *)(esp_alloced - sizeof(arch_task_context_t));
+  arch_task_context_init(t->context, eip);
   t->user_mode = 0;                           // 设置是否是user_mode
   bool owns_pde = false;
   if (current == NULL) {                      // 还没启用多任务
@@ -538,8 +537,7 @@ int into_mtask() {
     return -1;
   }
   x86_cr0_write(x86_cr0_read() | X86_CR0_EM | X86_CR0_TS | X86_CR0_NE);
-  task_start(&(m[0]));
-  return 0;
+  arch_task_start(m[0].context, m[0].pde, &current, &m[0]);
 }
 void task_set_fifo(mtask *task, struct FIFO8 *kfifo, struct FIFO8 *mfifo) {
   task->keyfifo = kfifo;
@@ -781,8 +779,6 @@ mtask *mtask_get_free() {
   }
   return t;
 }
-// THE FUNCTION CAN ONLY BE CALLED IN USER MODE!!!!
-void interrput_exit();
 void roc() {
   logk("ROCT\n");
   for (;;)
@@ -794,15 +790,10 @@ static void build_fork_stack(mtask *task) {
   x86_interrupt_frame_t *iframe = (x86_interrupt_frame_t *)addr;
   iframe->eax = 0;
   logk("iframe = %08x\n", iframe->eip);
-  addr -= sizeof(stack_frame);
-  stack_frame *sframe = (stack_frame *)addr;
-  sframe->ebp = 0x114514;
-  sframe->ebx = 0x114514;
-  sframe->ecx = 0x114514;
-  sframe->edx = 0x114514;
-  sframe->eip = (uintptr_t)interrput_exit;
-
-  task->esp = sframe;
+  addr -= sizeof(arch_task_context_t);
+  task->context = (arch_task_context_t *)addr;
+  arch_task_context_init(task->context,
+                         (uintptr_t)arch_task_interrupt_return);
 }
 int task_fork() {
   mtask *parent = current_task();
@@ -831,12 +822,12 @@ int task_fork() {
   }
   change_page_task_id(tid, (void *)stack, STACK_SIZE);
   uintptr_t old_stack_base = m->top - STACK_SIZE;
-  uintptr_t old_esp = (uintptr_t)m->esp;
-  uintptr_t esp_offset = old_esp - old_stack_base;
+  uintptr_t old_context = (uintptr_t)m->context;
+  uintptr_t context_offset = old_context - old_stack_base;
   memcpy((void *)stack, (void *)old_stack_base, STACK_SIZE);
   logk("s = %08x \n", old_stack_base);
   m->top = stack + STACK_SIZE;
-  m->esp = (stack_frame *)(stack + esp_offset);
+  m->context = (arch_task_context_t *)(stack + context_offset);
   m->nfs = NULL;
   m->Pkeyfifo = NULL;
   m->Ukeyfifo = NULL;
