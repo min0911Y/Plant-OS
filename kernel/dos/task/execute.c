@@ -3,6 +3,7 @@
 #include <arch/x86/interrupt.h>
 #include <arch/x86/control.h>
 #include <dos.h>
+#include <irq.h>
 #include <limits.h>
 #include <user_space.h>
 extern char *shell_data;
@@ -143,13 +144,19 @@ static bool task_clone_user_page_tables(unsigned pde) {
 }
 static __attribute__((optimize("O0"))) char *task_app_take_launch_request(void) {
   char *filename;
-  while (!current_task()->line) {
-    io_sti();
+  irq_state_t state;
+  for (;;) {
+    state = irq_save();
+    if (current_task()->line) {
+      break;
+    }
     task_next();
+    irq_restore(state);
   }
   unsigned *r = (unsigned *)current_task()->line;
   filename = (char *)r[0];
   current_task()->line = (char *)r[1];
+  irq_restore(state);
   page_free_one(r);
   logk("%08x\n", current_task()->top);
   return filename;
@@ -190,12 +197,12 @@ static __attribute__((noinline)) unsigned task_app_get_pde(void) {
 }
 
 static bool task_app_clone_user_space(unsigned pde) {
-  io_cli();
+  irq_state_t state = irq_save();
   x86_cr3_write(PDE_ADDRESS);
   logk("P1 %08x\n", current_task()->pde);
   bool cloned = task_clone_user_page_tables(pde);
   x86_cr3_write(pde);
-  io_sti();
+  irq_restore(state);
   return cloned;
 }
 
@@ -226,11 +233,11 @@ void task_shell() {
   *(current_task()->alloc_size) = 1 * 1024 * 1024;
 
   unsigned pde = current_task()->pde;
-  io_cli();
+  irq_state_t state = irq_save();
   x86_cr3_write(PDE_ADDRESS);
   bool cloned = task_clone_user_page_tables(pde);
   x86_cr3_write(pde);
-  io_sti();
+  irq_restore(state);
   if (!cloned) {
     task_exit(-1);
     return;
@@ -450,7 +457,6 @@ int os_execute_shell(const char *line, size_t line_length) {
   current_task()->sigint_up = 0;
   current_task()->TTY = NULL;
   current_task()->fifosleep = 1;
-  // io_sti();
   unsigned status = waittid(t->tid);
   current_task()->fifosleep = o;
   free(line_copy);

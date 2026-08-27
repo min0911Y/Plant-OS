@@ -3,12 +3,7 @@
 #include <drivers.h>
 
 #define Phy(seg, off) (seg * 0x10 + off)
-#define _NSETJMP 10
 
-typedef long jmp_buf[_NSETJMP];
-
-int setjmp(jmp_buf env);
-void longjmp(jmp_buf env, int val);
 int check_vbe_mode(int mode, struct VBEINFO *vinfo) {
   regs16_t regs = {0};
   regs.ax = 0x4f01;
@@ -89,7 +84,6 @@ void _get_all_mode() {
     printk("%d x %d x %d\n", info->width, info->height, info->bitsPerPixel);
     // sleep(500);
   }
-  // longjmp(env, 2);
 }
 void get_all_mode() {
   // 获取所有支持的模式

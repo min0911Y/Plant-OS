@@ -375,7 +375,6 @@ bool SwitchToHighTextMode(void) {
   return true;
 }
 void SwitchShell_HighTextMode(int i) {
-  // io_cli();
   // extern struct List* tty_list;
   // extern struct tty* tty_default;
   // struct tty* t = (struct tty*)FindForCount(i + 1, tty_list)->val;
@@ -417,7 +416,6 @@ void SwitchShell_HighTextMode(int i) {
   //   }
   // }
   // t->MoveCursor(t, t->x, t->y);
-  // io_sti();
 }
 bool now_tty_HighTextMode(struct tty *res) {
   struct SHEET *sht = (struct SHEET *)res->vram;

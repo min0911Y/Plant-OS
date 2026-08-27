@@ -16,6 +16,26 @@
 #define X86_CR0_CD (1u << 30)
 #define X86_CR0_PG (1u << 31)
 
+#define X86_EFLAGS_AC (1u << 18)
+
+static inline uint32_t x86_eflags_read(void) {
+  uint32_t value;
+  asm volatile("pushfl\n"
+               "popl %0"
+               : "=r"(value)
+               :
+               : "memory");
+  return value;
+}
+
+static inline void x86_eflags_write(uint32_t value) {
+  asm volatile("pushl %0\n"
+               "popfl"
+               :
+               : "r"(value)
+               : "cc", "memory");
+}
+
 static inline uint32_t x86_cr0_read(void) {
   uint32_t value;
   asm volatile("movl %%cr0, %0" : "=r"(value));

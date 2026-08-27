@@ -1,12 +1,16 @@
+#include <arch/x86/io.h>
 #include <dos.h>
 void MoveCursor_TextMode(struct tty *res, int x, int y) {
   res->x = x;
   res->y = y;
-  if(!res->cur_moving)
+  if (!res->cur_moving)
     return;
-  int i = y * res->xsize + x;
+  uint16_t position = (uint16_t)(y * res->xsize + x);
   if (res->vram == 0xb8000) {
-    ASM_call(i);
+    x86_port_write8(0x3d4, 0x0e);
+    x86_port_write8(0x3d5, position >> 8);
+    x86_port_write8(0x3d4, 0x0f);
+    x86_port_write8(0x3d5, position);
   }
 }
 
@@ -85,7 +89,6 @@ void Draw_Box_TextMode(struct tty *res, int x, int y, int x1, int y1,
   }
 }
 void SwitchShell_TextMode(int i) {
-  // io_cli();
   // extern struct List *tty_list;
   // extern struct tty *tty_default;
   // struct tty *t = (struct tty *)FindForCount(i, tty_list)->val;
@@ -130,7 +133,6 @@ void SwitchShell_TextMode(int i) {
   // t->vram = n->vram;
   // n->vram = buf;
   // t->MoveCursor(t, t->x, t->y);
-  // io_sti();
 }
 bool now_tty_TextMode(struct tty *res) {
   if (res->vram == 0xb8000) {

@@ -3,6 +3,7 @@
 #include <kasan.h>
 #include <limits.h>
 #include <page_fault.h>
+#include <irq.h>
 #include <user_space.h>
 #define IDX(addr) ((unsigned)addr >> 12)            // 获取 addr 的页索引
 #define DIDX(addr) (((unsigned)addr >> 22) & 0x3ff) // 获取 addr 的页目录索引
@@ -49,7 +50,7 @@ static __attribute__((noreturn)) void page_ref_panic(const char *reason,
   unsigned owner = idx < PAGE_TOTAL_COUNT ? pages[idx].task_id : 0;
   Panic_K("page reference %s idx=%08x count=%u owner=%u", (char *)reason, idx,
           count, owner);
-  io_cli();
+  (void)irq_save();
   for (;;) {
     asm volatile("hlt");
   }
@@ -714,13 +715,16 @@ void set_line_address(unsigned val, unsigned line, unsigned pde,
   }
 }
 void page_unlink(unsigned addr) {}
-void C_init_page() {
+void init_page(void) {
   init_pdepte(PDE_ADDRESS, PTE_ADDRESS, PAGE_END);
   init_page_manager(pages);
   page_set_alloced(pages, 0, PAGE_ALLOCATOR_RESERVED_END);
   page_set_alloced(pages, KASAN_SHADOW_START, KASAN_SHADOW_END);
   page_set_alloced(pages, PAGE_KERNEL_BASE, 0xffffffff);
   kasan_init();
+  /* WP 必须与分页同时开启：ring0 写只读用户页也要触发 #PF 走 COW。 */
+  x86_cr3_write(PDE_ADDRESS);
+  x86_cr0_write(x86_cr0_read() | X86_CR0_PG | X86_CR0_WP);
 }
 void pf_set(unsigned int memsize) {
   uint32_t *pte = (uint32_t *)PTE_ADDRESS;

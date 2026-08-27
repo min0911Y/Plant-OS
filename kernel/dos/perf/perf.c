@@ -1,4 +1,5 @@
 #include <dos.h>
+#include <irq.h>
 #include <perf.h>
 
 #ifdef KERNEL_PERF
@@ -94,14 +95,12 @@ static void perf_unwind_ebp(perf_sample_t *sample, uint32_t ebp,
 }
 
 void perf_boot_start(void) {
-  int eflags = io_load_eflags();
-
-  io_cli();
+  irq_state_t state = irq_save();
   perf_sample_count = 0;
   perf_dropped = 0;
   perf_dumped = 0;
   perf_running = 1;
-  io_store_eflags(eflags);
+  irq_restore(state);
 }
 
 void perf_sample_irq(const perf_irq_frame_t *frame) {
@@ -145,7 +144,7 @@ void perf_boot_stop_and_dump(const char *reason) {
     return;
   }
 
-  io_cli();
+  (void)irq_save();
   perf_running = 0;
   perf_dumped = 1;
   count = perf_sample_count;

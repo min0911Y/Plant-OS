@@ -1,3 +1,4 @@
+#include <arch/x86/io.h>
 /*
  * sb 16 driver
  * https://github.com/StevenBaby/onix/blob/dev/src/kernel/sb16.c
@@ -5,6 +6,7 @@
 #include <arch/x86/interrupt.h>
 #include <dos.h>
 #include <drivers.h>
+#include <irq.h>
 
 struct WAV16_HEADER {
   char riff[4];
@@ -77,9 +79,9 @@ void sb16_remove_task(mtask *task) {
 void sb16_handler(int* esp) {
   send_eoi(5);
 
-  io_in8(SB_INTR16);
+  x86_port_read8(SB_INTR16);
 
-  uint8_t state = io_in8(SB_STATE);
+  uint8_t state = x86_port_read8(SB_STATE);
 
   logk("sb16 handler state 0x%X...\n", state);
   sb.flag = !sb.flag;
@@ -99,32 +101,32 @@ void disable_sb16() {
   irq_mask_clear(SB16_IRQ);
 }
 static void sb_reset() {
-  io_out8(SB_RESET, 1);
+  x86_port_write8(SB_RESET, 1);
   sleep(1);
-  io_out8(SB_RESET, 0);
-  uint8_t state = io_in8(SB_READ);
+  x86_port_write8(SB_RESET, 0);
+  uint8_t state = x86_port_read8(SB_READ);
   logk("sb16 reset state 0x%x\n", state);
 }
 
 static void sb_intr_irq() {
-  io_out8(SB_MIXER, 0x80);
-  uint8_t data = io_in8(SB_MIXER_DATA);
+  x86_port_write8(SB_MIXER, 0x80);
+  uint8_t data = x86_port_read8(SB_MIXER_DATA);
   if (data != 2) {
-    io_out8(SB_MIXER, 0x80);
-    io_out8(SB_MIXER_DATA, 0x2);
+    x86_port_write8(SB_MIXER, 0x80);
+    x86_port_write8(SB_MIXER_DATA, 0x2);
   }
 }
 
 static void sb_out(uint8_t cmd) {
-  while (io_in8(SB_WRITE) & 128)
+  while (x86_port_read8(SB_WRITE) & 128)
     ;
-  io_out8(SB_WRITE, cmd);
+  x86_port_write8(SB_WRITE, cmd);
 }
 
 static void sb_set_volume(uint8_t level) {
   logk("set sb16 volume to 0x%02X\n", level);
-  io_out8(SB_MIXER, 0x22);
-  io_out8(SB_MIXER_DATA, level);
+  x86_port_write8(SB_MIXER, 0x22);
+  x86_port_write8(SB_MIXER_DATA, level);
 }
 
 int sb16_set(int cmd, void* args) {
@@ -133,9 +135,9 @@ int sb16_set(int cmd, void* args) {
     case 0:
       while (sb.use_task)
         ;
-      io_cli();
+      irq_state_t state = irq_save();
       sb.use_task = current_task();
-      io_sti();
+      irq_restore(state);
       sb_reset();      // 重置 DSP
       sb_intr_irq();   // 设置中断
       sb_out(CMD_ON);  // 打开声霸卡

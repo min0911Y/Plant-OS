@@ -1,5 +1,6 @@
 #include <dos.h>
 #include <ctype.h>
+#include <irq.h>
 #include <stdio.h>
 #include <string.h>
 void UInt2BinAscii(unsigned int num, char* buf);
@@ -962,7 +963,7 @@ int snprintf(char* str, size_t size, const char* format, ...) {
 }
 void abort(void) {
   logk("abort() called\n");
-  io_cli();
+  (void)irq_save();
   for (;;) {
   }
 }

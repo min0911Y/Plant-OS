@@ -1,3 +1,4 @@
+#include <arch/x86/io.h>
 #include <dos.h>
 #include <drivers.h>
 #define KEYCMD_SENDTO_MOUSE 0xd4
@@ -10,7 +11,7 @@ void mouse_wait(byte a_type) // unsigned char
   if (a_type == 0) {
     while (_time_out--) // Data
     {
-      if ((io_in8(0x64) & 1) == 1) {
+      if ((x86_port_read8(0x64) & 1) == 1) {
         return;
       }
     }
@@ -18,7 +19,7 @@ void mouse_wait(byte a_type) // unsigned char
   } else {
     while (_time_out--) // Signal
     {
-      if ((io_in8(0x64) & 2) == 0) {
+      if ((x86_port_read8(0x64) & 2) == 0) {
         return;
       }
     }
@@ -31,17 +32,17 @@ void mouse_write(byte a_write) // unsigned char
   // Wait to be able to send a command
   mouse_wait(1);
   // Tell the mouse we are sending a command
-  io_out8(0x64, 0xD4);
+  x86_port_write8(0x64, 0xD4);
   // Wait for the final part
   mouse_wait(1);
   // Finally write
-  io_out8(0x60, a_write);
+  x86_port_write8(0x60, a_write);
 }
 
 byte mouse_read() {
   // Get's response from mouse
   mouse_wait(0);
-  return io_in8(0x60);
+  return x86_port_read8(0x60);
 }
 lock_t mouse_l;
 void mouse_reset() { mouse_write(0xff); }
@@ -49,9 +50,9 @@ void enable_mouse(struct MOUSE_DEC *mdec) {
   lock_init(&mouse_l);
   /* 激活鼠标 */
   wait_KBC_sendready();
-  io_out8(PORT_KEYCMD, KEYCMD_SENDTO_MOUSE);
+  x86_port_write8(PORT_KEYCMD, KEYCMD_SENDTO_MOUSE);
   wait_KBC_sendready();
-  io_out8(PORT_KEYDAT, MOUSECMD_ENABLE);
+  x86_port_write8(PORT_KEYDAT, MOUSECMD_ENABLE);
   mdec->phase = 1;
   mouse_write(0xf3);
   mouse_write(200);
@@ -125,7 +126,7 @@ void inthandler2c(int *esp) {
   unsigned char data;
   (void)esp;
   send_eoi(12);
-  data = io_in8(PORT_KEYDAT);
+  data = x86_port_read8(PORT_KEYDAT);
   times++;
   if (times == 4) {
     times = 0;

@@ -1,9 +1,9 @@
 // 杂项函数
 // Copyright (C) 2021-2022 zhouzhihao & min0911_
 // ------------------------------------------------
+#include <arch/x86/cpuid.h>
 #include <dos.h>
 
-void print_32bits_ascil(unsigned int n);
 void insert_char(char *str, int pos, char ch) {
   int i;
   for (i = strlen(str); i >= pos; i--) {
@@ -37,27 +37,18 @@ char hex2bcd(char hex) {
     return hex;
   }
 }
-void Print_Hex(unsigned x) {
-  printk("%08x", x);
-  // for(int i = 0;i<0x03000000;i++);
-}
-void Clear_A_Line() {
-  // printk("\n");
-}
 void getCPUBrand(char *cBrand) {
-  print_32bits_ascil(get_cpu4(0x80000002));
-  print_32bits_ascil(get_cpu5(0x80000002));
-  print_32bits_ascil(get_cpu6(0x80000002));
-  print_32bits_ascil(get_cpu7(0x80000002));
-  print_32bits_ascil(get_cpu4(0x80000003));
-  print_32bits_ascil(get_cpu5(0x80000003));
-  print_32bits_ascil(get_cpu6(0x80000003));
-  print_32bits_ascil(get_cpu7(0x80000003));
-  print_32bits_ascil(get_cpu4(0x80000004));
-  print_32bits_ascil(get_cpu5(0x80000004));
-  print_32bits_ascil(get_cpu6(0x80000004));
-  print_32bits_ascil(get_cpu7(0x80000004));
-  printk("\n");
+  /* 0x80000002..0x80000004 每个 leaf 返回 16 字节 brand string。 */
+  enum { BRAND_LEAF = 0x80000002u, BRAND_LEAF_COUNT = 3 };
+  if (x86_cpuid(0x80000000u, 0).eax < BRAND_LEAF + BRAND_LEAF_COUNT - 1) {
+    cBrand[0] = '\0';
+    return;
+  }
+  for (unsigned i = 0; i < BRAND_LEAF_COUNT; i++) {
+    x86_cpuid_t regs = x86_cpuid(BRAND_LEAF + i, 0);
+    memcpy(cBrand + i * sizeof(regs), &regs, sizeof(regs));
+  }
+  cBrand[BRAND_LEAF_COUNT * sizeof(x86_cpuid_t)] = '\0';
 }
 char ascii2num(char c) {
   if (c > 'A' - 1 && c < 'F' + 1) {
@@ -102,16 +93,4 @@ void clean(char *s, int len) {
     s[i] = 0;
   }
   return;
-}
-void print_32bits_ascil(unsigned int n) {
-  char str[32];
-  int i = 0;
-  for (i = 0; i < 4; i++) {
-    str[i] = n & 0xff;
-    n >>= 8;
-  }
-
-  for (i = 0; i < 4; i++) {
-    printchar(str[i]);
-  }
 }

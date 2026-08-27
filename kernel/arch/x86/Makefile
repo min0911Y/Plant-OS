@@ -4,7 +4,8 @@ incpath_src := ../../include/
 obj_arch := $(out_path_src)descriptor_tables.o $(out_path_src)exceptions.o \
 	$(out_path_src)irq.o $(out_path_src)task_context.o \
 	$(out_path_src)bios_interrupt.obj $(out_path_src)exceptions.obj \
-	$(out_path_src)task_context.obj $(out_path_src)user_return.obj
+	$(out_path_src)interrupt_entries.obj $(out_path_src)task_context.obj \
+	$(out_path_src)user_return.obj
 
 default: $(obj_arch)
 

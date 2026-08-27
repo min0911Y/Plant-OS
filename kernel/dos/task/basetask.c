@@ -1,11 +1,11 @@
 #include <dos.h>
+#include <irq.h>
 int init_ok_flag = 0;
 extern unsigned int PCI_ADDR_BASE;
 char *shell_data;
 unsigned shell_size;
 extern unsigned base_count;
 float f_cpu_usage;
-unsigned ret_to_app;
 int rtc_init(void);
 void init_devfs(void);
 void ahci_init(void);
@@ -49,12 +49,8 @@ void idle() {
     f_cpu_usage *= 100.0f;
   }
 }
-void return_to_app();
 void init() {
-  ret_to_app = (uintptr_t)page_malloc_one_no_mark();
-  memcpy((void *)ret_to_app, (void *)(uintptr_t)return_to_app, 0x1000);
-  page_set_physics_attr(ret_to_app, (void *)ret_to_app,
-                        page_get_attr(ret_to_app) | PG_USU);
+  irq_enable();
   logk("init task has been started!\n");
 
   PCI_ADDR_BASE = (unsigned int)page_malloc(1 * 1024 * 1024);

@@ -1,7 +1,7 @@
+#include <arch.h>
 #include <dos.h>
-void check(void);
 void KernelMain(void) {
-  check();
+  arch_boot_verify();
   sysinit();
   for (;;)
     ;

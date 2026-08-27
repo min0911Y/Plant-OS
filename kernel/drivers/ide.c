@@ -1,3 +1,4 @@
+#include <arch/x86/io.h>
 #include <dos.h>
 #define logk(...) ((void)0)
 #define sleep(...) ((void)0)
@@ -5,8 +6,6 @@ unsigned char ide_read(unsigned char channel, unsigned char reg);
 void ide_write(unsigned char channel, unsigned char reg, unsigned char data);
 void ide_read_buffer(unsigned char channel, unsigned char reg, void *buffer,
                      unsigned int quads);
-#define inb io_in8
-#define outb io_out8
 #define ATA_SR_BSY 0x80   // Busy
 #define ATA_SR_DRDY 0x40  // Drive ready
 #define ATA_SR_DF 0x20    // Drive write fault
@@ -248,13 +247,13 @@ unsigned char ide_read(unsigned char channel, unsigned char reg) {
   if (reg > 0x07 && reg < 0x0C)
     ide_write(channel, ATA_REG_CONTROL, 0x80 | channels[channel].nIEN);
   if (reg < 0x08)
-    result = inb(channels[channel].base + reg - 0x00);
+    result = x86_port_read8(channels[channel].base + reg - 0x00);
   else if (reg < 0x0C)
-    result = inb(channels[channel].base + reg - 0x06);
+    result = x86_port_read8(channels[channel].base + reg - 0x06);
   else if (reg < 0x0E)
-    result = inb(channels[channel].ctrl + reg - 0x0A);
+    result = x86_port_read8(channels[channel].ctrl + reg - 0x0A);
   else if (reg < 0x16)
-    result = inb(channels[channel].bmide + reg - 0x0E);
+    result = x86_port_read8(channels[channel].bmide + reg - 0x0E);
   if (reg > 0x07 && reg < 0x0C)
     ide_write(channel, ATA_REG_CONTROL, channels[channel].nIEN);
   return result;
@@ -263,13 +262,13 @@ void ide_write(unsigned char channel, unsigned char reg, unsigned char data) {
   if (reg > 0x07 && reg < 0x0C)
     ide_write(channel, ATA_REG_CONTROL, 0x80 | channels[channel].nIEN);
   if (reg < 0x08)
-    outb(channels[channel].base + reg - 0x00, data);
+    x86_port_write8(channels[channel].base + reg - 0x00, data);
   else if (reg < 0x0C)
-    outb(channels[channel].base + reg - 0x06, data);
+    x86_port_write8(channels[channel].base + reg - 0x06, data);
   else if (reg < 0x0E)
-    outb(channels[channel].ctrl + reg - 0x0A, data);
+    x86_port_write8(channels[channel].ctrl + reg - 0x0A, data);
   else if (reg < 0x16)
-    outb(channels[channel].bmide + reg - 0x0E, data);
+    x86_port_write8(channels[channel].bmide + reg - 0x0E, data);
   if (reg > 0x07 && reg < 0x0C)
     ide_write(channel, ATA_REG_CONTROL, channels[channel].nIEN);
 }
@@ -531,7 +530,7 @@ unsigned char ide_ata_access(unsigned char direction, unsigned char drive,
 
       logk("words=%d bus=%d\n", words, bus);
       // for (int h = 0; h < words; h++) {
-      //   unsigned short a = io_in16(bus);
+      //   unsigned short a = x86_port_read16(bus);
       //   word_[i * words + h] = a;
       // }
       insl(bus, (uint32_t *)(void *)(word_ + i * words), words / 2);
@@ -551,7 +550,7 @@ unsigned char ide_ata_access(unsigned char direction, unsigned char drive,
       // asm("rep outsw" ::"c"(words), "d"(bus), "S"(edi));  // Send Data
       // asm("popw %ds");
       for (int h = 0; h < words; h++) {
-        io_out16(bus, word_[i * words + h]);
+        x86_port_write16(bus, word_[i * words + h]);
       }
     }
     ide_write(channel, ATA_REG_COMMAND,
@@ -642,7 +641,7 @@ unsigned char ide_atapi_read(unsigned char drive, unsigned int lba,
   logk("VIII\n");
   uint16_t *_atapi_packet = (uint16_t *)(void *)atapi_packet;
   for (int i = 0; i < 6; i++) {
-    io_out16(bus, _atapi_packet[i]);
+    x86_port_write16(bus, _atapi_packet[i]);
   }
   // (IX): Receiving Data:
   // ------------------------------------------------------------------
@@ -654,7 +653,7 @@ unsigned char ide_atapi_read(unsigned char drive, unsigned int lba,
       return err; // Polling and return if error.
     logk("words = %d\n", words);
     for (int h = 0; h < words; h++) {
-      uint16_t a = io_in16(bus);
+      uint16_t a = x86_port_read16(bus);
       _word[i * words + h] = a;
     }
   }

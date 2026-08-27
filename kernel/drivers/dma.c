@@ -1,9 +1,11 @@
+#include <arch/x86/io.h>
 /*
 	* Copyright by gaz os
 	* min0911 & zhouzhihao 对其移植并略微修改
 */
 #include <drivers.h>
 #include <dos.h>
+#include <irq.h>
 
 /* 定义用于访问一个整数的上位和下位字节。 */
 #define LOW_BYTE(x) (x & 0x00FF)
@@ -41,34 +43,34 @@ void dma_xfer(unsigned char channel, unsigned long address, unsigned int length,
 void _dma_xfer(unsigned char DMA_channel, unsigned char page,
                unsigned int offset, unsigned int length, unsigned char mode) {
   /* 我们不想别的事情来打扰 */
-  asm("cli");
+  irq_state_t state = irq_save();
 
   /* 设置DMA通道，以便我们可以正确传输数据，这很简单，只要我们用I/O操作告诉DMA控制器就行了
    */
   /* 我们将使用这个通道（DMA_channel）*/
-  io_out8(MaskReg[DMA_channel], 0x04 | DMA_channel);
+  x86_port_write8(MaskReg[DMA_channel], 0x04 | DMA_channel);
 
   /* 我们先得解除DMA对这个通道的屏蔽，不然用不了 */
-  io_out8(ClearReg[DMA_channel], 0x00);
+  x86_port_write8(ClearReg[DMA_channel], 0x00);
 
   /* 向DMA发送指定的模式 */
-  io_out8(ModeReg[DMA_channel], mode);
+  x86_port_write8(ModeReg[DMA_channel], mode);
 
   /* 发送偏移量地址，先发送高八位，再发送低八位（因为一次性最多只能发送一个byte）
    */
-  io_out8(AddrPort[DMA_channel], LOW_BYTE(offset));
-  io_out8(AddrPort[DMA_channel], HI_BYTE(offset));
+  x86_port_write8(AddrPort[DMA_channel], LOW_BYTE(offset));
+  x86_port_write8(AddrPort[DMA_channel], HI_BYTE(offset));
 
   /* 发送数据所在的物理页 */
-  io_out8(PagePort[DMA_channel], page);
+  x86_port_write8(PagePort[DMA_channel], page);
 
   /* 发送数据的长度 跟之前一样，先发送低八位，再发送高八位*/
-  io_out8(CountPort[DMA_channel], LOW_BYTE(length));
-  io_out8(CountPort[DMA_channel], HI_BYTE(length));
+  x86_port_write8(CountPort[DMA_channel], LOW_BYTE(length));
+  x86_port_write8(CountPort[DMA_channel], HI_BYTE(length));
 
   /* 现在我们该做的东西已经全部做完了，所以启用DMA_channel */
-  io_out8(MaskReg[DMA_channel], DMA_channel);
+  x86_port_write8(MaskReg[DMA_channel], DMA_channel);
 
   /* 重新让CPU能够接收到中断 */
-  asm("sti");
+  irq_restore(state);
 }

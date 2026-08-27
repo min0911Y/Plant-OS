@@ -170,18 +170,18 @@ static bool ipc_deadline_passed(uint32_t deadline) {
 }
 
 // 让出 CPU 等待事件（有消息到达、队列腾出位置，或者等到超时）。
-// 调用前必须处于关中断状态，返回时中断已经打开。
+// 调用前必须处于关中断状态，返回时恢复调用者原中断状态。
 //
 // 注意：task_next() / arch_task_switch() 不可重入，如果开着中断去切换，
 // 时钟中断可能正好落在切换过程中再调一次 task_next，把任务的内核栈指针搞乱
 // （表现为返回用户态时 eip 变成随机值）。所以这里一直关着中断切换，
-// 切回来之后再开中断。
+// 切回来之后再恢复原中断状态。
 static void ipc_wait(mtask *self, uint32_t peer_tid, uint32_t deadline,
-                     int use_deadline) {
+                     int use_deadline, irq_state_t state) {
   if (self->ready) {
     // 已经有人唤醒过我们了，直接回去重新检查
     self->ready = 0;
-    io_sti();
+    irq_restore(state);
     return;
   }
   self->ipc_wait_peer = peer_tid;
@@ -190,12 +190,12 @@ static void ipc_wait(mtask *self, uint32_t peer_tid, uint32_t deadline,
   self->state = WAITING;
   self->wait_reason = WAIT_REASON_IPC;
   task_next();
-  io_sti();
   self->ipc_wait_peer = TASK_ID_NONE;
   self->ipc_deadline_set = 0;
   if (self->wait_reason == WAIT_REASON_IPC) {
     self->wait_reason = WAIT_REASON_NONE;
   }
+  irq_restore(state);
 }
 
 // 由时钟中断调用：把等到超时的 IPC 等待者唤醒
@@ -284,8 +284,8 @@ int ipc_send(uint32_t to_tid, uint32_t to_generation, uint32_t type, uint32_t id
       result = IPC_ERR_TIMEOUT;
       break;
     }
-    // 队列满：等目标取走消息后再试（等待期间中断会被打开）
-    ipc_wait(self, to_tid, deadline, timeout_ms != 0);
+    // 队列满：等目标取走消息后再试，切回后恢复原中断状态。
+    ipc_wait(self, to_tid, deadline, timeout_ms != 0, state);
   }
 
   if (payload) {
@@ -338,7 +338,7 @@ int ipc_recv(void *buf, uint32_t bufsize, ipc_msg_info_t *info,
       irq_restore(state);
       return IPC_ERR_TIMEOUT;
     }
-    ipc_wait(self, TASK_ID_NONE, deadline, timeout_ms != 0);
+    ipc_wait(self, TASK_ID_NONE, deadline, timeout_ms != 0, state);
   }
 }
 
@@ -520,7 +520,7 @@ int send_ipc_message(int to_tid, void *data, unsigned int size, char type) {
       }
       /* 关中断切换，理由同 ipc_wait */
       task_next();
-      io_sti();
+      irq_restore(state);
     }
   }
   return 0;

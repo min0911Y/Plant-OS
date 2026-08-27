@@ -1,5 +1,7 @@
+#include <arch/x86/io.h>
 #include <dos.h>
 #include <drivers.h>
+#include <irq.h>
 static void set_plane(unsigned p);
 unsigned char g_320x200x256[] = {
     /* MISC */
@@ -50,44 +52,44 @@ void write_regs(unsigned char *regs) {
   unsigned int i;
 
   /* 写MISCELLANEOUS寄存器 */
-  io_out8(VGA_MISC_WRITE, *regs);
+  x86_port_write8(VGA_MISC_WRITE, *regs);
   regs++;
   /* 写SEQUENCER寄存器 */
   for (i = 0; i < VGA_NUM_SEQ_REGS; i++) {
-    io_out8(VGA_SEQ_INDEX, i);
-    io_out8(VGA_SEQ_DATA, *regs);
+    x86_port_write8(VGA_SEQ_INDEX, i);
+    x86_port_write8(VGA_SEQ_DATA, *regs);
     regs++;
   }
   /* 解锁 CRTC 寄存器 */
-  io_out8(VGA_CRTC_INDEX, 0x03);
-  io_out8(VGA_CRTC_DATA, io_in8(VGA_CRTC_DATA) | 0x80);
-  io_out8(VGA_CRTC_INDEX, 0x11);
-  io_out8(VGA_CRTC_DATA, io_in8(VGA_CRTC_DATA) & ~0x80);
+  x86_port_write8(VGA_CRTC_INDEX, 0x03);
+  x86_port_write8(VGA_CRTC_DATA, x86_port_read8(VGA_CRTC_DATA) | 0x80);
+  x86_port_write8(VGA_CRTC_INDEX, 0x11);
+  x86_port_write8(VGA_CRTC_DATA, x86_port_read8(VGA_CRTC_DATA) & ~0x80);
   /* 确保它们保持解锁状态 */
   regs[0x03] |= 0x80;
   regs[0x11] &= ~0x80;
   /* 写CRTC寄存器 */
   for (i = 0; i < VGA_NUM_CRTC_REGS; i++) {
-    io_out8(VGA_CRTC_INDEX, i);
-    io_out8(VGA_CRTC_DATA, *regs);
+    x86_port_write8(VGA_CRTC_INDEX, i);
+    x86_port_write8(VGA_CRTC_DATA, *regs);
     regs++;
   }
   /* 写GRAPHICS CONTROLLER寄存器 */
   for (i = 0; i < VGA_NUM_GC_REGS; i++) {
-    io_out8(VGA_GC_INDEX, i);
-    io_out8(VGA_GC_DATA, *regs);
+    x86_port_write8(VGA_GC_INDEX, i);
+    x86_port_write8(VGA_GC_DATA, *regs);
     regs++;
   }
   /* 写ATTRIBUTE CONTROLLER寄存器 */
   for (i = 0; i < VGA_NUM_AC_REGS; i++) {
-    (void)io_in8(VGA_INSTAT_READ);
-    io_out8(VGA_AC_INDEX, i);
-    io_out8(VGA_AC_WRITE, *regs);
+    (void)x86_port_read8(VGA_INSTAT_READ);
+    x86_port_write8(VGA_AC_INDEX, i);
+    x86_port_write8(VGA_AC_WRITE, *regs);
     regs++;
   }
   /* 锁定 16 色调色板和空白显示 */
-  (void)io_in8(VGA_INSTAT_READ);
-  io_out8(VGA_AC_INDEX, 0x20);
+  (void)x86_port_read8(VGA_INSTAT_READ);
+  x86_port_write8(VGA_AC_INDEX, 0x20);
 }
 void init_palette(void) {
   set_palette(0, 15, table_rgb);
@@ -96,8 +98,8 @@ void init_palette(void) {
 unsigned get_fb_seg(void) {
   unsigned seg;
 
-  io_out8(VGA_GC_INDEX, 6);
-  seg = io_in8(VGA_GC_DATA);
+  x86_port_write8(VGA_GC_INDEX, 6);
+  seg = x86_port_read8(VGA_GC_DATA);
   seg >>= 2;
   seg &= 3;
   switch (seg) {
@@ -123,27 +125,27 @@ void write_font(unsigned char *buf, unsigned font_height) {
 
   /* 保存寄存器
 set_plane() 修改了 GC4 和 SEQ2，因此也保存它们 */
-  io_out8(VGA_SEQ_INDEX, 2);
-  seq2 = io_in8(VGA_SEQ_DATA);
+  x86_port_write8(VGA_SEQ_INDEX, 2);
+  seq2 = x86_port_read8(VGA_SEQ_DATA);
 
-  io_out8(VGA_SEQ_INDEX, 4);
-  seq4 = io_in8(VGA_SEQ_DATA);
+  x86_port_write8(VGA_SEQ_INDEX, 4);
+  seq4 = x86_port_read8(VGA_SEQ_DATA);
   /* 关闭奇数寻址（设置平面寻址）
 假设：chain-4 寻址已关闭 */
-  io_out8(VGA_SEQ_DATA, seq4 | 0x04);
+  x86_port_write8(VGA_SEQ_DATA, seq4 | 0x04);
 
-  io_out8(VGA_GC_INDEX, 4);
-  gc4 = io_in8(VGA_GC_DATA);
+  x86_port_write8(VGA_GC_INDEX, 4);
+  gc4 = x86_port_read8(VGA_GC_DATA);
 
-  io_out8(VGA_GC_INDEX, 5);
-  gc5 = io_in8(VGA_GC_DATA);
+  x86_port_write8(VGA_GC_INDEX, 5);
+  gc5 = x86_port_read8(VGA_GC_DATA);
   /* 关闭偶数寻址 */
-  io_out8(VGA_GC_DATA, gc5 & ~0x10);
+  x86_port_write8(VGA_GC_DATA, gc5 & ~0x10);
 
-  io_out8(VGA_GC_INDEX, 6);
-  gc6 = io_in8(VGA_GC_DATA);
+  x86_port_write8(VGA_GC_INDEX, 6);
+  gc6 = x86_port_read8(VGA_GC_DATA);
   /* 关闭偶数寻址 */
-  io_out8(VGA_GC_DATA, gc6 & ~0x02);
+  x86_port_write8(VGA_GC_DATA, gc6 & ~0x02);
   /* 将字体写入平面 P4 */
   set_plane(2);
   /* 写字体 0 */
@@ -160,28 +162,28 @@ set_plane() 修改了 GC4 和 SEQ2，因此也保存它们 */
 	}
 #endif
   /* 恢复寄存器 */
-  io_out8(VGA_SEQ_INDEX, 2);
-  io_out8(VGA_SEQ_DATA, seq2);
-  io_out8(VGA_SEQ_INDEX, 4);
-  io_out8(VGA_SEQ_DATA, seq4);
-  io_out8(VGA_GC_INDEX, 4);
-  io_out8(VGA_GC_DATA, gc4);
-  io_out8(VGA_GC_INDEX, 5);
-  io_out8(VGA_GC_DATA, gc5);
-  io_out8(VGA_GC_INDEX, 6);
-  io_out8(VGA_GC_DATA, gc6);
+  x86_port_write8(VGA_SEQ_INDEX, 2);
+  x86_port_write8(VGA_SEQ_DATA, seq2);
+  x86_port_write8(VGA_SEQ_INDEX, 4);
+  x86_port_write8(VGA_SEQ_DATA, seq4);
+  x86_port_write8(VGA_GC_INDEX, 4);
+  x86_port_write8(VGA_GC_DATA, gc4);
+  x86_port_write8(VGA_GC_INDEX, 5);
+  x86_port_write8(VGA_GC_DATA, gc5);
+  x86_port_write8(VGA_GC_INDEX, 6);
+  x86_port_write8(VGA_GC_DATA, gc6);
 }
 void set_palette(int start, int end, unsigned char *rgb) {
-  int i, eflags;
-  eflags = io_load_eflags();
-  io_out8(0x03c8, start);
+  int i;
+  irq_state_t state = irq_save();
+  x86_port_write8(0x03c8, start);
   for (i = start; i <= end; i++) {
-    io_out8(0x03c9, rgb[0] / 4);
-    io_out8(0x03c9, rgb[1] / 4);
-    io_out8(0x03c9, rgb[2] / 4);
+    x86_port_write8(0x03c9, rgb[0] / 4);
+    x86_port_write8(0x03c9, rgb[1] / 4);
+    x86_port_write8(0x03c9, rgb[2] / 4);
     rgb += 3;
   }
-  io_store_eflags(eflags);
+  irq_restore(state);
   return;
 }
 void Set_Font(char *file) {
@@ -228,11 +230,11 @@ static void set_plane(unsigned p) {
   p &= 3;
   pmask = 1 << p;
   /* 设置读取平面 */
-  io_out8(VGA_GC_INDEX, 4);
-  io_out8(VGA_GC_DATA, p);
+  x86_port_write8(VGA_GC_INDEX, 4);
+  x86_port_write8(VGA_GC_DATA, p);
   /* 设置写入平面 */
-  io_out8(VGA_SEQ_INDEX, 2);
-  io_out8(VGA_SEQ_DATA, pmask);
+  x86_port_write8(VGA_SEQ_INDEX, 2);
+  x86_port_write8(VGA_SEQ_DATA, pmask);
 }
 void SwitchToText8025() {
   unsigned rows, cols, ht, i;

@@ -1,3 +1,4 @@
+#include <arch/x86/io.h>
 #include <dos.h>
 #include <drivers.h>
 #define KEYSTA_SEND_NOTREADY 0x02
@@ -21,7 +22,7 @@ char keytable1[0x54] = { // 未按下Shift
 void wait_KBC_sendready(void) {
   /* 等待键盘控制电路准备完毕 */
   for (;;) {
-    if ((io_in8(PORT_KEYSTA) & KEYSTA_SEND_NOTREADY) == 0) {
+    if ((x86_port_read8(PORT_KEYSTA) & KEYSTA_SEND_NOTREADY) == 0) {
       break;
     }
   }
@@ -31,9 +32,9 @@ void wait_KBC_sendready(void) {
 void init_keyboard(void) {
   /* 初始化键盘控制电路 */
   wait_KBC_sendready();
-  io_out8(PORT_KEYCMD, KEYCMD_WRITE_MODE);
+  x86_port_write8(PORT_KEYCMD, KEYCMD_WRITE_MODE);
   wait_KBC_sendready();
-  io_out8(PORT_KEYDAT, KBC_MODE);
+  x86_port_write8(PORT_KEYDAT, KBC_MODE);
   return;
 }
 int getch() {
@@ -142,7 +143,7 @@ void inthandler21(int *esp) {
   unsigned char data;
   (void)esp;
   send_eoi(1);
-  data = io_in8(PORT_KEYDAT); // 从键盘IO口读取扫描码
+  data = x86_port_read8(PORT_KEYDAT); // 从键盘IO口读取扫描码
   //  特殊键处理
   if (data == 0xe0) {
     e0_flag = 1;
@@ -179,11 +180,9 @@ void inthandler21(int *esp) {
   //   // 按下F1 ~ F12 & Shift
   //   // if (running_mode == POWERINTDOS) {
   //   //   SwitchShell_TextMode(data - 0x3b + 1);  // 换到1~12号控制台
-  //   //   io_sti();
   //   //   return;
   //   // } else if (running_mode == HIGHTEXTMODE) {
   //   //   SwitchShell_HighTextMode(data - 0x3b + 1);
-  //   //   io_sti();
   //   //   return;
   //   // }
   // }

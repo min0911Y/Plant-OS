@@ -1,4 +1,5 @@
 #include <dos.h>
+#include <irq.h>
 #include <kasan.h>
 
 #if !KASAN_ENABLED
@@ -419,7 +420,7 @@ void kasan_report(const void *addr, uint32_t size, int write,
            info->total_size, info->type, state);
   }
 
-  io_cli();
+  (void)irq_save();
   for (;;) {
     asm volatile("hlt");
   }

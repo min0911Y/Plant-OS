@@ -1,7 +1,7 @@
 # Plant OS 仓库协作指南
 
 ## 注意
-你应该思考让你的代码精简优化，改动小，简洁优雅，符合最佳实践。不要创建无意义的自由函数，思考尽量不要或减少新增无意义的成员变量。不要兼容旧的遗留的实现，而是删除替换旧的实现。你的实现应当有通用性与扩展性，避免硬编码与限制（比如各种固定大小的静态数组）。显式使用三个 subagent，先让一个只读 explorer 探索仓库、总结最小实现路径和测试方式；再让唯一可改代码的 worker 根据该总结实现并修复 bug；最后让只读 reviewer 审查 diff 是否正确且符合上述要求，若有问题则把反馈交回 worker 修复后复查，不要让多个 agent 同时改代码。完成后请根据实际情况更新 AGENTS.md，同时标记并用 HTML 注释来注释掉文档中过时的内容，并让 writer 进行 git commit。
+继续重新审视当前代码，还有没有可以优化，整合，删除你新增的和原有的冗余代码。进一步精简你的实现，使得你的实现更加内聚，而不是到处打补丁。你的实现应该是正确的，标准的，高性能的。你应该思考让你的代码精简优化，改动小，简洁优雅，符合最佳实践。你的实现应该是高性能的。不要创建无意义的自由函数，思考尽量不要或减少新增无意义的成员变量。不要兼容旧的遗留的实现，而是删除替换旧的实现。你的实现应当有通用性与扩展性，避免硬编码与限制。消除嵌套，消除强耦合，消除不必要的短小函数，用较为oop的设计，使用struct+enum等进行抽象和封装，禁止考虑向后兼容。适当拆出变量，从而更加清晰且减少嵌套。对于每个功能的实现，优先思考更精简优雅的写法，再考虑适当拆除变量从而提升可读性。你的代码更加精简优雅，规范且标准，效率高，结构清晰整洁，符合最佳实践。完全与各方面解耦。避免到处打补丁的做法，从架构和设计上使用更精简优雅的实现。
 
 <!-- 过时：通过修改 process_spawn_first_user 注入自动测试命令。当前统一临时修改 kernel/res/init.mst，并在测试后恢复；禁止使用 sendkey。 -->
 
@@ -42,7 +42,7 @@
 - `kernel/mst/`、`kernel/std/`、`kernel/modules/`：MST 脚本、基础运行库和可加载模块。
 - `kernel/include/`：内核公共声明；很多模块通过 `dos.h`、`define.h` 等大头文件耦合。
 - `kernel/include/arch/x86/`：x86 专属的中断帧、入口和其他架构 ABI 声明；通用内核头文件不应重新定义这些布局。
-- `kernel/arch/x86/`：x86 专属实现。GDT、IDT、TSS、selector 和 BIOS 实模式切换所需的临时 descriptor 由此目录私有持有；通用内核代码的新临界区通过 `irq_state_t`、`irq_save()`、`irq_restore()` 接口访问中断状态，其 x86 `pushfl/cli/sti` 实现也放在此目录。
+- `kernel/arch/x86/`：x86 专属实现，内核里所有 x86 汇编入口（异常、中断/系统调用 stub、BIOS 实模式切换、任务上下文、用户态返回）都在此目录，`kernel/` 其余子目录不再包含 `.asm`（`kernel/boot/` 的启动扇区除外）。GDT、IDT、TSS、selector 和 BIOS 实模式切换所需的临时 descriptor 由此目录私有持有；通用内核代码的新临界区通过 `irq_state_t`、`irq_save()`、`irq_restore()` 接口访问中断状态，其 x86 `pushfl/cli/sti` 实现也放在此目录。
 <!-- 过时：`interrupt_disable/get_interrupt_state/set_interrupt_state` 在 `kernel/dos/task/lock.c` 中实现并从 `dos.h` 暴露。 -->
 <!-- 过时：GDT/IDT 地址、descriptor/TSS 布局和 `set_segmdesc`/`set_gatedesc`/`load_*` 从 `define.h`、`dos.h` 暴露给通用代码。 -->
 - `kernel/res/`：打包进镜像的资源；资源是否进入镜像由 `kernel/Makefile` 中显式的 `mcopy` 命令决定。
@@ -162,6 +162,16 @@ python3 scripts/kernel-perf.py \
 <!-- 过时：异常入口分散在 `kernel/dos/asm/errors.asm`，通过 FS 猜测用户态、改写 CatchEIP 或在汇编中单独处理/自旋。 -->
 - x86 控制寄存器访问统一使用 `kernel/include/arch/x86/control.h` 的固定宽度 inline 接口和 `X86_CR0_*` 位定义；写 CR0/CR3 必须带 `memory` clobber，页故障地址通过 `x86_cr2_read` 获取。
 <!-- 过时：CR0 位定义放在 `define.h`，并同时保留 `get_cr0/set_cr0` 与 `load_cr0/store_cr0` 多套实现。 -->
+- x86 port I/O 统一使用 `kernel/include/arch/x86/io.h` 的 `x86_port_read8/16/32` 与 `x86_port_write8/16/32`；动态 port（特别是 PCI BAR）必须先验证是 I/O 空间、整个寄存器窗口不超过 `uint16_t` 范围，然后才显式收窄；数据宽度必须与硬件寄存器一致。这些 inline asm 都是 `volatile`，使用 `Nd` port/累加器约束并带 `memory` clobber；`x86_io_wait()` 只通过向 `0x80` 写入一个 8-bit 零实现，仅用于 PIC 初始化和明确需要该 legacy delay 的软盘控制器轮询。
+<!-- 过时：port I/O、中断开关、EFLAGS 和文本光标通过 `kernel/dos/asm/i386.asm` 的 `io_*`/`ASM_call` 全局 wrapper 访问。 -->
+- 普通临界区必须成对使用 `irq_save()`/`irq_restore()` 保留调用者 IF 状态；等待路径要在关中断时发布等待状态并调用 `task_next()`，切回后才 restore。`irq_enable()` 只用于首次启动、明确允许抢占的 syscall 入口、任务终止后等待调度以及需主动开中断等待硬件 IRQ 的路径；不得用它代替临界区 restore。新内核任务可能由中断内的调度切入，因此确实要允许硬件 IRQ 的 bootstrap 入口（例如 `init()`）必须自己显式 enable，不得依赖下游驱动的等待函数偶然开中断。`x86_eflags_read/write` 只用于 AC 位等必须直接修改 EFLAGS 的 CPU 探测，不用于中断保护。
+- `kernel/dos/asm/` 已整体退役：x86 中断/系统调用入口 stub 位于 `kernel/arch/x86/interrupt_entries.asm`，其余 legacy 汇编（`memtest_sub`、`gensound`、CPUID `get_cpu*`、`init_page`、`check`、`init_float`、`__init_PIT`、v86 与内核侧 `return_to_app` trampoline、`setjmp`/`longjmp`）已改写为 C 或删除，不得恢复。用户态的信号返回 trampoline 由 `apps/libp` 自己提供并通过 `set_rt` 注册，内核不再复制代码页。`interrupt_entries.asm` 中每个 stub 仍是逐份复制的 push/pop 样板，后续应作为独立任务收敛为宏或统一的 IRQ dispatch。
+<!-- 过时：`kernel/dos/asm/i386.asm` 保留 `memtest_sub`、`gensound`、CPUID `get_cpu*`、`init_page`、`check`、v86/返回 trampoline 和 FPU 相关 legacy 实现，后续拆分作为独立任务。 -->
+- CPUID 统一使用 `kernel/include/arch/x86/cpuid.h` 的 `x86_cpuid(leaf, subleaf)`，返回值 `x86_cpuid_t` 的字段顺序即 eax/ebx/ecx/edx，可直接按小端字节流复制（brand string 即依赖此性质）。EBX 必须写成输出约束交给编译器保存，不得再出现私有的 `cpuid` 内联包装或破坏 C ABI 的汇编版本。
+- PC speaker 完全由 `kernel/drivers/beep.c` 用 `arch/x86/io.h` 直接编程 PIT channel 2 与 port `0x61`，时长通过 `sleep()` 计时；不得回到基于 port `0x61` refresh 位的忙等或汇编实现。
+- 物理内存探测在 `kernel/dos/mm/mem.c` 内用 C 完成：先用 AC 位区分 386/486，再在一次 `irq_save()`/`irq_restore()` 临界区内 read-modify-write 设置并清除 `X86_CR0_CD|X86_CR0_NW`，探测本身用 `volatile uint32_t` 写-取反-回读并恢复原值，步长从 1GiB 逐次缩到 1/4（最小 4KiB）。该文件用 `KERNEL_NOKASAN_CFLAGS` 编译，探测循环不得引入 KASAN 插桩或打印。
+- 分页由 `init_page()`（`kernel/dos/mm/page.c`）一次完成：构造 PDE/PTE 与页管理器后自己写 CR3 并以 read-modify-write 置 `X86_CR0_PG|X86_CR0_WP`；调用方不得再单独补写 WP，也不得恢复 `C_init_page` + 汇编 wrapper 的两段式实现。
+- 内核入口的 boot ABI 检查是 `arch_boot_verify()`（`kernel/arch/x86/descriptor_tables.c`），只校验 CS 等于内核代码 selector，失败时直写文本 VRAM 并 `cli; hlt` 停机；不得依赖 loader 的 IDT 或 `int 0x36` 打印。段寄存器在 `arch_interrupt_init` 里紧跟 `lgdt` 重新载入内核数据段 selector，`do_init_seg_register` 这类独立入口不再存在。
 - 分页启用后必须永久设置 `X86_CR0_WP`，使 ring0 写只读用户页也触发 `#PF` 并进入 COW；后续 CR0 修改必须使用 read-modify-write 保留 WP，不得写入会清除该位的固定值。
 - descriptor table 与任务状态的通用入口是 `arch_interrupt_init`、`arch_task_state_init` 和 `arch_task_set_kernel_stack`；GDT/IDT/TSS 的地址、limit、布局、selector、access bits 及 `lgdt`/`lidt`/`ltr` 只能出现在 `kernel/arch/x86/` 私有实现中。首次 GDT/IDT 构造和活动 descriptor 更新必须全程保存并关闭中断；IDT 必须先完整构造全部 256 个有效入口再执行 `lidt`，`0xff` 默认入口必须可直接安全返回且不发送错误 EOI。
 - 驱动通过 `interrupt_register_entry(vector, entry)` 注册函数入口；该 API 只创建 DPL0 interrupt gate，并在保存中断状态的短临界区更新 IDT。DPL3 gate 只允许由架构初始化为既有的 syscall、custom syscall 和 net API 向量创建，驱动不得自行开放用户态调用权限。PCI 驱动取得 `uint8_t` IRQ 后必须先调用 `irq_is_valid`，成功后才能计算 vector、配置路由或解屏蔽；底层 mask/config API 对非法 IRQ 安全返回。

@@ -1,3 +1,4 @@
+#include <arch/x86/io.h>
 #include <dos.h>
 
 typedef struct {
@@ -295,11 +296,11 @@ void init_acpi(void) {
     FADT = NULL;
   }
 
-  if (FADT && !(io_in16(FADT->PM1aControlBlock) & 1)) {
+  if (FADT && !(x86_port_read16(FADT->PM1aControlBlock) & 1)) {
     if (FADT->SMI_CommandPort && FADT->AcpiEnable) {
-      io_out8(FADT->SMI_CommandPort, FADT->AcpiEnable);
+      x86_port_write8(FADT->SMI_CommandPort, FADT->AcpiEnable);
       for (int i = 0; i < 300; i++) {
-        if (io_in16(FADT->PM1aControlBlock) & 1) {
+        if (x86_port_read16(FADT->PM1aControlBlock) & 1) {
           break;
         }
         for (volatile int j = 0; j < 1000000; j++) {
@@ -307,7 +308,7 @@ void init_acpi(void) {
       }
       if (FADT->PM1bControlBlock) {
         for (int i = 0; i < 300; i++) {
-          if (io_in16(FADT->PM1bControlBlock) & 1) {
+          if (x86_port_read16(FADT->PM1bControlBlock) & 1) {
             break;
           }
           for (volatile int j = 0; j < 1000000; j++) {
@@ -365,9 +366,9 @@ int acpi_shutdown(void) {
     SLP_TYPb = *(S5Addr) << 10;
   }
 
-  io_out16(FADT->PM1aControlBlock, SLP_TYPa | 1 << 13);
+  x86_port_write16(FADT->PM1aControlBlock, SLP_TYPa | 1 << 13);
   if (FADT->PM1bControlBlock != 0) {
-    io_out16(FADT->PM1bControlBlock, SLP_TYPb | 1 << 13);
+    x86_port_write16(FADT->PM1bControlBlock, SLP_TYPb | 1 << 13);
   }
   return 1;
 }

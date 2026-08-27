@@ -1,3 +1,4 @@
+#include <arch/x86/io.h>
 #include <dos.h>
 #include <irq.h>
 #define PIT_CTRL 0x0043
@@ -9,9 +10,9 @@ struct TIMERCTL timerctl;
 extern int cg_flag0;
 extern struct TASK *c_task;
 void init_pit(void) {
-  io_out8(0x43, 0x34);
-  io_out8(0x40, 0x9c);
-  io_out8(0x40, 0x2e);
+  x86_port_write8(0x43, 0x34);
+  x86_port_write8(0x40, 0x9c);
+  x86_port_write8(0x40, 0x2e);
 
   int i;
   struct TIMER *t;
@@ -243,7 +244,6 @@ void inthandler20(int cs, perf_irq_frame_t *frame) {
   // timerctl.t0 = timer;
   // timerctl.next = timer->timeout;
   // printk("*");
-  // io_cli();
   // extern int st_task;
   // if (ts == 3) {
   //   mt_taskswitch3();
@@ -254,5 +254,4 @@ void inthandler20(int cs, perf_irq_frame_t *frame) {
   // if (ts == 1) {
   //   mt_taskswitch1();
   // }
-  // io_sti();
 }

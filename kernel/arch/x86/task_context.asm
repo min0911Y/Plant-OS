@@ -70,7 +70,7 @@ arch_task_start:
   ret
 
 ; Resume the x86_interrupt_frame_t copied by task_fork. This is intentionally
-; byte-for-byte equivalent to the normal handlers.asm restore tail.
+; byte-for-byte equivalent to the normal interrupt_entries.asm restore tail.
 arch_task_interrupt_return:
   xchg bx, bx
   popa

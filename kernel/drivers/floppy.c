@@ -1,3 +1,4 @@
+#include <arch/x86/io.h>
 /*
  * Copyright by GazOS
  * min0911 & zhouzhihao 对其进行略微修改并移植
@@ -5,6 +6,7 @@
 #include <arch/x86/bios.h>
 #include <arch/x86/interrupt.h>
 #include <dos.h>
+#include <irq.h>
 
 volatile int floppy_int_count = 0;
 mtask *waiter = NULL;
@@ -150,17 +152,17 @@ void set_waiter(mtask *t) {
 void reset(void) {
   set_waiter(current_task());
   /* 停止软盘电机并禁用IRQ和DMA传输 */
-  io_out8(FDC_DOR, 0);
+  x86_port_write8(FDC_DOR, 0);
 
   // 初始化电机计数器
   mtick = 0;
   motor = 0;
 
   /* 数据传输速度 (500K/s) */
-  io_out8(FDC_DRS, 0);
+  x86_port_write8(FDC_DRS, 0);
 
   /* 重新启动软盘中断（让软盘发送iRQ6），这将会调用上面的flint函数 */
-  io_out8(FDC_DOR, 0x0c);
+  x86_port_write8(FDC_DOR, 0x0c);
 
   /* 重置软盘驱动器将会引发一个中断了，我们需要进行处理 */
   wait_floppy_interrupt(); // 等待软盘驱动器的中断发生
@@ -186,7 +188,7 @@ void reset(void) {
 void motoron(void) {
   if (!motor) {
     mtick = -1; /* 停止电机计时 */
-    io_out8(FDC_DOR, 0x1c);
+    x86_port_write8(FDC_DOR, 0x1c);
     for (int i = 0; i < 80000; i++)
       ;
     motor = 1; // 设置电机状态为true
@@ -248,16 +250,16 @@ void sendbyte(int byte) // 向软盘控制器发送一个字节
 
   for (tmo = 0; tmo < 128; tmo++) // 这里我们只给128次尝试的机会
   {
-    msr = io_in8(FDC_MSR);
+    msr = x86_port_read8(FDC_MSR);
     if ((msr & 0xc0) ==
         0x80) // 如果软盘驱动器的状态寄存器的低6位是0x80，说明软盘能够接受新的数据
     {
       // 哈，程序如果执行到这里，可不就说明软盘驱动器可以接受新的数据了吗？
       // 那就发送呗
-      io_out8(FDC_DATA, byte);
+      x86_port_write8(FDC_DATA, byte);
       return;
     }
-    io_in8(0x80); /* 等待 */
+    x86_io_wait();
   }
 }
 int getbyte() {
@@ -266,32 +268,33 @@ int getbyte() {
 
   for (tmo = 0; tmo < 128; tmo++) // 这里我们只给128次尝试的机会
   {
-    msr = io_in8(FDC_MSR);
+    msr = x86_port_read8(FDC_MSR);
     if ((msr & 0xd0) ==
         0xd0) // 如果软盘控制器的状态寄存器的低五位是0xd0，说明我们能够从软盘DATA寄存器中读取
     {
       // 能读取了？那就读取吧，读完再返回回去
-      return io_in8(FDC_DATA);
+      return x86_port_read8(FDC_DATA);
     }
-    io_in8(0x80); /* 延时 */
+    x86_io_wait();
   }
   return -1; /* 没读取到 */
 }
 void wait_floppy_interrupt() {
-  // task_fall_blocked(WAITING);
-  io_sti();
+  irq_state_t state = irq_save();
+  irq_enable();
   unsigned start = timerctl.count;
   while (!floppy_int_count && timerctl.count - start < 100)
     asm volatile("pause");
   if (!floppy_int_count) {
     floppy_io_failed = 1;
     waiter = NULL;
+    irq_restore(state);
     return;
   }
   statsz = 0; // 清空状态
   while (
       (statsz < 7) &&
-      (io_in8(FDC_MSR) &
+      (x86_port_read8(FDC_MSR) &
        (1
         << 4))) //  状态寄存器的低四位是1（TRUE，所以这里不用写==），说明软盘驱动器没发送完所有的数据，当我们获取完所有的数据（状态变量=7），就可以跳出循环了
   {
@@ -305,7 +308,7 @@ void wait_floppy_interrupt() {
 
   floppy_int_count = 0;
   waiter = NULL;
-  return;
+  irq_restore(state);
 }
 void block2hts(int block, int *track, int *head, int *sector) {
   *track = (block / 18) / 2;
@@ -341,7 +344,7 @@ int fdc_rw(int block, unsigned char *blockbuff, int read,
 
   for (tries = 0; tries < 3; tries++) {
     /* 检查 */
-    if (io_in8(FDC_DIR) & 0x80) {
+    if (x86_port_read8(FDC_DIR) & 0x80) {
       waiter = NULL;
       dchange = 1;
       floppy_io_failed = 1;
@@ -357,7 +360,7 @@ int fdc_rw(int block, unsigned char *blockbuff, int read,
     }
     set_waiter(current_task());
     /* 传输速度（500K/s） */
-    io_out8(FDC_CCR, 0);
+    x86_port_write8(FDC_CCR, 0);
 
     /* 发送命令 */
     if (read) {
@@ -431,7 +434,7 @@ int fdc_rw_ths(int track, int head, int sector, unsigned char *blockbuff,
   }
 
   for (tries = 0; tries < 3; tries++) {
-    if (io_in8(FDC_DIR) & 0x80) {
+    if (x86_port_read8(FDC_DIR) & 0x80) {
       dchange = 1;
       seek(1);
       recalibrate();
@@ -444,7 +447,7 @@ int fdc_rw_ths(int track, int head, int sector, unsigned char *blockbuff,
       return 0;
     }
 
-    io_out8(FDC_CCR, 0);
+    x86_port_write8(FDC_CCR, 0);
 
     if (read) {
       dma_xfer(2, tbaddr, nosectors * 512, 0);

@@ -1,3 +1,4 @@
+#include <arch/x86/io.h>
 // rtl8139.c
 // Realtek rtl8139 网卡驱动
 // Copyright (C) zhouzhihao 2023
@@ -23,7 +24,7 @@
 #define TSAD0 0x20
 #define TSD0 0x10
 static uint8_t bus, dev, func;
-static uint32_t io_base;
+static uint16_t io_base;
 extern uint8_t mac0, mac1, mac2, mac3, mac4, mac5;
 static uint8_t *sendBuffer[4];
 static uint8_t *recvBuffer;
@@ -34,31 +35,31 @@ static void init_Card_all() {
     sendBuffer[i] = (uint8_t *)malloc(8192 + 16);
   }
 
-  mac0 = io_in8(io_base + MAC0);
-  mac1 = io_in8(io_base + MAC1);
-  mac2 = io_in8(io_base + MAC2);
-  mac3 = io_in8(io_base + MAC3);
-  mac4 = io_in8(io_base + MAC4);
-  mac5 = io_in8(io_base + MAC5);
+  mac0 = x86_port_read8(io_base + MAC0);
+  mac1 = x86_port_read8(io_base + MAC1);
+  mac2 = x86_port_read8(io_base + MAC2);
+  mac3 = x86_port_read8(io_base + MAC3);
+  mac4 = x86_port_read8(io_base + MAC4);
+  mac5 = x86_port_read8(io_base + MAC5);
   // printk("MAC:%02x:%02x:%02x:%02x:%02x:%02x\n", mac0, mac1, mac2, mac3, mac4,
   //        mac5);
 
   irq_mask_set(0);
-  io_out8(io_base + CONFIG_1, 0x00);          // 激活RTL8139网卡
-  io_out8(io_base + CMD, 0x10);               // 复位
-  while ((io_in8(io_base + CMD) & 0x10) != 0) // 等待RST高1变为0（复位成功）
+  x86_port_write8(io_base + CONFIG_1, 0x00);          // 激活RTL8139网卡
+  x86_port_write8(io_base + CMD, 0x10);               // 复位
+  while ((x86_port_read8(io_base + CMD) & 0x10) != 0) // 等待RST高1变为0（复位成功）
     ;
-  io_out16(io_base + CAPR, 0);
-  io_out32(io_base + RBSTART, (uintptr_t)recvBuffer); // 设置接收缓冲区地址
+  x86_port_write16(io_base + CAPR, 0);
+  x86_port_write32(io_base + RBSTART, (uintptr_t)recvBuffer); // 设置接收缓冲区地址
   for (int i = 0; i != 4; i++) {
-    io_out32(io_base + TSAD0 + i * 4, 0);
+    x86_port_write32(io_base + TSAD0 + i * 4, 0);
   }
-  io_out8(io_base + CMD, 0x0c); // 允许传输和接收
-  io_out32(io_base + TCR,
+  x86_port_write8(io_base + CMD, 0x0c); // 允许传输和接收
+  x86_port_write32(io_base + TCR,
            (1 << 16) | (3 << 24) | (0 << 4) | (7 << 8) | (0 << 17)); // 设置TCR
-  io_out32(io_base + RCR,
+  x86_port_write32(io_base + RCR,
            (8 << 24) | (5 << 13) | (3 << 11) | (7 << 8) | 0xf); // 设置RCR
-  io_out16(io_base + IMR, 0x0005); // 设置IMR 允许接收完成和传输完成的中断
+  x86_port_write16(io_base + IMR, 0x0005); // 设置IMR 允许接收完成和传输完成的中断
 
   currentSendBuffer = 0;
 
@@ -92,9 +93,9 @@ void Rtl8139Send(uint8_t *buffer, unsigned int size) {
   // }
   // printk("\n");
 
-  io_out32(io_base + TSAD0 + 4 * currentSendBuffer,
+  x86_port_write32(io_base + TSAD0 + 4 * currentSendBuffer,
            (uintptr_t)sendBuffer[currentSendBuffer]);
-  io_out32(io_base + TSD0 + 4 * currentSendBuffer, size - 4);
+  x86_port_write32(io_base + TSD0 + 4 * currentSendBuffer, size - 4);
   currentSendBuffer++;
   currentSendBuffer %= 4;
 }
@@ -107,6 +108,13 @@ bool rtl8139_find_card() {
   return true;
 }
 void init_rtl8139_card() {
+  uint32_t port_base = pci_get_port_base(bus, dev, func);
+  if (port_base == 0 || port_base > 0xffffu - CONFIG_1) {
+    logk("rtl8139: missing or invalid I/O BAR\n");
+    return;
+  }
+  io_base = (uint16_t)port_base;
+
   uint8_t irq = pci_get_drive_irq(bus, dev, func);
   if (!irq_is_valid(irq) ||
       !interrupt_register_entry(IRQ_BASE_VECTOR + irq,
@@ -120,11 +128,10 @@ void init_rtl8139_card() {
   conf &= 0xffff0000; // 保留STATUS寄存器，清除COMMAND寄存器
   conf |= 0x7;        // 设置第0~2位（允许PCNET网卡产生中断
   pci_write_command_status(bus, dev, func, conf);
-  io_base = pci_get_port_base(bus, dev, func);
   init_Card_all();
 }
 void RTL8139_IRQ() {
-  uint16_t temp = io_in16(io_base + ISR);
+  uint16_t temp = x86_port_read16(io_base + ISR);
   if ((temp & 0x0004) == 0x0004) {
     // printk("RTL8139 SEND\n");
   } else if ((temp & 0x0001) == 0x0001) {
@@ -132,7 +139,7 @@ void RTL8139_IRQ() {
     Rtl8139Recv();
   }
 
-  io_out16(io_base + ISR, temp);
+  x86_port_write16(io_base + ISR, temp);
 
   // printk("RTL8139 IRQ\n");
   send_eoi(pci_get_drive_irq(bus, dev, func));

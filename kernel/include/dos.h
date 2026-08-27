@@ -59,7 +59,7 @@ int task_fork();
 void task_next(void);
 void signal_deal(void);
 // page.c
-void C_init_page();
+void init_page(void);
 void pf_set(unsigned int memsize);
 int get_line_address(int t, int p, int o);
 int get_page_from_line_address(int line_address);
@@ -92,35 +92,12 @@ void page_links(unsigned start, unsigned numbers);
 int page_link(unsigned addr);
 int page_link_share(unsigned addr);
 void pde_retain(unsigned addr);
-// nasmfunc.asm
-void ASM_call(int i);
-void io_cli(void);
-void io_sti(void);
-void io_stihlt(void);
-void io_out8(int port, int data);
-void io_out16(int port, int data);
-void io_out32(int port, int data);
-int io_in8(int port);
-int io_in16(int port);
-int io_in32(int port);
-int io_load_eflags(void);
-void io_store_eflags(int eflags);
-void gensound(int notes, int dup);
-int get_cpu1();
-int get_cpu2();
-int get_cpu3();
-int get_cpu4(unsigned eax);
-int get_cpu5(unsigned eax);
-int get_cpu6(unsigned eax);
-int get_cpu7(unsigned eax);
-void __init_PIT();
-void init_float();
 // other.c
 void insert_char(char *str, int pos, char ch); // str:字符串，pos:位置，ch:字符
 void delete_char(char *str, int pos);          // str:字符串，pos:位置
 char bcd2hex(char bcd);
 char hex2bcd(char hex);
-void getCPUBrand(char *cBrand);
+void getCPUBrand(char *cBrand); // cBrand 至少 49 字节
 char ascii2num(char c);
 char num2ascii(char c);
 void strtoupper(char *str);

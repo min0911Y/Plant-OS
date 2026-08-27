@@ -1,5 +1,6 @@
 // AHCI Controller Driver Implement
 
+#include <arch/x86/cpuid.h>
 #include <dos.h>
 
 static uint8_t *cache;
@@ -780,19 +781,11 @@ void port_rebase(HBA_PORT *port, int portno) {
 
   start_cmd(port); // Start command engine
 }
-static inline void cpuid(uint32_t leaf, uint32_t subleaf, uint32_t *regs) {
-  asm volatile("cpuid"
-               : "=a"(regs[0]), "=b"(regs[1]), "=c"(regs[2]), "=d"(regs[3])
-               : "a"(leaf), "c"(subleaf));
-}
-
 // 获取缓存行大小
 uint32_t get_cache_line_size() {
-  uint32_t regs[4] = {0};
-  cpuid(0x00000001, 0, regs);
-
-  // EAX寄存器的第8-11位包含缓存行的字节数
-  return (regs[1] >> 8) & 0xFF;
+  /* CPUID.01H:EBX[15:8] 是 CLFLUSH 行长度，单位为 8 字节。 */
+  uint32_t chunks = (x86_cpuid(1, 0).ebx >> 8) & 0xff;
+  return chunks != 0 ? chunks * 8 : 64;
 }
 
 #define PAGE_SIZE 4096

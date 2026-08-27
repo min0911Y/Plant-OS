@@ -1,3 +1,4 @@
+#include <arch/x86/io.h>
 // bmp.c ：位图解析
 #include <dos.h>
 #include <fs.h>
@@ -18,11 +19,11 @@ bool BMPVIEW8(char *path, unsigned char *vram, int xsize) {
   pysize = *(unsigned short *)(p + 0x16);
   length = *(unsigned int *)(p + 2);
   start = *(unsigned short *)(p + 0xa);
-  io_out8(VGA_DAC_WRITE_INDEX, 0);
+  x86_port_write8(VGA_DAC_WRITE_INDEX, 0);
   for (i = 0; i != 256; i++) {
-    io_out8(VGA_DAC_DATA, p[0x36 + i * 4 + 2] / 4);
-    io_out8(VGA_DAC_DATA, p[0x36 + i * 4 + 1] / 4);
-    io_out8(VGA_DAC_DATA, p[0x36 + i * 4] / 4);
+    x86_port_write8(VGA_DAC_DATA, p[0x36 + i * 4 + 2] / 4);
+    x86_port_write8(VGA_DAC_DATA, p[0x36 + i * 4 + 1] / 4);
+    x86_port_write8(VGA_DAC_DATA, p[0x36 + i * 4] / 4);
   }
   for (i = 0; i < pysize; i++) {
     for (j = 0; j < pxsize; j++) {

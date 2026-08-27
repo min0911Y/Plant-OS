@@ -1,6 +1,5 @@
+#include <arch/x86/io.h>
 #include <dos.h>
-
-#define PIC_IO_WAIT_PORT 0x80
 
 #define IA32_APIC_BASE_MSR 0x1B
 #define IA32_TSC_DEADLINE_MSR 0x6E0
@@ -71,8 +70,6 @@ static uint8_t* smp_trampoline_ptr = (uint8_t*)(uintptr_t)SMP_TRAMPOLINE_PHYS;
 static uint64_t tsc_khz;
 static uint64_t apic_timer_deadline_interval_tsc;
 static uint64_t apic_timer_next_deadline_tsc;
-
-static inline void pic_io_wait(void) { io_out8(PIC_IO_WAIT_PORT, 0); }
 
 static inline void cpuid_full(uint32_t leaf, uint32_t subleaf, uint32_t* eax,
                               uint32_t* ebx, uint32_t* ecx, uint32_t* edx) {
@@ -200,37 +197,37 @@ static void ioapic_init_from_acpi(void) {
 }
 
 void init_pic(void) {
-  io_out8(PIC0_IMR, 0xff);
-  pic_io_wait();
-  io_out8(PIC1_IMR, 0xff);
-  pic_io_wait();
-  io_out8(PIC0_ICW1, 0x11);
-  pic_io_wait();
-  io_out8(PIC0_ICW2, IRQ_BASE_VECTOR);
-  pic_io_wait();
-  io_out8(PIC0_ICW3, 1 << 2);
-  pic_io_wait();
-  io_out8(PIC0_ICW4, 0x01);
-  pic_io_wait();
+  x86_port_write8(PIC0_IMR, 0xff);
+  x86_io_wait();
+  x86_port_write8(PIC1_IMR, 0xff);
+  x86_io_wait();
+  x86_port_write8(PIC0_ICW1, 0x11);
+  x86_io_wait();
+  x86_port_write8(PIC0_ICW2, IRQ_BASE_VECTOR);
+  x86_io_wait();
+  x86_port_write8(PIC0_ICW3, 1 << 2);
+  x86_io_wait();
+  x86_port_write8(PIC0_ICW4, 0x01);
+  x86_io_wait();
 
-  io_out8(PIC1_ICW1, 0x11);
-  pic_io_wait();
-  io_out8(PIC1_ICW2, IRQ_BASE_VECTOR + 8);
-  pic_io_wait();
-  io_out8(PIC1_ICW3, 2);
-  pic_io_wait();
-  io_out8(PIC1_ICW4, 0x01);
-  pic_io_wait();
+  x86_port_write8(PIC1_ICW1, 0x11);
+  x86_io_wait();
+  x86_port_write8(PIC1_ICW2, IRQ_BASE_VECTOR + 8);
+  x86_io_wait();
+  x86_port_write8(PIC1_ICW3, 2);
+  x86_io_wait();
+  x86_port_write8(PIC1_ICW4, 0x01);
+  x86_io_wait();
 
-  io_out8(PIC0_IMR, pic_irq_masks[0]);
-  io_out8(PIC1_IMR, pic_irq_masks[1]);
+  x86_port_write8(PIC0_IMR, pic_irq_masks[0]);
+  x86_port_write8(PIC1_IMR, pic_irq_masks[1]);
 }
 
 void pic_disable(void) {
   pic_irq_masks[0] = 0xff;
   pic_irq_masks[1] = 0xff;
-  io_out8(PIC0_IMR, 0xff);
-  io_out8(PIC1_IMR, 0xff);
+  x86_port_write8(PIC0_IMR, 0xff);
+  x86_port_write8(PIC1_IMR, 0xff);
 }
 
 static void pic_mask(unsigned irq, int masked) {
@@ -253,7 +250,7 @@ static void pic_mask(unsigned irq, int masked) {
   } else {
     *mask &= ~(1u << bit);
   }
-  io_out8(port, *mask);
+  x86_port_write8(port, *mask);
 }
 
 bool irq_is_valid(unsigned irq) { return irq < MAX_IRQS; }
@@ -265,10 +262,10 @@ void send_eoi(int irq) {
   }
 
   if (irq >= 8) {
-    io_out8(PIC1_OCW2, 0x60 | (irq - 8));
-    io_out8(PIC0_OCW2, 0x60 | 2);
+    x86_port_write8(PIC1_OCW2, 0x60 | (irq - 8));
+    x86_port_write8(PIC0_OCW2, 0x60 | 2);
   } else {
-    io_out8(PIC0_OCW2, 0x60 | irq);
+    x86_port_write8(PIC0_OCW2, 0x60 | irq);
   }
 }
 

@@ -5,5 +5,6 @@ typedef unsigned int irq_state_t;
 
 irq_state_t irq_save(void);
 void irq_restore(irq_state_t state);
+void irq_enable(void);
 
 #endif

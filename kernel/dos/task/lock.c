@@ -60,7 +60,6 @@ void lock(lock_t *key) {
       
     }
   }
-  (void)irq_save();
   lock_set_waiter(key, NULL);
   lock_set_value(key, LOCK_LOCKED);
   lock_set_owner(key, current_task());

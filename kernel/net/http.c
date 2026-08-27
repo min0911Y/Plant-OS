@@ -1,4 +1,5 @@
 #include <dos.h>
+#include <irq.h>
 // HTTP
 
 HTTPGetHeader http_check(uint8_t* data, uint32_t size) {
@@ -40,8 +41,8 @@ void GetNowDate(char* result) {
   hour = get_hour_hex();
   minute = get_min_hex();
   second = get_sec_hex();
-  io_cli();
+  irq_state_t state = irq_save();
   sprintf(result, "Date: %s, %02d %s %02d %02d:%02d:%02d GMT", week[get_week()],
           day, _month[month - 1], year, hour, minute, second);
-  io_sti();
+  irq_restore(state);
 }

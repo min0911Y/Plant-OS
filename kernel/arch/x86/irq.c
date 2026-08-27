@@ -20,3 +20,5 @@ void irq_restore(irq_state_t state) {
     __asm__ volatile("cli" ::: "memory");
   }
 }
+
+void irq_enable(void) { __asm__ volatile("sti" ::: "memory"); }

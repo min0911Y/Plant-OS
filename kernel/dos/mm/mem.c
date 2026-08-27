@@ -1,11 +1,9 @@
 #include <arch/x86/control.h>
 #include <dos.h>
+#include <irq.h>
 #include <kasan.h>
-#define EFLAGS_AC_BIT 0x00040000
 #define MALLOC_ALIGN 8
 
-typedef unsigned int uintptr_t;
-unsigned int memtest_sub(unsigned int, unsigned int);
 typedef struct {
   int size;
   int offset;
@@ -13,37 +11,60 @@ typedef struct {
 static inline uintptr_t align_up_uintptr(uintptr_t value, uintptr_t align) {
   return (value + align - 1) & ~(align - 1);
 }
+
+/* 写入 pattern、两次取反回读，最后恢复原值；返回该 dword 是否为真实内存。 */
+static bool memory_probe_dword(volatile uint32_t *probe) {
+  const uint32_t pattern = 0xaa55aa55u;
+  uint32_t saved = *probe;
+
+  *probe = pattern;
+  *probe ^= 0xffffffffu;
+  bool usable = *probe == ~pattern;
+  if (usable) {
+    *probe ^= 0xffffffffu;
+    usable = *probe == pattern;
+  }
+  *probe = saved;
+  return usable;
+}
+
+/* 从 1GiB 的步长开始向上探测，失败就把步长缩到 1/4，最小 4KiB，
+ * 返回第一个不可用地址，即可用内存的上界。 */
+static unsigned int memory_probe_limit(unsigned int start, unsigned int end) {
+  unsigned int address = start;
+
+  for (unsigned int block = 1024u * 1024u * 1024u; block >= 0x1000u;) {
+    volatile uint32_t *probe =
+        (volatile uint32_t *)(address + block - sizeof(uint32_t));
+    if (!memory_probe_dword(probe)) {
+      block /= 4;
+      continue;
+    }
+    address += block;
+    if (address > end) {
+      break;
+    }
+  }
+  return address;
+}
+
 unsigned int memtest(unsigned int start, unsigned int end) {
-  char flg486 = 0;
-  unsigned int eflg, cr0, i;
+  /* 386 无法把 AC 位置 1，只有 486 及以上才支持并需要临时关闭缓存。 */
+  uint32_t eflags = x86_eflags_read();
+  x86_eflags_write(eflags | X86_EFLAGS_AC);
+  bool cache_control = (x86_eflags_read() & X86_EFLAGS_AC) != 0;
+  x86_eflags_write(eflags & ~X86_EFLAGS_AC);
 
-  /* 确认CPU是386还是486以上的 */
-  eflg = io_load_eflags();
-  eflg |= EFLAGS_AC_BIT; /* AC-bit = 1 */
-  io_store_eflags(eflg);
-  eflg = io_load_eflags();
-  if ((eflg & EFLAGS_AC_BIT) != 0) {
-    /* 如果是386，即使设定AC=1，AC的值还会自动回到0 */
-    flg486 = 1;
+  irq_state_t state = irq_save();
+  if (cache_control) {
+    x86_cr0_write(x86_cr0_read() | X86_CR0_CD | X86_CR0_NW);
   }
-
-  eflg &= ~EFLAGS_AC_BIT; /* AC-bit = 0 */
-  io_store_eflags(eflg);
-
-  if (flg486 != 0) {
-    cr0 = x86_cr0_read();
-    cr0 |= X86_CR0_CD | X86_CR0_NW; /* 禁止缓存 */
-    x86_cr0_write(cr0);
+  unsigned int limit = memory_probe_limit(start, end);
+  if (cache_control) {
+    x86_cr0_write(x86_cr0_read() & ~(X86_CR0_CD | X86_CR0_NW));
   }
-
-  i = memtest_sub(start, end);
-
-  if (flg486 != 0) {
-    cr0 = x86_cr0_read();
-    cr0 &= ~(X86_CR0_CD | X86_CR0_NW); /* 允许缓存 */
-    x86_cr0_write(cr0);
-  }
-  return i;
+  irq_restore(state);
+  return limit;
 }
 
 void swap(free_member *a, free_member *b) {

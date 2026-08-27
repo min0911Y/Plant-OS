@@ -1,3 +1,4 @@
+#include <arch/x86/io.h>
 // pcnet.c
 // AMD pcnet 网卡驱动
 // Copyright (C) zhouzhihao & min0911_ 2022
@@ -38,7 +39,7 @@ extern uint32_t gateway, submask, dns, ip, dhcp_ip;
 struct InitializationBlock initBlock;
 uint8_t mac0, mac1, mac2, mac3, mac4, mac5;
 
-static int io_base = 0;
+static uint16_t io_base;
 static struct BufferDescriptor* sendBufferDesc;
 static uint8_t sendBufferDescMemory[2048 + 15];
 static uint8_t sendBuffers[8][2048 + 15];
@@ -51,52 +52,52 @@ void into_32bitsRW() {
   // 切换到32位读写模式 DWIO（BCR18,bit7）=1
   // 此时还处于16位读写模式
   // 读取BCR18
-  io_out16(io_base + RAP16, BCR18);
-  uint16_t tmp = io_in16(io_base + BDP16);
+  x86_port_write16(io_base + RAP16, BCR18);
+  uint16_t tmp = x86_port_read16(io_base + BDP16);
   tmp |= 0x80;  // DWIO（bit7）=1
   // 写入BCR18
-  io_out16(io_base + RAP16, BCR18);
-  io_out16(io_base + BDP16, tmp);
+  x86_port_write16(io_base + RAP16, BCR18);
+  x86_port_write16(io_base + BDP16, tmp);
   // 此时就处于32位读写模式了
 }
 void into_16bitsRW() {
   // 切换到16位读写模式 与切换到32位读写模式相反
-  io_out32(io_base + RAP32, BCR18);
-  uint32_t tmp = io_in32(io_base + BDP32);
+  x86_port_write32(io_base + RAP32, BCR18);
+  uint32_t tmp = x86_port_read32(io_base + BDP32);
   tmp &= ~0x80;
-  io_out32(io_base + RAP32, BCR18);
-  io_out32(io_base + BDP32, tmp);
+  x86_port_write32(io_base + RAP32, BCR18);
+  x86_port_write32(io_base + BDP32, tmp);
 }
 void reset_card() {
   // PCNET卡复位（约等于切换到16位读写模式
-  io_in16(io_base + RESET16);
-  io_out16(io_base + RESET16, 0x00);
+  x86_port_read16(io_base + RESET16);
+  x86_port_write16(io_base + RESET16, 0x00);
   // 执行完后需等待（sleep(1)）
 }
 void Activate() {
   // 激活PCNET IRQ中断
-  io_out16(io_base + RAP16, CSR0);
-  io_out16(io_base + RDP16, 0x41);
+  x86_port_write16(io_base + RAP16, CSR0);
+  x86_port_write16(io_base + RDP16, 0x41);
 
-  io_out16(io_base + RAP16, CSR4);
-  uint32_t temp = io_in16(io_base + RDP16);
-  io_out16(io_base + RAP16, CSR4);
-  io_out16(io_base + RDP16, temp | 0xc00);
+  x86_port_write16(io_base + RAP16, CSR4);
+  uint32_t temp = x86_port_read16(io_base + RDP16);
+  x86_port_write16(io_base + RAP16, CSR4);
+  x86_port_write16(io_base + RDP16, temp | 0xc00);
 
-  io_out16(io_base + RAP16, CSR0);
-  io_out16(io_base + RDP16, 0x42);
+  x86_port_write16(io_base + RAP16, CSR0);
+  x86_port_write16(io_base + RDP16, 0x42);
 }
 static void init_Card_all() {
   currentSendBuffer = 0;
   currentRecvBuffer = 0;
 
   // 获取MAC地址并保存
-  mac0 = io_in8(io_base + APROM0);
-  mac1 = io_in8(io_base + APROM1);
-  mac2 = io_in8(io_base + APROM2);
-  mac3 = io_in8(io_base + APROM3);
-  mac4 = io_in8(io_base + APROM4);
-  mac5 = io_in8(io_base + APROM5);
+  mac0 = x86_port_read8(io_base + APROM0);
+  mac1 = x86_port_read8(io_base + APROM1);
+  mac2 = x86_port_read8(io_base + APROM2);
+  mac3 = x86_port_read8(io_base + APROM3);
+  mac4 = x86_port_read8(io_base + APROM4);
+  mac5 = x86_port_read8(io_base + APROM5);
   // printk("MAC Address: %02x:%02x:%02x:%02x:%02x:%02x\n", mac0, mac1, mac2,
   // mac3,
   //        mac4, mac5);
@@ -106,10 +107,10 @@ static void init_Card_all() {
   sleep(1);
   irq_mask_set(0);
 
-  io_out16(io_base + RAP16, BCR20);
-  io_out16(io_base + BDP16, 0x102);
-  io_out16(io_base + RAP16, CSR0);
-  io_out16(io_base + RDP16, 0x0004);  // 暂时停止所有传输（用于初始化PCNET网卡
+  x86_port_write16(io_base + RAP16, BCR20);
+  x86_port_write16(io_base + BDP16, 0x102);
+  x86_port_write16(io_base + RAP16, CSR0);
+  x86_port_write16(io_base + RDP16, 0x0004);  // 暂时停止所有传输（用于初始化PCNET网卡
 
   // initBlock传输初始化（CSR1=IB地址低16位，CSR2=IB地址高16位）
   // &
@@ -150,10 +151,10 @@ static void init_Card_all() {
     clean((char *)(uintptr_t)recvBufferDesc[i].address, 2048);
   }
   // CSR1,CSR2赋值（initBlock地址
-  io_out16(io_base + RAP16, CSR1);
-  io_out16(io_base + RDP16, (uint16_t)(uintptr_t)&initBlock);
-  io_out16(io_base + RAP16, CSR2);
-  io_out16(io_base + RDP16, (uint32_t)(uintptr_t)&initBlock >> 16);
+  x86_port_write16(io_base + RAP16, CSR1);
+  x86_port_write16(io_base + RDP16, (uint16_t)(uintptr_t)&initBlock);
+  x86_port_write16(io_base + RAP16, CSR2);
+  x86_port_write16(io_base + RDP16, (uint32_t)(uintptr_t)&initBlock >> 16);
 
   Activate();
 
@@ -191,6 +192,13 @@ bool pcnet_find_card() {
   return true;
 }
 void init_pcnet_card() {
+  uint32_t port_base = pci_get_port_base(bus, dev, func);
+  if (port_base == 0 || port_base > 0xffffu - BDP32) {
+    logk("pcnet: missing or invalid I/O BAR\n");
+    return;
+  }
+  io_base = (uint16_t)port_base;
+
   // 允许PCNET网卡产生中断
   // 1.注册中断
   uint8_t irq = pci_get_drive_irq(bus, dev, func);
@@ -207,7 +215,6 @@ void init_pcnet_card() {
   conf &= 0xffff0000;  // 保留STATUS寄存器，清除COMMAND寄存器
   conf |= 0x7;         // 设置第0~2位（允许PCNET网卡产生中断
   pci_write_command_status(bus, dev, func, conf);
-  io_base = pci_get_port_base(bus, dev, func);
   init_Card_all();
 }
 int recv = 0;
@@ -262,8 +269,8 @@ void PcnetSend(uint8_t* buffer, unsigned int size) {
   sendBufferDesc[sendDesc].flags = 0x8300f000 | ((uint16_t)((-size) & 0xfff));
   sendBufferDesc[sendDesc].flags2 = 0;
 
-  io_out16(io_base + RAP16, CSR0);
-  io_out16(io_base + RDP16, 0x48);
+  x86_port_write16(io_base + RAP16, CSR0);
+  x86_port_write16(io_base + RDP16, 0x48);
 
   currentSendBuffer = 0;
 }
@@ -271,8 +278,8 @@ void PCNET_IRQ(int* esp) {
   // printk("PCNET IRQ:%02x ", (0x20 + PCI_Get_Drive_IRQ_LINE(bus, dev,
   // func)));
 
-  io_out16(io_base + RAP16, CSR0);
-  uint16_t temp = io_in16(io_base + RDP16);
+  x86_port_write16(io_base + RAP16, CSR0);
+  uint16_t temp = x86_port_read16(io_base + RDP16);
 
   // if ((temp & 0x8000) == 0x8000)
   //   printk("PCNET ERROR\n");
@@ -287,8 +294,8 @@ void PCNET_IRQ(int* esp) {
   // else if ((temp & 0x0200) == 0x0200)
   //   printk("PCNET SEND\n");
 
-  io_out16(io_base + RAP16, CSR0);
-  io_out16(io_base + RDP16, temp);  // 通知PCNET网卡 中断处理完毕
+  x86_port_write16(io_base + RAP16, CSR0);
+  x86_port_write16(io_base + RDP16, temp);  // 通知PCNET网卡 中断处理完毕
 
   if ((temp & 0x0100) == 0x0100)
     logk("PCNET INIT DONE\n");

@@ -1,6 +1,7 @@
 #include <arch/x86/interrupt.h>
 #include <cmd.h>
 #include <dos.h>
+#include <irq.h>
 #include <limits.h>
 #include <user_space.h>
 
@@ -1102,13 +1103,13 @@ static void syscall_mouse_data(x86_interrupt_frame_t *frame) {
 
 static void syscall_yield(x86_interrupt_frame_t *frame) {
   (void)frame;
+  irq_state_t state = irq_save();
   if (current_task()->ready == 0) {
-    io_cli();
     task_next();
-    io_sti();
   } else {
     current_task()->ready = 0;
   }
+  irq_restore(state);
 }
 
 static void syscall_tty_object(x86_interrupt_frame_t *frame) {
@@ -1155,27 +1156,27 @@ static void syscall_map_memory(x86_interrupt_frame_t *frame) {
   unsigned source_pde = frame->edi;
   unsigned count = div_round_up(size, 0x1000);
 
-  io_cli();
+  irq_state_t state = irq_save();
   for (unsigned i = 0; i < count; i++) {
     unsigned physical = page_get_phy_pde(source + i * 0x1000, source_pde);
     page_set_physics_attr_pde(
         target + i * 0x1000, (void *)(uintptr_t)physical,
         PG_P | PG_USU | PG_RWW | PG_SHARED, target_pde);
   }
-  io_sti();
+  irq_restore(state);
 }
 
 static void syscall_task_level(x86_interrupt_frame_t *frame) {
-  io_cli();
+  irq_state_t state = irq_save();
   mtask *task = get_task(frame->ebx);
   if (task == NULL) {
-    io_sti();
+    irq_restore(state);
     return;
   }
 
   if (frame->eax == SYSCALL_TASK_LEVEL_HIGH) {
     if (task->urgent) {
-      io_sti();
+      irq_restore(state);
       return;
     }
     task->urgent = 1;
@@ -1185,7 +1186,7 @@ static void syscall_task_level(x86_interrupt_frame_t *frame) {
     task->timeout = 1;
   }
   task->running = 0;
-  io_sti();
+  irq_restore(state);
 }
 
 static void syscall_module(x86_interrupt_frame_t *frame) {
@@ -1293,7 +1294,7 @@ static const syscall_handler_t syscall_handlers[SYSCALL_COUNT] = {
 };
 
 void x86_syscall_dispatch(x86_interrupt_frame_t *frame) {
-  io_sti();
+  irq_enable();
   if (frame->eax >= SYSCALL_COUNT || syscall_handlers[frame->eax] == NULL) {
     return;
   }

@@ -89,7 +89,6 @@ bool task_check_train(mtask *task) {
 }
 extern mtask *mouse_use_task;
 void task_next() {
-  // io_sti();
   if (current->running < current->timeout - 1 && current->state == RUNNING &&
       next_set == NULL) {
     current->running++;
@@ -499,7 +498,7 @@ void task_kill(unsigned tid) {
                   task->ptid != REAPER_TID;
   finish_task(task, TASK_KILLED_STATUS, waitable);
   if (is_current) {
-    io_sti();
+    irq_enable();
     for (;;)
       ;
   }
@@ -586,8 +585,8 @@ void task_lock() {
     self->state = WAITING;
     self->wait_reason = WAIT_REASON_TASK_GROUP_LOCK;
     self->ready = 0;
-    io_sti();
     task_next();
+    irq_restore(interrupt_state);
   }
 }
 
@@ -623,16 +622,18 @@ uint32_t get_father_tid(mtask *t) {
   return parent ? get_father_tid(parent) : t->tgid;
 }
 void task_fall_blocked_reason(enum STATE state, enum WAIT_REASON reason) {
+  irq_state_t interrupt_state = irq_save();
   if (current_task()->ready == 1) {
     current_task()->ready = 0;
     current_task()->wait_reason = WAIT_REASON_NONE;
+    irq_restore(interrupt_state);
     return;
   }
   current_task()->state = state;
   current_task()->wait_reason = reason;
   current_task()->ready = 0;
-  io_sti();
   task_next();
+  irq_restore(interrupt_state);
 }
 void task_fall_blocked(enum STATE state) {
   task_fall_blocked_reason(state, WAIT_REASON_GENERIC);
@@ -647,7 +648,7 @@ void task_exit(unsigned status) {
   bool waitable = task->kind == TASK_PROCESS && task->ptid != TASK_ID_NONE &&
                   task->ptid != REAPER_TID;
   finish_task(task, status, waitable);
-  io_sti();
+  irq_enable();
   for (;;)
     ;
 }
@@ -690,8 +691,8 @@ int waittid(uint32_t tid) {
     self->wait_reason = WAIT_REASON_CHILD;
     self->state = WAITING;
     self->ready = 0;
-    io_sti();
     task_next();
+    irq_restore(interrupt_state);
   }
 }
 void mtask_stop() { mtask_stop_flag = 1; }

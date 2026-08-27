@@ -1,16 +1,17 @@
+#include <arch/x86/io.h>
 #include <dos.h>  
 unsigned char read_cmos(unsigned char p) {
   unsigned char data;
-  io_out8(cmos_index, p);
-  data = io_in8(cmos_data);
-  io_out8(cmos_index, 0x80);
+  x86_port_write8(cmos_index, p);
+  data = x86_port_read8(cmos_data);
+  x86_port_write8(cmos_index, 0x80);
   return data;
 }
 void write_cmos(unsigned char p, unsigned char data) {
-  io_out8(cmos_index, p);
-  io_out8(cmos_data, data);
-  io_out8(cmos_index, 0x80);
-  io_out8(cmos_data, 0);
+  x86_port_write8(cmos_index, p);
+  x86_port_write8(cmos_data, data);
+  x86_port_write8(cmos_index, 0x80);
+  x86_port_write8(cmos_data, 0);
 }
 unsigned int get_hour_hex() { return BCD_HEX(read_cmos(CMOS_CUR_HOUR)); }
 unsigned int get_min_hex() { return BCD_HEX(read_cmos(CMOS_CUR_MIN)); }

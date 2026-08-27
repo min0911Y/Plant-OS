@@ -1,3 +1,4 @@
+#include <arch/x86/io.h>
 #include <dos.h>
 #include <drivers.h>
 #define PCI_COMMAND_PORT 0xCF8
@@ -16,8 +17,8 @@ uint32_t read_pci(uint8_t bus,
                   uint8_t registeroffset) {
   uint32_t id = 1u << 31 | ((bus & 0xff) << 16) | ((device & 0x1f) << 11) |
                 ((function & 0x07) << 8) | (registeroffset & 0xfc);
-  io_out32(PCI_COMMAND_PORT, id);
-  uint32_t result = io_in32(PCI_DATA_PORT);
+  x86_port_write32(PCI_COMMAND_PORT, id);
+  uint32_t result = x86_port_read32(PCI_DATA_PORT);
   return result >> (8 * (registeroffset % 4));
 }
 uint32_t read_bar_n(uint8_t bus,
@@ -34,8 +35,8 @@ void write_pci(uint8_t bus,
                uint32_t value) {
   uint32_t id = 1u << 31 | ((bus & 0xff) << 16) | ((device & 0x1f) << 11) |
                 ((function & 0x07) << 8) | (registeroffset & 0xfc);
-  io_out32(PCI_COMMAND_PORT, id);
-  io_out32(PCI_DATA_PORT, value);
+  x86_port_write32(PCI_COMMAND_PORT, id);
+  x86_port_write32(PCI_DATA_PORT, value);
 }
 uint32_t pci_read_command_status(uint8_t bus, uint8_t slot, uint8_t func) {
   return read_pci(bus, slot, func, 0x04);
@@ -121,7 +122,7 @@ void pci_config(unsigned int bus,
   cmd = 0x80000000 + (unsigned int)adder + ((unsigned int)f << 8) +
         ((unsigned int)equipment << 11) + ((unsigned int)bus << 16);
   // cmd = cmd | 0x01;
-  io_out32(PCI_COMMAND_PORT, cmd);
+  x86_port_write32(PCI_COMMAND_PORT, cmd);
 }
 void init_PCI(unsigned int adder_Base) {
   unsigned int i, BUS, Equipment, F, ADDER;
@@ -130,7 +131,7 @@ void init_PCI(unsigned int adder_Base) {
     for (Equipment = 0; Equipment < 32; Equipment++) {  //查询设备
       for (F = 0; F < 8; F++) {                         //查询功能
         pci_config(BUS, F, Equipment, 0);
-        if (io_in32(PCI_DATA_PORT) != 0xFFFFFFFF) {
+        if (x86_port_read32(PCI_DATA_PORT) != 0xFFFFFFFF) {
           //当前插槽有设备
           //把当前设备信息映射到PCI数据区
           int key = 1;
@@ -151,7 +152,7 @@ void init_PCI(unsigned int adder_Base) {
             //写入寄存器配置
             for (ADDER = 0; ADDER < 256; ADDER = ADDER + 4) {
               pci_config(BUS, F, Equipment, ADDER);
-              i = io_in32(PCI_DATA_PORT);
+              i = x86_port_read32(PCI_DATA_PORT);
               memcpy(PCI_DATA1, &i, 4);
               PCI_DATA1 = PCI_DATA1 + 4;
             }

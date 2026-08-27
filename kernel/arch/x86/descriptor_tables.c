@@ -154,6 +154,36 @@ static inline void x86_task_register_load(uint16_t selector) {
   asm volatile("ltr %0" : : "m"(selector) : "memory");
 }
 
+/* lgdt 之后段寄存器里仍是旧表的缓存描述符，必须重新载入内核数据段。 */
+static inline void x86_data_segments_load(uint16_t selector) {
+  asm volatile("movw %0, %%ds\n"
+               "movw %0, %%es\n"
+               "movw %0, %%fs\n"
+               "movw %0, %%gs"
+               :
+               : "rm"(selector)
+               : "memory");
+}
+
+/* 内核自身的控制台尚未初始化，启动期失败只能直写文本 VRAM 后停机。 */
+__attribute__((noreturn)) static void x86_boot_fail(const char *message) {
+  volatile uint16_t *cell = (volatile uint16_t *)0xb8000u;
+  for (const char *c = message; *c != '\0'; c++) {
+    *cell++ = (uint16_t)((uint8_t)*c) | 0x4f00u;
+  }
+  for (;;) {
+    asm volatile("cli; hlt");
+  }
+}
+
+void arch_boot_verify(void) {
+  uint16_t cs;
+  asm volatile("movw %%cs, %0" : "=rm"(cs));
+  if (cs != X86_SELECTOR(X86_GDT_KERNEL_CODE_INDEX)) {
+    x86_boot_fail("plant os: kernel entered with an unexpected CS selector");
+  }
+}
+
 static void x86_interrupt_entry_set(unsigned vector, interrupt_entry_t entry,
                                     uint16_t access) {
   x86_gate_descriptor_set(&x86_idt()[vector], entry, access);
@@ -184,6 +214,7 @@ void arch_interrupt_init(void) {
       .base = X86_GDT_ADDRESS,
   };
   x86_gdt_load(&gdt_pointer);
+  x86_data_segments_load(X86_SELECTOR(X86_GDT_KERNEL_DATA_INDEX));
 
   /* null_inthandler only iretds. This includes the APIC spurious vector and
    * deliberately sends no EOI. */

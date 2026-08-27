@@ -1,6 +1,7 @@
 #include <arch.h>
 #include <arch/x86/control.h>
 #include <dos.h>
+#include <irq.h>
 extern struct ide_device {
   unsigned char Reserved;      // 0 (Empty) or 1 (This Drive really exists).
   unsigned char Channel;       // 0 (Primary Channel) or 1 (Secondary Channel).
@@ -21,14 +22,12 @@ unsigned int memsize;
 unsigned int PCI_ADDR_BASE;
 struct MOUSE_DEC mdec;
 extern unsigned char *IVT;
-void init_page(void);
 void disable_sb16(void);
 void init_mount_disk(void);
 int getReadyDisk();
 void socket_init();
 void init_devfs();
 void init_vfs();
-void do_init_seg_register();
 unsigned base_count;
 
 #ifdef KERNEL_DISABLE_MEMTEST
@@ -132,10 +131,7 @@ void sysinit(void) {
   char keybuf_sr2[32];
   char mousebuf_sr2[128];
 
-  do_init_seg_register();
-
-  init_page(); // 初始化分页
-  x86_cr0_write(x86_cr0_read() | X86_CR0_WP);
+  init_page(); // 初始化分页与 WP
   arch_interrupt_init();
   init_pic();
   init_pit();
@@ -145,7 +141,7 @@ void sysinit(void) {
   IVT = page_malloc(0x400);
   memcpy(IVT, 0x0, 0x400);
 
-  io_sti();
+  irq_enable();
 #ifdef KERNEL_PERF
   perf_boot_start();
 #endif
