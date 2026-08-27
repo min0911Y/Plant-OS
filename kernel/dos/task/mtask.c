@@ -295,6 +295,25 @@ static bool task_slot_in_use(const mtask *task) {
          task->state != READY && task->state != ALLOCATING;
 }
 
+unsigned task_address_space_owner(unsigned pde) {
+  mtask *fallback = NULL;
+
+  for (unsigned i = 0; i < sizeof(m) / sizeof(m[0]); i++) {
+    mtask *task = &m[i];
+    if (!task_slot_in_use(task) || task->pde != pde) {
+      continue;
+    }
+    if (task->kind == TASK_PROCESS && task->tid == task->tgid) {
+      return task->tid;
+    }
+    if (fallback == NULL) {
+      fallback = task;
+    }
+  }
+
+  return fallback != NULL ? fallback->tgid : TASK_ID_NONE;
+}
+
 static void task_clear_ipc_refs(mtask *task) {
   /* 丢掉自己队列里没读完的消息、注销服务名、唤醒等着给它发消息的任务 */
   ipc_task_cleanup(task);

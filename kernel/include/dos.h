@@ -56,6 +56,7 @@ void task_fall_blocked_reason(enum STATE state, enum WAIT_REASON reason);
 void task_run(mtask *task);
 void mtask_run_now(mtask *obj);
 int task_fork();
+unsigned task_address_space_owner(unsigned pde);
 void task_next(void);
 void signal_deal(void);
 // page.c
@@ -67,6 +68,7 @@ void page2tpo(int page, int *t, int *p);
 void tpo2page(int *page, int t, int p);
 void *page_malloc_one();
 void *page_malloc_one_count_from_4gb();
+void *page_malloc_one_count_from_4gb_mark(unsigned tid);
 void *page_malloc_one_no_mark();
 void *page_malloc_one_mark(unsigned tid);
 int get_pageinpte_address(int t, int p);

@@ -52,6 +52,12 @@ static inline uintptr_t x86_cr2_read(void) {
   return value;
 }
 
+static inline uint32_t x86_cr3_read(void) {
+  uint32_t value;
+  asm volatile("movl %%cr3, %0" : "=r"(value) : : "memory");
+  return value;
+}
+
 static inline void x86_cr3_write(uintptr_t value) {
   asm volatile("movl %0, %%cr3" : : "r"(value) : "memory");
 }

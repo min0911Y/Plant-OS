@@ -779,6 +779,12 @@ void *page_malloc_one_mark(unsigned tid) {
 void *page_malloc_one_count_from_4gb() {
   return page_alloc_single_high(get_tid(current_task()));
 }
+void *page_malloc_one_count_from_4gb_mark(unsigned tid) {
+  if (tid > UCHAR_MAX) {
+    page_ref_panic("owner out of range", tid);
+  }
+  return page_alloc_single_high((uint8_t)tid);
+}
 void gc(unsigned tid) {
   for (unsigned i = 0; i < PAGE_TOTAL_COUNT; i++) {
     unsigned count = page_refcount_idx(i);
@@ -978,10 +984,14 @@ bool page_fault_try_resolve(uintptr_t address, uint32_t error) {
     return false;
   }
 
-  uint32_t active_pde = current_task()->pde;
+  uint32_t active_pde = x86_cr3_read() & PAGE_ENTRY_ADDR_MASK;
   if (active_pde < PAGE_SIZE_BYTES ||
       (active_pde & (PAGE_SIZE_BYTES - 1)) != 0 ||
       page_refcount_idx(IDX(active_pde)) == 0) {
+    return false;
+  }
+  unsigned owner_tid = task_address_space_owner(active_pde);
+  if (owner_tid > UCHAR_MAX) {
     return false;
   }
 
@@ -1016,13 +1026,13 @@ bool page_fault_try_resolve(uintptr_t address, uint32_t error) {
   bool copy_page = !pte_writable && page_refcount_entry(old_pte_value) > 1 &&
                    !page_entry_has_any(old_pte_value, PG_SHARED);
   if (copy_table) {
-    new_table = page_malloc_one_count_from_4gb();
+    new_table = page_malloc_one_count_from_4gb_mark(owner_tid);
     if (new_table == NULL) {
       goto restore;
     }
   }
   if (copy_page) {
-    new_page = page_malloc_one_count_from_4gb();
+    new_page = page_malloc_one_count_from_4gb_mark(owner_tid);
     if (new_page == NULL) {
       if (new_table != NULL) {
         page_free_one(new_table);
