@@ -128,14 +128,6 @@ uint32_t smp_cpu_count(void);
 uint32_t smp_bsp_lapic_id(void);
 uint32_t smp_cpu_lapic_id(uint32_t index);
 int smp_cpu_started(uint32_t index);
-// pcnet.c
-void into_32bitsRW();
-void into_16bitsRW();
-void reset_card();
-void Activate();
-void init_pcnet_card();
-void PcnetSend(uint8_t *buffer, unsigned int size);
-void PCNET_IRQ(int *esp);
 // vbe.c
 int SwitchVBEMode(int mode);
 int check_vbe_mode(int mode, struct VBEINFO *vinfo);
@@ -179,10 +171,6 @@ int rw_vdisk(char drive, unsigned int lba, unsigned char *buffer,
 bool have_vdisk(char drive);
 char first_vdisk(void);
 char next_vdisk(char drive);
-// rtl8139.c
-bool rtl8139_find_card();
-void init_rtl8139_card();
-void Rtl8139Send(uint8_t *buffer, unsigned int size);
 // timer.c
 void sleep(unsigned long long s);
 // ide.c
@@ -192,9 +180,4 @@ void ide_write_sectors(unsigned char drive, unsigned char numsects,
                        unsigned int lba, unsigned short es, void *buffer);
 void ide_initialize(unsigned int BAR0, unsigned int BAR1, unsigned int BAR2,
                     unsigned int BAR3, unsigned int BAR4);
-// network.c
-void init_networkCTL();
-void init_network();
-void init_card();
-void Card_Recv_Handler(unsigned char *RawData);
 #endif

@@ -1,5 +1,6 @@
 // libpfs
 #include <dos.h>
+#include <calendar.h>
 #include <mstr.h>
 #include <pfs.h>
 #include <stdio.h>
@@ -1212,8 +1213,8 @@ List *pfs_ListFile(struct vfs_t *vfs, char *dictpath) {
           return NULL;
         }
         uint32_t year, mon, day, hour, min, sec;
-        UnNTPTimeStamp(pdb.inodes[i].time, &year, &mon, &day, &hour, &min,
-                       &sec);
+        calendar_from_ntp_timestamp(pdb.inodes[i].time, &year, &mon, &day,
+                                    &hour, &min, &sec);
         strcpy(f->name, mstr_get(s));
         f->day = day;
         f->hour = hour;
@@ -1389,7 +1390,7 @@ vfs_file *pfs_FileInfo(struct vfs_t *vfs, char *filename) {
   memset(result, 0, sizeof(vfs_file));
   pfs_inode i = pfs_get_inode_by_index(vfs, idx, b);
   uint32_t year, mon, day, hour, min, sec;
-  UnNTPTimeStamp(i.time, &year, &mon, &day, &hour, &min, &sec);
+  calendar_from_ntp_timestamp(i.time, &year, &mon, &day, &hour, &min, &sec);
   memcpy(result->name, filename, strlen(filename) + 1);
   result->day = day;
   result->hour = hour;

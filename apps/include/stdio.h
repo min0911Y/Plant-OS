@@ -33,6 +33,7 @@ int printf(const char* format, ...);
 int sprintf(char *s, const char *format, ...);
 int vsprintf(char *s, const char *format, va_list arg);
 int vsnprintf(char *buf, size_t n, const char *fmt, va_list ap);
+int fscanf(FILE *f, const char *fmt, ...);
 int puts(char *str);
 char *gets(char *str);
 int remove(const char *filename);

@@ -73,8 +73,6 @@ void init() {
   current_task()->drive = system_drive;
   current_task()->drive_number = system_drive - 'A';
   env_init();
-  init_networkCTL();
-  init_network();
 
   if (env_read("network") == NULL) {
     printk("WARNING: you haven't set the network value in env.cfg, system will "
@@ -87,8 +85,10 @@ void init() {
     env_save();
   }
   if (strcmp(env_read("network"), "enable") == 0) {
-    logk("init card\n");
-    init_card();
+    logk("network: start lwIP\n");
+    if (!net_stack_start()) {
+      WARNING_K("network: no supported card or lwIP initialization failed");
+    }
   }
   if (strcmp("HIGHTEXTMODE", env_read("video_mode")) == 0) {
     running_mode = SwitchToHighTextMode() ? HIGHTEXTMODE : POWERINTDOS;

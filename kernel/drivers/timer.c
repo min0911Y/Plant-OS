@@ -180,6 +180,7 @@ void inthandler20(int cs, perf_irq_frame_t *frame) {
   struct TIMER *timer;
 
   timerctl.count++;
+  net_stack_tick();
   ipc_tick(); /* 唤醒等到超时的 IPC 等待者 */
 
   timer = timerctl.t0; /* 首先把最前面的地址赋给timer */

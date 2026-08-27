@@ -207,34 +207,6 @@ asm_rtc_handler:
   pop es
   pop ds
 		IRETD
-global asm_net_api
-extern net_api
-asm_net_api:
-	push ds
-  push es
-  push fs
-  push gs
-  pusha
-	STI
-	PUSH	DS
-	PUSH	ES
-	PUSHAD			; 用于保存的PUSH
-	PUSHAD
-	MOV		AX,SS
-	MOV		DS,AX ; 将操作系统用段地址存入DS和ES
-	MOV		ES,AX
-	CALL	net_api
-	ADD		ESP,32
-	;call signal_deal
-	POPAD
-	POP		ES
-	POP		DS
-  add esp,32
-  pop gs
-  pop fs
-  pop es
-  pop ds
-	IRETD
 asm_inthandler20:
   push ds
   push es

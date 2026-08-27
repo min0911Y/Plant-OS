@@ -1,4 +1,5 @@
 #include <arch/x86/interrupt.h>
+#include <calendar.h>
 #include <cmd.h>
 #include <dos.h>
 #include <irq.h>
@@ -294,6 +295,7 @@ enum syscall_id {
   SYSCALL_MODULE_UNLOAD = 0x5b,
   SYSCALL_MODULE_LIST = 0x5c,
   SYSCALL_IPC = 0x5d,
+  SYSCALL_NETWORK = 0x5e,
   SYSCALL_COUNT,
 };
 
@@ -910,8 +912,9 @@ static void syscall_framebuffer(x86_interrupt_frame_t *frame) {
 }
 
 static void syscall_timestamp(x86_interrupt_frame_t *frame) {
-  frame->eax = UTCTimeStamp(get_year(), get_mon_hex(), get_day_of_month(),
-                            get_hour_hex(), get_min_hex(), get_sec_hex());
+  frame->eax = calendar_to_unix_timestamp(
+      get_year(), get_mon_hex(), get_day_of_month(), get_hour_hex(),
+      get_min_hex(), get_sec_hex());
 }
 
 static void syscall_uptime(x86_interrupt_frame_t *frame) {
@@ -1208,6 +1211,59 @@ static void syscall_ipc(x86_interrupt_frame_t *frame) {
   frame->eax = ipc_syscall_dispatch(frame->ebx, frame->ecx, frame->edx);
 }
 
+static void syscall_network(x86_interrupt_frame_t *frame) {
+  uint32_t owner_group = current_task()->tgid;
+  switch (frame->ebx) {
+  case NET_SYSCALL_OPEN:
+    frame->eax = frame->ecx > 0xffu
+                     ? -1
+                     : net_socket_open(owner_group, (uint8_t)frame->ecx);
+    break;
+  case NET_SYSCALL_CLOSE:
+    frame->eax = net_socket_close(owner_group, (int)frame->ecx);
+    break;
+  case NET_SYSCALL_CONFIGURE:
+    frame->eax = frame->esi > 0xffffu || frame->ebp > 0xffffu
+                     ? -1
+                     : net_socket_configure(
+                           owner_group, (int)frame->ecx, frame->edx,
+                           (uint16_t)frame->esi, frame->edi,
+                           (uint16_t)frame->ebp);
+    break;
+  case NET_SYSCALL_SEND:
+    frame->eax =
+        frame->esi > 0xffffu || !user_range_ok(frame->edx, frame->esi)
+            ? -1
+            : net_socket_send(owner_group, (int)frame->ecx,
+                              (const void *)(uintptr_t)frame->edx,
+                              frame->esi);
+    break;
+  case NET_SYSCALL_RECV:
+    frame->eax =
+        frame->esi == 0 || frame->esi > 0xffffu ||
+                !user_range_ok(frame->edx, frame->esi)
+            ? -1
+            : net_socket_recv(owner_group, (int)frame->ecx,
+                              (void *)(uintptr_t)frame->edx, frame->esi);
+    break;
+  case NET_SYSCALL_CONNECT:
+    frame->eax = net_socket_connect(owner_group, (int)frame->ecx);
+    break;
+  case NET_SYSCALL_LISTEN:
+    frame->eax = net_socket_listen(owner_group, (int)frame->ecx);
+    break;
+  case NET_SYSCALL_GET_IP:
+    frame->eax = net_stack_ip();
+    break;
+  case NET_SYSCALL_PING:
+    frame->eax = net_stack_ping(frame->ecx);
+    break;
+  default:
+    frame->eax = -1;
+    break;
+  }
+}
+
 static const syscall_handler_t syscall_handlers[SYSCALL_COUNT] = {
     [SYSCALL_VERSION] = syscall_version,
     [SYSCALL_PRINT_CHARACTER] = syscall_print_character,
@@ -1291,6 +1347,7 @@ static const syscall_handler_t syscall_handlers[SYSCALL_COUNT] = {
     [SYSCALL_MODULE_UNLOAD] = syscall_module,
     [SYSCALL_MODULE_LIST] = syscall_module,
     [SYSCALL_IPC] = syscall_ipc,
+    [SYSCALL_NETWORK] = syscall_network,
 };
 
 void x86_syscall_dispatch(x86_interrupt_frame_t *frame) {

@@ -254,7 +254,7 @@ static int io_popen (lua_State *L) {
 
 
 static int io_tmpfile (lua_State *L) {
-  return NULL;
+  return 0;
 }
 
 
@@ -561,7 +561,7 @@ static int f_seek (lua_State *L) {
 
 
 static int f_setvbuf (lua_State *L) {
-  return NULL;
+  return 0;
 }
 
 

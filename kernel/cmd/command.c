@@ -14,10 +14,9 @@ int run_shell_command(const char *command, size_t command_length) {
     return -1;
   }
 
-  const size_t command_offset = sizeof("psh.bin -c \"") - 1;
-  memcpy(line, "psh.bin -c \"", command_offset);
+  const size_t command_offset = sizeof("psh.bin -c ") - 1;
+  memcpy(line, "psh.bin -c ", command_offset);
   memcpy(line + command_offset, command, command_length);
-  line[line_size - 2] = '"';
   line[line_size - 1] = '\0';
   int status = os_execute_shell(line, line_size - 1);
   free(line);

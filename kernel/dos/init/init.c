@@ -25,7 +25,6 @@ extern unsigned char *IVT;
 void disable_sb16(void);
 void init_mount_disk(void);
 int getReadyDisk();
-void socket_init();
 void init_devfs();
 void init_vfs();
 unsigned base_count;
@@ -244,10 +243,6 @@ void sysinit(void) {
   logk("sysinit: Input_Stack_Init start\n");
   Input_Stack_Init();
   logk("sysinit: Input_Stack_Init done\n");
-  printk("socket\n");
-  logk("sysinit: socket_init start\n");
-  socket_init();
-  logk("sysinit: socket_init done\n");
   printk("module\n");
   logk("sysinit: module_init_system start\n");
   module_init_system();
@@ -259,7 +254,6 @@ void sysinit(void) {
   printk("set drives\n");
   logk("sysinit: SetDrive start\n");
   SetDrive((unsigned char *)"DISK_DRIVE");
-  SetDrive((unsigned char *)"NETCARD_DRIVE");
   logk("sysinit: SetDrive done\n");
 
   printk("Hello Plant OS Kernel\n");

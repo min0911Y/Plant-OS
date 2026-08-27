@@ -1,0 +1,5 @@
+Upstream: https://github.com/lwip-tcpip/lwip
+Version: 2.2.1
+Tag: STABLE-2_2_1_RELEASE
+Commit: 009c2256469004009488b3385ba269461e8eb616
+License: BSD-3-Clause; see LICENSE.

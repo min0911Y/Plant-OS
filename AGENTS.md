@@ -29,7 +29,7 @@
 - `kernel/drivers/`：存储、网络、输入、显示、声音、PCI、时钟等驱动。
 - `kernel/fs/`：FAT、PFS、ISO9660、VFS、ELF 加载及路径/文件实现。
 - `kernel/io/`：文本/图形显示、TTY、输入栈和日志。
-- `kernel/net/`：以太网到 TCP/UDP、DHCP、DNS、HTTP、FTP 等协议实现。
+- `kernel/net/`：lwIP 2.2.1（`third_party/lwip`）及 Plant OS 的 raw-API 适配、DHCP 和用户态 socket 句柄实现；网卡帧适配位于 `kernel/drivers/network.c`。
 <!-- 过时：`kernel/cmd/` 保存内核命令实现。 -->
 - `kernel/cmd/`：系统调用到用户态 `apps/psh` 命令模式的适配层。不得恢复旧内核 `if/else` 命令解析器及其 `chat`、`netgobang` 实现；构造执行请求时 `argv[0]` 必须是实际 shell `psh.bin`。
 - 用户可见的磁盘重挂载命令唯一名称是 `remount_drive`，接受单字母盘符或常规 `X:` 写法并在内部规范化为大写盘符；仓库调用方统一使用 `remount_drive X:`，不得保留 `rdrv` 别名。
@@ -129,6 +129,15 @@ python3 scripts/kernel-perf.py \
 - 仅修改文档时至少运行 `git diff --check`。不要为了文档改动重建大型磁盘镜像。
 
 ## 跨层修改规则
+
+### 网络栈
+
+- 网络协议的唯一实现是 `kernel/net/third_party/lwip`（上游 lwIP 2.2.1）加 `kernel/net/net_stack.c`。禁止恢复手写 ARP、IPv4、ICMP、UDP、TCP、DHCP、DNS、HTTP、FTP 或第二套协议状态机。
+- 当前端口使用 `NO_SYS=1` 和 lwIP raw API：网卡 IRQ 交付完整、无 FCS 的以太网帧，`net_stack_tick()` 在时钟中断中驱动 lwIP timeout。调用 raw API 的普通内核路径必须以 `irq_save()`/`irq_restore()` 串行化，不能引入未受保护的 netconn/socket 线程层。
+- `kernel/drivers/network.c` 只负责选择链路驱动；PCnet/RTL8139 只负责 PCI、DMA、寄存器和 IRQ。驱动必须报告实际接收长度，并接收不含 FCS 的发送帧；不得恢复 `Card_Recv_Handler`、`netcard_send`、IP 缓存、DHCP 忙等或驱动内协议解析。
+- 用户态 `Socket_*` 是以 task group 为所有者的整数句柄，不是内核指针。它们通过统一 `SYSCALL_NETWORK`（`int 0x36`）分派；send/recv 必须验证用户地址和长度，任务组退出必须释放自己的 handle。不得恢复 DPL3 的 `int 0x30` 网络入口。
+- `network=enable` 仅启动异步 lwIP DHCP；地址可在租约完成前为零，不能把网络启动改回阻塞式 DHCP 或持久化旧的 `ip/gateway/submask/dns` 环境变量。
+- 网络验证优先使用 `nettest.bin`：它等待 DHCP 并 ping QEMU user-net 网关；传入可选 TCP echo 端口时再验证 connect/send/recv。自动验证时临时修改 `sys.cfg` 与 `init.mst`，结束后立即恢复，仍禁止 `sendkey`。
 
 ### 系统调用、IPC 和 RPC
 

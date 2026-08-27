@@ -74,7 +74,6 @@ void asm_inthandler20(void);
 void asm_inthandler21(void);
 void asm_inthandler2c(void);
 void asm_ide_irq(void);
-void asm_net_api(void);
 void floppy_int(void);
 void PCNET_ASM_INTHANDLER(void);
 void RTL8139_ASM_INTHANDLER(void);
