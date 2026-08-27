@@ -1,6 +1,7 @@
 #include <ELF.h>
 #include <arch.h>
 #include <arch/x86/interrupt.h>
+#include <arch/x86/control.h>
 #include <dos.h>
 #include <limits.h>
 #include <user_space.h>
@@ -190,10 +191,10 @@ static __attribute__((noinline)) unsigned task_app_get_pde(void) {
 
 static bool task_app_clone_user_space(unsigned pde) {
   io_cli();
-  set_cr3(PDE_ADDRESS);
+  x86_cr3_write(PDE_ADDRESS);
   logk("P1 %08x\n", current_task()->pde);
   bool cloned = task_clone_user_page_tables(pde);
-  set_cr3(pde);
+  x86_cr3_write(pde);
   io_sti();
   return cloned;
 }
@@ -226,9 +227,9 @@ void task_shell() {
 
   unsigned pde = current_task()->pde;
   io_cli();
-  set_cr3(PDE_ADDRESS);
+  x86_cr3_write(PDE_ADDRESS);
   bool cloned = task_clone_user_page_tables(pde);
-  set_cr3(pde);
+  x86_cr3_write(pde);
   io_sti();
   if (!cloned) {
     task_exit(-1);

@@ -41,7 +41,6 @@ int os_execute_shell(const char *line, size_t line_length);
 void idle();
 void init();
 extern uint64_t global_time;
-void set_cr3(uint32_t pde);
 struct FIFO8 *task_get_key_fifo(mtask *task);
 void task_fifo_sleep(mtask *task);
 struct FIFO8 *task_get_mouse_fifo(mtask *task);
@@ -80,10 +79,6 @@ void *page_malloc(int size);
 void page_free(void *p, int size);
 void page_map(void *target, void *start, void *end);
 void change_page_task_id(int task_id, void *p, unsigned int size);
-void PF(unsigned edi, unsigned esi, unsigned ebp, unsigned esp, unsigned ebx,
-        unsigned edx, unsigned ecx, unsigned eax, unsigned gs, unsigned fs,
-        unsigned es, unsigned ds, unsigned error, unsigned eip, unsigned cs,
-        unsigned eflags);
 void page_set_physics_attr(uint32_t vaddr, void *paddr, uint32_t attr);
 uint32_t page_get_attr(unsigned vaddr);
 uint32_t page_get_phy(unsigned vaddr);
@@ -98,9 +93,6 @@ int page_link(unsigned addr);
 int page_link_share(unsigned addr);
 void pde_retain(unsigned addr);
 // nasmfunc.asm
-int get_eip();
-void farjmp(int eip, int cs);
-void farcall(int eip, int cs);
 void ASM_call(int i);
 void io_cli(void);
 void io_sti(void);
@@ -113,8 +105,6 @@ int io_in16(int port);
 int io_in32(int port);
 int io_load_eflags(void);
 void io_store_eflags(int eflags);
-int load_cr0(void);
-void store_cr0(int cr0);
 void gensound(int notes, int dup);
 int get_cpu1();
 int get_cpu2();
@@ -126,26 +116,6 @@ int get_cpu7(unsigned eax);
 void __init_PIT();
 void init_float();
 // other.c
-void ERROR0(uint32_t eip);
-void ERROR1(uint32_t eip);
-void ERROR3(uint32_t eip);
-void ERROR4(uint32_t eip);
-void ERROR5(uint32_t eip);
-void ERROR6(uint32_t eip);
-void ERROR7(uint32_t eip);
-void ERROR8(uint32_t eip);
-void ERROR9(uint32_t eip);
-void ERROR10(uint32_t eip);
-void ERROR11(uint32_t eip);
-void ERROR12(uint32_t eip);
-void ERROR13(uint32_t eip);
-void ERROR16(uint32_t eip);
-void ERROR17(uint32_t eip);
-void ERROR18(uint32_t eip);
-void ERROR19(uint32_t eip);
-void ERROR(int CODE, char *TIPS);
-void KILLAPP(int ec, int eip);
-void KILLAPP0(int ec, int tn);
 void insert_char(char *str, int pos, char ch); // str:字符串，pos:位置，ch:字符
 void delete_char(char *str, int pos);          // str:字符串，pos:位置
 char bcd2hex(char bcd);
@@ -156,15 +126,6 @@ char num2ascii(char c);
 void strtoupper(char *str);
 int GetCHorEN(unsigned char *str);
 void clean(char *s, int len);
-void disableExp();
-void EnableExp();
-uint32_t get_cr0();
-void set_cr0(uint32_t cr0);
-char GetExpFlag();
-void ClearExpFlag();
-void SetCatchEip(uint32_t eip);
-void SwitchPublic();
-void SwitchPrivate();
 void *krealloc(void *ptr, uint32_t size);
 // fifo.c
 void fifo8_init(struct FIFO8 *fifo, int size, unsigned char *buf);

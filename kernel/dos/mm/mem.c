@@ -1,7 +1,7 @@
+#include <arch/x86/control.h>
 #include <dos.h>
 #include <kasan.h>
 #define EFLAGS_AC_BIT 0x00040000
-#define CR0_CACHE_DISABLE 0x60000000
 #define MALLOC_ALIGN 8
 
 typedef unsigned int uintptr_t;
@@ -31,17 +31,17 @@ unsigned int memtest(unsigned int start, unsigned int end) {
   io_store_eflags(eflg);
 
   if (flg486 != 0) {
-    cr0 = load_cr0();
-    cr0 |= CR0_CACHE_DISABLE; /* 禁止缓存 */
-    store_cr0(cr0);
+    cr0 = x86_cr0_read();
+    cr0 |= X86_CR0_CD | X86_CR0_NW; /* 禁止缓存 */
+    x86_cr0_write(cr0);
   }
 
   i = memtest_sub(start, end);
 
   if (flg486 != 0) {
-    cr0 = load_cr0();
-    cr0 &= ~CR0_CACHE_DISABLE; /* 允许缓存 */
-    store_cr0(cr0);
+    cr0 = x86_cr0_read();
+    cr0 &= ~(X86_CR0_CD | X86_CR0_NW); /* 允许缓存 */
+    x86_cr0_write(cr0);
   }
   return i;
 }

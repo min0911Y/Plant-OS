@@ -27,7 +27,7 @@ DEL      = rm
 
 OBJS_BOOTPACK = $(OUTPATH)kernelc.o $(OUTPATH)screen.o $(OUTPATH)command.o $(OUTPATH)timer.o \
 				$(OUTPATH)mem.o $(OUTPATH)file.o $(OUTPATH)setjmp.obj $(OUTPATH)bios_interrupt.obj $(OUTPATH)i386.obj \
-				$(OUTPATH)handlers.obj $(OUTPATH)errors.obj $(OUTPATH)vga.o $(OUTPATH)harddisk.o $(OUTPATH)TextMode.o  \
+				$(OUTPATH)handlers.obj $(OUTPATH)exceptions.obj $(OUTPATH)vga.o $(OUTPATH)harddisk.o $(OUTPATH)TextMode.o  \
 				$(OUTPATH)mouse.o $(OUTPATH)acpi.o $(OUTPATH)Input_Stack.o $(OUTPATH)descriptor_tables.o $(OUTPATH)arg.o \
 				$(OUTPATH)other.o $(OUTPATH)floppy.o $(OUTPATH)dma.o $(OUTPATH)init.o $(OUTPATH)main.o \
 				$(OUTPATH)std.o $(OUTPATH)sheet.o $(OUTPATH)vbe.o $(OUTPATH)cmos.o $(OUTPATH)pci.o $(OUTPATH)fat.o \
@@ -42,7 +42,8 @@ OBJS_BOOTPACK = $(OUTPATH)kernelc.o $(OUTPATH)screen.o $(OUTPATH)command.o $(OUT
 				$(OUTPATH)mtask.o $(OUTPATH)basetask.o $(OUTPATH)execute.o $(OUTPATH)network.o $(OUTPATH)rtl8139.o \
 				$(OUTPATH)vfs.o $(OUTPATH)build.o $(OUTPATH)mst.o $(OUTPATH)str.o $(OUTPATH)pfs.o $(OUTPATH)signal.o \
 				$(OUTPATH)rtc.o $(OUTPATH)ahci.o $(OUTPATH)farcall.o $(OUTPATH)fartty.o $(OUTPATH)iso9660.o \
-				$(OUTPATH)module.o $(OUTPATH)kasan.o $(OUTPATH)perf.o $(OUTPATH)irq.o $(OUTPATH)user_return.obj
+				$(OUTPATH)module.o $(OUTPATH)kasan.o $(OUTPATH)perf.o $(OUTPATH)irq.o $(OUTPATH)exceptions.o \
+				$(OUTPATH)user_return.obj
 
 # 默认动作
 default : make_dir
@@ -131,6 +132,7 @@ Mimg : make_dir $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $
 		mcopy -i ./disk.img $(APPSOUTPATH)copydir.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)dktest.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)rpctest.bin ::
+		mcopy -i ./disk.img $(APPSOUTPATH)exc_test.bin ::
 
 		mcopy -i ./disk.img $(RESPATH)init.mst ::
 
@@ -173,6 +175,7 @@ Mimg : make_dir $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $
 		mcopy -i boot.img $(APPSOUTPATH)copydir.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)dktest.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)rpctest.bin ::
+		mcopy -i boot.img $(APPSOUTPATH)exc_test.bin ::
 		mcopy -i boot.img $(FONTPATH)font.bin ::
 		mcopy -i boot.img $(FONTPATH)HZK16 ::
 		mcopy -i boot.img $(BIDPATH)nasm.zip ::

@@ -36,11 +36,6 @@ void task_sr1() {
   //     struct TASK* task = get_task(i);
   //     if (task->running == 0) {  // 进程没有运行
   //       printk("system retention task 1: kill task %d * 8 %s.\n", task->sel / 8, task->name);
-  //       extern struct TASK* last_fpu_task;
-  //       if (last_fpu_task == task) {
-  //         printk("Set last fpu task %d * 8 %s.\n", task->sel / 8, task->name);
-  //         last_fpu_task = (struct TASK *)0x1;
-  //       }
   //       __sub_task(task);
   //       goto re;
   //     }

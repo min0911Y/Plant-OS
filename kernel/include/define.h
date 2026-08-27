@@ -139,20 +139,6 @@ typedef struct { // IPC头（在TASK结构体中的头）
 //   struct TASK *father;
 // };
 #define _packed __attribute__((packed))
-enum {
-  CR0_PE = 1 << 0, // Protection Enable 启用保护模式
-  CR0_MP = 1 << 1, // Monitor Coprocessor
-  CR0_EM = 1 << 2, // Emulation 启用模拟，表示没有 FPU
-  CR0_TS = 1 << 3, // Task Switch 任务切换，延迟保存浮点环境
-  CR0_ET = 1 << 3, // Extension Type 保留
-  CR0_NE = 1 << 5, // Numeric Error 启用内部浮点错误报告
-  CR0_WP =
-      1 << 16, // Write Protect 写保护（禁止超级用户写入只读页）帮助写时复制
-  CR0_AM = 1 << 18, // Alignment Mask 对齐掩码
-  CR0_NW = 1 << 29, // Not Write-Through 不是直写
-  CR0_CD = 1 << 30, // Cache Disable 禁用内存缓冲
-  CR0_PG = 1 << 31, // Paging 启用分页
-};
 typedef struct fpu_t {
   uint16_t control;
   uint16_t RESERVED1;
@@ -194,9 +180,6 @@ typedef struct fpu_t {
 //   int nl;
 //   int lock; // 被锁住了？
 //   char forever;
-//   int DisableExpFlag;
-//   uint32_t CatchEIP;
-//   char flagOfexp;
 //   int mx, my;
 //   fpu_t *fpu;
 //   struct vfs_t *nfs;
@@ -253,9 +236,6 @@ typedef struct mtask {
   uint32_t *alloc_size;
   uint32_t alloced;
   struct tty *TTY;
-  int DisableExpFlag;
-  uint32_t CatchEIP;
-  char flagOfexp;
   fpu_t fpu;
   int fpu_flag;
   char drive_number;

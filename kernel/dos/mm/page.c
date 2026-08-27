@@ -1,6 +1,9 @@
+#include <arch/x86/control.h>
 #include <dos.h>
 #include <kasan.h>
 #include <limits.h>
+#include <page_fault.h>
+#include <user_space.h>
 #define IDX(addr) ((unsigned)addr >> 12)            // 获取 addr 的页索引
 #define DIDX(addr) (((unsigned)addr >> 22) & 0x3ff) // 获取 addr 的页目录索引
 #define TIDX(addr) (((unsigned)addr >> 12) & 0x3ff) // 获取 addr 的页表索引
@@ -419,7 +422,6 @@ unsigned pde_clone(unsigned addr) {
     }
     unsigned p = page_entry_addr(*pde_entry);
     page_ref_inc_entry(*pde_entry);
-    *pde_entry = page_entry_clear_flags(*pde_entry, PG_RWW);
     for (int j = 0; j < 0x1000; j += 4) {
       unsigned int *pte_entry = (unsigned int *)(p + j);
       if (!page_entry_has_all(*pte_entry, PAGE_USER_PRESENT_FLAGS)) {
@@ -436,7 +438,7 @@ unsigned pde_clone(unsigned addr) {
   memcpy((void *)result, (void *)addr, 0x1000);
   flush_tlb(result);
   flush_tlb(addr);
-  set_cr3(addr);
+  x86_cr3_write(addr);
 
   return result;
 }
@@ -503,7 +505,7 @@ int page_link_pde(unsigned addr, unsigned pde) {
   unsigned pde_backup = current_task()->pde;
   int result = 0;
   current_task()->pde = PDE_ADDRESS;
-  set_cr3(PDE_ADDRESS);
+  x86_cr3_write(PDE_ADDRESS);
   unsigned t, p;
   t = DIDX(addr);
   p = (addr >> 12) & 0x3ff;
@@ -545,7 +547,7 @@ int page_link_pde(unsigned addr, unsigned pde) {
   result = 1;
 restore:
   current_task()->pde = pde_backup;
-  set_cr3(pde_backup);
+  x86_cr3_write(pde_backup);
   return result;
 }
 int page_link_pde_share(unsigned addr, unsigned pde) {
@@ -553,7 +555,7 @@ int page_link_pde_share(unsigned addr, unsigned pde) {
   unsigned pde_backup = current_task()->pde;
   int result = 0;
   current_task()->pde = PDE_ADDRESS;
-  set_cr3(PDE_ADDRESS);
+  x86_cr3_write(PDE_ADDRESS);
   unsigned t, p;
   t = DIDX(addr);
   p = (addr >> 12) & 0x3ff;
@@ -603,14 +605,14 @@ int page_link_pde_share(unsigned addr, unsigned pde) {
   result = 1;
 restore:
   current_task()->pde = pde_backup;
-  set_cr3(pde_backup);
+  x86_cr3_write(pde_backup);
   return result;
 }
 void page_link_pde_paddr(unsigned addr, unsigned pde, unsigned *paddr1,
                          unsigned paddr2) {
   unsigned pde_backup = current_task()->pde;
   current_task()->pde = PDE_ADDRESS;
-  set_cr3(PDE_ADDRESS);
+  x86_cr3_write(PDE_ADDRESS);
   unsigned t, p;
   t = DIDX(addr);
   p = (addr >> 12) & 0x3ff;
@@ -648,7 +650,7 @@ void page_link_pde_paddr(unsigned addr, unsigned pde, unsigned *paddr1,
   flush_tlb((unsigned)pte);
   flush_tlb(addr);
   current_task()->pde = pde_backup;
-  set_cr3(pde_backup);
+  x86_cr3_write(pde_backup);
 }
 void page_links_pde(unsigned start, unsigned numbers, unsigned pde) {
   int times = 0;
@@ -947,11 +949,6 @@ void showPage() {
   //*pte &= 0xffffffff-1;
   //}
 }
-unsigned int get_cr2() {
-  unsigned r;
-  asm volatile("mov %%cr2,%0" : "=r"(r));
-  return r;
-}
 uint32_t page_get_attr_pde(unsigned vaddr, unsigned pde) {
   uint32_t *pde_entry = page_dir_entry(pde, vaddr);
   uint32_t *pte_entry = page_table_entry_from_dir(*pde_entry, vaddr);
@@ -971,71 +968,103 @@ uint32_t page_get_phy_pde(unsigned vaddr, unsigned pde) {
 uint32_t page_get_phy(unsigned vaddr) {
   return page_get_phy_pde(vaddr, current_task()->pde);
 }
-void copy_on_write(uint32_t vaddr) {
-  void *pd = (void *)current_task()->pde; // PDE页目录地址
-  uint32_t *pde = page_dir_entry((unsigned)pd, vaddr);              // PTE地址
-  void *pde_phy = (void *)page_entry_addr(*pde);                    // 页
+bool page_fault_try_resolve(uintptr_t address, uint32_t error) {
+  if ((error != 0x3u && error != 0x7u) ||
+      address < USER_SPACE_START || address > USER_HEAP_END) {
+    return false;
+  }
 
-  if (!page_entry_has_any(*pde, PG_RWW) || !page_entry_has_any(*pde, PG_USU)) {
-    // PDE如果不可写
-    // 不可写的话，就需要对PDE做COW操作
-    unsigned backup = *pde; // 用于备份原有页的属性
-    if (page_refcount_entry(backup) < 2 || page_entry_has_any(*pde, PG_SHARED)) {
-      // 如果只有一个人引用，并且PDE属性是共享
-      // 设置可写属性，然后进入下一步
-      *pde = page_entry_add_flags(*pde, PAGE_USER_RW_FLAGS);
-      goto PDE_FLUSH;
+  uint32_t active_pde = current_task()->pde;
+  if (active_pde < PAGE_SIZE_BYTES ||
+      (active_pde & (PAGE_SIZE_BYTES - 1)) != 0 ||
+      page_refcount_idx(IDX(active_pde)) == 0) {
+    return false;
+  }
+
+  bool resolved = false;
+  void *new_table = NULL;
+  void *new_page = NULL;
+  x86_cr3_write(PDE_ADDRESS);
+
+  uint32_t *pde = page_dir_entry(active_pde, address);
+  uint32_t old_pde = *pde;
+  if (!page_entry_has_all(old_pde, PAGE_USER_PRESENT_FLAGS) ||
+      page_entry_addr(old_pde) == 0 || page_refcount_entry(old_pde) == 0) {
+    goto restore;
+  }
+
+  uint32_t *old_pte = page_table_entry_from_dir(old_pde, address);
+  uint32_t old_pte_value = *old_pte;
+  if (!page_entry_has_all(old_pte_value, PAGE_USER_PRESENT_FLAGS) ||
+      page_entry_addr(old_pte_value) == 0 ||
+      page_refcount_entry(old_pte_value) == 0) {
+    goto restore;
+  }
+
+  bool pde_writable = page_entry_has_any(old_pde, PG_RWW);
+  bool pte_writable = page_entry_has_any(old_pte_value, PG_RWW);
+  if (pde_writable && pte_writable) {
+    goto restore;
+  }
+
+  bool copy_table = page_refcount_entry(old_pde) > 1 &&
+                    !page_entry_has_any(old_pde, PG_SHARED);
+  bool copy_page = !pte_writable && page_refcount_entry(old_pte_value) > 1 &&
+                   !page_entry_has_any(old_pte_value, PG_SHARED);
+  if (copy_table) {
+    new_table = page_malloc_one_count_from_4gb();
+    if (new_table == NULL) {
+      goto restore;
     }
-    // 进行COW
-    *pde = (unsigned)page_malloc_one_count_from_4gb(); // 分配一页
-    memcpy((void *)(*pde), pde_phy, 0x1000);           // 复制内容
-    *pde = page_entry_add_flags(*pde,
-                                page_entry_flags(backup) | PAGE_USER_RW_FLAGS);
-    page_ref_dec_entry(backup); // 原有引用减少
-  PDE_FLUSH:
-    // 刷新快表
-    flush_tlb(*pde);
+  }
+  if (copy_page) {
+    new_page = page_malloc_one_count_from_4gb();
+    if (new_page == NULL) {
+      if (new_table != NULL) {
+        page_free_one(new_table);
+      }
+      goto restore;
+    }
+  }
+
+  uint32_t *target_pte = old_pte;
+  if (new_table != NULL) {
+    memcpy(new_table, (void *)page_entry_addr(old_pde), PAGE_SIZE_BYTES);
+    target_pte = page_table_entry_from_dir((uint32_t)(uintptr_t)new_table,
+                                           address);
+  }
+  if (new_page != NULL) {
+    memcpy(new_page, (void *)page_entry_addr(old_pte_value), PAGE_SIZE_BYTES);
+    *target_pte = page_entry_make(
+        (uint32_t)(uintptr_t)new_page,
+        page_entry_flags(old_pte_value) | PAGE_USER_RW_FLAGS);
   } else {
+    *target_pte = page_entry_add_flags(old_pte_value, PAGE_USER_RW_FLAGS);
   }
-  uint32_t *pte = page_table_entry_from_dir(*pde, vaddr);
-  if (!page_entry_has_any(*pte, PG_RWW)) {
-    if (page_refcount_entry(*pte) < 2 || // 只有一个人引用
-        page_entry_has_any(*pte, PG_SHARED) /*或   这是一个SHARED页*/) {
-      *pte = page_entry_add_flags(*pte, PG_RWW); // 设置RWW
-      goto FLUSH;
-    }
-    // 获取旧页信息
-    unsigned int old_pte = *pte;
-    void *phy = (void *)page_entry_addr(old_pte);
 
-    // 分配一个页
-    //  logk("UPDATE %08x\n", vaddr);
-    void *new_page = page_malloc_one_count_from_4gb();
-    memcpy(new_page, phy, 0x1000);
-
-    // 获取原先页的属性
-    unsigned int attr = old_pte & 0x00000fff;
-
-    // 设置PWU
-    attr = attr | PG_RWW;
-
-    // 计算新PTE
-    unsigned int new_pte = page_entry_make((unsigned int)new_page, attr);
-
-    // 设置并更新
-    page_ref_dec_entry(old_pte);
-    *pte = new_pte;
-  FLUSH:
-    // 刷新TLB快表
-    flush_tlb((unsigned)pte);
+  if (new_table != NULL) {
+    *pde = page_entry_make((uint32_t)(uintptr_t)new_table,
+                           page_entry_flags(old_pde) | PAGE_USER_RW_FLAGS);
+  } else {
+    *pde = page_entry_add_flags(old_pde, PAGE_USER_RW_FLAGS);
   }
-  flush_tlb((unsigned)vaddr);
+  if (new_page != NULL) {
+    page_ref_dec_entry(old_pte_value);
+  }
+  if (new_table != NULL) {
+    page_ref_dec_entry(old_pde);
+  }
+  resolved = true;
+
+restore:
+  x86_cr3_write(active_pde);
+  return resolved;
 }
 // 设置页属性和物理地址
 void page_set_physics_attr(uint32_t vaddr, void *paddr, uint32_t attr) {
   unsigned pde_backup = current_task()->pde;
   current_task()->pde = PDE_ADDRESS;
-  set_cr3(PDE_ADDRESS);
+  x86_cr3_write(PDE_ADDRESS);
   unsigned t, p;
   t = DIDX(vaddr);
   p = (vaddr >> 12) & 0x3ff;
@@ -1066,7 +1095,7 @@ void page_set_physics_attr(uint32_t vaddr, void *paddr, uint32_t attr) {
   flush_tlb((unsigned)pte);
   flush_tlb(vaddr);
   current_task()->pde = pde_backup;
-  set_cr3(pde_backup);
+  x86_cr3_write(pde_backup);
 }
 void page_set_physics_attr_pde(uint32_t vaddr, void *paddr, uint32_t attr,
                                unsigned pde_backup) {
@@ -1099,42 +1128,6 @@ void page_set_physics_attr_pde(uint32_t vaddr, void *paddr, uint32_t attr,
   flush_tlb((unsigned)pte);
   flush_tlb(vaddr);
 }
-void PF(unsigned edi, unsigned esi, unsigned ebp, unsigned esp, unsigned ebx,
-        unsigned edx, unsigned ecx, unsigned eax, unsigned gs, unsigned fs,
-        unsigned es, unsigned ds, unsigned error, unsigned eip, unsigned cs,
-        unsigned eflags) {
-  unsigned pde = current_task()->pde;
-  io_cli();
-  set_cr3(PDE_ADDRESS); // 设置一个安全的页表
-  void *line_address = (void *)get_cr2();
-  if (!(page_get_attr((unsigned)line_address) & PG_P) ||     // 不存在
-      (!(page_get_attr((unsigned)line_address) & PG_USU))) { // 用户不可写
-
-    printk("Fatal error: Attempt to read/write a non-existent/kernel memory "
-           "%08x at "
-           "%08x. System "
-           "halt \n   --- at PF()",
-           line_address, eip);
-    logk("Fatal error: Attempt to read/write a non-existent/kernel memory "
-         "%08x at "
-         "%08x. System "
-         "halt \n   --- at PF()",
-         line_address, eip);
-    if (current_task()->user_mode) { // 用户级FAULT
-      task_exit(-1);                 // 强制退出
-    }
-    io_cli();
-    // 系统级FAULT
-    asm volatile("hlt"); // 停机
-    for (;;)
-      ;
-  }
-  copy_on_write((unsigned)line_address);
-  set_cr3(pde);
-  io_sti();
-  return;
-}
-
 void page_set_attr(unsigned start, unsigned end, unsigned attr, unsigned pde) {
   int count = div_round_up(end - start, 0x1000); // 整除
   for (int i = 0; i < count; i++) {
@@ -1143,5 +1136,5 @@ void page_set_attr(unsigned start, unsigned end, unsigned attr, unsigned pde) {
     uint32_t *pte_entry = page_table_entry_from_dir(*pde_entry, vaddr);
     *pte_entry = page_entry_add_flags(*pte_entry, attr);
   }
-  set_cr3(pde);
+  x86_cr3_write(pde);
 }

@@ -5,38 +5,17 @@ section .data
 		GLOBAL	io_out8, io_out16, io_out32
 		GLOBAL	io_load_eflags, io_store_eflags
 		GLOBAL ASM_call
-		GLOBAL	load_cr0, store_cr0,memtest_sub,farjmp,farcall,start_app
-		GLOBAL get_eip,return_to_app,do_init_seg_register,entering_v86
+		GLOBAL	memtest_sub
+		GLOBAL return_to_app,do_init_seg_register,entering_v86
 str: db 'Yun Xing Ni Ma De Kernel Xiang Si Shi Bu Shi',0
 section .text
 %define ADR_BOTPAK 							   0x0
-get_eip:		; int get_eip();
-	mov	eax,[esp]
-	ret
-farjmp:		; void farjmp(int eip, int cs);
-	pushad
-	JMP    FAR [ESP+36]    ; eip, cs
-	popad
-	RET
-farcall:		; void farjmp(int eip, int cs);
-	pushad
-	call    FAR [ESP+36]    ; eip, cs
-	popad
-	RET
 io_hlt:	; void io_hlt(void);
 		HLT
 		RET
 
 io_cli:	; void io_cli(void);
 		CLI
-		RET
-load_cr0:		; int load_cr0(void);
-		MOV		EAX,CR0
-		RET
-
-store_cr0:		; void store_cr0(int cr0);
-		MOV		EAX,[ESP+4]
-		MOV		CR0,EAX
 		RET
 io_sti:	; void io_sti(void);
 		STI

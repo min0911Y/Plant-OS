@@ -1,5 +1,6 @@
 // 多任务重构 -- mtask.c (区别与以前的多任务)
 #include <arch.h>
+#include <arch/x86/control.h>
 #include <arch/x86/interrupt.h>
 #include <dos.h>
 #include <irq.h>
@@ -12,7 +13,6 @@ void free_pde(unsigned addr);
 unsigned pde_clone(unsigned addr);
 void gc(unsigned tid);
 void task_start(mtask *task);
-void fpu_disable(void);
 void task_switch(mtask *next);
 static void reset_task_slot(mtask *task, int tid);
 char default_drive = 'A';
@@ -20,11 +20,6 @@ mtask m[255];
 mtask *idle_task;
 mtask *current = NULL;
 char mtask_stop_flag = 0;
-unsigned get_cr3() {
-  unsigned value;
-  asm volatile("movl %%cr3, %0" : "=r"(value));
-  return value;
-}
 void task_set_default_drive(char drive) {
   if (drive >= 'a' && drive <= 'z') {
     drive -= 'a' - 'A';
@@ -34,7 +29,6 @@ void task_set_default_drive(char drive) {
   }
   default_drive = drive;
 }
-void set_cr3(uint32_t pde) { asm volatile("movl %%eax, %%cr3\n" ::"a"(pde)); }
 mtask *next_set = NULL;
 mtask null_task;
 static void init_task() {
@@ -158,11 +152,11 @@ void task_next() {
   }
   int current_fpu_flag = current->fpu_flag;
   fpu_t *current_fpu = &(current->fpu);
-  set_cr0(get_cr0() & ~(CR0_EM | CR0_TS));
+  x86_cr0_write(x86_cr0_read() & ~(X86_CR0_EM | X86_CR0_TS));
   if (current_fpu && current_fpu_flag)
     asm volatile("fnsave (%%eax) \n" ::"a"(current_fpu));
   next->jiffies = global_time;
-  fpu_disable(); // 禁用fpu 如果使用FPU就会调用ERROR7
+  x86_fpu_disable();
   if (current_task()->state == WILL_EMPTY) {
     current_task()->state = READY;
   }
@@ -355,7 +349,7 @@ static void task_release_resources(mtask *task) {
 
   task_clear_external_refs(task);
   if (task == current_task()) {
-    set_cr3(PDE_ADDRESS);
+    x86_cr3_write(PDE_ADDRESS);
   }
   if (task->pde && task->pde != PDE_ADDRESS) {
     free_pde(task->pde);
@@ -522,10 +516,10 @@ mtask *current_task() {
 }
 int into_mtask() {
   init_task();
-  set_cr0(get_cr0() & ~(CR0_EM | CR0_TS));
+  x86_cr0_write(x86_cr0_read() & ~(X86_CR0_EM | X86_CR0_TS));
   asm volatile("fninit");
   asm volatile("fnsave (%%eax) \n" ::"a"(&public_fpu));
-  fpu_disable();
+  x86_fpu_disable();
   arch_task_state_init();
   idle_task = create_task((uintptr_t)idle, 0, 1, 3);
   if (idle_task == NULL) {
@@ -543,7 +537,7 @@ int into_mtask() {
     Panic_K("unable to publish bootstrap tasks");
     return -1;
   }
-  set_cr0(get_cr0() | CR0_EM | CR0_TS | CR0_NE);
+  x86_cr0_write(x86_cr0_read() | X86_CR0_EM | X86_CR0_TS | X86_CR0_NE);
   task_start(&(m[0]));
   return 0;
 }

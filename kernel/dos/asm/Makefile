@@ -3,7 +3,7 @@ out_path_src := ../../obj/
 incpath_src := ../../include/
 TOOLPATH := ../../../tools/
 MAKE     := make
-obj_dos := $(out_path_src)errors.obj $(out_path_src)handlers.obj $(out_path_src)i386.obj $(out_path_src)setjmp.obj
+obj_dos := $(out_path_src)handlers.obj $(out_path_src)i386.obj $(out_path_src)setjmp.obj
 default : $(obj_dos)
 	
 $(out_path_src)%.o : %.c Makefile

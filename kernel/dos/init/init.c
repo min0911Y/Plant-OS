@@ -1,4 +1,5 @@
 #include <arch.h>
+#include <arch/x86/control.h>
 #include <dos.h>
 extern struct ide_device {
   unsigned char Reserved;      // 0 (Empty) or 1 (This Drive really exists).
@@ -134,6 +135,7 @@ void sysinit(void) {
   do_init_seg_register();
 
   init_page(); // 初始化分页
+  x86_cr0_write(x86_cr0_read() | X86_CR0_WP);
   arch_interrupt_init();
   init_pic();
   init_pit();
@@ -153,7 +155,7 @@ void sysinit(void) {
   }
   irq_mask_clear(1);  // keyboard
   irq_mask_clear(12); // mouse
-  set_cr0(get_cr0() | CR0_EM | CR0_TS | CR0_NE);
+  x86_cr0_write(x86_cr0_read() | X86_CR0_EM | X86_CR0_TS | X86_CR0_NE);
 
   fifo8_init(&keyfifo, 32, (unsigned char *)keybuf);
   fifo8_init(&mousefifo, 128, (unsigned char *)mousebuf);

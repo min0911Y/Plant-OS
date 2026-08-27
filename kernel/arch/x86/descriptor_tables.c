@@ -1,5 +1,6 @@
 #include <arch.h>
 #include <arch/x86/bios.h>
+#include <arch/x86/control.h>
 #include <arch/x86/interrupt.h>
 #include <dos.h>
 #include <interrupts.h>
@@ -191,23 +192,10 @@ void arch_interrupt_init(void) {
                             X86_ACCESS_INTERRUPT_GATE);
   }
 
-  x86_interrupt_entry_set(0x00, asm_error0, X86_ACCESS_INTERRUPT_GATE);
-  x86_interrupt_entry_set(0x01, asm_error1, X86_ACCESS_INTERRUPT_GATE);
-  x86_interrupt_entry_set(0x03, asm_error3, X86_ACCESS_INTERRUPT_GATE);
-  x86_interrupt_entry_set(0x04, asm_error4, X86_ACCESS_INTERRUPT_GATE);
-  x86_interrupt_entry_set(0x05, asm_error5, X86_ACCESS_INTERRUPT_GATE);
-  x86_interrupt_entry_set(0x06, asm_error6, X86_ACCESS_INTERRUPT_GATE);
-  x86_interrupt_entry_set(0x07, asm_error7, X86_ACCESS_INTERRUPT_GATE);
-  x86_interrupt_entry_set(0x08, asm_error8, X86_ACCESS_INTERRUPT_GATE);
-  x86_interrupt_entry_set(0x09, asm_error9, X86_ACCESS_INTERRUPT_GATE);
-  x86_interrupt_entry_set(0x0a, asm_error10, X86_ACCESS_INTERRUPT_GATE);
-  x86_interrupt_entry_set(0x0b, asm_error11, X86_ACCESS_INTERRUPT_GATE);
-  x86_interrupt_entry_set(0x0c, asm_error12, X86_ACCESS_INTERRUPT_GATE);
-  x86_interrupt_entry_set(0x0d, asm_error13, X86_ACCESS_INTERRUPT_GATE);
-  x86_interrupt_entry_set(0x0e, asm_error14, X86_ACCESS_INTERRUPT_GATE);
-  x86_interrupt_entry_set(0x10, asm_error16, X86_ACCESS_INTERRUPT_GATE);
-  x86_interrupt_entry_set(0x11, asm_error17, X86_ACCESS_INTERRUPT_GATE);
-  x86_interrupt_entry_set(0x12, asm_error18, X86_ACCESS_INTERRUPT_GATE);
+  for (unsigned vector = 0; vector < X86_EXCEPTION_COUNT; vector++) {
+    x86_interrupt_entry_set(vector, x86_exception_entries[vector],
+                            X86_ACCESS_INTERRUPT_GATE);
+  }
   x86_interrupt_entry_set(0x20, asm_inthandler20,
                           X86_ACCESS_INTERRUPT_GATE);
   x86_interrupt_entry_set(0x21, asm_inthandler21,
@@ -289,6 +277,6 @@ void x86_bios_interrupt(uint8_t interrupt_number, regs16_t *registers) {
   x86_segment_descriptor_set(&gdt[X86_GDT_BIOS_CODE32_INDEX], 0, 0, 0);
   x86_segment_descriptor_set(&gdt[X86_GDT_BIOS_CODE16_INDEX], 0, 0, 0);
   x86_segment_descriptor_set(&gdt[X86_GDT_BIOS_DATA16_INDEX], 0, 0, 0);
-  set_cr3(current_task()->pde);
+  x86_cr3_write(current_task()->pde);
   irq_restore(state);
 }

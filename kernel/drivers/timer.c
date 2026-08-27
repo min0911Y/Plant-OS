@@ -4,7 +4,6 @@
 #define PIT_CNT0 0x0040
 
 struct TIMERCTL timerctl;
-void fpu_disable();
 #define TIMER_FLAGS_ALLOC 1 /* 已配置状态 */
 #define TIMER_FLAGS_USING 2 /* 定时器运行中 */
 extern int cg_flag0;
@@ -244,12 +243,8 @@ void inthandler20(int cs, perf_irq_frame_t *frame) {
   // timerctl.t0 = timer;
   // timerctl.next = timer->timeout;
   // printk("*");
-  // ClearExpFlag();
-  // disableExp();
-
   // io_cli();
   // extern int st_task;
-  // fpu_disable();
   // if (ts == 3) {
   //   mt_taskswitch3();
   // }
@@ -260,19 +255,4 @@ void inthandler20(int cs, perf_irq_frame_t *frame) {
   //   mt_taskswitch1();
   // }
   // io_sti();
-  // if (current_task()->fpu_use == 1 && current_task()->app == 1) {
-  //   extern int dflag ;
-  //   dflag = 1;
-  //   // printk("switch %s\n",current_task()->name);
-  //   asm volatile("frstor %0" ::"m"(current_task()->fxsave_region));
-  //   current_task()->fpu_use = 0;
-  //   dflag = 0;
-  // } else {
-  //   //asm volatile("fninit");
-  // }
-  // if(GetExpFlag()) {
-  //   printk("Warning: an Error for CPU!\n");
-  // }
-  // ClearExpFlag();
-  // EnableExp();
 }
