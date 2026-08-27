@@ -14,12 +14,10 @@
 //    让出时间片的轮询（内核里的 sleep() 本身也是这么做的）。
 
 #include <dos.h>
+#include <irq.h>
 
 #define TASK_ID_NONE ((uint32_t)-1)
 #define IPC_TICK_MS 10 /* 一个时钟节拍 10ms */
-
-bool interrupt_disable(void);
-void set_interrupt_state(bool state);
 
 typedef struct {
   char name[IPC_NAME_MAX];
@@ -252,11 +250,11 @@ int ipc_send(uint32_t to_tid, uint32_t to_generation, uint32_t type, uint32_t id
   }
 
   for (;;) {
-    bool state = interrupt_disable();
+    irq_state_t state = irq_save();
     mtask *to = get_task(to_tid);
     if (!to || to->state == DIED ||
         (to_generation && to->generation != to_generation)) {
-      set_interrupt_state(state);
+      irq_restore(state);
       result = IPC_ERR_NOTASK;
       break;
     }
@@ -273,16 +271,16 @@ int ipc_send(uint32_t to_tid, uint32_t to_generation, uint32_t type, uint32_t id
       slot->used = 1;
       ipc->count++;
       ipc_wake_receiver(to);
-      set_interrupt_state(state);
+      irq_restore(state);
       return IPC_OK;
     }
     if (flags & IPC_NOWAIT) {
-      set_interrupt_state(state);
+      irq_restore(state);
       result = IPC_ERR_FULL;
       break;
     }
     if (timeout_ms && ipc_deadline_passed(deadline)) {
-      set_interrupt_state(state);
+      irq_restore(state);
       result = IPC_ERR_TIMEOUT;
       break;
     }
@@ -309,7 +307,7 @@ int ipc_recv(void *buf, uint32_t bufsize, ipc_msg_info_t *info,
     deadline = ipc_deadline(timeout_ms);
   }
   for (;;) {
-    bool state = interrupt_disable();
+    irq_state_t state = irq_save();
     IPCMessage *msg = ipc_find_oldest(ipc, from_filter);
     if (msg) {
       uint32_t size = msg->size;
@@ -321,7 +319,7 @@ int ipc_recv(void *buf, uint32_t bufsize, ipc_msg_info_t *info,
         info->size = size;
       }
       if (size > bufsize) {
-        set_interrupt_state(state);
+        irq_restore(state);
         return IPC_ERR_TOOBIG;
       }
       if (size && buf) {
@@ -329,15 +327,15 @@ int ipc_recv(void *buf, uint32_t bufsize, ipc_msg_info_t *info,
       }
       ipc_drop_message(ipc, msg);
       ipc_wake_senders(self->tid);
-      set_interrupt_state(state);
+      irq_restore(state);
       return (int)size;
     }
     if (flags & IPC_NOWAIT) {
-      set_interrupt_state(state);
+      irq_restore(state);
       return IPC_ERR_EMPTY;
     }
     if (timeout_ms && ipc_deadline_passed(deadline)) {
-      set_interrupt_state(state);
+      irq_restore(state);
       return IPC_ERR_TIMEOUT;
     }
     ipc_wait(self, TASK_ID_NONE, deadline, timeout_ms != 0);
@@ -346,10 +344,10 @@ int ipc_recv(void *buf, uint32_t bufsize, ipc_msg_info_t *info,
 
 // 查看下一条消息的信息但不取走
 int ipc_peek(ipc_msg_info_t *info, uint32_t from_filter) {
-  bool state = interrupt_disable();
+  irq_state_t state = irq_save();
   IPCMessage *msg = ipc_find_oldest(&current_task()->ipc_header, from_filter);
   if (!msg) {
-    set_interrupt_state(state);
+    irq_restore(state);
     return IPC_ERR_EMPTY;
   }
   if (info) {
@@ -359,15 +357,15 @@ int ipc_peek(ipc_msg_info_t *info, uint32_t from_filter) {
     info->id = msg->id;
     info->size = msg->size;
   }
-  set_interrupt_state(state);
+  irq_restore(state);
   return IPC_OK;
 }
 
 // 当前任务队列里的消息数
 int ipc_pending(void) {
-  bool state = interrupt_disable();
+  irq_state_t state = irq_save();
   int count = (int)current_task()->ipc_header.count;
-  set_interrupt_state(state);
+  irq_restore(state);
   return count;
 }
 
@@ -401,7 +399,7 @@ int ipc_service_register(const char *name) {
     return IPC_ERR_INVAL;
   }
   mtask *self = current_task();
-  bool state = interrupt_disable();
+  irq_state_t state = irq_save();
   int free_index = -1;
   for (int i = 0; i < IPC_MAX_SERVICE; i++) {
     if (!ipc_services[i].used) {
@@ -414,7 +412,7 @@ int ipc_service_register(const char *name) {
       mtask *owner = get_task(ipc_services[i].tid);
       if (owner && owner->generation == ipc_services[i].generation &&
           owner->state != DIED) {
-        set_interrupt_state(state);
+        irq_restore(state);
         return owner == self ? IPC_OK : IPC_ERR_EXIST;
       }
       // 原来的服务进程已经不在了，回收这个名字
@@ -424,14 +422,14 @@ int ipc_service_register(const char *name) {
     }
   }
   if (free_index < 0) {
-    set_interrupt_state(state);
+    irq_restore(state);
     return IPC_ERR_FULL;
   }
   ipc_name_copy(ipc_services[free_index].name, name);
   ipc_services[free_index].tid = self->tid;
   ipc_services[free_index].generation = self->generation;
   ipc_services[free_index].used = 1;
-  set_interrupt_state(state);
+  irq_restore(state);
   return IPC_OK;
 }
 
@@ -440,21 +438,21 @@ int ipc_service_unregister(const char *name) {
     return IPC_ERR_INVAL;
   }
   mtask *self = current_task();
-  bool state = interrupt_disable();
+  irq_state_t state = irq_save();
   for (int i = 0; i < IPC_MAX_SERVICE; i++) {
     if (!ipc_services[i].used || strcmp(ipc_services[i].name, name) != 0) {
       continue;
     }
     if (ipc_services[i].tid != self->tid) {
-      set_interrupt_state(state);
+      irq_restore(state);
       return IPC_ERR_INVAL; // 只能注销自己注册的名字
     }
     ipc_services[i].used = 0;
     ipc_services[i].name[0] = '\0';
-    set_interrupt_state(state);
+    irq_restore(state);
     return IPC_OK;
   }
-  set_interrupt_state(state);
+  irq_restore(state);
   return IPC_ERR_NOTFOUND;
 }
 
@@ -463,7 +461,7 @@ int ipc_service_lookup(const char *name, uint32_t *generation) {
   if (!ipc_name_valid(name)) {
     return IPC_ERR_INVAL;
   }
-  bool state = interrupt_disable();
+  irq_state_t state = irq_save();
   for (int i = 0; i < IPC_MAX_SERVICE; i++) {
     if (!ipc_services[i].used || strcmp(ipc_services[i].name, name) != 0) {
       continue;
@@ -479,10 +477,10 @@ int ipc_service_lookup(const char *name, uint32_t *generation) {
     if (generation) {
       *generation = ipc_services[i].generation;
     }
-    set_interrupt_state(state);
+    irq_restore(state);
     return tid;
   }
-  set_interrupt_state(state);
+  irq_restore(state);
   return IPC_ERR_NOTFOUND;
 }
 
@@ -502,10 +500,10 @@ int send_ipc_message(int to_tid, void *data, unsigned int size, char type) {
   if (type == synchronous) {
     // 等目标把队列清空到不含我们这条消息为止
     for (;;) {
-      bool state = interrupt_disable();
+      irq_state_t state = irq_save();
       mtask *to = get_task((uint32_t)to_tid);
       if (!to) {
-        set_interrupt_state(state);
+        irq_restore(state);
         return 0;
       }
       IPCMessage *mine = NULL;
@@ -517,7 +515,7 @@ int send_ipc_message(int to_tid, void *data, unsigned int size, char type) {
         }
       }
       if (!mine) {
-        set_interrupt_state(state);
+        irq_restore(state);
         return 0;
       }
       /* 关中断切换，理由同 ipc_wait */

@@ -1,5 +1,6 @@
 #include <dos.h>
 #include <kasan.h>
+#include <limits.h>
 #define IDX(addr) ((unsigned)addr >> 12)            // 获取 addr 的页索引
 #define DIDX(addr) (((unsigned)addr >> 22) & 0x3ff) // 获取 addr 的页目录索引
 #define TIDX(addr) (((unsigned)addr >> 12) & 0x3ff) // 获取 addr 的页表索引
@@ -24,15 +25,32 @@
 #define PAGE_USER_PRESENT_FLAGS (PG_P | PG_USU)
 #define PAGE_USER_RW_FLAGS (PG_P | PG_USU | PG_RWW)
 
+struct PAGE_INFO {
+  uint8_t task_id;
+  uint8_t count;
+} __attribute__((packed));
+
 void *page_malloc_one_no_mark();
 void flush_tlb(unsigned vaddr); 
 unsigned div_round_up(unsigned num, unsigned size);
-struct PAGE_INFO *pages = (struct PAGE_INFO *)PAGE_MANNAGER;
+static struct PAGE_INFO *pages = (struct PAGE_INFO *)PAGE_MANNAGER;
 static uint32_t *page_free_bitmap = (uint32_t *)PAGE_BITMAP_ADDRESS;
 static unsigned page_alloc_limit = PAGE_TOTAL_COUNT;
 static unsigned page_low_hint = 0;
 static unsigned page_high_hint = PAGE_TOTAL_COUNT - 1;
 static unsigned page_run_hint = 0;
+
+static __attribute__((noreturn)) void page_ref_panic(const char *reason,
+                                                     unsigned idx) {
+  unsigned count = idx < PAGE_TOTAL_COUNT ? pages[idx].count : 0;
+  unsigned owner = idx < PAGE_TOTAL_COUNT ? pages[idx].task_id : 0;
+  Panic_K("page reference %s idx=%08x count=%u owner=%u", (char *)reason, idx,
+          count, owner);
+  io_cli();
+  for (;;) {
+    asm volatile("hlt");
+  }
+}
 
 static inline unsigned page_entry_addr(uint32_t entry) {
   return entry & PAGE_ENTRY_ADDR_MASK;
@@ -91,7 +109,12 @@ static inline bool page_bitmap_is_free(unsigned idx) {
   return (page_free_bitmap[page_alloc_word(idx)] & page_alloc_mask(idx)) != 0;
 }
 
-static inline unsigned page_refcount_idx(unsigned idx) { return pages[idx].count; }
+static inline unsigned page_refcount_idx(unsigned idx) {
+  if (idx >= PAGE_TOTAL_COUNT) {
+    page_ref_panic("index out of range", idx);
+  }
+  return pages[idx].count;
+}
 
 static inline unsigned page_refcount_entry(uint32_t entry) {
   return page_refcount_idx(IDX(page_entry_addr(entry)));
@@ -123,25 +146,39 @@ static void page_note_alloc_idx(unsigned idx) {
 
 static void page_ref_inc_idx(unsigned idx) {
   if (idx >= PAGE_TOTAL_COUNT) {
-    return;
+    page_ref_panic("retain index out of range", idx);
+  }
+  if (pages[idx].count == UCHAR_MAX) {
+    page_ref_panic("overflow", idx);
   }
   if (pages[idx].count == 0) {
+    pages[idx].task_id = 0;
     page_bitmap_mark_used(idx);
     page_note_alloc_idx(idx);
+  } else {
+    pages[idx].task_id = 0;
   }
   pages[idx].count++;
 }
 
 static void page_ref_dec_idx(unsigned idx) {
-  if (idx >= PAGE_TOTAL_COUNT || pages[idx].count == 0) {
+  if (idx >= PAGE_TOTAL_COUNT) {
+    page_ref_panic("release index out of range", idx);
+  }
+  if (pages[idx].count == 0) {
+    page_ref_panic("underflow", idx);
+  }
+  if (pages[idx].count > 1 && pages[idx].task_id != 0) {
+    page_ref_panic("shared page has owner", idx);
+  }
+  if (pages[idx].count == 1) {
+    pages[idx].task_id = 0;
+    pages[idx].count = 0;
+    page_bitmap_mark_free(idx);
+    page_note_free_idx(idx);
     return;
   }
   pages[idx].count--;
-  if (pages[idx].count == 0) {
-    pages[idx].task_id = 0;
-    page_bitmap_mark_free(idx);
-    page_note_free_idx(idx);
-  }
 }
 
 static inline void page_ref_inc_entry(uint32_t entry) {
@@ -154,7 +191,36 @@ static inline void page_ref_dec_entry(uint32_t entry) {
 
 static void page_claim_idx(unsigned idx, uint8_t task_id) {
   page_ref_inc_idx(idx);
+  if (pages[idx].count != 1) {
+    page_ref_panic("claim reused page", idx);
+  }
   pages[idx].task_id = task_id;
+}
+
+unsigned page_ref_count(unsigned paddr) {
+  return page_refcount_idx(IDX(paddr));
+}
+
+void page_ref_release(unsigned paddr) {
+  page_ref_dec_idx(IDX(paddr));
+}
+
+unsigned page_used_count(unsigned physical_size) {
+  unsigned limit = physical_size / PAGE_SIZE_BYTES;
+  if (physical_size % PAGE_SIZE_BYTES) {
+    limit++;
+  }
+  if (limit > PAGE_TOTAL_COUNT) {
+    limit = PAGE_TOTAL_COUNT;
+  }
+
+  unsigned used = 0;
+  for (unsigned idx = 0; idx < limit; idx++) {
+    if (page_refcount_idx(idx) != 0) {
+      used++;
+    }
+  }
+  return used;
 }
 
 static void page_claim_range(unsigned start, unsigned count, uint8_t task_id) {
@@ -341,6 +407,10 @@ void page_set_alloced(struct PAGE_INFO *pg, unsigned int start,
 // 为了防止应用程序和操作系统抢占前0x70000000的内存，所以page_link和copy_on_write是从后往前分配的
 // OS应该是用不完0x70000000的，所以应用程序大概是可以用满2GB
 unsigned pde_clone(unsigned addr) {
+  unsigned result = (unsigned)(uintptr_t)page_malloc_one_no_mark();
+  if (result == 0) {
+    return 0;
+  }
 
   for (int i = 0; i < 0x1000; i += 4) {
     unsigned int *pde_entry = (unsigned int *)(addr + i);
@@ -363,7 +433,6 @@ unsigned pde_clone(unsigned addr) {
       *pte_entry = page_entry_clear_flags(*pte_entry, PG_RWW);
     }
   }
-  unsigned result = (unsigned)page_malloc_one_no_mark();
   memcpy((void *)result, (void *)addr, 0x1000);
   flush_tlb(result);
   flush_tlb(addr);
@@ -706,11 +775,13 @@ void *page_malloc_one_count_from_4gb() {
 }
 void gc(unsigned tid) {
   for (unsigned i = 0; i < PAGE_TOTAL_COUNT; i++) {
-    if (pages[i].count && pages[i].task_id == tid) {
-      pages[i].task_id = 0;
-      while (pages[i].count) {
-        page_ref_dec_idx(i);
-      }
+    unsigned count = page_refcount_idx(i);
+    if ((count == 0 && pages[i].task_id != 0) ||
+        (count > 1 && pages[i].task_id != 0)) {
+      page_ref_panic("invalid owner", i);
+    }
+    if (tid != 0 && count == 1 && pages[i].task_id == (uint8_t)tid) {
+      page_ref_dec_idx(i);
     }
   }
 }
@@ -722,11 +793,12 @@ int get_pageinpte_address(int t, int p) {
 static void page_free_one_internal(void *p, int kasan_track) {
   unsigned idx = IDX(p);
   if (idx >= PAGE_TOTAL_COUNT) // 超过最大页
-    return;
-  if (pages[idx].count > 1) {
-    if (pages[idx].task_id == current_task()->tid) {
-      pages[idx].task_id = 0;
-    }
+    page_ref_panic("free index out of range", idx);
+  unsigned count = page_refcount_idx(idx);
+  if (count == 0) {
+    page_ref_panic("free underflow", idx);
+  }
+  if (count > 1) {
     page_ref_dec_idx(idx);
     return;
   }
@@ -840,9 +912,27 @@ void page_map(void *target, void *start, void *end) {
   }
 }
 void change_page_task_id(int task_id, void *p, unsigned int size) {
+  if (task_id < 0 || task_id > UCHAR_MAX) {
+    page_ref_panic("owner out of range", IDX(p));
+  }
+  if (size == 0) {
+    return;
+  }
   int page = get_page_from_line_address((int)p);
-  for (int i = 0; i != ((size - 1) / (4 * 1024)) + 1; i++) {
-    pages[page + i].task_id = task_id;
+  unsigned page_count = (size - 1) / PAGE_SIZE_BYTES + 1;
+  for (unsigned i = 0; i < page_count; i++) {
+    unsigned idx = (unsigned)page + i;
+    unsigned refs = page_refcount_idx(idx);
+    if (refs == 0) {
+      page_ref_panic("assign owner to free page", idx);
+    }
+    if (refs > 1) {
+      if (pages[idx].task_id != 0) {
+        page_ref_panic("shared page has owner", idx);
+      }
+      continue;
+    }
+    pages[idx].task_id = (uint8_t)task_id;
   }
 }
 void showPage() {

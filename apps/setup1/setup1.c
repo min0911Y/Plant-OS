@@ -1,4 +1,7 @@
 #include <mst.h>
+#include <ctype.h>
+#include <limits.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 #include <syscall.h>
@@ -13,14 +16,22 @@
 #define Right_Down 188
 #define T_DrawBox(x, y, w, h, c) Text_Draw_Box((y), (x), (h) + y, (w) + x, (c))
 
-void cpy(char *filename,char *filename1) {
-  if(filesize(filename) == -1) return;
-  int sz = filesize(filename);
-  char *buffer = malloc(sz);
-  api_ReadFile(filename,buffer);
-  mkfile(filename1);
-  Edit_File(filename1,buffer,sz,0);
+static bool copy_file(char *source, char *destination) {
+  int size = filesize(source);
+  if (size < 0) {
+    return false;
+  }
+  char *buffer = size == 0 ? NULL : malloc((size_t)size);
+  if (size != 0 && buffer == NULL) {
+    return false;
+  }
+  if ((size != 0 && !api_ReadFile(source, buffer)) ||
+      !Edit_File(destination, buffer, size, 0)) {
+    free(buffer);
+    return false;
+  }
   free(buffer);
+  return true;
 }
 
 void Box(int x, int y, int w, int h) {
@@ -127,60 +138,116 @@ void setState(char *msg) {
   T_DrawBox(0, 24, 80, 1, 0x70);
 }
 int get_array_len(Array *arr) {
+  if (arr == NULL) {
+    return -1;
+  }
   int r = 0;
   for (; MST_array_get_data(arr, r); r++)
     ;
   return r;
 }
 void set(int current, int total) {
+  if (total <= 0) {
+    Set_Loading(100);
+    return;
+  }
   Set_Loading((int)((float)((float)(current) / (float)total) * 100.0));
 }
-int do_next(SPACE *next, MST_Object *m) {
-  if (MST_get_var("state", next)) {
-    setState(MST_get_string_in_space(m, "state", next));
+enum step_result { STEP_ERROR = -1, STEP_DONE, STEP_CONTINUE };
+static enum step_result run_next_step(SPACE *next, MST_Object *m) {
+  if (next == NULL || m == NULL) {
+    return STEP_ERROR;
   }
-  if (OKCancelMsg(MST_get_string_in_space(m, "info", next))) {
+  char *state = MST_get_string_in_space(m, "state", next);
+  char *info = MST_get_string_in_space(m, "info", next);
+  char *disk_name = MST_get_string_in_space(m, "disk_name", next);
+  if (info == NULL || disk_name == NULL) {
+    return STEP_ERROR;
+  }
+  if (state != NULL) {
+    setState(state);
+  }
+  if (OKCancelMsg(info)) {
     Box(0, 0, 80, 24);
     goto_xy(26, 0);
     print("Powerint DOS 386 Installation");
     T_DrawBox(26, 0, 29, 1, 0x4f);
-    char tip[512];
-    sprintf(tip,"Please insert %s",MST_get_string_in_space(m, "disk_name", next));
+    size_t disk_name_length = strlen(disk_name);
+    if (disk_name_length > (size_t)UINT_MAX - sizeof("Please insert ")) {
+      return STEP_ERROR;
+    }
+    char *tip = malloc(sizeof("Please insert ") + disk_name_length);
+    if (tip == NULL) {
+      return STEP_ERROR;
+    }
+    sprintf(tip, "Please insert %s", disk_name);
     OKMsg(tip);
-    system("rdrv A");
-    system("C:");
-    return 1;
+    free(tip);
+    if (system("remount_drive A:") != 0 || system("C:") != 0) {
+      return STEP_ERROR;
+    }
+    return STEP_CONTINUE;
   }
-  return 0;
+  return STEP_DONE;
 }
 
-int do_step(SPACE *step, MST_Object *m) {
-  Array *files_arr = MST_space_get_array(MST_get_var("files", step));
+static enum step_result run_step(SPACE *step, MST_Object *m) {
+  if (step == NULL || m == NULL) {
+    return STEP_ERROR;
+  }
+  Var *files = MST_get_var("files", step);
+  Array *files_arr = files == NULL ? NULL : MST_space_get_array(files);
   int files_in_total = get_array_len(files_arr);
+  if (files_in_total < 0) {
+    return STEP_ERROR;
+  }
   Set_Loading(0);
   for (int i = 0; i < files_in_total; i++) {
-    char *b = MST_get_string_in_array(m, i, files_arr);
-    if(b == 0x0) {
-      SPACE *d = MST_get_space_in_array(m, i, files_arr);
-      mkdir(MST_get_string_in_space(m,"dir",d));
+    char *entry = MST_get_string_in_array(m, i, files_arr);
+    if (entry == NULL) {
+      SPACE *directory = MST_get_space_in_array(m, i, files_arr);
+      char *name = directory == NULL
+                       ? NULL
+                       : MST_get_string_in_space(m, "dir", directory);
+      if (name == NULL || !mkdir(name)) {
+        return STEP_ERROR;
+      }
       continue;
     }
-    setState(MST_get_string_in_array(m, i, files_arr));
-    char path1[255];
-    char path2[255];
-    sprintf(path1, "A:\\%s", MST_get_string_in_array(m, i, files_arr));
-    sprintf(path2, "C:\\%s", MST_get_string_in_array(m, i, files_arr));
-    cpy(path1, path2);
+    setState(entry);
+    size_t entry_length = strlen(entry);
+    if (entry_length > (size_t)UINT_MAX - 4) {
+      return STEP_ERROR;
+    }
+    char *source = malloc(entry_length + 4);
+    char *destination = malloc(entry_length + 4);
+    if (source == NULL || destination == NULL) {
+      free(source);
+      free(destination);
+      return STEP_ERROR;
+    }
+    sprintf(source, "A:\\%s", entry);
+    sprintf(destination, "C:\\%s", entry);
+    bool copied = copy_file(source, destination);
+    free(source);
+    free(destination);
+    if (!copied) {
+      return STEP_ERROR;
+    }
     set(i + 1, files_in_total);
   }
   if (!MST_get_var("next", step)) {
-    return 0;
+    return STEP_DONE;
   }
-  return do_next(MST_get_space_in_space(m, "next", step), m);
+  return run_next_step(MST_get_space_in_space(m, "next", step), m);
 }
 int main() {
+  char source_drive = toupper(api_current_drive());
+  if (source_drive < 'A' || source_drive > 'Z') {
+    return 1;
+  }
   int len = filesize("setup.mst");
-  if (len == -1) {
+  if (len < 0 || len == INT_MAX) {
     int c = get_cons_color();
     set_cons_color(0x0c);
     printf("Can't find setup.mst.\n");
@@ -188,19 +255,29 @@ int main() {
     return 1;
   }
   char *config = (char *)malloc(len + 1);
-  api_ReadFile("setup.mst", config);
-  config[len] = 0;
-  MST_Object *m = MST_init(config);
-  if (m->err) {
-    int c = get_cons_color();
-    set_cons_color(0x0c);
-    printf("Parse error:%s\n", MST_strerror(m));
-    set_cons_color(c);
-    MST_free(m);
+  if (config == NULL || (len != 0 && !api_ReadFile("setup.mst", config))) {
+    free(config);
+    printf("Unable to read setup.mst.\n");
     return 1;
   }
-  system("cls");
-  system("color 1f");
+  config[len] = 0;
+  MST_Object *m = MST_init(config);
+  if (m == NULL || m->err) {
+    int c = get_cons_color();
+    set_cons_color(0x0c);
+    printf("Parse error:%s\n", m == NULL ? "out of memory" : MST_strerror(m));
+    set_cons_color(c);
+    if (m != NULL) {
+      MST_free(m);
+    }
+    free(config);
+    return 1;
+  }
+  if (system("cls") != 0 || system("color 1f") != 0) {
+    MST_free(m);
+    free(config);
+    return 1;
+  }
   Box(0, 0, 80, 24);
   T_DrawBox(0, 24, 80, 1, 0x70);
   goto_xy(26, 0);
@@ -213,6 +290,8 @@ int main() {
   if (!OKCancelMsg("Do you want to Install Powerint DOS?")) {
     system("color 07");
     system("cls");
+    MST_free(m);
+    free(config);
     return 0;
   }
   Set_Loading(0);
@@ -226,8 +305,7 @@ int main() {
   print("PFS");
   T_DrawBox(35, 6, 9, 1, 0x4f);
   T_DrawBox(35, 7, 9, 1, 0x0f);
-  char *fs_choice = malloc(4);
-  strcpy(fs_choice, "FAT");
+  char fs_choice[4] = "FAT";
   for (;;) {
     int i = getch();
     if (i == '\n') {
@@ -244,37 +322,82 @@ int main() {
   }
   putSpace(34, 4, 11, 5);
   T_DrawBox(34, 4, 11, 5, 0x1f);
-  if (!format('C', fs_choice)) {
-    OKMsg("Disk Read Error.");
-    system("color 07");
-    system("cls");
-    return 0;
+  bool target_was_mounted = vfs_check_mount('C');
+  if (toupper(api_current_drive()) == 'C' ||
+      (target_was_mounted && !vfs_unmount_disk('C'))) {
+    OKMsg("Unable to unmount target disk.");
+    goto fail;
   }
-  system("rdrv C:");
+  if (!format('C', fs_choice)) {
+    if (target_was_mounted) {
+      vfs_mount('C', 'C');
+    }
+    OKMsg("Disk Read Error.");
+    goto fail;
+  }
+  if (!vfs_mount('C', 'C') || !vfs_change_disk('C')) {
+    OKMsg("Unable to mount formatted disk.");
+    goto fail;
+  }
   Set_Loading(100);
-  int CopyFilesCount = 0;
-  Array *step = MST_space_get_array(MST_get_var("step", MST_get_root_space(m)));
+  SPACE *root = MST_get_root_space(m);
+  Var *step_var = root == NULL ? NULL : MST_get_var("step", root);
+  Array *step = step_var == NULL ? NULL : MST_space_get_array(step_var);
   int all_steps = get_array_len(step);
+  if (all_steps < 0) {
+    goto fail;
+  }
   for (int i = 0; i < all_steps; i++) {
-    if(!do_step(MST_get_space_in_array(m,i,step),m)) {
+    enum step_result step_result =
+        run_step(MST_get_space_in_array(m, i, step), m);
+    if (step_result == STEP_ERROR) {
+      goto fail;
+    }
+    if (step_result == STEP_DONE) {
       break;
     }
   }
   Set_Loading(0);
   setState("Config --- Create env.cfg");
-  mkfile("env.cfg");
+  if (!mkfile("env.cfg")) {
+    goto fail;
+  }
   Set_Loading(25);
   setState("Config --- Write env.cfg");
-  Edit_File("env.cfg", "\"path\" = \"C:\\bin;C:;\"", 22, 0);
+  static char env_config[] = "\"path\" = \"C:\\bin;C:;\"";
+  if (!Edit_File("env.cfg", env_config, sizeof(env_config) - 1, 0)) {
+    goto fail;
+  }
   Set_Loading(50);
   setState("Config --- Create sys.cfg");
-  mkfile("sys.cfg");
+  if (!mkfile("sys.cfg")) {
+    goto fail;
+  }
   Set_Loading(75);
   setState("Config --- Write sys.cfg");
-  Edit_File("sys.cfg", "\"network\" = \"enable\"\n\"video_mode\" = \"HIGHTEXTMODE\"", 52, 0);
+  static char system_config[] =
+      "\"network\" = \"enable\"\n\"video_mode\" = \"HIGHTEXTMODE\"";
+  if (!Edit_File("sys.cfg", system_config, sizeof(system_config) - 1, 0)) {
+    goto fail;
+  }
   Set_Loading(100);
   OKMsg("Press Enter to Reboot Your computer.");
-  system("reboot");
+  MST_free(m);
+  free(config);
+  if (system("reboot") != 0) {
+    return 1;
+  }
   for (;;)
     ;
+
+fail:
+  if (!vfs_check_mount(source_drive)) {
+    vfs_mount(source_drive, source_drive);
+  }
+  vfs_change_disk(source_drive);
+  system("color 07");
+  system("cls");
+  MST_free(m);
+  free(config);
+  return 1;
 }

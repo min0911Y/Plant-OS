@@ -1,10 +1,10 @@
 NASM = nasm
 OBJS_PACK = ../out/entry.obj ../out/syscall.obj ../out/rand.obj ../out/arg.obj \
 			../out/mouse.obj ../out/math.obj ../out/libc.obj ../out/net_syscall.obj ../out/time.obj ../out/posix.obj ../out/pow.obj ../out/exit.obj \
-			../out/ipc.obj ../out/rpc.obj
+			../out/ipc.obj ../out/rpc.obj ../out/runtime_args.obj
 OBJS_PACK_CPP = ../out/cppstart.obj ../out/syscall.obj ../out/rand.obj ../out/arg.obj \
 			../out/mouse.obj ../out/math.obj ../out/libc.obj ../out/net_syscall.obj ../out/time.obj ../out/posix.obj ../out/pow.obj ../out/exit.obj \
-			../out/ipc.obj ../out/rpc.obj
+			../out/ipc.obj ../out/rpc.obj ../out/runtime_args.obj
 OBJS_PACK_GUI = ../out/gui_syscall.obj
 default : $(OBJS_PACK_GUI) $(OBJS_PACK) $(OBJS_GUI) ../out/abi.obj $(OBJS_PACK_CPP)
 	ar rv ../libs/libp.a $(OBJS_PACK)

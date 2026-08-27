@@ -1,157 +1,161 @@
-#include <arg.h>
+#include <ctype.h>
+#include <limits.h>
 #include <mst.h>
+#include <runtime_args.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <syscall.h>
-char *_path;
-MST_Object *env;
-char *env_read(char *name);
-void env_write(char *name, char *val);
-void env_init(int m) {
-  if (filesize("env.cfg") == -1) {
-    if (m == 1) {
-      _path = "";
-      return;
+static char *search_path;
+static MST_Object *environment;
+
+static char *env_read(char *name) {
+  if (MST_get_var(name, MST_get_root_space(environment)) == NULL) {
+    return NULL;
+  }
+  return MST_get_string_in_space(environment, name,
+                                 MST_get_root_space(environment));
+}
+
+static bool env_init(int command_mode) {
+  search_path = "";
+  environment = NULL;
+
+  int size = filesize("env.cfg");
+  if (size < 0) {
+    if (command_mode) {
+      return true;
     }
     mkfile("env.cfg");
     Edit_File("env.cfg", "# created by psh", 16, 0);
-  }
-  char *buff = (char *)malloc(filesize("env.cfg") + 1);
-  api_ReadFile("env.cfg", buff);
-  env = MST_init(buff);
-  if (env->err) {
-    MST_free(env);
-    env = NULL;
-    sleep(500);
-  }
-  free(buff);
-
-retry:
-  if (!(_path = env_read("path"))) {
-    env_write("path", "");
-    goto retry;
-  }
-}
-void env_write(char *name, char *val) {
-  if (MST_get_var(name, MST_get_root_space(env)) == NULL) {
-    MST_add_var_to_space(env, MST_get_root_space(env),
-                         MST_var_make_string(name, val));
-  } else {
-    MST_change_var_for_name(env, MST_var_make_string(name, val), name,
-                            MST_get_root_space(env));
-  }
-}
-char *env_read(char *name) {
-  if (MST_get_var(name, MST_get_root_space(env)) == NULL) {
-    return NULL;
-  } else {
-    return MST_get_string_in_space(env, name, MST_get_root_space(env));
-  }
-}
-void env_save() {
-  char path[12];
-  sprintf(path, "%c:/env.cfg", api_current_drive());
-  if (filesize(path) == -1) {
-    return;
-  }
-  char *s = MST_build_to_string(env);
-  Edit_File(path, s, strlen(s), 0);
-  free(s);
-}
-void env_reload() {
-  MST_free(env);
-  env_init(0);
-}
-// 首先 我们要解析环境变量的字符串
-// 环境变量的字符串是以分号分隔的
-void Path_GetPath(int count, char *ptr, char *PATH_ADDR) {
-  // count 获取第几个环境变量？
-  // ptr   储存在哪里？
-  // PATH_ADDR 环境变量的信息在哪里？
-  // 我们要解析环境变量的字符串
-  int str_base = 0;
-  for (int i = 0, j = 0;; i++) {
-    if (PATH_ADDR[i] == ';') {
-      ++j;
+    size = filesize("env.cfg");
+    if (size < 0) {
+      printf("Unable to create env.cfg.\n");
+      return false;
     }
-    if (j == count) {
-      str_base = i;
+  }
+
+  size_t file_size = (size_t)size;
+  if (file_size >= (size_t)INT_MAX || file_size > SIZE_MAX - 1) {
+    printf("env.cfg is too large.\n");
+    return false;
+  }
+  size_t buffer_size = file_size + 1;
+  char *buff = (char *)malloc(buffer_size);
+  if (buff == NULL) {
+    printf("Unable to load env.cfg.\n");
+    return false;
+  }
+  if (!api_ReadFile("env.cfg", buff)) {
+    free(buff);
+    printf("Unable to read env.cfg.\n");
+    return false;
+  }
+  buff[buffer_size - 1] = '\0';
+  environment = MST_init(buff);
+  free(buff);
+  if (environment == NULL) {
+    printf("Unable to parse env.cfg.\n");
+    return false;
+  }
+  if (environment->err) {
+    printf("Unable to parse env.cfg: %s\n", MST_strerror(environment));
+    MST_free(environment);
+    environment = NULL;
+    return false;
+  }
+
+  char *path = env_read("path");
+  if (path != NULL) {
+    search_path = path;
+  }
+  return true;
+}
+
+static bool find_in_search_path(const char *file_name, char **result) {
+  if (file_name == NULL || result == NULL) {
+    return false;
+  }
+  *result = NULL;
+  const char *cursor = search_path;
+  const size_t file_name_length = strlen(file_name);
+
+  while (*cursor != '\0') {
+    while (*cursor == ';') {
+      cursor++;
+    }
+    if (*cursor == '\0') {
       break;
     }
-    if (i >= strlen(PATH_ADDR)) {
-      // 没找到
-      return;
+
+    const char *entry = cursor;
+    while (*cursor != '\0' && *cursor != ';') {
+      cursor++;
     }
-  }
-  if (PATH_ADDR[str_base] == ';') {
-    str_base++;
-  }
-  // 找到了
-  // copy
-  int i;
-  for (i = 0; PATH_ADDR[str_base + i] != ';'; i++) {
-    ptr[i] = PATH_ADDR[str_base + i];
-  }
-  ptr[i] = '\0';
-}
-int Path_GetPathCount(char *PATH_ADDR) {
-  int count = 0;
-  for (int i = 0; i < strlen(PATH_ADDR); i++) {
-    if (PATH_ADDR[i] == ';') {
-      count++;
+    size_t entry_length = (size_t)(cursor - entry);
+    bool add_separator = entry[entry_length - 1] != '\\' &&
+                         entry[entry_length - 1] != '/';
+    size_t separator = add_separator;
+    if (entry_length > UINT_MAX - separator) {
+      return false;
     }
-  }
-  return count;
-}
-static void GetFullPath(char *result, char *name, char *dictpath) {
-  strcpy(result, dictpath);
-  strcat(result, "\\");
-  strcat(result, name);
-}
-bool Path_Find_File(char *fileName, char *PATH_ADDR) {
-  char path_result1[255];
-  char path_result2[255];
-  for (int i = 0; i < Path_GetPathCount(PATH_ADDR); i++) {
-    Path_GetPath(i, path_result1, PATH_ADDR);
-    GetFullPath(path_result2, fileName, path_result1);
-    int size = filesize(path_result2);
-    if (size != -1) {
+    size_t prefix = entry_length + separator;
+    if (prefix == UINT_MAX || file_name_length > UINT_MAX - prefix - 1) {
+      return false;
+    }
+    size_t size = prefix + file_name_length + 1;
+    char *path = malloc(size);
+    if (path == NULL) {
+      return false;
+    }
+    memcpy(path, entry, entry_length);
+    size_t offset = entry_length;
+    if (add_separator) {
+      path[offset++] = '\\';
+    }
+    memcpy(path + offset, file_name, file_name_length + 1);
+    if (filesize(path) != -1) {
+      *result = path;
       return true;
     }
+    free(path);
   }
   return false;
 }
-void Path_Find_FileName(char *Result, char *fileName, char *PATH_ADDR) {
-  char path_result1[255];
-  char path_result2[255];
-  for (int i = 0; i < Path_GetPathCount(PATH_ADDR); i++) {
-    Path_GetPath(i, path_result1, PATH_ADDR);
-    GetFullPath(path_result2, fileName, path_result1);
-    int size = filesize(path_result2);
-    if (size != -1) {
-      strcpy(Result, path_result2);
-    }
-  }
-}
-unsigned div_round_up(unsigned num, unsigned size) {
+static unsigned div_round_up(unsigned num, unsigned size) {
   return (num + size - 1) / size;
 }
-void dir_deal() {
-  struct finfo_block *f = listfile("");
-  for (int i = 0; f[i].name[0]; i++) {
-    if (f[i].type == DIR) {
+static void print_directory(void) {
+  struct finfo_block *entries;
+  size_t count;
+  if (list_directory("", &entries, &count) != 0) {
+    printf("Unable to list directory.\n");
+    return;
+  }
+  for (size_t i = 0; i < count; i++) {
+    if (entries[i].type == DIR) {
       int c = get_cons_color();
       set_cons_color(0x0a);
-      printf("%s ", f[i].name);
+      printf("%s ", entries[i].name);
       set_cons_color(c);
     } else {
-      printf("%s ", f[i].name);
+      printf("%s ", entries[i].name);
     }
   }
   printf("\n");
-  free(f);
+  free(entries);
 }
-static void module_list_deal(void) {
+static void print_memory_usage(void) {
+  printf("Used/Total: %u/%u\n", mem_used(), div_round_up(mem_total(), 0x1000));
+}
+
+static void pause_shell(void) {
+  printf("Press any key to continue. . .");
+  getch();
+  printf("\n");
+}
+
+static void list_modules(void) {
   module_handle_t modules[32];
   int count = module_list(modules, 32);
   if (count <= 0) {
@@ -164,177 +168,290 @@ static void module_list_deal(void) {
            modules[i].section_count, modules[i].export_count);
   }
 }
-int cmd_app(char *cmdline, int *ok) {
-  int result = 0;
-  int flag = 0;
-  char *s = (char *)malloc(strlen(cmdline) + 10);
-  for (int i = 0; i <= strlen(cmdline); i++) {
-    s[i] = cmdline[i] == ' ' ? '\0' : cmdline[i];
+
+struct simple_command {
+  const char *name;
+  void (*handler)(void);
+};
+
+static const struct simple_command simple_commands[] = {
+    {"cls", clear},
+    {"dir", print_directory},
+    {"mem", print_memory_usage},
+    {"pause", pause_shell},
+    {"lsmod", list_modules},
+};
+
+static int execute_external_command(int argc, char **argv, int *ok) {
+  size_t name_length = strlen(argv[0]);
+  if (name_length > UINT_MAX - sizeof(".bin")) {
+    *ok = 0;
+    return 0;
   }
-RETRY:
-  if (filesize(s) == -1) {
-    if (!Path_Find_File(s, _path)) {
+  char *name = malloc(name_length + sizeof(".bin"));
+  if (name == NULL) {
+    *ok = 0;
+    return 0;
+  }
+  memcpy(name, argv[0], name_length + 1);
+  char *path = NULL;
+  char *executable = name;
+  if (filesize(name) == -1 && !find_in_search_path(name, &path)) {
+    memcpy(name + name_length, ".bin", sizeof(".bin"));
+    if (filesize(name) == -1 && !find_in_search_path(name, &path)) {
+      free(name);
       *ok = 0;
-    } else {
-      char *s1 = (char *)malloc(strlen(s) + 1024);
-      Path_Find_FileName(s1, s, _path);
-      result = exec(s1, cmdline);
-      free(s1);
-      *ok = 1;
+      return 0;
     }
-  } else {
-    result = exec(s, cmdline);
-    *ok = 1;
   }
-  if (flag == 0 && *ok == 0)
-    goto S;
-  free(s);
-  if (*ok)
-    printf("\n");
+  if (path != NULL) {
+    executable = path;
+  }
+  char *command_line;
+  size_t command_length;
+  if (runtime_command_line_build(argc, argv, &command_line,
+                                 &command_length) != 0) {
+    free(path);
+    free(name);
+    *ok = 0;
+    return 0;
+  }
+  (void)command_length;
+  int result = exec(executable, command_line);
+  free(command_line);
+  free(path);
+  free(name);
+  *ok = 1;
+  printf("\n");
   return result;
-S:
-  strcat(s, ".bin");
-  flag = 1;
-  goto RETRY;
 }
-int run(char *line) {
-  int result = 0;
-  if (strlen(line) == 0) {
+
+static int remount_drive(const char *argument) {
+  char drive = argument[0];
+  if (drive >= 'a' && drive <= 'z') {
+    drive -= 'a' - 'A';
+  }
+  if (drive < 'A' || drive > 'Z' ||
+      !((argument[1] == '\0') ||
+        (argument[1] == ':' && argument[2] == '\0'))) {
+    printf("remount_drive <drive>\n");
     return 1;
   }
-  if (strcmp("cls", line) == 0) {
-    clear();
-  } else if (strcmp("dir", line) == 0) {
-    dir_deal();
-  } else if (strcmp("mem", line) == 0) {
-    printf("Used/Total: %u/%u\n", mem_used(),
-           div_round_up(mem_total(), 0x1000));
-  } else if (strncmp("del ", line, 4) == 0) {
-    char *s = (char *)malloc(256);
-    get_arg(s, line, 1);
-    if (vfs_delfile(s) == 0) {
-      printf("File not find.\n");
+  if (vfs_check_mount(drive) && !vfs_unmount_disk(drive)) {
+    logkf("psh: remount_drive %c: unmount failed\n", drive);
+    printf("Unable to unmount drive %c:.\n", drive);
+    return 1;
+  }
+  if (!vfs_mount(drive, drive)) {
+    logkf("psh: remount_drive %c: mount failed\n", drive);
+    printf("Disk not ready!\n");
+    return 1;
+  }
+  if (!vfs_change_disk(drive)) {
+    logkf("psh: remount_drive %c: switch failed\n", drive);
+    printf("Unable to switch to drive %c:.\n", drive);
+    return 1;
+  }
+  logkf("psh: remount_drive %c: ok\n", drive);
+  return 0;
+}
+
+static int run_command(int argc, char **argv) {
+  int result = 0;
+  if (argc == 0) {
+    return 1;
+  }
+  for (unsigned i = 0; i < sizeof(simple_commands) / sizeof(simple_commands[0]);
+       i++) {
+    if (strcmp(simple_commands[i].name, argv[0]) == 0) {
+      if (argc != 1) {
+        printf("%s takes no arguments.\n", argv[0]);
+        return 1;
+      }
+      simple_commands[i].handler();
+      return 0;
     }
-    free(s);
-  } else if (strncmp("cd ", line, 3) == 0) {
-    char *s = (char *)malloc(256);
-    get_arg(s, line, 1);
-    if (vfs_change_path(s) == 0) {
-      printf("Invalid path.\n");
-    }
-    free(s);
-  } else if (strncmp("mkfile ", line, 7) == 0) {
-    char *s = (char *)malloc(256);
-    get_arg(s, line, 1);
-    mkfile(s);
-    free(s);
-  } else if (strncmp("type ", line, 5) == 0) {
-    char *s = (char *)malloc(256);
-    get_arg(s, line, 1);
-    if (filesize(s) == -1) {
-      printf("File not find.\n");
-      free(s);
+  }
+  if (strcmp("del", argv[0]) == 0) {
+    if (argc != 2 || !vfs_delfile(argv[1])) {
+      printf("File not found.\n");
       return 1;
     }
-    unsigned char *p = (char *)malloc(filesize(s));
-    api_ReadFile(s, p);
-    for (int i = 0; i != filesize(s); i++) {
-      printf("%c", p[i]);
+  } else if (strcmp("cd", argv[0]) == 0) {
+    if (argc != 2 || !vfs_change_path(argv[1])) {
+      printf("Invalid path.\n");
+      return 1;
+    }
+  } else if (strcmp("mkfile", argv[0]) == 0) {
+    if (argc != 2 || !mkfile(argv[1])) {
+      printf("Unable to create file.\n");
+      return 1;
+    }
+  } else if (strcmp("type", argv[0]) == 0) {
+    if (argc != 2) {
+      printf("type <file>\n");
+      return 1;
+    }
+    int file_size = filesize(argv[1]);
+    if (file_size < 0) {
+      printf("File not found.\n");
+      return 1;
+    }
+    char *contents = file_size == 0 ? NULL : malloc((size_t)file_size);
+    if ((file_size != 0 && contents == NULL) ||
+        (file_size != 0 && !api_ReadFile(argv[1], contents))) {
+      free(contents);
+      printf("Unable to read file.\n");
+      return 1;
+    }
+    for (int i = 0; i < file_size; i++) {
+      printf("%c", contents[i]);
     }
     printf("\n");
-    free(s);
-    free(p);
-  } else if (strcmp("pause", line) == 0) {
-    printf("Pree any key to continue. . .");
-    getch();
-    printf("\n");
-  } else if (strncmp("rdrv ", line, 5) == 0) {
-    if (!vfs_check_mount(line[5])) {
-      if (!vfs_mount(line[5], line[5])) {
-        printf("Disk not ready!\n");
-      } else {
-        vfs_change_disk(line[5]);
-      }
-    } else {
-      vfs_unmount_disk(line[5]);
-      if (!vfs_mount(line[5], line[5])) {
-        printf("Disk not ready!\n");
-      } else {
-        vfs_change_disk(line[5]);
-      }
+    free(contents);
+  } else if (strcmp("remount_drive", argv[0]) == 0) {
+    return argc == 2 ? remount_drive(argv[1]) : 1;
+  } else if (strcmp("color", argv[0]) == 0) {
+    if (argc != 2) {
+      return 1;
     }
-  } else if (strncmp("color ", line, 6) == 0) {
-    int c = strtol(line + 6, NULL, 16);
+    int c = strtol(argv[1], NULL, 16);
     T_DrawBox(0, 0, tty_get_xsize(), tty_get_ysize(), c);
     set_cons_color(c);
-  } else if (strncmp("mkdir ", line, 6) == 0) {
-    if (!mkdir(line + 6)) {
-      printf("Unable to create %s\n", line);
+  } else if (strcmp("mkdir", argv[0]) == 0) {
+    if (argc != 2 || !mkdir(argv[1])) {
+      printf("Unable to create directory.\n");
+      return 1;
     }
-  } else if (strncmp("insmod ", line, 7) == 0) {
-    if (module_load(line + 7) != 0) {
+  } else if (strcmp("insmod", argv[0]) == 0) {
+    if (argc != 2 || module_load(argv[1]) != 0) {
       printf("Module load failed.\n");
       return 1;
     }
-  } else if (strncmp("rmmod ", line, 6) == 0) {
-    if (module_unload(line + 6) != 0) {
+  } else if (strcmp("rmmod", argv[0]) == 0) {
+    if (argc != 2 || module_unload(argv[1]) != 0) {
       printf("Module unload failed.\n");
       return 1;
     }
-  } else if (strcmp("lsmod", line) == 0) {
-    module_list_deal();
-  } else if (strncmp("format ", line, 7) == 0) {
-    if (get_argc(line) != 3) {
-      printf("format <drive> <fsname>\nfsname can be FAT and PFS\n");
+  } else if (strcmp("format", argv[0]) == 0) {
+    if (argc != 3) {
+      printf("format <drive> <fsname>\n"
+             "fsname can be FAT and PFS; the drive must be unmounted and "
+             "have no retired references.\n");
       return 1;
     }
-    char *s = (char *)malloc(256);
-    char *s1 = (char *)malloc(256);
-    get_arg(s, line, 1);
-    get_arg(s1, line, 2);
-    format(s[0], s1);
-    free(s);
-    free(s1);
-  } else if (line[1] == ':' && line[2] == '\0') {
-    if (!vfs_check_mount(line[0])) {
-      if (!vfs_mount(line[0], line[0])) {
+    char normalized_drive = toupper((unsigned char)argv[1][0]);
+    if (normalized_drive < 'A' || normalized_drive > 'Z' ||
+        !((argv[1][1] == '\0') ||
+          (argv[1][1] == ':' && argv[1][2] == '\0'))) {
+      printf("Invalid drive.\n");
+      return 1;
+    }
+    if (!format(normalized_drive, argv[2])) {
+      printf("Unable to format drive %c:. Ensure it is fully unmounted.\n",
+             normalized_drive);
+      return 1;
+    }
+  } else if (argc == 1 && strlen(argv[0]) == 2 && argv[0][1] == ':') {
+    if (!vfs_check_mount(argv[0][0])) {
+      if (!vfs_mount(argv[0][0], argv[0][0])) {
         printf("disk not ready!\n");
-      } else {
-        vfs_change_disk(line[0]);
+        return 1;
       }
-    } else {
-      vfs_change_disk(line[0]);
+    }
+    if (!vfs_change_disk(argv[0][0])) {
+      printf("Unable to switch drive.\n");
+      return 1;
     }
   } else {
     int ok;
-    result = cmd_app(line, &ok);
+    result = execute_external_command(argc, argv, &ok);
     if (ok == 0) {
-      printf("bad command!\n");
+      printf("Command not found.\n");
       return 1;
     }
   }
   return result;
 }
-void shell() {
+
+static char *read_interactive_command(void) {
+  size_t capacity = 64;
+  size_t length = 0;
+  char *line = malloc(capacity);
+  if (line == NULL) {
+    return NULL;
+  }
+  for (;;) {
+    int input = getch();
+    if (input == '\n') {
+      putch('\n');
+      line[length] = '\0';
+      return line;
+    }
+    if (input == '\b') {
+      if (length != 0) {
+        length--;
+        print("\b \b");
+      }
+      continue;
+    }
+    if (input < 0 || input > 0xff) {
+      continue;
+    }
+    if (length + 1 == capacity) {
+      if (capacity > UINT_MAX / 2) {
+        free(line);
+        return NULL;
+      }
+      size_t new_capacity = capacity * 2;
+      char *replacement = realloc(line, new_capacity);
+      if (replacement == NULL) {
+        free(line);
+        return NULL;
+      }
+      line = replacement;
+      capacity = new_capacity;
+    }
+    line[length++] = (char)input;
+    putch((char)input);
+  }
+}
+
+static void run_shell(void) {
   printf("Plant OS 0.8a\n");
   for (;;) {
     char cwd[255];
     api_getcwd(cwd);
     printf("psh|%s ~ ", cwd);
-    char buf[500];
-    scan(buf, 500);
-    run(buf);
+    char *line = read_interactive_command();
+    if (line == NULL) {
+      printf("Unable to read command.\n");
+      continue;
+    }
+    runtime_arguments_t arguments;
+    if (runtime_arguments_parse(line, &arguments) == 0) {
+      run_command(arguments.argc, arguments.argv);
+      runtime_arguments_destroy(&arguments);
+    } else {
+      printf("Invalid command line.\n");
+    }
+    free(line);
   }
 }
 int main(int argc, char **argv) {
   if (argc > 1) {
-    if (argc != 3) {
-      printf("fatal error.\n");
+    if (argc < 3 || strcmp(argv[1], "-c") != 0) {
+      printf("Usage: %s -c <command> [arguments...]\n", argv[0]);
       return 1;
     }
-    env_init(1);
-    return run(argv[2]);
+    if (!env_init(1)) {
+      return 1;
+    }
+    return run_command(argc - 2, argv + 2);
   }
-  env_init(0);
-  shell();
+  if (!env_init(0)) {
+    return 1;
+  }
+  run_shell();
+  return 0;
 }

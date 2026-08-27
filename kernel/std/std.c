@@ -927,21 +927,25 @@ char* strrchr(const char* s1, int ch) {
   return NULL;
 }
 void* memmove(void* dest, const void* src, int n) {
-  /*因为char类型为1字节，所以将数据转化为char*
-  进行操作。并不是因为操作的对象是字符串*/
-  char* pdest = (char*)dest;
-  const char* psrc = (const char*)src;
+  if (n <= 0) {
+    return dest;
+  }
   assert(dest != NULL);
   assert(src != NULL);
-  if (pdest <= psrc && pdest >= psrc + n)  //正常情况下从前向后拷贝
-  {
-    while (n--) {
-      *pdest = *psrc;
+  if (dest == src) {
+    return dest;
+  }
+  char* pdest = (char*)dest;
+  const char* psrc = (const char*)src;
+  uintptr_t destination_address = (uintptr_t)dest;
+  uintptr_t source_address = (uintptr_t)src;
+  if (destination_address < source_address) {
+    for (int i = 0; i < n; i++) {
+      pdest[i] = psrc[i];
     }
-  } else  //当出现内存覆盖时从后向前拷贝
-  {
-    while (n--) {
-      *(pdest + n) = *(psrc + n);
+  } else {
+    for (int i = n; i != 0; i--) {
+      pdest[i - 1] = psrc[i - 1];
     }
   }
   return dest;

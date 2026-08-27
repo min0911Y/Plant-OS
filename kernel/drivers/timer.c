@@ -1,4 +1,5 @@
 #include <dos.h>
+#include <irq.h>
 #define PIT_CTRL 0x0043
 #define PIT_CNT0 0x0040
 
@@ -20,6 +21,10 @@ void init_pit(void) {
     timerctl.timers0[i].flags = 0; /* 没有使用 */
   }
   t = timer_alloc(); /* 取得一个 */
+  if (t == NULL) {
+    Panic_K("unable to allocate PIT sentinel timer");
+    return;
+  }
   t->timeout = 0xffffffff;
   t->flags = TIMER_FLAGS_USING;
   t->next = 0;     /* 末尾 */
@@ -42,9 +47,60 @@ struct TIMER *timer_alloc(void) {
 }
 
 void timer_free(struct TIMER *timer) {
+  if (timer == NULL) {
+    return;
+  }
+  timer_cancel(timer);
+  irq_state_t state = irq_save();
   timer->flags = 0; /* 未使用 */
   timer->waiter = NULL;
-  return;
+  timer->fifo = NULL;
+  timer->next = NULL;
+  irq_restore(state);
+}
+
+bool timer_cancel(struct TIMER *timer) {
+  if (timer == NULL) {
+    return false;
+  }
+  irq_state_t state = irq_save();
+  if (timer->flags != TIMER_FLAGS_USING) {
+    irq_restore(state);
+    return false;
+  }
+
+  struct TIMER **link = &timerctl.t0;
+  for (int i = 0; i < MAX_TIMER && *link != NULL; i++) {
+    if (*link == timer) {
+      *link = timer->next;
+      timer->flags = TIMER_FLAGS_ALLOC;
+      timer->next = NULL;
+      timerctl.next = timerctl.t0 != NULL ? timerctl.t0->timeout : 0xffffffff;
+      irq_restore(state);
+      return true;
+    }
+    link = &(*link)->next;
+  }
+  timer->flags = TIMER_FLAGS_ALLOC;
+  timer->next = NULL;
+  irq_restore(state);
+  return false;
+}
+
+void timer_cancel_for_task(mtask *task) {
+  if (task == NULL) {
+    return;
+  }
+  for (int i = 0; i < MAX_TIMER; i++) {
+    struct TIMER *timer = &timerctl.timers0[i];
+    if (timer->waiter == task) {
+      timer_cancel(timer);
+      timer->waiter = NULL;
+      if (timer != task->timer) {
+        timer_free(timer);
+      }
+    }
+  }
 }
 
 void timer_init(struct TIMER *timer, struct FIFO8 *fifo, unsigned char data) {
@@ -54,18 +110,28 @@ void timer_init(struct TIMER *timer, struct FIFO8 *fifo, unsigned char data) {
 }
 
 void timer_settime(struct TIMER *timer, unsigned int timeout) {
-  int e;
+  if (timer == NULL) {
+    return;
+  }
+  timer_cancel(timer);
+  irq_state_t state = irq_save();
   struct TIMER *t, *s;
   timer->timeout = timeout + timerctl.count;
   timer->flags = TIMER_FLAGS_USING;
-  e = io_load_eflags();
   t = timerctl.t0;
+  if (t == NULL) {
+    timerctl.t0 = timer;
+    timer->next = NULL;
+    timerctl.next = timer->timeout;
+    irq_restore(state);
+    return;
+  }
   if (timer->timeout <= t->timeout) {
     /* 插入最前面的情况 */
     timerctl.t0 = timer;
     timer->next = t; /* 下面是设定t */
     timerctl.next = timer->timeout;
-    io_store_eflags(e);
+    irq_restore(state);
     return;
   }
   for (;;) {
@@ -75,7 +141,7 @@ void timer_settime(struct TIMER *timer, unsigned int timeout) {
       /* 插入s和t之间的情况 */
       s->next = timer; /* s下一个是timer */
       timer->next = t; /* timer的下一个是t */
-      io_store_eflags(e);
+      irq_restore(state);
       return;
     }
   }
@@ -91,6 +157,7 @@ uint32_t mt2flag = 0;
 int g = 0;
 uint64_t global_time = 0;
 void inthandler20(int cs, perf_irq_frame_t *frame) {
+  (void)cs;
 #ifdef KERNEL_PERF
   perf_sample_irq(frame);
 #else

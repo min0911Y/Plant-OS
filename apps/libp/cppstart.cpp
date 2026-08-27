@@ -1,6 +1,7 @@
 #include <syscall.h>
-#include <arg.h>
+#include <runtime_args.h>
 #include <stdio.h>
+#include <string.h>
 #undef bool
 #undef true
 #undef false
@@ -18,29 +19,34 @@ extern "C" void Main()
   stdout = (FILE *)malloc(sizeof(FILE));
   stdin = (FILE *)malloc(sizeof(FILE));
   stderr = (FILE *)malloc(sizeof(FILE));
+  if (stdout == NULL || stdin == NULL || stderr == NULL) {
+    free(stdout);
+    free(stdin);
+    free(stderr);
+    exit((unsigned)-1);
+  }
+  memset(stdout, 0, sizeof(FILE));
+  memset(stdin, 0, sizeof(FILE));
+  memset(stderr, 0, sizeof(FILE));
   stdout->buffer = (unsigned char *)NULL;
   stdout->mode = WRITE;
   stderr->buffer = (unsigned char *)NULL;
   stderr->mode = WRITE;
-  stdin->buffer = (unsigned char *)malloc(1024);
+  stdin->buffer = (unsigned char *)NULL;
   stdin->fileSize = -1;
-  stdin->bufferSize = 1024;
-  stdin->p = 0;
   stdin->mode = READ;
-  char *buf = (char *)malloc(1024);
-  char **argv;
-  GetCmdline(buf);
+  runtime_arguments_t arguments;
+  if (runtime_arguments_load(&arguments) != 0) {
+    free(stdout);
+    free(stdin);
+    free(stderr);
+    exit((unsigned)-1);
+  }
   init_env();
-  argv = (char **)malloc(sizeof(char *) * (get_argc(buf) + 1));
-  for (int i = 0; i < get_argc(buf); i++) {
-    argv[i] = (char *)malloc(128);
-  }
-  for (int i = 0; i < get_argc(buf); i++) {
-    get_arg(argv[i], buf, i);
-  }
   init_float();
-
-  exit(main(get_argc(buf), argv));
+  int status = main(arguments.argc, arguments.argv);
+  runtime_arguments_destroy(&arguments);
+  exit(status);
 }
 extern "C" void __main()
 {
@@ -72,11 +78,13 @@ void *operator new[](size_t size)
  
 void operator delete(void *p,unsigned int size)
 {
+    (void)size;
     free(p);
 }
  
 void operator delete[](void *p,unsigned int size)
 {
+    (void)size;
     free(p);
 }
 void operator delete(void *p)

@@ -25,6 +25,8 @@ typedef struct {
 
 void x86_syscall_entry(void);
 void x86_custom_syscall_entry(void);
+__attribute__((noreturn)) void
+x86_return_to_user(const x86_interrupt_frame_t *frame);
 void x86_syscall_dispatch(x86_interrupt_frame_t *frame);
 void x86_custom_syscall_dispatch(x86_interrupt_frame_t *frame);
 

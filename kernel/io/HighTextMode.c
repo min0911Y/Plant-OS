@@ -59,7 +59,7 @@ void screen_ne_HighTextMode(struct tty *res) {
   res->MoveCursor(res, res->x, res->y);
 }
 void putchar_HighTextMode(struct tty *res, int c) {
-  if (cur_tmr) {
+  if (cur_tmr != NULL && cursor != NULL) {
     lock(&l);
     f = 1;
     task_run(cursor);
@@ -222,9 +222,20 @@ void Draw_Box_HighTextMode(struct tty *res, int x, int y, int x1, int y1,
 }*/
 int c = 0;
 lock_t ll;
+void high_text_cursor_task_exited(mtask *task) {
+  if (cursor == task) {
+    cursor = NULL;
+    cur_tmr = NULL;
+  }
+}
 void cur_service() {
   lock(&l);
   cur_tmr = timer_alloc();
+  if (cur_tmr == NULL) {
+    unlock(&l);
+    task_exit((unsigned)-1);
+    return;
+  }
   cur_tmr->waiter = current_task();
   unsigned char buf[50];
   struct FIFO8 fifo;
@@ -259,21 +270,52 @@ void cur_service() {
 }
 int default_tty_fifo_status(struct tty *res);
 int default_tty_fifo_get(struct tty *res);
-void SwitchToHighTextMode() {
+bool SwitchToHighTextMode(void) {
   if (set_mode(1024, 768, 32) == (unsigned)(-1)) {
     printk("Can't enable 1024x768x32 VBE mode.\n\n");
-    return;
+    return false;
   }
   lock_init(&l);
   lock_init(&l1);
   cur_tmr = NULL;
   struct VBEINFO *vinfo = (struct VBEINFO *)VBEINFO_ADDRESS;
   shtctl0 = shtctl_init((vram_t *)(uintptr_t)vinfo->vram, vinfo->xsize, vinfo->ysize);
+  if (shtctl0 == NULL) {
+    return false;
+  }
+  size_t screen_buffer_size =
+      (vinfo->xsize + 1) * (vinfo->ysize + 1) * sizeof(color_t);
+  size_t cursor_buffer_size = 16 * 32 * sizeof(color_t);
   vram_t *scr_buf =
-      page_malloc((vinfo->xsize + 1) * (vinfo->ysize + 1) * sizeof(color_t));
-  vram_t *cur_buf = page_malloc(16 * 32 * sizeof(color_t));
+      page_malloc(screen_buffer_size);
+  vram_t *cur_buf = page_malloc(cursor_buffer_size);
+  if (scr_buf == NULL || cur_buf == NULL) {
+    if (scr_buf != NULL) {
+      page_free(scr_buf, screen_buffer_size);
+    }
+    if (cur_buf != NULL) {
+      page_free(cur_buf, cursor_buffer_size);
+    }
+    ctl_free(shtctl0);
+    shtctl0 = NULL;
+    return false;
+  }
   struct SHEET *sht_scr = sheet_alloc(shtctl0);
   sht_cur = sheet_alloc(shtctl0);
+  if (sht_scr == NULL || sht_cur == NULL) {
+    if (sht_scr != NULL) {
+      sheet_free(sht_scr);
+    }
+    if (sht_cur != NULL) {
+      sheet_free(sht_cur);
+    }
+    page_free(scr_buf, screen_buffer_size);
+    page_free(cur_buf, cursor_buffer_size);
+    ctl_free(shtctl0);
+    shtctl0 = NULL;
+    sht_cur = NULL;
+    return false;
+  }
   sheet_setbuf(sht_scr, scr_buf, vinfo->xsize, vinfo->ysize, -1);
   sheet_setbuf(sht_cur, cur_buf, 8, 16, COL_TRANSPARENT);
   memset(scr_buf, 0, vinfo->xsize * vinfo->ysize * sizeof(color_t));
@@ -288,12 +330,49 @@ void SwitchToHighTextMode() {
 
   cursor = create_task((uintptr_t)cur_service, (unsigned)0,
                        1, 1);
+  if (cursor == NULL) {
+    WARNING_K("unable to create high-text cursor task");
+    sheet_free(sht_cur);
+    sheet_free(sht_scr);
+    page_free(scr_buf, screen_buffer_size);
+    page_free(cur_buf, cursor_buffer_size);
+    ctl_free(shtctl0);
+    shtctl0 = NULL;
+    sht_cur = NULL;
+    return false;
+  }
   struct tty *tty_h = tty_alloc((void *)sht_scr, vinfo->xsize / 8,
                                 vinfo->ysize / 16, putchar_HighTextMode,
                                 MoveCursor_HighTextMode, clear_HighTextMode,
                                 screen_ne_HighTextMode, Draw_Box_HighTextMode,default_tty_fifo_status,default_tty_fifo_get);
+  if (tty_h == NULL) {
+    task_abort_creation(cursor);
+    cursor = NULL;
+    sheet_free(sht_cur);
+    sheet_free(sht_scr);
+    page_free(scr_buf, screen_buffer_size);
+    page_free(cur_buf, cursor_buffer_size);
+    ctl_free(shtctl0);
+    shtctl0 = NULL;
+    sht_cur = NULL;
+    return false;
+  }
+  if (!task_publish(cursor)) {
+    task_abort_creation(cursor);
+    cursor = NULL;
+    tty_free(tty_h);
+    sheet_free(sht_cur);
+    sheet_free(sht_scr);
+    page_free(scr_buf, screen_buffer_size);
+    page_free(cur_buf, cursor_buffer_size);
+    ctl_free(shtctl0);
+    shtctl0 = NULL;
+    sht_cur = NULL;
+    return false;
+  }
   tty_set_default(tty_h);
   tty_set(current_task(), tty_h);
+  return true;
 }
 void SwitchShell_HighTextMode(int i) {
   // io_cli();

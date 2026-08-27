@@ -58,12 +58,21 @@ int default_tty_fifo_status(struct tty *res) {
 int default_tty_fifo_get(struct tty *res) {
   return fifo8_get(task_get_key_fifo(current_task()));
 }
-void init_tty() {
+bool init_tty(void) {
   tty_list = NewList();
+  if (tty_list == NULL) {
+    return false;
+  }
   tty_default =
       tty_alloc((void *)0xb8000, 80, 25, putchar_TextMode, MoveCursor_TextMode,
                 clear_TextMode, screen_ne_TextMode, Draw_Box_TextMode,
                 default_tty_fifo_status, default_tty_fifo_get);
+  if (tty_default == NULL) {
+    DeleteList(tty_list);
+    tty_list = NULL;
+    return false;
+  }
+  return true;
 }
 struct tty *tty_alloc(void *vram, int xsize, int ysize,
                       void (*putchar)(struct tty *res, int c),
@@ -74,6 +83,9 @@ struct tty *tty_alloc(void *vram, int xsize, int ysize,
                                        int y1, unsigned char color),
                       int (*fifo_status)(struct tty *res), int (*fifo_get)(struct tty *res)) {
   struct tty *res = (struct tty *)page_malloc(sizeof(struct tty));
+  if (res == NULL) {
+    return NULL;
+  }
   res->using1 = 1;
   res->x = 0;
   res->y = 0;
@@ -97,14 +109,22 @@ struct tty *tty_alloc(void *vram, int xsize, int ysize,
   res->done = 0;
   res->mode = 0;
   res->color_saved = -1;
-  AddVal((int)res, tty_list);
+  if (tty_list == NULL || !AddVal((uintptr_t)res, tty_list)) {
+    page_free((void *)res, sizeof(struct tty));
+    return NULL;
+  }
   return res;
 }
 void tty_free(struct tty *res) {
-  int i;
-  for (i = 0; FindForCount(i, tty_list) != (int)res; i++)
-    ;
-  DeleteVal(i, tty_list);
+  if (res == NULL || tty_list == NULL) {
+    return;
+  }
+  for (size_t i = 1; FindForCount(i, tty_list) != NULL; i++) {
+    if (FindForCount(i, tty_list)->val == (uintptr_t)res) {
+      DeleteVal(i, tty_list);
+      break;
+    }
+  }
   page_free((void *)res, sizeof(struct tty));
   return;
 }

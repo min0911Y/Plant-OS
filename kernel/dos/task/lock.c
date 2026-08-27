@@ -4,6 +4,7 @@
  * @date 2022-6-8
  */
 #include <dos.h>
+#include <irq.h>
 void mtask_stop();
 void mtask_start();
 extern char mtask_stop_flag;
@@ -45,43 +46,8 @@ void lock_init(lock_t *l) {
   lock_set_value(l, LOCK_UNLOCKED);
   lock_set_waiter(l, NULL);
 }
-// FUXK!!!!!!!!!!
-bool interrupt_disable()
-{
-    unsigned flags;
-    asm volatile(
-        "pushfl\n"    // 保存 cli 之前的 eflags
-        "popl %0\n"
-        "cli\n"
-        : "=r"(flags)
-        :
-        : "memory");
-    return (flags >> 9) & 1;
-}
-
-// 获得 IF 位
-bool get_interrupt_state()
-{
-    unsigned flags;
-    asm volatile(
-        "pushfl\n"
-        "popl %0\n"
-        : "=r"(flags)
-        :
-        : "memory");
-    return (flags >> 9) & 1;
-}
-
-// 设置 IF 位
-void set_interrupt_state(bool state)
-{
-    if (state)
-        asm volatile("sti\n" ::: "memory");
-    else
-        asm volatile("cli\n" ::: "memory");
-}
 void lock(lock_t *key) {
-  int state = interrupt_disable();
+  irq_state_t state = irq_save();
   if (lock_get_value(key) != LOCK_UNLOCKED) {
     lock_set_waiter(key, current_task());
     if (lock_get_value(key) != LOCK_UNLOCKED && lock_get_waiter(key)) {
@@ -94,14 +60,14 @@ void lock(lock_t *key) {
       
     }
   }
-  interrupt_disable();
+  (void)irq_save();
   lock_set_waiter(key, NULL);
   lock_set_value(key, LOCK_LOCKED);
   lock_set_owner(key, current_task());
-  set_interrupt_state(state);
+  irq_restore(state);
 }
 void unlock(lock_t *key) {
-  int state = interrupt_disable();
+  irq_state_t state = irq_save();
   mtask *waiter;
   lock_set_value(key, LOCK_UNLOCKED);
   waiter = lock_get_waiter(key);
@@ -111,5 +77,5 @@ void unlock(lock_t *key) {
     lock_set_waiter(key, NULL);
     task_next();
   }
-  set_interrupt_state(state);
+  irq_restore(state);
 }

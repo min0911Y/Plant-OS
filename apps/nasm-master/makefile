@@ -29,7 +29,7 @@ INTERNAL_CFLAGS = -I$(srcdir) -I$(objdir) \
 		  -I$(srcdir)/disasm -I$(objdir)/disasm \
 		  -I$(srcdir)/output -I$(objdir)/output
 ALL_CFLAGS	= $(BUILD_CFLAGS) $(INTERNAL_CFLAGS)
-LDFLAGS		=  -m elf_i386 -static -Ttext 0x70000000 -e Main
+LDFLAGS		=  -m elf_i386 -static -N -Ttext 0x70000000 -e Main
 ALL_LDFLAGS     = $(LDFLAGS)
 LIBS		= 
 

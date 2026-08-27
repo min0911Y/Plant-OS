@@ -229,8 +229,9 @@ static int f_chdir(lua_State *L) {
 static int f_list_dir(lua_State *L) {
   const char *path = luaL_checkstring(L, 1);
 
-  struct finfo_block *f = listfile(path);
-  if (!f) {
+  struct finfo_block *f;
+  size_t count;
+  if (list_directory(path, &f, &count) != 0) {
     lua_pushnil(L);
     lua_pushstring(L, strerror(errno));
     return 2;
@@ -239,14 +240,11 @@ static int f_list_dir(lua_State *L) {
   lua_newtable(L);
   int i = 1;
 
-  for (int j = 0; f[j].name[0]; j++) {
+  for (size_t j = 0; j < count; j++) {
     if (strcmp(f[j].name, ".") == 0) {
       continue;
     }
     if (strcmp(f[j].name, "..") == 0) {
-      continue;
-    }
-    if (strcmp(f[j].name, "NULL") == 0) {
       continue;
     }
     lua_pushstring(L, f[j].name);

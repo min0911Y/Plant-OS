@@ -2,6 +2,7 @@
 // Copyright (C) 2024 min0911
 
 #include <mst.h>
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 #include <syscall.h>
@@ -36,17 +37,30 @@ void convert(char *str) {
 }
 int main() {
   logk("init.bin started\n");
-  if (filesize("init.mst") == -1) {
+  int file_size = filesize("init.mst");
+  if (file_size < 0 || file_size == INT_MAX) {
     set_cons_color(0x0c);
     printf("ERROR!!! Couldn't find the file \"init.mst\"!");
     for (;;)
       ;
   }
-  unsigned int size = filesize("init.mst");
-  char *buffer = (char *)malloc(size + 1);
-  api_ReadFile("init.mst", buffer);
-  buffer[size] = 0;
+  char *buffer = (char *)malloc((size_t)file_size + 1);
+  if (buffer == NULL ||
+      (file_size != 0 && !api_ReadFile("init.mst", buffer))) {
+    logk("init: unable to read init.mst\n");
+    free(buffer);
+    return 1;
+  }
+  buffer[file_size] = 0;
   MST_Object *m = MST_init(buffer);
+  if (m == NULL || m->err) {
+    logk("init: unable to parse init.mst\n");
+    if (m != NULL) {
+      MST_free(m);
+    }
+    free(buffer);
+    return 1;
+  }
   Var *v = MST_get_var("todo", MST_get_root_space(m));
   if (!v) {
     set_cons_color(0x0c);
@@ -55,7 +69,7 @@ int main() {
       ;
   }
   Array *a = MST_space_get_array(v);
-  if (!v) {
+  if (!a) {
     set_cons_color(0x0c);
     printf("ERROR!!! the type of \"todo\" is wrong, it should be array\n");
     for (;;)
@@ -106,6 +120,10 @@ int main() {
           ;
       }
       char *s3 = strdup(s2);
+      if (s3 == NULL) {
+        logk("init: unable to duplicate output action\n");
+        break;
+      }
       convert(s3);
       print(s3);
       free(s3);
@@ -127,16 +145,25 @@ int main() {
           ;
       }
       char *s3 = strdup(s2);
-      for (int i = 0; i < strlen(s3); i++) {
+      if (s3 == NULL) {
+        logk("init: unable to duplicate command line\n");
+        break;
+      }
+      for (size_t i = 0; s3[i] != '\0'; i++) {
         if (s3[i] == ' ') {
           s3[i] = '\0';
 					break;
 				}
       }
-      exec(s3, s2);
-			free(s3);
-	  }
+      logkf("init: run %s\n", s2);
+      int status = exec(s3, s2);
+      logkf("init: command %s status=%d\n", s2, status);
+      free(s3);
+    }
   }
+  logk("init: todo complete\n");
+  MST_free(m);
+  free(buffer);
   for (;;)
     ;
   return 0;

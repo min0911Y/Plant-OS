@@ -134,6 +134,9 @@ struct tty *fartty_alloc(void *vram, unsigned handle, unsigned cr3, int xsize,
   struct tty *ftty;
   ftty = tty_alloc(vram, xsize, ysize, fartty_putchar, fartty_MoveCursor,
                    fartty_clear, fartty_screen_ne, fartty_Draw_Box,fartty_fifo_status,fartty_fifo_get);
+  if (ftty == NULL) {
+    return NULL;
+  }
   tty_set_reserved(ftty, handle, cr3, 0, 0);
   return ftty;
 }

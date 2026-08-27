@@ -31,3 +31,6 @@ kernel/img
 kernel64/bin
 kernel64/obj
 kernel64/build
+kernel/a.iso
+kernel/cd.iso
+kernel/iso/psh.bin

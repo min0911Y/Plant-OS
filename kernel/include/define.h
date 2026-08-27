@@ -47,10 +47,6 @@ extern unsigned char *font, *ascfont, *hzkfont;
 extern struct TIMERCTL timerctl;
 extern unsigned int memsize;
 extern uint32_t running_mode;
-struct PAGE_INFO {
-  uint8_t task_id;
-  uint8_t count;
-} __attribute__((packed));
 
 #define FREE_MAX_NUM 4096
 #define ERRNO_NOPE 0
@@ -384,9 +380,10 @@ typedef struct {
 #define get_fat_lock(vfs) ((fat_cache *)(vfs->cache))->lock
 #define get_fat_lock_owner(vfs) ((fat_cache *)(vfs->cache))->lock_owner
 #define get_fat_lock_depth(vfs) ((fat_cache *)(vfs->cache))->lock_depth
-#define get_clustno(high, low) (high << 16) | (low & 0xffff)
-#define clustno_end(type) 0xfffffff & ((((1 << (type - 1)) - 1) << 1) + 1)
+#define get_clustno(high, low)                                                \
+  (((uint32_t)(high) << 16) | ((uint32_t)(low) & 0xffffu))
 typedef enum { FLE, DIR, RDO, HID, SYS } ftype;
+struct vfs_mount;
 typedef struct {
   char name[255];
   ftype type;
@@ -411,12 +408,16 @@ typedef struct vfs_t {
   bool (*RenameFile)(struct vfs_t *vfs, char *filename, char *filename_of_new);
   bool (*Attrib)(struct vfs_t *vfs, char *filename, ftype type);
   bool (*Format)(uint8_t disk_number);
-  void (*InitFs)(struct vfs_t *vfs, uint8_t disk_number);
+  bool (*InitFs)(struct vfs_t *vfs, uint8_t disk_number);
   void (*DeleteFs)(struct vfs_t *vfs);
   bool (*Check)(uint8_t disk_number);
   bool (*cd)(struct vfs_t *vfs, char *dictName);
   int (*FileSize)(struct vfs_t *vfs, char *filename);
-  void (*CopyCache)(struct vfs_t *dest, struct vfs_t *src);
+  bool (*CopyCache)(struct vfs_t *dest, struct vfs_t *src);
+  void (*ReleaseCache)(struct vfs_t *vfs);
+  struct vfs_mount *mount_owner;
+  struct vfs_t *mount_prev;
+  struct vfs_t *mount_next;
   int flag;
 } vfs_t;
 #define BS_jmpBoot 0

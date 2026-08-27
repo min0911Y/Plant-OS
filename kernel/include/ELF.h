@@ -165,6 +165,9 @@ typedef struct {
 #define PT_NOTE 4
 #define PT_SHLIB 5
 #define PT_PHDR 6
+#define PF_X 0x1
+#define PF_W 0x2
+#define PF_R 0x4
 #define LOPROC 0x70000000
 #define HIPROC 0x7fffffff
 
@@ -178,11 +181,11 @@ typedef struct {
   Elf32_Word p_flags;
   Elf32_Word p_align;
 } Elf32_Phdr;
-bool elf32Validate(Elf32_Ehdr* hdr);
-bool elf32ValidateRelocatable(Elf32_Ehdr* hdr);
-void elf32LoadData(Elf32_Ehdr* elfhdr, uint8_t* ptr);
-uint32_t elf32_get_max_vaddr(Elf32_Ehdr* hdr);
-uint32_t load_elf(Elf32_Ehdr* hdr);
+bool elf32_validate_executable(const void* image, size_t image_size,
+                               uint32_t* entry_out, uint32_t* image_end_out);
+bool elf32_load_executable(const void* image, size_t image_size,
+                           uint32_t* entry_out);
+bool elf32_validate_relocatable(const void* image, size_t image_size);
 Elf32_Shdr* elf32_section(Elf32_Ehdr* hdr, int index);
 const char* elf32_section_name(Elf32_Ehdr* hdr, int index);
 Elf32_Shdr* elf32_find_section(Elf32_Ehdr* hdr, const char* name);

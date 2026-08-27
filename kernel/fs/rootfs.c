@@ -21,6 +21,9 @@ static void Write(char drive,
   printk("[dev fs]don't try to write!\n");
 }
 static bool dev_check(uint8_t disk_number) {
+  if (!DiskReady(disk_number)) {
+    return false;
+  }
   uint32_t *marker = page_malloc(512);
   if (marker == NULL) {
     return false;
@@ -32,12 +35,17 @@ static bool dev_check(uint8_t disk_number) {
   return ok;
 }
 
-static void dev_copy_cache(struct vfs_t *dest, struct vfs_t *src) {
-  return;
+static bool dev_copy_cache(struct vfs_t *dest, struct vfs_t *src) {
+  (void)dest;
+  (void)src;
+  return true;
 }
-static void dev_init(struct vfs_t *vfs, uint8_t disk_number) {
+static void dev_release_cache(struct vfs_t *vfs) { (void)vfs; }
+static bool dev_init(struct vfs_t *vfs, uint8_t disk_number) {
+  (void)vfs;
+  (void)disk_number;
   printk("init dev fs.\n");
-  return;
+  return true;
 }
 static int dev_cd(struct vfs_t *vfs, char *dictName) {
   (void)vfs;
@@ -53,11 +61,12 @@ void init_devfs() {
   vd.Write = Write;
   vd.flag = 1;
   register_vdisk(vd);
-  vfs_t fs;
+  vfs_t fs = {0};
   fs.flag = 1;
   fs.cache = NULL;
   strcpy(fs.FSName, "DEVFS");
   fs.CopyCache = dev_copy_cache;
+  fs.ReleaseCache = dev_release_cache;
   fs.Format = NULL;
   fs.CreateFile = NULL;
   fs.CreateDict = NULL;

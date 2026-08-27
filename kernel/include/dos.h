@@ -25,6 +25,8 @@ void register_intr_handler(int num, uintptr_t addr);
 // timer.c
 void init_pit(void);
 struct TIMER *timer_alloc(void);
+bool timer_cancel(struct TIMER *timer);
+void timer_cancel_for_task(mtask *task);
 void timer_free(struct TIMER *timer);
 void timer_init(struct TIMER *timer, struct FIFO8 *fifo, unsigned char data);
 void timer_settime(struct TIMER *timer, unsigned int timeout);
@@ -41,6 +43,8 @@ void inthandler20(int cs, perf_irq_frame_t *frame);
 mtask *current_task();
 mtask *get_task(unsigned tid);
 mtask *create_task(uintptr_t eip, unsigned esp, unsigned ticks, unsigned floor);
+bool task_publish(mtask *task);
+void task_abort_creation(mtask *task);
 mtask *create_thread_task(uintptr_t eip, unsigned esp, unsigned ticks,
                           unsigned floor);
 void task_set_default_drive(char drive);
@@ -82,6 +86,9 @@ void *page_malloc_one_count_from_4gb();
 void *page_malloc_one_no_mark();
 void *page_malloc_one_mark(unsigned tid);
 int get_pageinpte_address(int t, int p);
+unsigned page_ref_count(unsigned paddr);
+void page_ref_release(unsigned paddr);
+unsigned page_used_count(unsigned physical_size);
 void page_free_one(void *p);
 int find_kpage(int line, int n);
 void *page_malloc(int size);
@@ -214,11 +221,10 @@ int fifo8_put(struct FIFO8 *fifo, unsigned char data);
 int fifo8_get(struct FIFO8 *fifo);
 int fifo8_status(struct FIFO8 *fifo);
 // list.c
-void AddVal(uintptr_t val, struct List *Obj);
+bool AddVal(uintptr_t val, struct List *Obj);
 struct List *FindForCount(size_t count, struct List *Obj);
 void DeleteVal(size_t count, struct List *Obj);
 struct List *NewList();
-void Change(size_t count, struct List *Obj, uintptr_t val);
 int GetLastCount(struct List *Obj);
 void DeleteList(struct List *Obj);
 // init.c

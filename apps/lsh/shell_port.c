@@ -13,6 +13,7 @@
 #include "shell.h"
 #include "shell_fs.h"
 #include "shell_passthrough.h"
+#include "telnetd.h"
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
@@ -67,7 +68,7 @@ void pch(char ch) {
     putch(ch);
   }
 }
-unsigned short userShellWrite(char *data, unsigned short len) {
+short userShellWrite(char *data, unsigned short len) {
   unsigned short length = len;
   while (length--) {
     pch(*data++);
@@ -113,7 +114,7 @@ int gch() {
     return a;
   }
 }
-unsigned short userShellRead(char *data, unsigned short len) {
+short userShellRead(char *data, unsigned short len) {
   unsigned short length = len;
   while (length--) {
     *data++ = gch();
@@ -154,14 +155,29 @@ size_t userShellListDir(char *path, char *buffer, size_t maxLen) {
   //     strcat(buffer, "\t");
   // }
   // closedir(dir);
-  struct finfo_block *f = listfile(path);
-  for (int i = 0; f[i].name[0]; i++) {
-    strcat(buffer, f[i].name);
-    strcat(buffer, "\t");
+  if (buffer == NULL || maxLen == 0) {
+    return (size_t)-1;
   }
-  printf("\n");
-  free(f);
-  return 0;
+  buffer[0] = '\0';
+  struct finfo_block *entries;
+  size_t count;
+  if (list_directory(path, &entries, &count) != 0) {
+    return (size_t)-1;
+  }
+  size_t used = 0;
+  for (size_t i = 0; i < count; i++) {
+    size_t name_length = strlen(entries[i].name);
+    if (name_length + 1 > maxLen - used - 1) {
+      free(entries);
+      return (size_t)-1;
+    }
+    memcpy(buffer + used, entries[i].name, name_length);
+    used += name_length;
+    buffer[used++] = '\t';
+    buffer[used] = '\0';
+  }
+  free(entries);
+  return used;
 }
 
 /**
@@ -173,20 +189,30 @@ size_t userShellListDir(char *path, char *buffer, size_t maxLen) {
  * @return int 0 启动成功 -1 启动失败
  */
 int userNewThread(void *handler, void *param) {
-  unsigned *stack = ((unsigned)malloc(1024 * 512) + 1024 * 512 - 4);
-  *stack = param;
-  AddThread("", handler, stack-1);
-  return 0;
+  void *allocation = malloc(1024 * 512);
+  if (allocation == NULL) {
+    return -1;
+  }
+  unsigned *stack =
+      (unsigned *)((uintptr_t)allocation + 1024 * 512 - sizeof(unsigned));
+  *stack = (uintptr_t)param;
+  return AddThread("", (uintptr_t)handler, (uintptr_t)(stack - 1)) < 0 ? -1
+                                                                       : 0;
 }
 
 /**
  * @brief 用户shell初始化
  *
  */
-char *getcwd_(char *a, size_t b) { return api_getcwd(a); }
-int chdir_(char *dirname) {
+size_t getcwd_(char *a, size_t b) {
+  if (a == NULL || b == 0 || api_getcwd(a) == NULL) {
+    return 0;
+  }
+  return strlen(a);
+}
+size_t chdir_(char *dirname) {
   if (vfs_change_path(dirname) == 0) {
-    return -1;
+    return (size_t)-1;
   }
   return 0;
 }
@@ -237,7 +263,7 @@ int sysInfoSet(int value) {
 
 ShellNodeVarAttr sysInfo = {
     .get = dumpInfo,
-    .set = sysInfoSet,
+    .set = (int (*)(void))sysInfoSet,
 };
 SHELL_EXPORT_VAR(SHELL_CMD_PERMISSION(0) | SHELL_CMD_TYPE(SHELL_TYPE_VAR_NODE),
                  sysInfo, &sysInfo, node var test);
@@ -250,7 +276,7 @@ int shellInfoGet(Shell *shell) {
 
 ShellNodeVarAttr shellInfo = {
     .var = &shell,
-    .get = shellInfoGet,
+    .get = (int (*)(void))shellInfoGet,
 };
 SHELL_EXPORT_VAR(SHELL_CMD_PERMISSION(0) | SHELL_CMD_TYPE(SHELL_TYPE_VAR_NODE) |
                      SHELL_CMD_READ_ONLY,
@@ -283,8 +309,9 @@ SHELL_EXPORT_CMD(SHELL_CMD_PERMISSION(0x00) |
                      SHELL_CMD_DISABLE_RETURN,
                  scanTest, shellScanTest, test scan);
 
-void shellPassthroughTest(char *data, unsigned short len) {
+int shellPassthroughTest(char *data, unsigned short len) {
   printf("passthrough mode test, data: %s, len: %d\r\n", data, len);
+  return 0;
 }
 SHELL_EXPORT_PASSTROUGH(SHELL_CMD_PERMISSION(0), passTest, passthrough >>,
                         shellPassthroughTest, passthrough mode test);

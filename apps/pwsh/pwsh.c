@@ -7,6 +7,20 @@ static struct finfo_block *file_list;
 static int roll = 0, choose = 0, file_list_num;
 static char *path;
 static int tid_main, tid_mouse;
+static int reload_file_list(void) {
+  struct finfo_block *replacement;
+  size_t count;
+  if (list_directory(path, &replacement, &count) != 0) {
+    return 0;
+  }
+  free(file_list);
+  file_list = replacement;
+  file_list_num = (int)count;
+  if (choose >= file_list_num) {
+    choose = file_list_num > 0 ? file_list_num - 1 : 0;
+  }
+  return 1;
+}
 void Create_Button(int x, int y, int w, int h, char *text, char color) {
   goto_xy(x + (w - strlen(text)) / 2, y);
   print(text);
@@ -26,8 +40,7 @@ void Draw_UI() {
   printf("TYPE");
   goto_xy(52, 3);
   printf("DATE       TIME");
-  for (int i = 0;
-       file_list[roll + i].name[0] != 0 && roll + i <= max_file_list_num; i++) {
+  for (int i = 0; roll + i < file_list_num && i <= max_file_list_num; i++) {
     //	T_DrawBox(0,4+i,1,1,0x0);
     goto_xy(2, 4 + i);
     printf("%s", file_list[roll + i].name);
@@ -72,11 +85,10 @@ void mouse_thread() {
         while (_kbhit())
           getch(); // 清空输入缓冲区
         scan(path, 512);
-        free((void *)file_list);
-        file_list = listfile(path);
-        for (file_list_num = 0; file_list[file_list_num].name[0] != 0;
-             file_list_num++)
-          ;
+        if (!reload_file_list()) {
+          TaskUnlock();
+          continue;
+        }
         roll = 0;
         choose = 0;
         TaskUnlock();
@@ -110,10 +122,10 @@ int main(int argc, char **argv) {
   tid_main = NowTaskID();
   path = (char *)malloc(512);
   strcpy(path, "/");
-  file_list = listfile(path);
-  for (file_list_num = 0; file_list[file_list_num].name[0] != 0;
-       file_list_num++)
-    ;
+  if (!reload_file_list()) {
+    free(path);
+    return 1;
+  }
   Draw_UI();
   unsigned int stack = (unsigned int)malloc(4*1024 * 1024);
   AddThread("mouse", (uintptr_t)&mouse_thread, stack + 4*1024 * 1024);
@@ -133,7 +145,7 @@ int main(int argc, char **argv) {
         } else if (choose < file_list_num - 1) {
           choose++;
         }
-      } else if (c == '\n') {
+      } else if (c == '\n' && file_list_num > 0) {
         if (file_list[choose].type == FLE || file_list[choose].type == HID) {
           TaskLock();
           clear();
@@ -180,11 +192,7 @@ int main(int argc, char **argv) {
                   system(buffer);
                   choose--;
                 }
-                free((void *)file_list);
-                file_list = listfile(path);
-                for (file_list_num = 0; file_list[file_list_num].name[0] != 0;
-                     file_list_num++)
-                  ;
+                reload_file_list();
                 free(buffer);
                 TaskUnlock();
                 break;
@@ -196,11 +204,10 @@ int main(int argc, char **argv) {
         TaskLock();
         goto_xy(8, 1);
         scan(path, 512);
-        free((void *)file_list);
-        file_list = listfile(path);
-        for (file_list_num = 0; file_list[file_list_num].name[0] != 0;
-             file_list_num++)
-          ;
+        if (!reload_file_list()) {
+          TaskUnlock();
+          continue;
+        }
         roll = 0;
         choose = 0;
         TaskUnlock();

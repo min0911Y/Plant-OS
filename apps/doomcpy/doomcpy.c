@@ -1,60 +1,118 @@
-#include <stdio.h>
 #include <ctype.h>
+#include <limits.h>
+#include <stdbool.h>
+#include <stdio.h>
 #include <string.h>
 #include <syscall.h>
-void copy_drive(char d, char *p1, char *p2) {
-  char *buf = malloc(strlen(p2) + 4);
-  if (p2[0] == '/') {
-    sprintf(buf, "%c:%s", d, p2);
-  } else {
-    sprintf(buf, "%c:\\%s",d, p2);
+
+static bool remount_drive(char drive) {
+  char command[] = "remount_drive X:";
+  drive = toupper((unsigned char)drive);
+  command[sizeof("remount_drive ") - 1] = drive;
+  return system(command) == 0 && toupper(api_current_drive()) == drive;
+}
+
+static bool read_file(const char *path, char **buffer, int *size) {
+  int file_size = filesize((char *)path);
+  if (file_size < 0) {
+    return false;
   }
-  Copy(p1, buf);
-  free(buf);
+  char *data = file_size == 0 ? NULL : malloc((size_t)file_size);
+  if (file_size != 0 && data == NULL) {
+    return false;
+  }
+  if (file_size != 0 && !api_ReadFile((char *)path, data)) {
+    free(data);
+    return false;
+  }
+  *buffer = data;
+  *size = file_size;
+  return true;
 }
-void change_disk(char d) {
-  char *buf = malloc(4);
-  sprintf(buf, "rdrv %c", d);
-  system(buf);
-  free(buf);
-}
+
 int main() {
-  char d, c;
-  c = api_current_drive();
-R:
-  printf("Which drive do you want to copy to? [A/C/D/E/F]\n");
-  d = getch();
-  d = toupper(d);
-  printf("the file doom.zip will copy to Drive %c [y/n]\n", d);
-  if (getch() == 'n') {
-    goto R;
+  char source_drive = toupper(api_current_drive());
+  if (source_drive < 'A' || source_drive > 'Z') {
+    printf("Invalid source drive.\n");
+    return 1;
   }
+
+  char destination_drive;
+  for (;;) {
+    printf("Which drive do you want to copy to? [A-Z]\n");
+    destination_drive = toupper(getch());
+    if (destination_drive < 'A' || destination_drive > 'Z') {
+      printf("Invalid drive.\n");
+      continue;
+    }
+    printf("the file doom.zip will copy to Drive %c [y/n]\n",
+           destination_drive);
+    if (getch() != 'n') {
+      break;
+    }
+  }
+
   printf("Reading 001doom.bin file...");
-  int fsz1 = filesize("001doom.bin");
-  char *buf1 = malloc(fsz1);
-  api_ReadFile("001doom.bin", buf1);
-  printf("done.\n");
-  printf("Please insert doom2 disk and press enter to continue...");
-R2:
-  while (1) if (getch() == '\n') break;
-  printf("\n");
-  change_disk(c);
-  int fsz2 = filesize("002doom.bin");
-  if (fsz2 == -1) {
-	printf("Insert a wrong disk, retry...");
-	goto R2;
+  char *first = NULL;
+  int first_size;
+  if (!read_file("001doom.bin", &first, &first_size)) {
+    printf("failed.\n");
+    return 1;
   }
-  printf("Reading 002doom.bin file...");
-  char *whole_file = malloc(fsz1 + fsz2);
-  api_ReadFile("002doom.bin", whole_file + fsz1);
-  memcpy((void *)whole_file, (void *)buf1, fsz1);
-  free((void *)buf1);
   printf("done.\n");
-  printf("Merging and copying nasm.bin...");
-  change_disk(d);
-  Edit_File("doom.zip", whole_file, fsz1 + fsz2, 0);
-  free((void *)whole_file);
-  printf("done.\n");
-  printf("and then, you can extract it by miniunz.bin.\n  Have Fun! ^-^");
-  return 0;
+
+  char *whole_file = NULL;
+  int result = 1;
+  for (;;) {
+    printf("Please insert doom2 disk and press enter to continue...");
+    while (getch() != '\n') {
+    }
+    printf("\n");
+    if (!remount_drive(source_drive)) {
+      printf("Unable to remount source drive.\n");
+      goto cleanup;
+    }
+
+    int second_size = filesize("002doom.bin");
+    if (second_size < 0) {
+      printf("Insert a wrong disk, retry...\n");
+      continue;
+    }
+    if (first_size > INT_MAX - second_size) {
+      printf("doom.zip is too large.\n");
+      goto cleanup;
+    }
+    int whole_size = first_size + second_size;
+    whole_file = whole_size == 0 ? NULL : malloc((size_t)whole_size);
+    if (whole_size != 0 && whole_file == NULL) {
+      printf("Not enough memory.\n");
+      goto cleanup;
+    }
+    if (first_size != 0) {
+      memcpy(whole_file, first, first_size);
+    }
+    printf("Reading 002doom.bin file...");
+    if (second_size != 0 &&
+        !api_ReadFile("002doom.bin", whole_file + first_size)) {
+      printf("failed.\n");
+      goto cleanup;
+    }
+    printf("done.\nMerging and copying doom.zip...");
+    if (!remount_drive(destination_drive) ||
+        !Edit_File("doom.zip", whole_file, whole_size, 0)) {
+      printf("failed.\n");
+      goto cleanup;
+    }
+    printf("done.\nand then, you can extract it by miniunz.bin.\n  Have Fun! ^-");
+    result = 0;
+    break;
+  }
+
+cleanup:
+  free(whole_file);
+  free(first);
+  if (!remount_drive(source_drive)) {
+    result = 1;
+  }
+  return result;
 }

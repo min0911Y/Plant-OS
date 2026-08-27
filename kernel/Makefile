@@ -17,6 +17,7 @@ INCPATH  = ./include/
 OUTPATH = ./obj/
 IMGPATH = ./img/
 LOADERPATH = ../Loader/out/
+ARCHX86PATH = ./arch/x86/
 
 MAKE     = make -r
 NASM     = nasm
@@ -41,10 +42,11 @@ OBJS_BOOTPACK = $(OUTPATH)kernelc.o $(OUTPATH)screen.o $(OUTPATH)command.o $(OUT
 				$(OUTPATH)mtask.o $(OUTPATH)basetask.o $(OUTPATH)execute.o $(OUTPATH)network.o $(OUTPATH)rtl8139.o \
 				$(OUTPATH)vfs.o $(OUTPATH)build.o $(OUTPATH)mst.o $(OUTPATH)str.o $(OUTPATH)pfs.o $(OUTPATH)signal.o \
 				$(OUTPATH)rtc.o $(OUTPATH)ahci.o $(OUTPATH)farcall.o $(OUTPATH)fartty.o $(OUTPATH)iso9660.o \
-				$(OUTPATH)module.o $(OUTPATH)kasan.o $(OUTPATH)perf.o
+				$(OUTPATH)module.o $(OUTPATH)kasan.o $(OUTPATH)perf.o $(OUTPATH)irq.o $(OUTPATH)user_return.obj
 
 # 默认动作
 default : make_dir
+	$(MAKE) -C $(ARCHX86PATH)
 	$(MAKE) -C $(DOSPATH)
 	$(MAKE) -C $(IOPATH)
 	$(MAKE) -C $(FSPATH)
@@ -70,6 +72,9 @@ $(OUTPATH)kernel.bin : $(OBJS_BOOTPACK) Makefile
 make_dir:
 	mkdir -p img
 	mkdir -p obj
+
+$(OUTPATH)irq.o: $(ARCHX86PATH)irq.c $(INCPATH)irq.h $(ARCHX86PATH)Makefile
+	$(MAKE) -C $(ARCHX86PATH)
 
 make_img: make_dir
 	qemu-img create boot.img 64M
@@ -278,6 +283,7 @@ Mimg : make_dir $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $
 # 运行程序
 
 img_run :
+	$(MAKE) -C $(ARCHX86PATH)
 	$(MAKE) -C $(DOSPATH)
 	$(MAKE) -C $(IOPATH)
 	$(MAKE) -C $(FSPATH)
@@ -292,6 +298,7 @@ img_run :
 	 -hdb disk.img \
 	 -boot c -m 4096
 full : make_dir
+	$(MAKE) -C $(ARCHX86PATH)
 	$(MAKE) -C $(DOSPATH)
 	$(MAKE) -C $(IOPATH)
 	$(MAKE) -C $(FSPATH)
@@ -305,6 +312,7 @@ full : make_dir
 run:
 	qemu-system-i386 -d in_asm -no-reboot -netdev user,id=net0 -device pcnet,netdev=net0 -serial stdio -device sb16 -device floppy -fda ./img/Powerint_DOS_386.img -drive id=disk,file=disk.img,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -hdb ./img/Disk2.img -hdc ./img/Disk3.img -hdd ./img/res.img -boot a -m 512
 full_run:
+	$(MAKE) -C $(ARCHX86PATH)
 	$(MAKE) -C $(DOSPATH)
 	$(MAKE) -C $(IOPATH)
 	$(MAKE) -C $(FSPATH)

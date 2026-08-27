@@ -1,6 +1,8 @@
 // 多任务重构 -- mtask.c (区别与以前的多任务)
 #include <arch/x86/interrupt.h>
 #include <dos.h>
+#include <irq.h>
+#include <user_space.h>
 #define STACK_SIZE 1024 * 1024
 #define REAPER_TID 0u
 #define TASK_ID_NONE ((uint32_t)-1)
@@ -9,8 +11,6 @@ void free_pde(unsigned addr);
 unsigned pde_clone(unsigned addr);
 void gc(unsigned tid);
 void task_start(mtask *task);
-bool interrupt_disable(void);
-void set_interrupt_state(bool state);
 void fpu_disable(void);
 void task_switch(mtask *next);
 static void reset_task_slot(mtask *task, int tid);
@@ -172,8 +172,9 @@ void task_next() {
 
 static mtask *create_task_impl(uintptr_t eip, unsigned esp, unsigned ticks,
                                unsigned floor, bool share_pde) {
+  (void)esp;
   mtask *t = NULL;
-  bool interrupt_state = interrupt_disable();
+  irq_state_t interrupt_state = irq_save();
   int first = (current == NULL && m[0].state == EMPTY) ? 0 : 1;
   for (int i = first; i < 255; i++) {
     if (m[i].state == EMPTY) {
@@ -182,7 +183,7 @@ static mtask *create_task_impl(uintptr_t eip, unsigned esp, unsigned ticks,
     }
   }
   if (!t) {
-    set_interrupt_state(interrupt_state);
+    irq_restore(interrupt_state);
     return NULL;
   }
   int tid = (int)(t - m);
@@ -193,7 +194,7 @@ static mtask *create_task_impl(uintptr_t eip, unsigned esp, unsigned ticks,
   t->tgid = share_pde && current != NULL ? current_task()->tgid : (uint32_t)tid;
   t->ptid = share_pde && current != NULL ? current_task()->ptid : TASK_ID_NONE;
   t->state = ALLOCATING;
-  set_interrupt_state(interrupt_state);
+  irq_restore(interrupt_state);
   void *stack_base = page_malloc(STACK_SIZE);
   if (stack_base == NULL) {
     reset_task_slot(t, tid);
@@ -204,6 +205,7 @@ static mtask *create_task_impl(uintptr_t eip, unsigned esp, unsigned ticks,
   t->esp = (stack_frame *)(esp_alloced - sizeof(stack_frame)); // switch用到的栈帧
   t->esp->eip = eip;                          // 设置跳转地址
   t->user_mode = 0;                           // 设置是否是user_mode
+  bool owns_pde = false;
   if (current == NULL) {                      // 还没启用多任务
     t->pde = PDE_ADDRESS;                     // 所以先用预设好的页表
     t->times = PDE_ADDRESS;
@@ -211,21 +213,39 @@ static mtask *create_task_impl(uintptr_t eip, unsigned esp, unsigned ticks,
     t->pde = current_task()->pde;
     t->times = t->pde;
     pde_retain(t->pde);
+    owns_pde = true;
   } else {
     t->pde = pde_clone(current_task()->pde); // 启用了就复制一个
+    if (t->pde == 0) {
+      page_free(stack_base, STACK_SIZE);
+      reset_task_slot(t, tid);
+      return NULL;
+    }
     t->times = t->pde;
+    owns_pde = true;
   }
   t->top = esp_alloced; // r0的esp
   t->floor = floor;
   t->running = 0;
   t->timeout = ticks;
-  t->state = RUNNING; // running
   t->drive = default_drive;
   t->drive_number = default_drive - 'A';
   t->jiffies = 0;
   extern int init_ok_flag; // init_ok_flag 标记fs等是否初始化完成
   if (init_ok_flag) {
-    vfs_change_disk_for_task(t->drive, t);
+    bool vfs_ready = current != NULL && current_task()->nfs != NULL
+                         ? vfs_clone_for_task(current_task(), t)
+                         : vfs_change_disk_for_task(t->drive, t);
+    if (!vfs_ready) {
+      if (owns_pde) {
+        free_pde(t->pde);
+      }
+      page_free(stack_base, STACK_SIZE);
+      reset_task_slot(t, tid);
+      return NULL;
+    }
+    t->drive = t->nfs->drive;
+    t->drive_number = t->drive - 'A';
   }
   return t;
 }
@@ -235,6 +255,15 @@ mtask *create_task(uintptr_t eip, unsigned esp, unsigned ticks, unsigned floor) 
 mtask *create_thread_task(uintptr_t eip, unsigned esp, unsigned ticks,
                           unsigned floor) {
   return create_task_impl(eip, esp, ticks, floor, true);
+}
+bool task_publish(mtask *task) {
+  irq_state_t state = irq_save();
+  bool published = task != NULL && task->state == ALLOCATING;
+  if (published) {
+    task->state = RUNNING;
+  }
+  irq_restore(state);
+  return published;
 }
 mtask *get_task(unsigned tid) {
   if (tid >= 255) {
@@ -247,46 +276,42 @@ mtask *get_task(unsigned tid) {
   return &(m[tid]);
 }
 void task_to_user_mode(unsigned eip, unsigned esp) {
+  mtask *task = current;
+  struct user_runtime_layout layout;
+  if (!user_runtime_layout_calculate(USER_SPACE_START, 0, 0, false, eip,
+                                     &layout) ||
+      esp < USER_SPACE_START || esp >= USER_HEAP_END) {
+    task_exit(-1);
+    return;
+  }
+  (void)layout;
+  logk("TTT %d\n", task->tid);
+  x86_interrupt_frame_t iframe;
 
-  unsigned addr = (unsigned)current->top;
+  iframe.edi = 1;
+  iframe.esi = 2;
+  iframe.ebp = 3;
+  iframe.esp_dummy = 4;
+  iframe.ebx = 5;
+  iframe.edx = 6;
+  iframe.ecx = 7;
+  iframe.eax = 8;
 
-  addr -= sizeof(x86_interrupt_frame_t);
-  x86_interrupt_frame_t *iframe = (x86_interrupt_frame_t *)(addr);
-
-  iframe->edi = 1;
-  iframe->esi = 2;
-  iframe->ebp = 3;
-  iframe->esp_dummy = 4;
-  iframe->ebx = 5;
-  iframe->edx = 6;
-  iframe->ecx = 7;
-  iframe->eax = 8;
-
-  iframe->gs = 0;
-  iframe->ds = GET_SEL(3 * 8, SA_RPL3);
-  iframe->es = GET_SEL(3 * 8, SA_RPL3);
-  iframe->fs = GET_SEL(3 * 8, SA_RPL3);
-  iframe->ss = GET_SEL(3 * 8, SA_RPL3);
-  iframe->cs = GET_SEL(4 * 8, SA_RPL3);
-  iframe->eip = eip;
-  iframe->eflags = (0 << 12 | 0b10 | 1 << 9);
-  iframe->esp = esp; // 设置用户态堆栈
-  current->user_mode = 1;
-  tss.esp0 = current->top;
-  logk("TTT %d\n", current_task()->tid);
+  iframe.gs = 0;
+  iframe.ds = GET_SEL(3 * 8, SA_RPL3);
+  iframe.es = GET_SEL(3 * 8, SA_RPL3);
+  iframe.fs = GET_SEL(3 * 8, SA_RPL3);
+  iframe.ss = GET_SEL(3 * 8, SA_RPL3);
+  iframe.cs = GET_SEL(4 * 8, SA_RPL3);
+  iframe.eip = eip;
+  iframe.eflags = 0b10 | 1 << 9;
+  iframe.esp = esp;
+  task->user_mode = 1;
+  tss.esp0 = task->top;
   // task_exit(0);
   // change_page_task_id(current_task()->tid, iframe->esp - 64 * 1024, 64 *
   // 1024);
-  io_sti();
-  asm volatile("movl %0, %%esp\n"
-               "popa\n"
-               "pop %%gs\n"
-               "pop %%fs\n"
-               "pop %%es\n"
-               "pop %%ds\n"
-               "iret" ::"m"(iframe));
-  for (;;)
-    ;
+  x86_return_to_user(&iframe);
 }
 
 static bool task_slot_in_use(const mtask *task) {
@@ -334,11 +359,8 @@ static void task_clear_external_refs(mtask *task) {
     custom_handler_pde = 0;
     custom_handler_owner = NULL;
   }
-  for (int i = 0; i < MAX_TIMER; i++) {
-    if (timerctl.timers0[i].waiter == task) {
-      timerctl.timers0[i].waiter = NULL;
-    }
-  }
+  timer_cancel_for_task(task);
+  high_text_cursor_task_exited(task);
   task_clear_ipc_refs(task);
   sb16_remove_task(task);
   vdisk_remove_task(task->tid);
@@ -351,7 +373,7 @@ static void task_release_resources(mtask *task) {
   if (task == current_task()) {
     set_cr3(PDE_ADDRESS);
   }
-  if (task->pde) {
+  if (task->pde && task->pde != PDE_ADDRESS) {
     free_pde(task->pde);
   }
   gc(tid);
@@ -371,6 +393,16 @@ static void task_release_resources(mtask *task) {
   }
   if (task->alloced && task->alloc_size) {
     free(task->alloc_size);
+  }
+  if (task->timer != NULL) {
+    struct FIFO8 *fifo = task->timer->fifo;
+    if (fifo != NULL) {
+      if (fifo->buf != NULL) {
+        page_free(fifo->buf, 50 * sizeof(unsigned char));
+      }
+      page_free(fifo, sizeof(struct FIFO8));
+    }
+    timer_free(task->timer);
   }
   task->alloc_addr = 0;
   task->alloc_size = NULL;
@@ -402,6 +434,15 @@ static void task_release_resources(mtask *task) {
   for (int k = 0; k < 30; k++) {
     task->handler[k] = 0;
   }
+}
+
+void task_abort_creation(mtask *task) {
+  if (task == NULL || task->state != ALLOCATING) {
+    return;
+  }
+  int tid = task->tid;
+  task_release_resources(task);
+  reset_task_slot(task, tid);
 }
 
 static void wake_child_waiter(mtask *child) {
@@ -471,7 +512,7 @@ void task_kill(unsigned tid) {
   if (!task || task->state == DIED) {
     return;
   }
-  bool interrupt_state = interrupt_disable();
+  irq_state_t interrupt_state = irq_save();
   bool is_current = task == current_task();
   if (task->kind == TASK_PROCESS) {
     terminate_thread_group(task->tgid, task);
@@ -485,7 +526,7 @@ void task_kill(unsigned tid) {
     for (;;)
       ;
   }
-  set_interrupt_state(interrupt_state);
+  irq_restore(interrupt_state);
 }
 
 mtask *current_task() {
@@ -507,7 +548,21 @@ int into_mtask() {
   set_segmdesc(gdt + 103, 103, (int)(uintptr_t)&tss, AR_TSS32);
   load_tr(103 * 8);
   idle_task = create_task((uintptr_t)idle, 0, 1, 3);
-  create_task((uintptr_t)init, 0, 5, 1);
+  if (idle_task == NULL) {
+    Panic_K("unable to create bootstrap tasks");
+    return -1;
+  }
+  mtask *init_task = create_task((uintptr_t)init, 0, 5, 1);
+  if (init_task == NULL) {
+    task_abort_creation(idle_task);
+    idle_task = NULL;
+    Panic_K("unable to create bootstrap tasks");
+    return -1;
+  }
+  if (!task_publish(idle_task) || !task_publish(init_task)) {
+    Panic_K("unable to publish bootstrap tasks");
+    return -1;
+  }
   set_cr0(get_cr0() | CR0_EM | CR0_TS | CR0_NE);
   task_start(&(m[0]));
   return 0;
@@ -548,12 +603,12 @@ void task_lock() {
   mtask *self = current_task();
   mtask *leader = task_group_leader(self);
   for (;;) {
-    bool interrupt_state = interrupt_disable();
+    irq_state_t interrupt_state = irq_save();
     if (leader->group_lock_owner == TASK_ID_NONE ||
         leader->group_lock_owner == self->tid) {
       leader->group_lock_owner = self->tid;
       leader->group_lock_depth++;
-      set_interrupt_state(interrupt_state);
+      irq_restore(interrupt_state);
       return;
     }
     self->state = WAITING;
@@ -567,9 +622,9 @@ void task_lock() {
 void task_unlock() {
   mtask *self = current_task();
   mtask *leader = task_group_leader(self);
-  bool interrupt_state = interrupt_disable();
+  irq_state_t interrupt_state = irq_save();
   if (leader->group_lock_owner != self->tid || leader->group_lock_depth == 0) {
-    set_interrupt_state(interrupt_state);
+    irq_restore(interrupt_state);
     return;
   }
   leader->group_lock_depth--;
@@ -583,7 +638,7 @@ void task_unlock() {
       }
     }
   }
-  set_interrupt_state(interrupt_state);
+  irq_restore(interrupt_state);
 }
 uint32_t get_father_tid(mtask *t) {
   if (!t) {
@@ -610,10 +665,9 @@ void task_fall_blocked_reason(enum STATE state, enum WAIT_REASON reason) {
 void task_fall_blocked(enum STATE state) {
   task_fall_blocked_reason(state, WAIT_REASON_GENERIC);
 }
-extern struct PAGE_INFO *pages;
 void task_exit(unsigned status) {
   mtask *task = current_task();
-  interrupt_disable();
+  (void)irq_save();
   if (task->kind == TASK_PROCESS) {
     terminate_thread_group(task->tgid, task);
     reparent_children(task->tgid, REAPER_TID);
@@ -629,24 +683,24 @@ int waittid(uint32_t tid) {
   mtask *self = current_task();
   uint32_t generation;
 
-  bool interrupt_state = interrupt_disable();
+  irq_state_t interrupt_state = irq_save();
   mtask *child = get_task(tid);
   if (!child || child->kind != TASK_PROCESS || child->ptid != self->tgid) {
-    set_interrupt_state(interrupt_state);
+    irq_restore(interrupt_state);
     return -1;
   }
   generation = child->generation;
-  set_interrupt_state(interrupt_state);
+  irq_restore(interrupt_state);
 
   for (;;) {
-    interrupt_state = interrupt_disable();
+    interrupt_state = irq_save();
     child = get_task(tid);
     if (!child || child->generation != generation ||
         child->kind != TASK_PROCESS || child->ptid != self->tgid) {
       self->waittid = TASK_ID_NONE;
       self->wait_generation = 0;
       self->wait_reason = WAIT_REASON_NONE;
-      set_interrupt_state(interrupt_state);
+      irq_restore(interrupt_state);
       return -1;
     }
     if (child->state == DIED) {
@@ -655,7 +709,7 @@ int waittid(uint32_t tid) {
       self->wait_generation = 0;
       self->wait_reason = WAIT_REASON_NONE;
       reset_task_slot(child, tid);
-      set_interrupt_state(interrupt_state);
+      irq_restore(interrupt_state);
       logk("task exit with code %d\n", status);
       return status;
     }
@@ -671,8 +725,8 @@ int waittid(uint32_t tid) {
 void mtask_stop() { mtask_stop_flag = 1; }
 void mtask_start() { mtask_stop_flag = 0; }
 void mtask_run_now(mtask *obj) { next_set = obj; }
-void copy_vfs(mtask *src, mtask *dest) {
-  vfs_clone_for_task(src, dest);
+static bool copy_vfs(mtask *src, mtask *dest) {
+  return vfs_clone_for_task(src, dest);
 }
 static void release_task_fifos(mtask *task) {
   if (task->Pkeyfifo) {
@@ -778,10 +832,10 @@ static void build_fork_stack(mtask *task) {
 }
 int task_fork() {
   mtask *parent = current_task();
-  bool state = interrupt_disable();
+  irq_state_t state = irq_save();
   mtask *m = mtask_get_free();
   if (!m) {
-    set_interrupt_state(state);
+    irq_restore(state);
     return -1;
   }
   logk("get free %08x\n", m);
@@ -794,10 +848,11 @@ int task_fork() {
   m->kind = TASK_PROCESS;
   m->tgid = tid;
   m->ptid = parent->tgid;
+  m->state = ALLOCATING;
   uintptr_t stack = (uintptr_t)page_malloc(STACK_SIZE);
   if (stack == 0) {
     reset_task_slot(m, tid);
-    set_interrupt_state(state);
+    irq_restore(state);
     return -1;
   }
   change_page_task_id(tid, (void *)stack, STACK_SIZE);
@@ -833,7 +888,7 @@ int task_fork() {
     if (m->alloc_size == NULL) {
       page_free((void *)stack, STACK_SIZE);
       reset_task_slot(m, tid);
-      set_interrupt_state(state);
+      irq_restore(state);
       return -1;
     }
     *(m->alloc_size) = *(parent->alloc_size);
@@ -852,16 +907,36 @@ int task_fork() {
     }
     page_free((void *)stack, STACK_SIZE);
     reset_task_slot(m, tid);
-    set_interrupt_state(state);
+    irq_restore(state);
     return -1;
   }
   logk("copy vfs\n");
-  copy_vfs(parent, m);
+  if (!copy_vfs(parent, m)) {
+    release_task_fifos(m);
+    if (m->alloced) {
+      free(m->alloc_size);
+    }
+    page_free((void *)stack, STACK_SIZE);
+    reset_task_slot(m, tid);
+    irq_restore(state);
+    return -1;
+  }
   m->pde = pde_clone(parent->pde);
+  if (m->pde == 0) {
+    vfs_free_task_instance(m->nfs);
+    m->nfs = NULL;
+    release_task_fifos(m);
+    if (m->alloced) {
+      free(m->alloc_size);
+    }
+    page_free((void *)stack, STACK_SIZE);
+    reset_task_slot(m, tid);
+    irq_restore(state);
+    return -1;
+  }
   m->running = 0;
   m->jiffies = 0;
   m->timeout = 1;
-  m->state = RUNNING;
   m->ptid = parent->tgid;
   m->tgid = tid;
   m->kind = TASK_PROCESS;
@@ -870,6 +945,11 @@ int task_fork() {
   tid = m->tid;
   logk("BUILD FORK STACK\n");
   build_fork_stack(m);
-  set_interrupt_state(state);
+  if (!task_publish(m)) {
+    task_abort_creation(m);
+    irq_restore(state);
+    return -1;
+  }
+  irq_restore(state);
   return tid;
 }

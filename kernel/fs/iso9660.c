@@ -1,4 +1,5 @@
 #include <dos.h>
+#include <limits.h>
 #include <fs.h>
 typedef enum {
   /*! Success! */
@@ -110,7 +111,7 @@ typedef union {
   char _bits[2048];
 } l9660_vdesc;
 
-typedef struct l9660_file;
+static void ISO_DeleteFs(struct vfs_t *vfs);
 
 typedef struct l9660_fs {
 #ifdef L9660_SINGLEBUFFER
@@ -179,10 +180,6 @@ bool read_sector(l9660_fs *fs, void *buf, uint32_t sector);
   (l9660_seek(&(dir)->file, L9660_SEEK_SET, (pos)))
 #define l9660_telldir(dir) (l9660_tell(&(dir)->file))
 
-#define SEEK_END L9660_SEEK_END
-#define SEEK_SET L9660_SEEK_SET
-#define SEEK_CUR L9660_SEEK_CUR
-
 #define DENT_EXISTS (1 << 0)
 #define DENT_ISDIR (1 << 1)
 #define DENT_ASSOCIATED (1 << 2)
@@ -212,8 +209,8 @@ static l9660_file *last_file;
 static char gbuf[2048];
 #endif
 
-#define get_now_dir(vfs) ((l9660_fs_status_t *)(vfs->cache))->now_dir
-#define get_root_dir(vfs) ((l9660_fs_status_t *)(vfs->cache))->root_dir
+#define iso_now_dir(vfs) ((l9660_fs_status_t *)(vfs->cache))->now_dir
+#define iso_root_dir(vfs) ((l9660_fs_status_t *)(vfs->cache))->root_dir
 static char *strchrnul(const char *s, int c) {
   while (*s) {
     if ((*s++) == c)
@@ -399,7 +396,14 @@ rebuffer:
   }
 
   l9660_dirent *dirent = (l9660_dirent *)off;
-  f->position += aligneven(dirent->length);
+  unsigned record_length = aligneven(dirent->length);
+  unsigned sector_remaining = 2048 - fsectoff(f);
+  if (dirent->length < sizeof(l9660_dirent) ||
+      dirent->name_len > dirent->length - sizeof(l9660_dirent) ||
+      record_length > sector_remaining || record_length > f->length - f->position) {
+    return L9660_EBADFS;
+  }
+  f->position += record_length;
 
   *pdirent = dirent;
   return L9660_OK;
@@ -416,15 +420,15 @@ l9660_status l9660_seek(l9660_file *f, int whence, int32_t offset) {
   uint32_t cursect = fsector(f);
 
   switch (whence) {
-  case SEEK_SET:
+  case L9660_SEEK_SET:
     f->position = offset;
     break;
 
-  case SEEK_CUR:
+  case L9660_SEEK_CUR:
     f->position = f->position + offset;
     break;
 
-  case SEEK_END:
+  case L9660_SEEK_END:
     f->position = f->length - offset;
     break;
   }
@@ -441,6 +445,13 @@ uint32_t l9660_tell(l9660_file *f) { return f->position; }
 
 l9660_status l9660_read(l9660_file *f, void *buf, size_t size, size_t *read) {
   l9660_status rv;
+  if (f == NULL || buf == NULL || read == NULL) {
+    return L9660_EBADFS;
+  }
+  *read = 0;
+  if (size == 0 || f->position >= f->length) {
+    return L9660_OK;
+  }
 
   if ((rv = prebuffer(f)))
     return rv;
@@ -471,9 +482,12 @@ bool read_sector(l9660_fs *fs, void *buf, uint32_t sector) {
 
 bool ISO_Check(uint8_t disk_number) {
   unsigned char *buffer = malloc(2049); // 假设扇区大小为 2048 字节
+  if (buffer == NULL) {
+    return false;
+  }
   bool ok = CDROM_Read(16, 1, buffer, disk_number);
 
-  if (buffer[0] == 0x01 && buffer[1] == 'C' && buffer[2] == 'D' &&
+  if (ok && buffer[0] == 0x01 && buffer[1] == 'C' && buffer[2] == 'D' &&
       buffer[3] == '0' && buffer[4] == '0' && buffer[5] == '1') {
     free(buffer);
     return true; // 是 ISO9660 文件系统
@@ -483,16 +497,27 @@ bool ISO_Check(uint8_t disk_number) {
   }
 }
 
-void ISO_InitFs(struct vfs_t *vfs, uint8_t disk_number) {
-  l9660_fs_status_t *fs_m;
-  fs_m = (l9660_fs_status_t *)malloc(sizeof(l9660_fs_status_t));
-
+bool ISO_InitFs(struct vfs_t *vfs, uint8_t disk_number) {
+  l9660_fs_status_t *fs_m =
+      (l9660_fs_status_t *)malloc(sizeof(l9660_fs_status_t));
+  if (fs_m == NULL) {
+    return false;
+  }
+  memset(fs_m, 0, sizeof(l9660_fs_status_t));
   fs_m->fs = (l9660_fs *)malloc(sizeof(l9660_fs));
+  if (fs_m->fs == NULL) {
+    free(fs_m);
+    return false;
+  }
   vfs->cache = (void *)fs_m;
-  l9660_openfs(fs_m->fs, read_sector, disk_number);
-  l9660_fs_open_root(&fs_m->root_dir, fs_m->fs);
+  if (l9660_openfs(fs_m->fs, read_sector, disk_number) != L9660_OK ||
+      l9660_fs_open_root(&fs_m->root_dir, fs_m->fs) != L9660_OK) {
+    ISO_DeleteFs(vfs);
+    return false;
+  }
   fs_m->now_dir = fs_m->root_dir;
   logk("%08x\n", vfs->cache);
+  return true;
 }
 
 int ISO_CDFile(struct vfs_t *vfs, char *path) {
@@ -501,15 +526,33 @@ int ISO_CDFile(struct vfs_t *vfs, char *path) {
   return 0;
 }
 
-void ISO_CopyCache(struct vfs_t *dest, struct vfs_t *src) {
+bool ISO_CopyCache(struct vfs_t *dest, struct vfs_t *src) {
   dest->cache = malloc(sizeof(l9660_fs_status_t));
+  if (dest->cache == NULL) {
+    return false;
+  }
   memcpy(dest->cache, src->cache, sizeof(l9660_fs_status_t));
+  return true;
+}
+static void ISO_ReleaseCache(struct vfs_t *vfs) {
+  free(vfs->cache);
+  vfs->cache = NULL;
+}
+
+static void ISO_DeleteFs(struct vfs_t *vfs) {
+  l9660_fs_status_t *status = (l9660_fs_status_t *)vfs->cache;
+  if (status == NULL) {
+    return;
+  }
+  free(status->fs);
+  free(status);
+  vfs->cache = NULL;
 }
 
 int ISO_cd(struct vfs_t *vfs, char *dictname) {
-  //
-  //    strtoupper(dictname);
-  //
+  if (vfs == NULL || dictname == NULL || vfs->path == NULL) {
+    return 0;
+  }
   if (strcmp(dictname, "/") == 0) {
     while (vfs->path->ctl->all != 0) {
       free((void *)(uintptr_t)FindForCount(vfs->path->ctl->all, vfs->path)
@@ -517,37 +560,70 @@ int ISO_cd(struct vfs_t *vfs, char *dictname) {
       DeleteVal(vfs->path->ctl->all, vfs->path);
     }
     l9660_fs_status_t *fs_m = (l9660_fs_status_t *)vfs->cache;
-    get_now_dir(vfs) = fs_m->root_dir;
+    iso_now_dir(vfs) = fs_m->root_dir;
     return 1;
   }
+  bool parent = strcmp(dictname, "..") == 0;
+  if (parent && vfs->path->ctl->all == 0) {
+    return 0;
+  }
+
   int free_flag = 0;
   l9660_dir finfo;
   l9660_status a;
 RE:
-  a = l9660_opendirat(&finfo, &get_now_dir(vfs), dictname);
+  a = l9660_opendirat(&finfo, &iso_now_dir(vfs), dictname);
   if (a) {
     if (free_flag) {
       free(dictname);
     } else {
       dictname = strdup(dictname);
+      if (dictname == NULL) {
+        return 0;
+      }
       strtoupper(dictname);
       free_flag = 1;
       goto RE;
     }
     return 0;
   }
-  get_now_dir(vfs) = finfo;
-  if (strcmp(dictname, "..") != 0 && strcmp(dictname, ".") != 0) {
-    char *dict = malloc(255);
-    strcpy(dict, dictname);
-    AddVal((uintptr_t)dict, vfs->path);
-  }
 
-  if (strcmp(dictname, "..") == 0) {
-    free((void *)(uintptr_t)FindForCount(vfs->path->ctl->all, vfs->path)
-             ->val);
+  if (parent) {
+    struct List *path_entry =
+        FindForCount(vfs->path->ctl->all, vfs->path);
+    if (path_entry == NULL) {
+      if (free_flag) {
+        free(dictname);
+      }
+      return 0;
+    }
+    free((void *)(uintptr_t)path_entry->val);
     DeleteVal(vfs->path->ctl->all, vfs->path);
+  } else if (strcmp(dictname, ".") != 0) {
+    size_t length = strlen(dictname);
+    if (length >= (size_t)INT_MAX) {
+      if (free_flag) {
+        free(dictname);
+      }
+      return 0;
+    }
+    char *dict = malloc((int)length + 1);
+    if (dict == NULL) {
+      if (free_flag) {
+        free(dictname);
+      }
+      return 0;
+    }
+    memcpy(dict, dictname, length + 1);
+    if (!AddVal((uintptr_t)dict, vfs->path)) {
+      free(dict);
+      if (free_flag) {
+        free(dictname);
+      }
+      return 0;
+    }
   }
+  iso_now_dir(vfs) = finfo;
   if (free_flag) {
     free(dictname);
   }
@@ -555,16 +631,22 @@ RE:
 }
 
 bool ISO_ReadFile(struct vfs_t *vfs, char *path, char *buffer) {
+  if (vfs == NULL || path == NULL || buffer == NULL) {
+    return false;
+  }
   l9660_file file;
   l9660_status a;
   int free_flag = 0;
 RE:
-  a = l9660_openat(&file, &get_now_dir(vfs), path);
+  a = l9660_openat(&file, &iso_now_dir(vfs), path);
   if (a) {
     if (free_flag) {
       free(path);
     } else {
       path = strdup(path);
+      if (path == NULL) {
+        return false;
+      }
       strtoupper(path);
       free_flag = 1;
       goto RE;
@@ -572,8 +654,13 @@ RE:
     return false; // not found
   }
   for (;;) {
-    size_t read;
-    l9660_read(&file, buffer, 128, &read);
+    size_t read = 0;
+    if (l9660_read(&file, buffer, 128, &read) != L9660_OK) {
+      if (free_flag) {
+        free(path);
+      }
+      return false;
+    }
     if (read == 0)
       break;
     buffer += read;
@@ -588,16 +675,19 @@ List *ISO_ListFile(struct vfs_t *vfs, char *dictpath) {
   l9660_dir finfo;
   int free_flag = 0;
   if (strcmp(dictpath, "") == 0)
-    finfo = get_now_dir(vfs);
+    finfo = iso_now_dir(vfs);
   else {
     l9660_status a;
   RE:
-    a = l9660_opendirat(&finfo, &get_now_dir(vfs), dictpath);
+    a = l9660_opendirat(&finfo, &iso_now_dir(vfs), dictpath);
     if (a) {
       if (free_flag) {
         free(dictpath);
       } else {
         dictpath = strdup(dictpath);
+        if (dictpath == NULL) {
+          return NULL;
+        }
         strtoupper(dictpath);
         free_flag = 1;
         goto RE;
@@ -607,31 +697,46 @@ List *ISO_ListFile(struct vfs_t *vfs, char *dictpath) {
   }
 
   List *result = NewList();
+  if (result == NULL) {
+    if (free_flag) {
+      free(dictpath);
+    }
+    return NULL;
+  }
   for (;;) {
-    l9660_dirent *dent;
-    l9660_readdir(&finfo, &dent);
+    l9660_dirent *dent = NULL;
+    if (l9660_readdir(&finfo, &dent) != L9660_OK) {
+      goto fail;
+    }
 
     if (dent == 0)
       break;
     vfs_file *d = malloc(sizeof(vfs_file));
+    if (d == NULL) {
+      goto fail;
+    }
     clean((void *)d, sizeof(vfs_file));
     int j = 0;
     if (memcmp("\0", dent->name, dent->name_len) == 0) {
-      if (finfo.file.first_sector == get_root_dir(vfs).file.first_sector) {
+      if (finfo.file.first_sector == iso_root_dir(vfs).file.first_sector) {
         free(d);
         continue;
       }
       d->name[j++] = '.';
       d->name[j] = 0;
     } else if (memcmp("\1", dent->name, dent->name_len) == 0) {
-      if (finfo.file.first_sector == get_root_dir(vfs).file.first_sector) {
+      if (finfo.file.first_sector == iso_root_dir(vfs).file.first_sector) {
         free(d);
         continue;
       }
       d->name[j++] = '.';
       d->name[j++] = '.';
       d->name[j] = 0;
-    } else
+    } else {
+      if (dent->name_len >= sizeof(d->name)) {
+        free(d);
+        goto fail;
+      }
       for (; j < dent->name_len; j++) {
         if (dent->name[j] == ';') {
           break;
@@ -639,6 +744,7 @@ List *ISO_ListFile(struct vfs_t *vfs, char *dictpath) {
 
         d->name[j] = dent->name[j];
       }
+    }
     d->name[j] = 0;
     d->type = FLE;
     if (dent->flags & DENT_ISDIR) {
@@ -646,24 +752,43 @@ List *ISO_ListFile(struct vfs_t *vfs, char *dictpath) {
     } else {
       d->size = READ32(dent->size);
     }
-    AddVal((uintptr_t)d, result);
+    if (!AddVal((uintptr_t)d, result)) {
+      free(d);
+      goto fail;
+    }
   }
   if (free_flag) {
     free(dictpath);
   }
   return result;
+
+fail:
+  for (int i = 1; FindForCount(i, result) != NULL; i++) {
+    free((void *)(uintptr_t)FindForCount(i, result)->val);
+  }
+  DeleteList(result);
+  if (free_flag) {
+    free(dictpath);
+  }
+  return NULL;
 }
 int ISO_FileSize(struct vfs_t *vfs, char *filename) {
+  if (vfs == NULL || filename == NULL) {
+    return -1;
+  }
   l9660_file file;
   l9660_status a;
   int free_flag = 0;
 RE:
-  a = l9660_openat(&file, &get_now_dir(vfs), filename);
+  a = l9660_openat(&file, &iso_now_dir(vfs), filename);
   if (a) {
     if (free_flag) {
       free(filename);
     } else {
       filename = strdup(filename);
+      if (filename == NULL) {
+        return -1;
+      }
       strtoupper(filename);
       free_flag = 1;
       goto RE;
@@ -677,12 +802,14 @@ RE:
 }
 
 void init_iso9660() {
-  vfs_t fs;
+  vfs_t fs = {0};
   fs.flag = 1;
   fs.cache = NULL;
   strcpy(fs.FSName, "ISO9660");
 
   fs.CopyCache = ISO_CopyCache;
+  fs.ReleaseCache = ISO_ReleaseCache;
+  fs.DeleteFs = ISO_DeleteFs;
   fs.Check = ISO_Check;
   fs.InitFs = ISO_InitFs;
   fs.CreateFile = ISO_CDFile;

@@ -3,11 +3,17 @@
 #include <stdlib.h>
 #include <dos.h>
 #include <stddef.h>
-void AddVal(uintptr_t val, struct List* Obj) {
+bool AddVal(uintptr_t val, struct List* Obj) {
+  if (Obj == NULL) {
+    return false;
+  }
   while (Obj->next != NULL)
     Obj = Obj->next;
   Obj = Obj->ctl->end;
   struct List* new = (struct List*)malloc(sizeof(struct List));
+  if (new == NULL) {
+    return false;
+  }
   Obj->next = new;
   Obj->ctl->end = new;
   new->prev = Obj;
@@ -17,6 +23,7 @@ void AddVal(uintptr_t val, struct List* Obj) {
   new->ctl->all++;
   // printk("Address:%08x Val:%08x Start:%08x
   // Count:%d\n",new,val,Obj->ctl->start,GetLastCount(Obj->ctl->start));
+  return true;
 }
 struct List* FindForCount(size_t count, struct List* Obj) {
   int count_last = GetLastCount(Obj);
@@ -58,7 +65,14 @@ void DeleteVal(size_t count, struct List* Obj) {
 }
 struct List* NewList() {
   struct List* Obj = (struct List*)malloc(sizeof(struct List));
+  if (Obj == NULL) {
+    return NULL;
+  }
   struct ListCtl* ctl = (struct ListCtl*)malloc(sizeof(struct ListCtl));
+  if (ctl == NULL) {
+    free(Obj);
+    return NULL;
+  }
   Obj->ctl = ctl;
   Obj->ctl->start = Obj;
   Obj->ctl->end = Obj;
@@ -67,14 +81,6 @@ struct List* NewList() {
   Obj->next = (List*)NULL;
   Obj->ctl->all = 0;
   return Obj;
-}
-void Change(size_t count, struct List* Obj, uintptr_t val) {
-  struct List* Will_Change = FindForCount(count + 1, Obj);
-  if (Will_Change != NULL) {
-    Will_Change->val = val;
-  } else {
-    AddVal(val, Obj);
-  }
 }
 // 获取尾节点的count
 int GetLastCount(struct List* Obj) {

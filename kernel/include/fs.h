@@ -23,7 +23,7 @@ int feof(FILE *stream);
 int getc(FILE *stream);
 int ferror(FILE *stream);
 int fsz(char *filename);
-void EDIT_FILE(char* name, char* dest, int length, int offset);
+bool EDIT_FILE(char* name, char* dest, int length, int offset);
 int Copy(char* path, char* path1);
 // bmp.c
 bool BMPVIEW8(char* path, unsigned char* vram, int xsize);
@@ -63,4 +63,8 @@ bool vfs_check_mount(uint8_t drive);
 bool vfs_unmount_disk(uint8_t drive);
 bool vfs_attrib(char* filename, ftype type);
 vfs_file *vfs_fileinfo(char *filename);
+typedef void (*vfs_instance_visitor_t)(vfs_t *instance, void *context);
+void vfs_visit_mount_instances(vfs_t *instance,
+                               vfs_instance_visitor_t visitor,
+                               void *context);
 #endif

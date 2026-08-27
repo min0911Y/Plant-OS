@@ -18,11 +18,22 @@ void Free(void* ptr) {
 #define malloc Malloc
 #define free Free
 #endif
-PRIVATE void put_token(char* buf, TOKEN_TYPE t, MST_Object* mst) {
+PRIVATE bool put_token(char* buf, TOKEN_TYPE t, MST_Object* mst) {
   TOKEN* tok = malloc(sizeof(TOKEN));
+  if (tok == NULL) {
+    free(buf);
+    mst->err = ERROR_TOKEN;
+    return false;
+  }
   tok->t = t;
   tok->tok = buf;
-  AddVal((uintptr_t)tok, mst->token);
+  if (!AddVal((uintptr_t)tok, mst->token)) {
+    free(buf);
+    free(tok);
+    mst->err = ERROR_TOKEN;
+    return false;
+  }
+  return true;
 }
 PRIVATE char* __next(char* buf) {
   char *x, *y;
@@ -156,6 +167,9 @@ PRIVATE char* get_str(char* text,
     return NULL;
   }
   result = (char*)malloc(len + 1);
+  if (result == NULL) {
+    return NULL;
+  }
   result[len] = 0;
   memcpy(result, src, len);
   *p = text;
@@ -176,6 +190,10 @@ PRIVATE size_t token_strlen(char* s) {
 PRIVATE int token_put_string(char* p1, MST_Object* mst) {
   char* result;
   result = malloc(token_strlen(p1) + 1);
+  if (result == NULL) {
+    mst->err = ERROR_TOKEN;
+    return 0;
+  }
   TOKEN_TYPE tt;
   size_t length = strlen(p1);
   int flag = 0;
@@ -195,7 +213,9 @@ PRIVATE int token_put_string(char* p1, MST_Object* mst) {
       result[j++] = p1[i];
     }
     result[j] = 0;
-    put_token(result, tt, mst);
+    if (!put_token(result, tt, mst)) {
+      return 0;
+    }
     return j + 1;
   } else {
     free(result);
@@ -205,6 +225,10 @@ PRIVATE int token_put_string(char* p1, MST_Object* mst) {
 PRIVATE int token_put_integer(char* p1, MST_Object* mst) {
   char* result;
   result = malloc(strlen(p1) + 1);
+  if (result == NULL) {
+    mst->err = ERROR_TOKEN;
+    return 0;
+  }
   size_t length = strlen(p1);
   int j = 0;
   if (p1[0] == '-') {
@@ -220,8 +244,20 @@ PRIVATE int token_put_integer(char* p1, MST_Object* mst) {
     }
   }
   result[j] = 0;
-  put_token(result, NUMBER, mst);
+  if (!put_token(result, NUMBER, mst)) {
+    return 0;
+  }
   return j - 1;
+}
+PRIVATE bool put_symbol_token(char symbol, TOKEN_TYPE type, MST_Object* mst) {
+  char* token = malloc(2);
+  if (token == NULL) {
+    mst->err = ERROR_TOKEN;
+    return false;
+  }
+  token[0] = symbol;
+  token[1] = '\0';
+  return put_token(token, type, mst);
 }
 PRIVATE void auto_put_token(char* p1, MST_Object* mst) {
   // printk("p1=%s\n",p1);
@@ -235,38 +271,23 @@ PRIVATE void auto_put_token(char* p1, MST_Object* mst) {
         i = i + token_put_string(p1 + i, mst);
         break;
       case '[': {
-        char* r = malloc(2);
-        r[1] = 0;
-        r[0] = '[';
-        put_token(r, ARRAY_START, mst);
+        if (!put_symbol_token('[', ARRAY_START, mst)) return;
         break;
       }
       case ']': {
-        char* r = malloc(2);
-        r[1] = 0;
-        r[0] = ']';
-        put_token(r, ARRAY_END, mst);
+        if (!put_symbol_token(']', ARRAY_END, mst)) return;
         break;
       }
       case '{': {
-        char* r = malloc(2);
-        r[1] = 0;
-        r[0] = '{';
-        put_token(r, SPACE_START, mst);
+        if (!put_symbol_token('{', SPACE_START, mst)) return;
         break;
       }
       case '}': {
-        char* r = malloc(2);
-        r[1] = 0;
-        r[0] = '}';
-        put_token(r, SPACE_END, mst);
+        if (!put_symbol_token('}', SPACE_END, mst)) return;
         break;
       }
       case '=': {
-        char* r = malloc(2);
-        r[1] = 0;
-        r[0] = '=';
-        put_token(r, OP, mst);
+        if (!put_symbol_token('=', OP, mst)) return;
         break;
       }
       case ' ':
@@ -339,10 +360,22 @@ PRIVATE int parser_array(MST_Object* mst, int idx, Array* arr) {
     if (t->t == SPACE_START) {
       //     printk("Array:Found a SPACE\n");
       Array_data* v = (Array_data*)malloc(sizeof(Array_data));
+      SPACE* sp = (SPACE*)malloc(sizeof(SPACE));
+      if (v == NULL || sp == NULL) {
+        free(v);
+        free(sp);
+        mst->err = ERROR_TOKEN;
+        return -1;
+      }
       v->vt = SPAC;
-      v->obj = (SPACE*)malloc(sizeof(Array));
-      SPACE* sp = (SPACE*)v->obj;
+      v->obj = sp;
       sp->the_space = NewList();
+      if (sp->the_space == NULL) {
+        free(sp);
+        free(v);
+        mst->err = ERROR_TOKEN;
+        return -1;
+      }
       i = parser_space(mst, i + 1, sp, 0);
       if (i == -1) {
         free_space(sp);
@@ -351,14 +384,33 @@ PRIVATE int parser_array(MST_Object* mst, int idx, Array* arr) {
         free(v);
         return -1;
       }
-      AddVal((uintptr_t)v, arr->the_array);
+      if (!AddVal((uintptr_t)v, arr->the_array)) {
+        free_space(sp);
+        DeleteList(sp->the_space);
+        free(v->obj);
+        free(v);
+        mst->err = ERROR_TOKEN;
+        return -1;
+      }
     } else if (t->t == ARRAY_START) {
       //  printk("Array:Found a Array\n");
       Array_data* v = (Array_data*)malloc(sizeof(Array_data));
+      Array* arr1 = (Array*)malloc(sizeof(Array));
+      if (v == NULL || arr1 == NULL) {
+        free(v);
+        free(arr1);
+        mst->err = ERROR_TOKEN;
+        return -1;
+      }
       v->vt = ARRAY;
-      v->obj = (Array*)malloc(sizeof(Array));
-      Array* arr1 = (Array*)v->obj;
+      v->obj = arr1;
       arr1->the_array = NewList();
+      if (arr1->the_array == NULL) {
+        free(arr1);
+        free(v);
+        mst->err = ERROR_TOKEN;
+        return -1;
+      }
       i = parser_array(mst, i + 1, arr1);
       if (i == -1) {
         free_arr(arr1);
@@ -367,23 +419,52 @@ PRIVATE int parser_array(MST_Object* mst, int idx, Array* arr) {
         free(v);
         return -1;
       }
-      AddVal((uintptr_t)v, arr->the_array);
+      if (!AddVal((uintptr_t)v, arr->the_array)) {
+        free_arr(arr1);
+        DeleteList(arr1->the_array);
+        free(v->obj);
+        free(v);
+        mst->err = ERROR_TOKEN;
+        return -1;
+      }
     } else if (t->t == INTEGER) {
       //  printk("Array:Found a Number:%s\n",t->tok);
       Array_data* v = (Array_data*)malloc(sizeof(Array_data));
+      Integer* number = (Integer*)malloc(sizeof(Integer));
+      if (v == NULL || number == NULL) {
+        free(v);
+        free(number);
+        mst->err = ERROR_TOKEN;
+        return -1;
+      }
       v->vt = INTEGER;
-      v->obj = (Integer*)malloc(sizeof(Integer));
-      Integer* number = (Integer*)v->obj;
+      v->obj = number;
       number->num = strtol(t->tok, NULL, 10);
-      AddVal((uintptr_t)v, arr->the_array);
+      if (!AddVal((uintptr_t)v, arr->the_array)) {
+        free(v->obj);
+        free(v);
+        mst->err = ERROR_TOKEN;
+        return -1;
+      }
     } else if (t->t == STRING) {
       //   printk("Array:Found a String:%s\n",t->tok);
       Array_data* v = (Array_data*)malloc(sizeof(Array_data));
+      String* str = (String*)malloc(sizeof(String));
+      if (v == NULL || str == NULL) {
+        free(v);
+        free(str);
+        mst->err = ERROR_TOKEN;
+        return -1;
+      }
       v->vt = STR;
-      v->obj = (String*)malloc(sizeof(String));
-      String* str = (String*)v->obj;
+      v->obj = str;
       str->str = t->tok;
-      AddVal((uintptr_t)v, arr->the_array);
+      if (!AddVal((uintptr_t)v, arr->the_array)) {
+        free(v->obj);
+        free(v);
+        mst->err = ERROR_TOKEN;
+        return -1;
+      }
     } else {
       mst->err = ERROR_TOKEN;
       return -1;
@@ -460,9 +541,14 @@ PRIVATE int parser_space(MST_Object* mst, int idx, SPACE* space, int mode) {
     }
     if (t->t == WORD) {
       Var* v = (Var*)malloc(sizeof(Var));
+      if (v == NULL) {
+        mst->err = ERROR_TOKEN;
+        return -1;
+      }
       v->name = t->tok;
       List* tk_list1 = FindForCount(i + 1, mst->token);
       if (!tk_list1) {
+        free(v);
         mst->err = SYNTAX_ERROR;
         return -1;
       }
@@ -474,6 +560,7 @@ PRIVATE int parser_space(MST_Object* mst, int idx, SPACE* space, int mode) {
       }
       List* tk_list2 = FindForCount(i + 2, mst->token);
       if (!tk_list2) {
+        free(v);
         mst->err = SYNTAX_ERROR;
         return -1;
       }
@@ -482,9 +569,20 @@ PRIVATE int parser_space(MST_Object* mst, int idx, SPACE* space, int mode) {
         // printk("START\n");
         //    printk("Found a Space %s\n",t->tok);
         v->vt = SPAC;
-        v->obj = (SPACE*)malloc(sizeof(SPACE));
-        SPACE* sp = (SPACE*)v->obj;
+        SPACE* sp = (SPACE*)malloc(sizeof(SPACE));
+        if (sp == NULL) {
+          free(v);
+          mst->err = ERROR_TOKEN;
+          return -1;
+        }
+        v->obj = sp;
         sp->the_space = NewList();
+        if (sp->the_space == NULL) {
+          free(sp);
+          free(v);
+          mst->err = ERROR_TOKEN;
+          return -1;
+        }
         i = parser_space(mst, i + 3, sp, 0);
         if (i == -1) {
           free_space(sp);
@@ -493,14 +591,32 @@ PRIVATE int parser_space(MST_Object* mst, int idx, SPACE* space, int mode) {
           free(v);
           return -1;
         }
-        AddVal((uintptr_t)v, space->the_space);
+        if (!AddVal((uintptr_t)v, space->the_space)) {
+          free_space(sp);
+          DeleteList(sp->the_space);
+          free(v->obj);
+          free(v);
+          mst->err = ERROR_TOKEN;
+          return -1;
+        }
         // i += 2;
       } else if (t1->t == ARRAY_START) {
         //    printk("Found a Array:%s\n",t->tok);
         v->vt = ARRAY;
-        v->obj = (Array*)malloc(sizeof(Array));
-        Array* arr = (Array*)v->obj;
+        Array* arr = (Array*)malloc(sizeof(Array));
+        if (arr == NULL) {
+          free(v);
+          mst->err = ERROR_TOKEN;
+          return -1;
+        }
+        v->obj = arr;
         arr->the_array = NewList();
+        if (arr->the_array == NULL) {
+          free(arr);
+          free(v);
+          mst->err = ERROR_TOKEN;
+          return -1;
+        }
         i = parser_array(mst, i + 3, arr);
         if (i == -1) {
           free_arr(arr);
@@ -509,26 +625,53 @@ PRIVATE int parser_space(MST_Object* mst, int idx, SPACE* space, int mode) {
           free(v);
           return -1;
         }
-        AddVal((uintptr_t)v, space->the_space);
+        if (!AddVal((uintptr_t)v, space->the_space)) {
+          free_arr(arr);
+          DeleteList(arr->the_array);
+          free(v->obj);
+          free(v);
+          mst->err = ERROR_TOKEN;
+          return -1;
+        }
       } else if (t1->t == INTEGER) {
         //  printk("Space:Found a Number:%s\n",t->tok);
         // Array_data *v = (Array_data *)malloc(sizeof(Array_data));
         v->vt = INTEGER;
-        v->obj = (Integer*)malloc(sizeof(Integer));
-        Integer* number = (Integer*)v->obj;
+        Integer* number = (Integer*)malloc(sizeof(Integer));
+        if (number == NULL) {
+          free(v);
+          mst->err = ERROR_TOKEN;
+          return -1;
+        }
+        v->obj = number;
         number->num = strtol(t1->tok, NULL, 10);
-        AddVal((uintptr_t)v, space->the_space);
+        if (!AddVal((uintptr_t)v, space->the_space)) {
+          free(v->obj);
+          free(v);
+          mst->err = ERROR_TOKEN;
+          return -1;
+        }
         i += 2;
       } else if (t1->t == STRING) {
         // printk("Space:Found a String:%s\n",t->tok);
         //  Array_data *v = (Array_data *)malloc(sizeof(Array_data));
         v->vt = STR;
-        v->obj = (String*)malloc(sizeof(String));
-        String* str = (String*)v->obj;
+        String* str = (String*)malloc(sizeof(String));
+        if (str == NULL) {
+          free(v);
+          mst->err = ERROR_TOKEN;
+          return -1;
+        }
+        v->obj = str;
 
         str->str = t1->tok;
         //  printk("string = %llx %llx\n", str->str, t1->tok);
-        AddVal((uintptr_t)v, space->the_space);
+        if (!AddVal((uintptr_t)v, space->the_space)) {
+          free(v->obj);
+          free(v);
+          mst->err = ERROR_TOKEN;
+          return -1;
+        }
         i += 2;
       }
     } else {
@@ -545,17 +688,43 @@ PRIVATE int parser_space(MST_Object* mst, int idx, SPACE* space, int mode) {
   return i;
 }
 PUBLIC MST_API MST_Object* Init_MstObj(char* string) {
+  if (string == NULL) {
+    return NULL;
+  }
   MST_Object* result = (MST_Object*)malloc(sizeof(MST_Object));
+  if (result == NULL) {
+    return NULL;
+  }
+  memset(result, 0, sizeof(MST_Object));
   result->string = malloc(strlen(string) + 1);
+  if (result->string == NULL) {
+    free(result);
+    return NULL;
+  }
   result->err = 0;
   result->root_space = NULL;
   strcpy(result->string, string);
   result->token = NewList();
+  if (result->token == NULL) {
+    free(result->string);
+    free(result);
+    return NULL;
+  }
   Mst_lexer(result->string, result);
   if (!result->err) {
     process_token(result);
     result->root_space = (SPACE*)malloc(sizeof(SPACE));
+    if (result->root_space == NULL) {
+      result->err = ERROR_TOKEN;
+      return result;
+    }
     result->root_space->the_space = NewList();
+    if (result->root_space->the_space == NULL) {
+      free(result->root_space);
+      result->root_space = NULL;
+      result->err = ERROR_TOKEN;
+      return result;
+    }
     // printk("%08x\n",result->root_space->the_space);
     parser_space(result, 1, result->root_space, 1);
   }
@@ -633,16 +802,20 @@ PUBLIC MST_API Array* MST_Array_get_array(Array_data* ad) {
   return n;
 }
 PUBLIC MST_API void MST_FreeObj(MST_Object* mst) {
-  free(mst->string);
-  for (int i = 1; FindForCount(i, mst->token) != NULL; i++) {
-    TOKEN* t = (TOKEN*)FindForCount(i, mst->token)->val;
-    //   printk("free %llx\n",t->tok);
-    free(t->tok);
-    free(t);
+  if (mst == NULL) {
+    return;
   }
-  DeleteList(mst->token);
+  free(mst->string);
+  if (mst->token != NULL) {
+    for (int i = 1; FindForCount(i, mst->token) != NULL; i++) {
+      TOKEN* t = (TOKEN*)FindForCount(i, mst->token)->val;
+      free(t->tok);
+      free(t);
+    }
+    DeleteList(mst->token);
+  }
 
-  if (mst->root_space) {
+  if (mst->root_space != NULL) {
     free_space(mst->root_space);
     DeleteList(mst->root_space->the_space);
     free(mst->root_space);

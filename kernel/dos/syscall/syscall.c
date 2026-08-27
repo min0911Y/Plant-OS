@@ -2,12 +2,9 @@
 #include <cmd.h>
 #include <dos.h>
 #include <limits.h>
-
-#define USER_SPACE_START 0x70000000u
-#define USER_HEAP_END 0xf0000000u
+#include <user_space.h>
 
 unsigned div_round_up(unsigned num, unsigned size);
-extern struct PAGE_INFO *pages;
 
 unsigned custom_handler;
 unsigned custom_handler_pde;
@@ -496,50 +493,102 @@ static void syscall_run_shell_command(x86_interrupt_frame_t *frame) {
   free(command);
 }
 
+enum {
+  LIST_DIRECTORY_ERROR = -1,
+  LIST_DIRECTORY_RETRY = -2,
+};
+
 static void syscall_file_operation(x86_interrupt_frame_t *frame) {
   switch (frame->ebx) {
-  case 0x01:
-    frame->edx = vfs_filesize((char *)(uintptr_t)frame->edx);
-    break;
-  case 0x02: {
-    int file_size = vfs_filesize((char *)(uintptr_t)frame->edx);
-    if (file_size != -1) {
-      vfs_readfile((char *)(uintptr_t)frame->edx,
-                   (char *)(uintptr_t)frame->esi);
-      frame->eax = 1;
-    } else {
-      frame->eax = 0;
-    }
+  case 0x01: {
+    size_t length;
+    char *path = copy_user_string(frame->edx, &length);
+    frame->edx = path == NULL ? (uint32_t)-1 : vfs_filesize(path);
+    free(path);
     break;
   }
-  case 0x03:
-    frame->eax = vfs_createfile((char *)(uintptr_t)frame->edx);
+  case 0x02: {
+    size_t length;
+    char *path = copy_user_string(frame->edx, &length);
+    int file_size = path == NULL ? -1 : (int)vfs_filesize(path);
+    if (file_size < 0 ||
+        (file_size != 0 && !user_range_ok(frame->esi, file_size))) {
+      frame->eax = 0;
+    } else {
+      frame->eax = vfs_readfile(path, (char *)(uintptr_t)frame->esi);
+    }
+    free(path);
     break;
-  case 0x04:
-    frame->eax = vfs_createdict((char *)(uintptr_t)frame->edx);
+  }
+  case 0x03: {
+    size_t length;
+    char *path = copy_user_string(frame->edx, &length);
+    frame->eax = path != NULL && vfs_createfile(path);
+    free(path);
     break;
-  case 0x05:
-    EDIT_FILE((char *)(uintptr_t)frame->edx,
-              (char *)(uintptr_t)frame->esi, frame->ecx, frame->edi);
+  }
+  case 0x04: {
+    size_t length;
+    char *path = copy_user_string(frame->edx, &length);
+    frame->eax = path != NULL && vfs_createdict(path);
+    free(path);
     break;
+  }
+  case 0x05: {
+    size_t length;
+    char *path = copy_user_string(frame->edx, &length);
+    frame->eax = path != NULL && frame->ecx <= INT_MAX &&
+                 (frame->ecx == 0 || user_range_ok(frame->esi, frame->ecx)) &&
+                 EDIT_FILE(path, (char *)(uintptr_t)frame->esi, frame->ecx,
+                           frame->edi);
+    free(path);
+    break;
+  }
   case 0x06: {
-    struct List *file_list = vfs_listfile((char *)(uintptr_t)frame->edx);
-    int count;
-    for (count = 1; FindForCount(count, file_list) != NULL; count++) {
+    size_t path_length;
+    char *path = copy_user_string(frame->edx, &path_length);
+    if (path == NULL || frame->esi > INT_MAX / sizeof(vfs_file) ||
+        (frame->ecx == 0 && frame->esi != 0) ||
+        (frame->ecx != 0 &&
+         !user_range_ok(frame->ecx, frame->esi * sizeof(vfs_file)))) {
+      free(path);
+      frame->eax = LIST_DIRECTORY_ERROR;
+      break;
     }
-    char *files = (char *)(uintptr_t)frame->ecx;
-    for (int i = 1; FindForCount(i, file_list) != NULL; i++) {
-      if (files) {
-        memcpy(files + sizeof(vfs_file) * (i - 1),
-               (void *)FindForCount(i, file_list)->val, sizeof(vfs_file));
+
+    struct List *file_list = vfs_listfile(path);
+    free(path);
+    if (file_list == NULL) {
+      frame->eax = LIST_DIRECTORY_ERROR;
+      break;
+    }
+
+    size_t count = file_list->ctl->all;
+    if (count > INT_MAX) {
+      frame->eax = LIST_DIRECTORY_ERROR;
+    } else if (frame->ecx == 0) {
+      frame->eax = count;
+    } else if (frame->esi < count) {
+      frame->eax = LIST_DIRECTORY_RETRY;
+    } else {
+      vfs_file *files = (vfs_file *)(uintptr_t)frame->ecx;
+      frame->eax = count;
+      for (size_t i = 0; i < count; i++) {
+        struct List *entry = FindForCount(i + 1, file_list);
+        if (entry == NULL || entry->val == 0) {
+          frame->eax = LIST_DIRECTORY_ERROR;
+          break;
+        }
+        memcpy(&files[i], (void *)(uintptr_t)entry->val, sizeof(vfs_file));
       }
-      free((void *)FindForCount(i, file_list)->val);
     }
-    if (files) {
-      memset(files + (count - 1) * sizeof(vfs_file), 0, sizeof(vfs_file));
+    for (size_t i = 1; i <= count; i++) {
+      struct List *entry = FindForCount(i, file_list);
+      if (entry != NULL) {
+        free((void *)(uintptr_t)entry->val);
+      }
     }
     DeleteList(file_list);
-    frame->eax = (uintptr_t)files;
     break;
   }
   }
@@ -547,14 +596,39 @@ static void syscall_file_operation(x86_interrupt_frame_t *frame) {
 
 static void syscall_command_line(x86_interrupt_frame_t *frame) {
   mtask *task = current_task();
-  while (!task->line) {
+  if (task->line == NULL) {
+    frame->eax = -1;
+    return;
   }
-  strcpy((char *)(uintptr_t)frame->edx, (const char *)task->line);
+  size_t length = strlen((const char *)task->line);
+  if (length >= INT_MAX || (frame->edx == 0 && frame->ecx != 0) ||
+      (frame->edx != 0 &&
+       !user_range_ok(frame->edx, frame->ecx))) {
+    frame->eax = -1;
+    return;
+  }
+  if (frame->edx == 0) {
+    frame->eax = length;
+    return;
+  }
+  if (frame->ecx <= length) {
+    frame->eax = -2;
+    return;
+  }
+  memcpy((void *)(uintptr_t)frame->edx, (const void *)task->line, length + 1);
+  frame->eax = length;
 }
 
 static void syscall_copy(x86_interrupt_frame_t *frame) {
-  frame->eax = Copy((char *)(uintptr_t)frame->edx,
-                    (char *)(uintptr_t)frame->esi);
+  size_t source_length;
+  size_t destination_length;
+  char *source = copy_user_string(frame->edx, &source_length);
+  char *destination = copy_user_string(frame->esi, &destination_length);
+  frame->eax = source == NULL || destination == NULL
+                   ? -1
+                   : Copy(source, destination);
+  free(source);
+  free(destination);
 }
 
 static void syscall_keyboard_hit(x86_interrupt_frame_t *frame) {
@@ -563,7 +637,8 @@ static void syscall_keyboard_hit(x86_interrupt_frame_t *frame) {
 
 static void syscall_exit(x86_interrupt_frame_t *frame) {
   mtask *task = current_task();
-  if (!*(unsigned char *)0xf0000000) {
+  unsigned status = frame->ebx;
+  if (!*(unsigned char *)USER_HEAP_END) {
     extern mtask *mouse_use_task;
     if (mouse_use_task == task) {
       mouse_sleep(&mdec);
@@ -573,10 +648,13 @@ static void syscall_exit(x86_interrupt_frame_t *frame) {
                         ? NULL
                         : get_task(task->ptid);
     if (parent && parent->kind == TASK_PROCESS && parent->state != DIED) {
-      vfs_clone_for_task(task, parent);
+      if (!vfs_clone_for_task(task, parent)) {
+        WARNING_K("failed to transfer child VFS state");
+        status = (unsigned)-1;
+      }
     }
   }
-  task_exit(frame->ebx);
+  task_exit(status);
   for (;;) {
   }
 }
@@ -637,27 +715,34 @@ static void syscall_task_control(x86_interrupt_frame_t *frame) {
     get_msg_all((void *)(uintptr_t)frame->edx);
     break;
   case 0x0a: {
-    extern int init_ok_flag;
-    init_ok_flag = 0;
     mtask *thread = create_thread_task((uintptr_t)user_thread_entry, 0, 1, 1);
     if (thread == NULL) {
       frame->eax = -1;
       return;
     }
-    init_ok_flag = 1;
     thread->alloc_addr = task->alloc_addr;
     thread->alloc_size = task->alloc_size;
     thread->TTY = task->TTY;
-    vfs_clone_for_task(task, thread);
     thread->ptid = task->ptid;
     thread->tgid = task->tgid;
     thread->kind = TASK_THREAD;
     thread->mx = 0;
     thread->my = 0;
     unsigned *request = page_malloc_one_no_mark();
+    if (request == NULL) {
+      task_abort_creation(thread);
+      frame->eax = -1;
+      return;
+    }
     request[0] = frame->esi;
     request[1] = frame->edx;
     thread->line = (char *)request;
+    if (!task_publish(thread)) {
+      task_abort_creation(thread);
+      page_free_one(request);
+      frame->eax = -1;
+      return;
+    }
     frame->eax = thread->tid;
     break;
   }
@@ -687,24 +772,56 @@ static void syscall_tty_color(x86_interrupt_frame_t *frame) {
 
 static void syscall_timer_control(x86_interrupt_frame_t *frame) {
   mtask *task = current_task();
+  frame->eax = -1;
   switch (frame->ebx) {
-  case 0x00:
-    task->timer = timer_alloc();
-    task->timer->fifo = page_malloc(sizeof(struct FIFO8));
-    task->timer->fifo->buf = page_malloc(50 * sizeof(unsigned char));
-    fifo8_init(task->timer->fifo, 50, task->timer->fifo->buf);
-    timer_init(task->timer, task->timer->fifo, 1);
+  case 0x00: {
+    if (task->timer != NULL) {
+      break;
+    }
+    struct TIMER *timer = timer_alloc();
+    struct FIFO8 *fifo = page_malloc(sizeof(struct FIFO8));
+    unsigned char *buffer = page_malloc(50 * sizeof(unsigned char));
+    if (timer == NULL || fifo == NULL || buffer == NULL) {
+      if (buffer != NULL) {
+        page_free(buffer, 50 * sizeof(unsigned char));
+      }
+      if (fifo != NULL) {
+        page_free(fifo, sizeof(struct FIFO8));
+      }
+      timer_free(timer);
+      break;
+    }
+    fifo8_init(fifo, 50, buffer);
+    timer_init(timer, fifo, 1);
+    timer->waiter = task;
+    task->timer = timer;
+    frame->eax = 0;
     break;
+  }
   case 0x01:
+    if (task->timer == NULL) {
+      break;
+    }
     timer_settime(task->timer, frame->ecx);
+    frame->eax = 0;
     break;
   case 0x02:
-    frame->eax = fifo8_get(task->timer->fifo) == 1;
+    if (task->timer == NULL || task->timer->fifo == NULL) {
+      break;
+    }
+    frame->eax = fifo8_status(task->timer->fifo) != 0 &&
+                 fifo8_get(task->timer->fifo) == 1;
     break;
   case 0x03:
+    if (task->timer == NULL) {
+      break;
+    }
+    timer_cancel(task->timer);
     page_free(task->timer->fifo->buf, 50 * sizeof(unsigned char));
     page_free(task->timer->fifo, sizeof(struct FIFO8));
     timer_free(task->timer);
+    task->timer = NULL;
+    frame->eax = 0;
     break;
   }
 }
@@ -895,10 +1012,10 @@ static void syscall_mount_operation(x86_interrupt_frame_t *frame) {
     frame->eax = vfs_mount_disk(frame->ebx, frame->ecx);
     break;
   case SYSCALL_CHANGE_DISK:
-    vfs_change_disk(frame->ebx);
+    frame->eax = vfs_change_disk(frame->ebx);
     break;
   case SYSCALL_UNMOUNT:
-    vfs_unmount_disk(frame->ebx);
+    frame->eax = vfs_unmount_disk(frame->ebx);
     break;
   }
 }
@@ -909,13 +1026,7 @@ static void syscall_memory_info(x86_interrupt_frame_t *frame) {
     return;
   }
 
-  uint32_t used_pages = 0;
-  for (unsigned i = 0; i < div_round_up(memsize, 0x1000); i++) {
-    if (pages[i].count) {
-      used_pages++;
-    }
-  }
-  frame->eax = used_pages;
+  frame->eax = page_used_count(memsize);
 }
 
 static void syscall_delete_file(x86_interrupt_frame_t *frame) {

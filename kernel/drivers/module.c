@@ -332,7 +332,7 @@ static bool module_load_image(module_loaded_t *module, const char *path) {
   }
 
   Elf32_Ehdr *hdr = (Elf32_Ehdr *)module->image;
-  if (!elf32ValidateRelocatable(hdr)) {
+  if (!elf32_validate_relocatable(hdr, module->image_size)) {
     printk("module: %s is not relocatable ELF\n", path);
     return false;
   }

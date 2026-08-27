@@ -4864,12 +4864,90 @@ void init_mem() { abi_alloc_init(); }
 //   int size = *(int *)((char *)p - sizeof(int));
 //   mem_free_nb(mm, (char *)p - sizeof(int), size + sizeof(int), 128);
 // }
-struct finfo_block *api_listfile(struct finfo_block *r, char *path);
-struct finfo_block *listfile(char *path) {
-  struct finfo_block *r =
-      (struct finfo_block *)malloc(512 * sizeof(struct finfo_block));
-  api_listfile(r, path);
-  return r;
+int api_list_directory(const char *path, struct finfo_block *entries,
+                       size_t capacity);
+enum {
+  API_BUFFER_ERROR = -1,
+  API_BUFFER_RETRY = -2,
+};
+int list_directory(const char *path, struct finfo_block **entries,
+                   size_t *count) {
+  if (path == NULL || entries == NULL || count == NULL) {
+    return -1;
+  }
+
+  *entries = NULL;
+  *count = 0;
+  size_t capacity = 0;
+  for (;;) {
+    int required = api_list_directory(path, NULL, 0);
+    if (required < 0) {
+      free(*entries);
+      *entries = NULL;
+      return -1;
+    }
+    if (required == 0) {
+      free(*entries);
+      *entries = NULL;
+      return 0;
+    }
+    if ((size_t)required > (size_t)UINT_MAX / sizeof(struct finfo_block)) {
+      free(*entries);
+      *entries = NULL;
+      return API_BUFFER_ERROR;
+    }
+
+    if (capacity < (size_t)required) {
+      struct finfo_block *replacement =
+          realloc(*entries, (size_t)required * sizeof(struct finfo_block));
+      if (replacement == NULL) {
+        free(*entries);
+        *entries = NULL;
+        return -1;
+      }
+      *entries = replacement;
+      capacity = (size_t)required;
+    }
+
+    int result = api_list_directory(path, *entries, capacity);
+    if (result >= 0) {
+      *count = (size_t)result;
+      return 0;
+    }
+    if (result != API_BUFFER_RETRY) {
+      free(*entries);
+      *entries = NULL;
+      return -1;
+    }
+  }
+}
+int api_get_command_line(char *line, size_t capacity);
+int get_command_line(char **line, size_t *length) {
+  if (line == NULL || length == NULL) {
+    return -1;
+  }
+  *line = NULL;
+  *length = 0;
+  for (;;) {
+    int required = api_get_command_line(NULL, 0);
+    if (required < 0 || required == INT_MAX) {
+      return -1;
+    }
+    char *buffer = malloc((size_t)required + 1);
+    if (buffer == NULL) {
+      return -1;
+    }
+    int result = api_get_command_line(buffer, (size_t)required + 1);
+    if (result >= 0) {
+      *line = buffer;
+      *length = (size_t)result;
+      return 0;
+    }
+    free(buffer);
+    if (result != API_BUFFER_RETRY) {
+      return -1;
+    }
+  }
 }
 int fseek(FILE *fp, int offset, int whence) {
   if (whence == 0) {
@@ -4960,18 +5038,10 @@ FILE *fopen(char *filename, char *mode) {
 }
 int fgetc(FILE *stream) {
   if (CANREAD(stream->mode)) {
+    if (stream == stdin) {
+      return getch();
+    }
     if (stream->p >= stream->fileSize || stream->fileSize == -1) {
-      if (stream == stdin) {
-        if (stream->fileSize == -1) {
-          scan(stream->buffer, 1024);
-          stream->fileSize = strlen(stream->buffer);
-          stream->p = 0;
-          return fgetc(stream);
-        } else {
-          stream->fileSize = -1;
-          return EOF;
-        }
-      }
       stream->eof = 1;
       return EOF;
     } else {

@@ -180,7 +180,10 @@ void sysinit(void) {
   logk("sysinit: memory_init public heap done public_heap=%08x\n",
        (uint32_t)(uintptr_t)public_heap);
   logk("sysinit: init_tty start\n");
-  init_tty();
+  if (!init_tty()) {
+    Panic_K("unable to initialize TTY");
+    return;
+  }
   logk("sysinit: init_tty done\n");
   clear();
   logk("sysinit: clear done\n");
@@ -274,7 +277,10 @@ void sysinit(void) {
   printk("base count is %08x (%s)\n", base_count,
          apic_timer_uses_tsc_deadline() ? "tsc-deadline" : "pit");
   logk("sysinit: into_mtask start\n");
-  into_mtask();
+  if (into_mtask() != 0) {
+    Panic_K("unable to start multitasking");
+    return;
+  }
   for (;;)
     ;
 }

@@ -2,10 +2,10 @@
 #include <arch/x86/interrupt.h>
 #include <dos.h>
 #include <limits.h>
+#include <user_space.h>
 extern char *shell_data;
+extern unsigned shell_size;
 extern struct TSS32 tss;
-extern struct PAGE_INFO *pages;
-#define IDX(addr) ((unsigned)addr >> 12)            // 获取 addr 的页索引
 #define DIDX(addr) (((unsigned)addr >> 22) & 0x3ff) // 获取 addr 的页目录索引
 #define TIDX(addr) (((unsigned)addr >> 12) & 0x3ff) // 获取 addr 的页表索引
 #define PAGE(idx) ((unsigned)idx << 12) // 获取页索引 idx 对应的页开始的位置
@@ -13,11 +13,10 @@ extern struct PAGE_INFO *pages;
 #define PAGE_ENTRY_BYTES sizeof(uint32_t)
 #define PAGE_ENTRY_ADDR_MASK 0xfffff000u
 #define PAGE_ENTRY_FLAG_MASK 0x00000fffu
-#define PAGE_USER_CLONE_BASE 0x70000000u
+#define PAGE_USER_CLONE_BASE USER_SPACE_START
 #define PAGE_USER_PRESENT_FLAGS (PG_P | PG_USU)
 #define PAGE_USER_RW_FLAGS (PG_P | PG_USU | PG_RWW)
 unsigned div_round_up(unsigned num, unsigned size);
-bool get_interrupt_state(void);
 void task_to_user_mode_shell(void);
 
 #ifdef KERNEL_PERF
@@ -69,16 +68,63 @@ static inline uint32_t *page_table_entry_from_dir(uint32_t pde_entry,
   return (uint32_t *)(page_entry_addr(pde_entry) + index * PAGE_ENTRY_BYTES);
 }
 
-static void task_clone_user_page_tables(unsigned pde) {
+static bool task_map_user_pages(uint32_t start, uint32_t count) {
+  if (count != 0 && count - 1 > (UINT_MAX - start) / PAGE_SIZE_BYTES) {
+    return false;
+  }
+  for (uint32_t i = 0; i < count; i++) {
+    if (!page_link(start + i * PAGE_SIZE_BYTES)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool user_runtime_layout_calculate(uint32_t aligned_image_end,
+                                   uint32_t heap_pages,
+                                   uint32_t stack_pages,
+                                   bool uses_status_page, uint32_t entry,
+                                   struct user_runtime_layout *layout) {
+  if (layout == NULL || aligned_image_end < USER_SPACE_START ||
+      aligned_image_end >= USER_HEAP_END ||
+      (aligned_image_end & (PAGE_SIZE_BYTES - 1)) != 0 ||
+      entry < USER_SPACE_START || entry >= USER_HEAP_END) {
+    return false;
+  }
+  uint64_t total_pages = (uint64_t)heap_pages + stack_pages;
+  uint64_t runtime_end =
+      (uint64_t)aligned_image_end + total_pages * PAGE_SIZE_BYTES;
+  uint64_t stack_top =
+      (uint64_t)aligned_image_end + (uint64_t)stack_pages * PAGE_SIZE_BYTES;
+  if (total_pages > UINT_MAX || runtime_end > USER_HEAP_END ||
+      stack_top > runtime_end ||
+      (uses_status_page && runtime_end > (uint64_t)USER_HEAP_END)) {
+    return false;
+  }
+  layout->total_pages = (uint32_t)total_pages;
+  layout->stack_top = (uint32_t)stack_top;
+  layout->allocation_base = (uint32_t)stack_top;
+  return true;
+}
+
+static bool task_clone_user_page_tables(unsigned pde) {
   for (int i = DIDX(PAGE_USER_CLONE_BASE) * 4; i < 0x1000; i += 4) {
     uint32_t *pde_entry = (uint32_t *)(pde + i);
+    if (!page_entry_has_any(*pde_entry, PG_P)) {
+      continue;
+    }
 
-    if (page_entry_has_any(*pde_entry, PG_SHARED) || pages[IDX(*pde_entry)].count > 1) {
-      if (pages[IDX(*pde_entry)].count > 1) {
+    unsigned table_refs = page_ref_count(page_entry_addr(*pde_entry));
+    if (page_entry_has_any(*pde_entry, PG_SHARED) || table_refs > 1) {
+      if (table_refs > 1) {
         uint32_t old = page_entry_addr(*pde_entry);
-        *pde_entry = (unsigned)page_malloc_one_count_from_4gb();
-        memcpy((void *)(*pde_entry), (void *)old, PAGE_SIZE_BYTES);
-        pages[IDX(old)].count--;
+        void *new_table = page_malloc_one_count_from_4gb();
+        if (new_table == NULL) {
+          return false;
+        }
+        *pde_entry = (unsigned)new_table;
+        memcpy(new_table, (void *)old, PAGE_SIZE_BYTES);
+        page_ref_release(old);
         *pde_entry = page_entry_add_flags(*pde_entry, PAGE_USER_RW_FLAGS);
       } else {
         *pde_entry = page_entry_add_flags(*pde_entry, PAGE_USER_RW_FLAGS);
@@ -92,6 +138,7 @@ static void task_clone_user_page_tables(unsigned pde) {
       }
     }
   }
+  return true;
 }
 static __attribute__((optimize("O0"))) char *task_app_take_launch_request(void) {
   char *filename;
@@ -107,20 +154,28 @@ static __attribute__((optimize("O0"))) char *task_app_take_launch_request(void) 
   return filename;
 }
 
-static void task_app_setup_fifos(void) {
+static bool task_app_setup_fifos(void) {
   char *kfifo = (char *)page_malloc_one();
   char *mfifo = (char *)page_malloc_one();
   char *kbuf = (char *)page_malloc_one();
   char *mbuf = (char *)page_malloc_one();
+  if (kfifo == NULL || mfifo == NULL || kbuf == NULL || mbuf == NULL) {
+    return false;
+  }
 
   fifo8_init((struct FIFO8 *)kfifo, 4096, (unsigned char *)kbuf);
   fifo8_init((struct FIFO8 *)mfifo, 4096, (unsigned char *)mbuf);
   task_set_fifo(current_task(), (struct FIFO8 *)kfifo, (struct FIFO8 *)mfifo);
+  return true;
 }
 
-static void task_app_setup_memory_alloc(void) {
+static bool task_app_setup_memory_alloc(void) {
   current_task()->alloc_size = (uint32_t *)malloc(4);
+  if (current_task()->alloc_size == NULL) {
+    return false;
+  }
   current_task()->alloced = 1;
+  return true;
 }
 
 static void task_app_setup_memory_size(void) {
@@ -133,23 +188,29 @@ static __attribute__((noinline)) unsigned task_app_get_pde(void) {
   return pde;
 }
 
-static void task_app_clone_user_space(unsigned pde) {
+static bool task_app_clone_user_space(unsigned pde) {
   io_cli();
   set_cr3(PDE_ADDRESS);
   logk("P1 %08x\n", current_task()->pde);
-  task_clone_user_page_tables(pde);
-  io_sti();
+  bool cloned = task_clone_user_page_tables(pde);
   set_cr3(pde);
+  io_sti();
+  return cloned;
 }
 
 void task_app() {
   unsigned pde;
   char *filename = task_app_take_launch_request();
-  task_app_setup_fifos();
-  task_app_setup_memory_alloc();
+  if (!task_app_setup_fifos() || !task_app_setup_memory_alloc()) {
+    task_exit(-1);
+    return;
+  }
   task_app_setup_memory_size();
   pde = task_app_get_pde();
-  task_app_clone_user_space(pde);
+  if (!task_app_clone_user_space(pde)) {
+    task_exit(-1);
+    return;
+  }
   task_to_user_mode_elf(filename);
   for (;;)
     ;
@@ -157,53 +218,33 @@ void task_app() {
 void task_shell() {
   while (!current_task()->line)
     ;
-  char *kfifo = (char *)page_malloc_one();
-  char *mfifo = (char *)page_malloc_one();
-  char *kbuf = (char *)page_malloc_one();
-  char *mbuf = (char *)page_malloc_one();
-  fifo8_init((struct FIFO8 *)kfifo, 4096, (unsigned char *)kbuf);
-  fifo8_init((struct FIFO8 *)mfifo, 4096, (unsigned char *)mbuf);
-  task_set_fifo(current_task(), (struct FIFO8 *)kfifo, (struct FIFO8 *)mfifo);
-  current_task()->alloc_size = (uint32_t *)malloc(4);
-  current_task()->alloced = 1;
+  if (!task_app_setup_fifos() || !task_app_setup_memory_alloc()) {
+    task_exit(-1);
+    return;
+  }
   *(current_task()->alloc_size) = 1 * 1024 * 1024;
 
   unsigned pde = current_task()->pde;
   io_cli();
   set_cr3(PDE_ADDRESS);
-  task_clone_user_page_tables(pde);
-  io_sti();
+  bool cloned = task_clone_user_page_tables(pde);
   set_cr3(pde);
+  io_sti();
+  if (!cloned) {
+    task_exit(-1);
+    return;
+  }
   task_to_user_mode_shell();
   for (;;)
     ;
 }
 void task_to_user_mode_shell() {
-
-  unsigned addr = (unsigned)current_task()->top;
-
-  addr -= sizeof(x86_interrupt_frame_t);
-  x86_interrupt_frame_t *iframe = (x86_interrupt_frame_t *)(addr);
-
-  iframe->edi = 1;
-  iframe->esi = 2;
-  iframe->ebp = 3;
-  iframe->esp_dummy = 4;
-  iframe->ebx = 5;
-  iframe->edx = 6;
-  iframe->ecx = 7;
-  iframe->eax = 8;
-
-  iframe->gs = GET_SEL(5 * 8, SA_RPL3);
-  iframe->ds = GET_SEL(3 * 8, SA_RPL3);
-  iframe->es = GET_SEL(3 * 8, SA_RPL3);
-  iframe->fs = GET_SEL(3 * 8, SA_RPL3);
-  iframe->ss = GET_SEL(3 * 8, SA_RPL3);
-  iframe->cs = GET_SEL(4 * 8, SA_RPL3);
-  iframe->eflags = (0 << 12 | 0b10 | 1 << 9);
-  iframe->esp = (uintptr_t)NULL; // 设置用户态堆栈
+  mtask *task = current_task();
   char *p = shell_data;
-  if (!elf32Validate((Elf32_Ehdr *)p)) {
+  uint32_t user_eip;
+  uint32_t image_end;
+  if (!elf32_validate_executable(p, shell_size, &user_eip, &image_end) ||
+      image_end > UINT_MAX - (PAGE_SIZE_BYTES - 1)) {
     extern mtask *mouse_use_task;
     if (mouse_use_task == current_task()) {
       mouse_sleep(&mdec);
@@ -212,154 +253,185 @@ void task_to_user_mode_shell() {
     for (;;)
       ;
   }
-  unsigned alloc_addr = (elf32_get_max_vaddr((Elf32_Ehdr *)p) & 0xfffff000) + 0x1000;
-  unsigned pg = div_round_up(*(current_task()->alloc_size), 0x1000);
-  for (int i = 0; i < pg + 128; i++) {
-    // logk("%d\n",i);
-    page_link(alloc_addr + i * 0x1000);
+  unsigned alloc_addr =
+      (image_end + PAGE_SIZE_BYTES - 1) & ~(PAGE_SIZE_BYTES - 1);
+  unsigned pg = div_round_up(*(task->alloc_size), 0x1000);
+  struct user_runtime_layout layout;
+  if (!user_runtime_layout_calculate(alloc_addr, pg, 128, true, user_eip,
+                                     &layout) ||
+      !task_map_user_pages(alloc_addr, layout.total_pages)) {
+    task_exit(-1);
+    return;
   }
-  unsigned alloced_esp = alloc_addr + 128 * 0x1000;
-  alloc_addr += 128 * 0x1000;
-  iframe->esp = alloced_esp;
-  page_link(0xf0000000);
-  *(unsigned char *)(0xf0000000) = 1;
-  current_task()->alloc_addr = alloc_addr;
+  if (!page_link(USER_HEAP_END)) {
+    task_exit(-1);
+    return;
+  }
+  task->alloc_addr = layout.allocation_base;
 
-  iframe->eip = load_elf((Elf32_Ehdr *)p);
-  current_task()->user_mode = 1;
-  tss.esp0 = current_task()->top;
-  change_page_task_id(current_task()->tid, (void *)(uintptr_t)(iframe->esp - 512 * 1024),
-                      512 * 1024);
+  if (!elf32_load_executable(p, shell_size, &user_eip)) {
+    task_exit(-1);
+    return;
+  }
+  *(unsigned char *)(USER_HEAP_END) = 1;
+  task->user_mode = 1;
+  tss.esp0 = task->top;
 #ifdef KERNEL_PERF
   perf_boot_stop_and_dump("shell-iret");
 #endif
 
-  asm volatile("movl %0, %%esp\n"
-               "xchg %%bx,%%bx\n"
-               "popa\n"
-               "pop %%gs\n"
-               "pop %%fs\n"
-               "pop %%es\n"
-               "pop %%ds\n"
-               "iret" ::"m"(iframe));
-  for (;;)
-    ;
+  x86_interrupt_frame_t iframe;
+  iframe.edi = 1;
+  iframe.esi = 2;
+  iframe.ebp = 3;
+  iframe.esp_dummy = 4;
+  iframe.ebx = 5;
+  iframe.edx = 6;
+  iframe.ecx = 7;
+  iframe.eax = 8;
+  iframe.gs = GET_SEL(5 * 8, SA_RPL3);
+  iframe.ds = GET_SEL(3 * 8, SA_RPL3);
+  iframe.es = GET_SEL(3 * 8, SA_RPL3);
+  iframe.fs = GET_SEL(3 * 8, SA_RPL3);
+  iframe.ss = GET_SEL(3 * 8, SA_RPL3);
+  iframe.cs = GET_SEL(4 * 8, SA_RPL3);
+  iframe.eip = user_eip;
+  iframe.eflags = 0b10 | 1 << 9;
+  iframe.esp = layout.stack_top;
+  x86_return_to_user(&iframe);
 }
 void task_to_user_mode_elf(char *filename) {
-
-  unsigned addr = (unsigned)current_task()->top;
-
-  addr -= sizeof(x86_interrupt_frame_t);
-  x86_interrupt_frame_t *iframe = (x86_interrupt_frame_t *)(addr);
-
-  iframe->edi = 1;
-  iframe->esi = 2;
-  iframe->ebp = 3;
-  iframe->esp_dummy = 4;
-  iframe->ebx = 5;
-  iframe->edx = 6;
-  iframe->ecx = 7;
-  iframe->eax = 8;
-
-  iframe->gs = GET_SEL(5 * 8, SA_RPL3);
-  iframe->ds = GET_SEL(3 * 8, SA_RPL3);
-  iframe->es = GET_SEL(3 * 8, SA_RPL3);
-  iframe->fs = GET_SEL(3 * 8, SA_RPL3);
-  iframe->ss = GET_SEL(3 * 8, SA_RPL3);
-  iframe->cs = GET_SEL(4 * 8, SA_RPL3);
-  iframe->eflags = (0 << 12 | 0b10 | 1 << 9);
-  iframe->esp = (uintptr_t)NULL; // 设置用户态堆栈
+  mtask *task = current_task();
   tss.eflags = 0x202;
-  char *p = page_malloc(vfs_filesize(filename));
-  vfs_readfile(filename, p);
-  if (!elf32Validate((Elf32_Ehdr *)p)) {
-    page_free(p, vfs_filesize(filename));
+  int executable_size = vfs_filesize(filename);
+  char *p = executable_size <= 0 ? NULL : page_malloc(executable_size);
+  if (p == NULL) {
+    task_exit(-1);
+    for (;;) {
+    }
+  }
+  change_page_task_id(task->tid, p, executable_size);
+  if (!vfs_readfile(filename, p)) {
+    task_exit(-1);
+    for (;;) {
+    }
+  }
+  uint32_t user_eip;
+  uint32_t image_end;
+  if (!elf32_validate_executable(p, executable_size, &user_eip, &image_end) ||
+      image_end > UINT_MAX - (PAGE_SIZE_BYTES - 1)) {
+    page_free(p, executable_size);
     extern mtask *mouse_use_task;
-    if (mouse_use_task == current_task()) {
+    if (mouse_use_task == task) {
       mouse_sleep(&mdec);
     }
     task_exit(-1);
     for (;;)
       ;
   }
-  unsigned alloc_addr = (elf32_get_max_vaddr((Elf32_Ehdr *)p) & 0xfffff000) + 0x1000;
-  unsigned pg = div_round_up(*(current_task()->alloc_size), 0x1000);
-  for (int i = 0; i < pg + 128 * 4; i++) {
-    page_link(alloc_addr + i * 0x1000);
+  unsigned alloc_addr =
+      (image_end + PAGE_SIZE_BYTES - 1) & ~(PAGE_SIZE_BYTES - 1);
+  unsigned pg = div_round_up(*(task->alloc_size), 0x1000);
+  bool uses_status_page = task->ptid != (uint32_t)-1;
+  struct user_runtime_layout layout;
+  if (!user_runtime_layout_calculate(alloc_addr, pg, 128 * 4,
+                                     uses_status_page, user_eip, &layout) ||
+      !task_map_user_pages(alloc_addr, layout.total_pages)) {
+    task_exit(-1);
+    return;
   }
-  unsigned alloced_esp = alloc_addr + 128 * 0x1000 * 4;
-  alloc_addr += 128 * 0x1000 * 4;
-  iframe->esp = alloced_esp;
-  if (current_task()->ptid != -1) {
-    page_link(0xf0000000);
-    *(unsigned char *)(0xf0000000) = 0;
+  if (uses_status_page) {
+    if (!page_link(USER_HEAP_END)) {
+      task_exit(-1);
+      return;
+    }
   }
   // *(unsigned int *)(0xb5000000) = 2;
   // logk("value = %08x\n",*(unsigned int *)(0xb5000000));
-  current_task()->alloc_addr = alloc_addr;
-  iframe->eip = load_elf((Elf32_Ehdr *)p);
-  logk("eip = %08x\n", &(iframe->eip));
-  current_task()->user_mode = 1;
-  tss.esp0 = current_task()->top;
-  change_page_task_id(current_task()->tid, p, vfs_filesize(filename));
-  change_page_task_id(current_task()->tid, (void *)(uintptr_t)(iframe->esp - 512 * 1024),
-                      512 * 1024);
+  task->alloc_addr = layout.allocation_base;
+  if (!elf32_load_executable(p, executable_size, &user_eip)) {
+    task_exit(-1);
+    return;
+  }
+  if (uses_status_page) {
+    *(unsigned char *)(USER_HEAP_END) = 0;
+  }
+  task->user_mode = 1;
+  tss.esp0 = task->top;
 #ifdef KERNEL_PERF
   if (task_is_boot_shell_name(filename)) {
     perf_boot_stop_and_dump("psh-iret");
   }
 #endif
-  logk("%d\n", get_interrupt_state());
-  asm volatile("movl %0, %%esp\n"
-               "popa\n"
-               "pop %%gs\n"
-               "pop %%fs\n"
-               "pop %%es\n"
-               "pop %%ds\n"
-               "iret" ::"m"(iframe));
-  for (;;)
-    ;
+
+  x86_interrupt_frame_t iframe;
+  iframe.edi = 1;
+  iframe.esi = 2;
+  iframe.ebp = 3;
+  iframe.esp_dummy = 4;
+  iframe.ebx = 5;
+  iframe.edx = 6;
+  iframe.ecx = 7;
+  iframe.eax = 8;
+  iframe.gs = GET_SEL(5 * 8, SA_RPL3);
+  iframe.ds = GET_SEL(3 * 8, SA_RPL3);
+  iframe.es = GET_SEL(3 * 8, SA_RPL3);
+  iframe.fs = GET_SEL(3 * 8, SA_RPL3);
+  iframe.ss = GET_SEL(3 * 8, SA_RPL3);
+  iframe.cs = GET_SEL(4 * 8, SA_RPL3);
+  iframe.eip = user_eip;
+  iframe.eflags = 0b10 | 1 << 9;
+  iframe.esp = layout.stack_top;
+  x86_return_to_user(&iframe);
 }
 int os_execute(char *filename, char *line) {
+  if (filename == NULL || line == NULL) {
+    return -1;
+  }
   extern mtask *mouse_use_task;
   mtask *backup = mouse_use_task;
-  extern int init_ok_flag;
   char *fm = (char *)malloc(strlen(filename) + 1);
+  char *p1 = malloc(strlen(line) + 1);
+  unsigned *r = page_malloc_one_no_mark();
+  if (fm == NULL || p1 == NULL || r == NULL) {
+    free(fm);
+    free(p1);
+    if (r != NULL) {
+      page_free_one(r);
+    }
+    return -1;
+  }
   strcpy(fm, filename);
-  init_ok_flag = 0;
+  strcpy(p1, line);
+  r[0] = (uintptr_t)fm;
+  r[1] = (uintptr_t)p1;
 
   mtask *t = create_task((uintptr_t)task_app, 0, 1, 1);
   if (t == NULL) {
-    init_ok_flag = 1;
     free(fm);
+    free(p1);
+    page_free_one(r);
     return -1;
   }
   // 轮询
   t->train = 0;
-  vfs_change_disk_for_task(current_task()->nfs->drive, t);
-  List *l;
-  char *path;
-  for (int i = 1; FindForCount(i, current_task()->nfs->path) != NULL; i++) {
-    l = FindForCount(i, current_task()->nfs->path);
-    path = (char *)l->val;
-    t->nfs->cd(t->nfs, path);
-  }
-  init_ok_flag = 1;
   t->ptid = current_task()->tgid;
   int old = current_task()->sigint_up;
-  current_task()->sigint_up = 0;
   t->sigint_up = 1;
   struct tty *tty_backup = current_task()->TTY;
   t->TTY = current_task()->TTY;
-  current_task()->TTY = NULL;
-  char *p1 = malloc(strlen(line) + 1);
-  strcpy(p1, line);
   int o = current_task()->fifosleep;
-  current_task()->fifosleep = 1;
-  unsigned *r = page_malloc_one_no_mark();
-  r[0] = (uintptr_t)fm;
-  r[1] = (uintptr_t)p1;
   t->line = (char *)r;
+  if (!task_publish(t)) {
+    task_abort_creation(t);
+    free(p1);
+    free(fm);
+    page_free_one(r);
+    return -1;
+  }
+  current_task()->sigint_up = 0;
+  current_task()->TTY = NULL;
+  current_task()->fifosleep = 1;
 
   unsigned status = waittid(t->tid);
   current_task()->fifosleep = o;
@@ -389,27 +461,27 @@ int os_execute_shell(const char *line, size_t line_length) {
   memcpy(line_copy, line, line_length);
   line_copy[line_length] = '\0';
 
-  extern int init_ok_flag;
-  init_ok_flag = 0;
   mtask *t = create_task((uintptr_t)task_shell, 0, 1, 1);
   if (t == NULL) {
-    init_ok_flag = 1;
     free(line_copy);
     return -1;
   }
-  vfs_clone_for_task(current_task(), t);
   t->train = 1;
   int old = current_task()->sigint_up;
-  current_task()->sigint_up = 0;
   t->sigint_up = 1;
-  init_ok_flag = 1;
   t->ptid = current_task()->tgid;
   struct tty *tty_backup = current_task()->TTY;
   t->TTY = current_task()->TTY;
-  current_task()->TTY = NULL;
   int o = current_task()->fifosleep;
-  current_task()->fifosleep = 1;
   t->line = line_copy;
+  if (!task_publish(t)) {
+    task_abort_creation(t);
+    free(line_copy);
+    return -1;
+  }
+  current_task()->sigint_up = 0;
+  current_task()->TTY = NULL;
+  current_task()->fifosleep = 1;
   // io_sti();
   unsigned status = waittid(t->tid);
   current_task()->fifosleep = o;
@@ -419,15 +491,24 @@ int os_execute_shell(const char *line, size_t line_length) {
   return status;
 }
 void os_execute_no_ret(char *filename, char *line) {
+  unsigned *r = page_malloc_one_no_mark();
+  if (r == NULL) {
+    return;
+  }
+  r[0] = (uintptr_t)filename;
+  r[1] = (uintptr_t)line;
   mtask *t = create_task((uintptr_t)task_app, 0, 1, 1);
   if (t == NULL) {
+    page_free_one(r);
     return;
   }
   t->ptid = 0; /* detached tasks are adopted by the idle reaper */
   t->TTY = current_task()->TTY;
-  current_task()->TTY = NULL;
-  unsigned *r = page_malloc_one_no_mark();
-  r[0] = (uintptr_t)filename;
-  r[1] = (uintptr_t)line;
   t->line = (char *)r;
+  if (!task_publish(t)) {
+    task_abort_creation(t);
+    page_free_one(r);
+    return;
+  }
+  current_task()->TTY = NULL;
 }

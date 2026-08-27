@@ -1,5 +1,6 @@
 #include <dos.h>
 #include <fs.h>
+#include <limits.h>
 #define READ 0x2
 #define WRITE 0x4
 #define APPEND 0x8
@@ -21,8 +22,10 @@ long ftell(FILE *stream) { return stream->p; }
 #define CANREAD(flag) ((flag)&READ || (flag)&PLUS)
 #define CANWRITE(flag) ((flag)&WRITE || (flag)&PLUS || (flag)&APPEND)
 FILE *fopen(char *filename, char *mode) {
+  if (filename == NULL || mode == NULL) {
+    return NULL;
+  }
   unsigned int flag = 0;
-  FILE *fp = (FILE *)malloc(sizeof(FILE));
   while (*mode != '\0') {
     switch (*mode) {
     case 'a':
@@ -44,43 +47,64 @@ FILE *fopen(char *filename, char *mode) {
     }
     mode++;
   }
-  if (vfs_filesize(filename) == -1) {
-    free(fp);
-    return NULL; // 找不到
-  } else if (flag & WRITE) {
-    char buffe2[100];
-    // vfs_delfile(filename);
-    // vfs_createfile(filename);
+  uint32_t file_size = vfs_filesize(filename);
+  if (file_size == (uint32_t)-1 || file_size > INT_MAX) {
+    return NULL;
   }
+  FILE *fp = (FILE *)malloc(sizeof(FILE));
+  if (fp == NULL) {
+    return NULL;
+  }
+  memset(fp, 0, sizeof(FILE));
   if (flag & WRITE) {
     fp->fileSize = 0;
   } else {
-    fp->fileSize = vfs_filesize(filename);
+    fp->fileSize = file_size;
   }
-  fp->bufferSize = 0;
+  uint32_t buffer_size = 0;
   if (flag & READ || flag & PLUS || flag & APPEND) {
-    fp->bufferSize = vfs_filesize(filename);
-    // printk("[Set]BufferSize=%d\n",fp->bufferSize);
+    buffer_size = file_size;
   }
   if (flag & WRITE || flag & PLUS || flag & APPEND) {
-    fp->bufferSize += 100;
+    if (buffer_size > INT_MAX - 100) {
+      free(fp);
+      return NULL;
+    }
+    buffer_size += 100;
   }
-  if (fp->bufferSize == 0) {
-    fp->bufferSize = 1;
+  if (buffer_size == 0) {
+    buffer_size = 1;
   }
-  fp->buffer = malloc(fp->bufferSize);
-  if (flag & PLUS || flag & APPEND || flag & READ) {
-    //	printk("ReadFile........\n");
-    vfs_readfile(filename, fp->buffer);
+  fp->buffer = malloc(buffer_size);
+  if (fp->buffer == NULL) {
+    free(fp);
+    return NULL;
   }
+  if (file_size != 0 && (flag & PLUS || flag & APPEND || flag & READ) &&
+      !vfs_readfile(filename, (char *)fp->buffer)) {
+    free(fp->buffer);
+    free(fp);
+    return NULL;
+  }
+  size_t filename_length = strlen(filename);
+  if (filename_length >= INT_MAX) {
+    free(fp->buffer);
+    free(fp);
+    return NULL;
+  }
+  fp->name = malloc(filename_length + 1);
+  if (fp->name == NULL) {
+    free(fp->buffer);
+    free(fp);
+    return NULL;
+  }
+  memcpy(fp->name, filename, filename_length + 1);
+  fp->bufferSize = buffer_size;
   fp->p = 0;
   if (flag & APPEND) {
     fp->p = fp->fileSize;
   }
-  fp->name = malloc(strlen(filename) + 1);
-  strcpy(fp->name, filename);
   fp->mode = flag;
-  //	printk("[fopen]BufferSize=%d\n",fp->bufferSize);
   return fp;
 }
 int fgetc(FILE *stream) {
@@ -98,8 +122,15 @@ int fputc(int ch, FILE *stream) {
   if (CANWRITE(stream->mode)) {
     //		printk("Current Buffer=%s\n",stream->buffer);
     if (stream->p >= stream->bufferSize) {
-      //	printk("Realloc....(%d,%d)\n",stream->p,stream->bufferSize);
-      stream->buffer = realloc(stream->buffer, stream->bufferSize + 100);
+      if (stream->bufferSize > INT_MAX - 100) {
+        return EOF;
+      }
+      unsigned char *replacement =
+          realloc(stream->buffer, stream->bufferSize + 100);
+      if (replacement == NULL) {
+        return EOF;
+      }
+      stream->buffer = replacement;
       stream->bufferSize += 100;
     }
     if (stream->p >= stream->fileSize) {
@@ -116,7 +147,7 @@ unsigned int fwrite(const void *ptr, unsigned int size, unsigned int nmemb,
                     FILE *stream) {
   if (CANWRITE(stream->mode)) {
     unsigned char *c_ptr = (unsigned char *)ptr;
-    for (int i = 0; i < size * nmemb; i++) {
+    for (unsigned int i = 0; i < size * nmemb; i++) {
       fputc(c_ptr[i], stream);
     }
     return nmemb;
@@ -128,8 +159,8 @@ unsigned int fread(void *buffer, unsigned int size, unsigned int count,
                    FILE *stream) {
   if (CANREAD(stream->mode)) {
     unsigned char *c_ptr = (unsigned char *)buffer;
-    for (int i = 0; i < size * count; i++) {
-      unsigned int ch = fgetc(stream);
+    for (unsigned int i = 0; i < size * count; i++) {
+      int ch = fgetc(stream);
       if (ch == EOF) {
         return i;
       } else {
@@ -145,21 +176,24 @@ int fclose(FILE *fp) {
   if (fp == NULL) {
     return EOF;
   }
+  int status = 0;
   if (CANWRITE(fp->mode)) {
     //		printk("Save file.....(%s) Size =
     //%d\n",fp->buffer,fp->fileSize);
     //  Edit_File(fp->name, fp->buffer, fp->fileSize, 0);
-    vfs_writefile(fp->name, fp->buffer, fp->fileSize);
+    if (!vfs_writefile(fp->name, (char *)fp->buffer, fp->fileSize)) {
+      status = EOF;
+    }
   }
   free(fp->buffer);
   free(fp->name);
   free(fp);
-  return 0;
+  return status;
 }
 char *fgets(char *str, int n, FILE *stream) {
   if (CANREAD(stream->mode)) {
     for (int i = 0; i < n; i++) {
-      unsigned int ch = fgetc(stream);
+      int ch = fgetc(stream);
       if (ch == EOF) {
         if (i == 0) {
           return NULL;
@@ -178,7 +212,7 @@ char *fgets(char *str, int n, FILE *stream) {
 }
 int fputs(const char *str, FILE *stream) {
   if (CANWRITE(stream->mode)) {
-    for (int i = 0; i < strlen(str); i++) {
+    for (size_t i = 0; i < strlen(str); i++) {
       fputc(str[i], stream);
     }
     return 0;
@@ -208,33 +242,43 @@ int feof(FILE *stream) {
   }
   return 0;
 }
-int ferror(FILE *stream) { return 0; }
+int ferror(FILE *stream) {
+  (void)stream;
+  return 0;
+}
 int getc(FILE *stream) { return fgetc(stream); }
 int fsz(char *filename) { return vfs_filesize(filename); }
 
-void EDIT_FILE(char *name, char *dest, int length, int offset) {
-  if (vfs_filesize(name) == -1) {
-    //没有找到文件，创建一个，然后再编辑
-    vfs_createfile(name);
-    EDIT_FILE(name, dest, length, offset);
-    return;
+bool EDIT_FILE(char *name, char *dest, int length, int offset) {
+  if (name == NULL || (length > 0 && dest == NULL) || length < 0 ||
+      offset != 0) {
+    return false;
   }
-  vfs_writefile(name, dest, length);
-  return;
+  if (vfs_filesize(name) == (uint32_t)-1) {
+    if (!vfs_createfile(name)) {
+      return false;
+    }
+  }
+  return vfs_writefile(name, dest, length);
 }
 int Copy(char *path, char *path1) {
-  unsigned char *path1_file_buffer;
-  if (fsz(path) == -1) {
-    // printk("file not found\n");
+  if (path == NULL || path1 == NULL) {
     return -1;
   }
-  // printk("-----------------------------\n");
-  vfs_createfile(path1);
-
-  path1_file_buffer = malloc(fsz(path) + 1);
   int sz = fsz(path);
-  vfs_readfile(path, path1_file_buffer);
-  vfs_writefile(path1, path1_file_buffer, sz);
+  if (sz < 0) {
+    return -1;
+  }
+  char *path1_file_buffer = sz == 0 ? NULL : malloc(sz);
+  if (sz != 0 && path1_file_buffer == NULL) {
+    return -1;
+  }
+  if ((sz != 0 && !vfs_readfile(path, path1_file_buffer)) ||
+      (vfs_filesize(path1) == (uint32_t)-1 && !vfs_createfile(path1)) ||
+      !vfs_writefile(path1, path1_file_buffer, sz)) {
+    free(path1_file_buffer);
+    return -1;
+  }
   free(path1_file_buffer);
   return 0;
 }

@@ -26,7 +26,7 @@ void Draw_Box_TextMode(struct tty *res, int x, int y, int x1, int y1,
 void SwitchShell_TextMode(int i);
 bool now_tty_TextMode(struct tty *res);
 // tty.c
-void init_tty();
+bool init_tty(void);
 struct tty *tty_alloc(void *vram, int xsize, int ysize,
                       void (*putchar)(struct tty *res, int c),
                       void (*MoveCursor)(struct tty *res, int x, int y),
@@ -36,6 +36,7 @@ struct tty *tty_alloc(void *vram, int xsize, int ysize,
                                        int y1, unsigned char color),
                       int (*fifo_status)(struct tty *res), int (*fifo_get)(struct tty *res));
 void tty_free(struct tty *res);
+void high_text_cursor_task_exited(mtask *task);
 struct tty *tty_set(mtask *task, struct tty *res);
 struct tty *tty_set_default(struct tty *res);
 void tty_set_reserved(struct tty *res, unsigned int reserved1,
@@ -62,7 +63,7 @@ void MoveCursor_HighTextMode(struct tty *res, int x, int y);
 void putchar_HighTextMode(struct tty *res, int c);
 bool now_tty_HighTextMode(struct tty *res);
 // void Gar_Test_Task();
-void SwitchToHighTextMode();
+bool SwitchToHighTextMode(void);
 void Draw_Box_HighTextMode(struct tty *res, int x, int y, int x1, int y1,
                            unsigned char color);
 void SwitchShell_HighTextMode(int i);
