@@ -69,6 +69,7 @@ void putchar_HighTextMode(struct tty *res, int c) {
   struct SHEET *sht = (struct SHEET *)res->vram;
   unsigned char *p = (unsigned char *)&c;
   if (p[0] == '\r') {
+    res->MoveCursor(res, 0, res->y);
     unlock(&l1);
     return;
   }

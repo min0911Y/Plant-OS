@@ -1,6 +1,7 @@
 #include <ctype.h>
 #include <limits.h>
 #include <mst.h>
+#include <pl_readline.h>
 #include <runtime_args.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -180,6 +181,11 @@ static const struct simple_command simple_commands[] = {
     {"mem", print_memory_usage},
     {"pause", pause_shell},
     {"lsmod", list_modules},
+};
+
+static const char *const argument_commands[] = {
+    "del", "cd", "mkfile", "type", "remount_drive",
+    "color", "mkdir", "insmod", "rmmod", "format",
 };
 
 static int execute_external_command(int argc, char **argv, int *ok) {
@@ -374,56 +380,80 @@ static int run_command(int argc, char **argv) {
   return result;
 }
 
-static char *read_interactive_command(void) {
-  size_t capacity = 64;
-  size_t length = 0;
-  char *line = malloc(capacity);
-  if (line == NULL) {
-    return NULL;
+static void psh_readline_words(char *prefix, pl_readline_words_t words) {
+  (void)prefix;
+  for (size_t i = 0; i < sizeof(simple_commands) / sizeof(simple_commands[0]);
+       i++) {
+    if (pl_readline_word_maker_add(simple_commands[i].name, words, true,
+                                   PL_COLOR_CYAN, ' ') != PL_READLINE_SUCCESS) {
+      return;
+    }
   }
-  for (;;) {
-    int input = getch();
-    if (input == '\n') {
-      putch('\n');
-      line[length] = '\0';
-      return line;
+  for (size_t i = 0;
+       i < sizeof(argument_commands) / sizeof(argument_commands[0]); i++) {
+    if (pl_readline_word_maker_add(argument_commands[i], words, true,
+                                   PL_COLOR_CYAN, ' ') != PL_READLINE_SUCCESS) {
+      return;
     }
-    if (input == '\b') {
-      if (length != 0) {
-        length--;
-        print("\b \b");
-      }
-      continue;
-    }
-    if (input < 0 || input > 0xff) {
-      continue;
-    }
-    if (length + 1 == capacity) {
-      if (capacity > UINT_MAX / 2) {
-        free(line);
-        return NULL;
-      }
-      size_t new_capacity = capacity * 2;
-      char *replacement = realloc(line, new_capacity);
-      if (replacement == NULL) {
-        free(line);
-        return NULL;
-      }
-      line = replacement;
-      capacity = new_capacity;
-    }
-    line[length++] = (char)input;
-    putch((char)input);
   }
 }
 
-static void run_shell(void) {
+static int psh_readline_getch(void) {
+  for (;;) {
+    int input = getch();
+    switch (input) {
+    case KEY_INPUT_UP:
+      return PL_READLINE_KEY_UP;
+    case KEY_INPUT_DOWN:
+      return PL_READLINE_KEY_DOWN;
+    case KEY_INPUT_LEFT:
+      return PL_READLINE_KEY_LEFT;
+    case KEY_INPUT_RIGHT:
+      return PL_READLINE_KEY_RIGHT;
+    case '\n':
+      return PL_READLINE_KEY_ENTER;
+    case '\b':
+      return PL_READLINE_KEY_BACKSPACE;
+    case '\t':
+      return PL_READLINE_KEY_TAB;
+    default:
+      break;
+    }
+    if (input >= ' ' && input <= UCHAR_MAX && input != 0x7f) {
+      return input;
+    }
+  }
+}
+
+static int psh_readline_putch(int input) {
+  putch((char)input);
+  return input;
+}
+
+static void psh_readline_flush(void) {}
+
+static bool run_shell(void) {
+  pl_readline_t reader =
+      pl_readline_init(psh_readline_getch, psh_readline_putch,
+                       psh_readline_flush, psh_readline_words);
+  if (reader == NULL) {
+    return false;
+  }
+
   printf("Plant OS 0.8a\n");
   for (;;) {
     char cwd[255];
+    char prompt[sizeof(cwd) + sizeof("psh| ~ ")];
     api_getcwd(cwd);
-    printf("psh|%s ~ ", cwd);
-    char *line = read_interactive_command();
+    size_t cwd_length = strlen(cwd);
+    size_t offset = 0;
+    memcpy(prompt + offset, "psh|", sizeof("psh|") - 1);
+    offset += sizeof("psh|") - 1;
+    memcpy(prompt + offset, cwd, cwd_length);
+    offset += cwd_length;
+    memcpy(prompt + offset, " ~ ", sizeof(" ~ "));
+
+    const char *line = pl_readline(reader, prompt);
     if (line == NULL) {
       printf("Unable to read command.\n");
       continue;
@@ -435,7 +465,6 @@ static void run_shell(void) {
     } else {
       printf("Invalid command line.\n");
     }
-    free(line);
   }
 }
 int main(int argc, char **argv) {
@@ -452,6 +481,5 @@ int main(int argc, char **argv) {
   if (!env_init(0)) {
     return 1;
   }
-  run_shell();
-  return 0;
+  return run_shell() ? 0 : 1;
 }

@@ -55,8 +55,10 @@ color_t text_color_to_real_color(unsigned char text_color, bool back_or_font) {
     return COL_FFFFFF;
 }
 void putchar_console(struct tty *res, int c) {
-  if (c == '\r')
+  if (c == '\r') {
+    res->MoveCursor(res, 0, res->y);
     return;
+  }
   if (c == '\t') {
     putchar_console(res, ' ');
     putchar_console(res, ' ');

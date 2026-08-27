@@ -4273,23 +4273,26 @@ char *strrchr(const char *s1, int ch) {
   }
   return NULL;
 }
-void *memmove(void *dest, const void *src, int n) {
-  /*因为char类型为1字节，所以将数据转化为char*
-  进行操作。并不是因为操作的对象是字符串*/
-  char *pdest = (char *)dest;
-  const char *psrc = (const char *)src;
-  if (pdest <= psrc && pdest >= psrc + n) // 正常情况下从前向后拷贝
-  {
-    while (n--) {
-      *pdest = *psrc;
-    }
-  } else // 当出现内存覆盖时从后向前拷贝
-  {
-    while (n--) {
-      *(pdest + n) = *(psrc + n);
-    }
+void *memmove(void *destination, const void *source, size_t size) {
+  if (destination == NULL || source == NULL) return NULL;
+
+  unsigned char *dst = destination;
+  const unsigned char *src = source;
+  uintptr_t dst_address = (uintptr_t)dst;
+  uintptr_t src_address = (uintptr_t)src;
+  if (size > UINT_MAX - dst_address || size > UINT_MAX - src_address) {
+    return NULL;
   }
-  return dest;
+  if (dst == src || size == 0) return destination;
+
+  if (dst_address > src_address && dst_address - src_address < size) {
+    dst += size;
+    src += size;
+    while (size-- != 0) *--dst = *--src;
+  } else {
+    while (size-- != 0) *dst++ = *src++;
+  }
+  return destination;
 }
 /////////////////////////////////////////
 

@@ -25,8 +25,16 @@ typedef struct module_handle {
   uint32_t section_count;
   uint32_t export_count;
 } module_handle_t;
+
+enum key_input {
+  KEY_INPUT_UP = -1,
+  KEY_INPUT_DOWN = -2,
+  KEY_INPUT_LEFT = -3,
+  KEY_INPUT_RIGHT = -4,
+};
+
 void putch(char ch);
-unsigned int getch();
+int getch(void);
 char input_char_inSM();
 int get_xy();
 void goto_xy(int x, int y);

@@ -119,6 +119,7 @@ int main(int argc, char **argv) {
 
   char remount_command[] = "remount_drive X:";
   remount_command[sizeof("remount_drive ") - 1] = destination_drive;
+  printf("remount command: %s\n", remount_command);
   if (system(remount_command) != 0) {
     printf("Unable to remount drive %c:.\n", destination_drive);
     restore_source_drive(source_drive);

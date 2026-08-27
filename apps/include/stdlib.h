@@ -10,8 +10,6 @@ extern "C" {
 #include <rand.h>
 #include <syscall.h>
 #define RAND_MAX 32767
-void putch(char ch);
-unsigned int getch();
 void *malloc(size_t size);
 void free(void *p);
 void *realloc(void *ptr, uint32_t size);

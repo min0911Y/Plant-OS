@@ -45,6 +45,7 @@ void putchar_TextMode(struct tty *res, int c) {
     res->print(res, "    ");
     return;
   } else if (c == '\r') {
+    res->MoveCursor(res, 0, res->y);
     return;
   }
   *(unsigned char *)(res->vram + res->y * res->xsize * 2 + res->x * 2) = c;

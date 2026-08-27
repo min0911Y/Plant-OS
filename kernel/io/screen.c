@@ -231,7 +231,7 @@ static int parse_vt100(struct tty *res, char *string) {
     switch (delta) {
     case 0: {
       int flag = 0;
-      for (int i = old_y * res->xsize + old_x; i < (old_y + 1) * res->ysize;
+      for (int i = old_y * res->xsize + old_x; i < (old_y + 1) * res->xsize;
            i++) {
         flag = 1;
         res->putchar(res, ' ');
