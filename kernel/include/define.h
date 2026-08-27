@@ -8,20 +8,10 @@ typedef vram_t color_t;
 
 /* dos.h */
 #define VERSION "0.7b" // Version of the program
-#define ADR_IDT 0x0026f800
-#define LIMIT_IDT 0x000007ff
-#define ADR_GDT 0x00270000
-#define LIMIT_GDT 0x0000ffff
 #define ADR_BOTPAK 0x00280000
 #define LIMIT_BOTPAK 0x0007ffff
-#define AR_DATA32_RW 0x4092
-#define AR_DATA16_RW 0x0092
-#define AR_CODE32_ER 0x409a
-#define AR_CODE16_ER 0x009a
-#define AR_INTGATE32 0x008e
 #define PIT_CTRL 0x0043
 #define PIT_CNT0 0x0040
-#define AR_TSS32 0x0089
 #define NULL_TID 11459810
 #define Panic_Print(func, info, ...)                                           \
   func("%s--PANIC: %s:%d Info:" info "\n", __FUNCTION__, __FILE__, __LINE__,   \
@@ -66,16 +56,6 @@ typedef struct {
   freeinfo *freeinf;
   int memerrno;
 } memory;
-struct SEGMENT_DESCRIPTOR {
-  short limit_low, base_low;
-  char base_mid, access_right;
-  char limit_high, base_high;
-};
-struct GATE_DESCRIPTOR {
-  short offset_low, selector;
-  char dw_count, access_right;
-  short offset_high;
-};
 #define MAX_TIMER 500
 struct mtask;
 typedef struct mtask mtask;
@@ -90,12 +70,6 @@ struct TIMERCTL {
   volatile unsigned int count, next;
   struct TIMER *t0;
   struct TIMER timers0[MAX_TIMER];
-};
-struct TSS32 {
-  int backlink, esp0, ss0, esp1, ss1, esp2, ss2, cr3;
-  int eip, eflags, eax, ecx, edx, ebx, esp, ebp, esi, edi;
-  int es, cs, ss, ds, fs, gs;
-  int ldtr, iomap;
 };
 #define MAX_IPC_MESSAGE 16   // 每个任务的消息队列深度
 #define IPC_MAX_MSG_SIZE 4096 // 单条消息负载的最大字节数
@@ -194,7 +168,6 @@ typedef struct fpu_t {
 } _packed fpu_t;
 // struct TASK {
 //   int sel, sleep, level;
-//   struct TSS32 tss;
 //   char name[32];
 //   char running;
 //   struct tty *TTY;
@@ -495,11 +468,6 @@ struct paw_info {
 #define PIC1_ICW2 0x00a1
 #define PIC1_ICW3 0x00a1
 #define PIC1_ICW4 0x00a1
-typedef struct {
-  unsigned short di, si, bp, sp, bx, dx, cx, ax;
-  unsigned short gs, fs, es, ds, eflags;
-} regs16_t;
-
 /* io.h */
 typedef enum {
   MODE_A = 'A',

@@ -6,39 +6,28 @@ saved_edi dd 0
 saved_ebp dd 0
 
 section .text
-; 
-; Protected Mode BIOS Call Functionailty v2.0 - by Napalm
+;
+; Protected Mode BIOS Call Functionality v2.0 - by Napalm
 ; -------------------------------------------------------
-; 
+;
 ; This is code shows how its POSSIBLE to execute BIOS interrupts
 ; by switch out to real-mode and then back into protected mode.
-; 
+;
 ; If you wish to use all or part of this code you must agree
 ; to the license at the following URL.
-; 
+;
 ; License: http://creativecommons.org/licenses/by-sa/2.0/uk/
-;         
+;
 ; Notes: This file is in NASM syntax.
 ;        Turn off paging before calling these functions.
-;        int32() resets all selectors.
+;        The raw entry resets all selectors.
 ;
-; C Prototype:
-;	void _cdelc int32(unsigned char intnum, regs16_t *regs);
-; 
-; Example of usage:
-;   regs.ax = 0x0013;
-;   int32(0x10, &regs);
-;   memset((char *)0xA0000, 1, (320*200));
-;   memset((char *)0xA0000 + (100*320+80), 14, 80);
-;   regs.ax = 0x0000;
-;   int32(0x16, &regs);
-;   regs.ax = 0x0003;
-;   int32(0x10, &regs);
-; 
-; 
+; Called only by descriptor_tables.c after it prepares the temporary GDT
+; descriptors and restores the caller's architecture state afterwards.
+;
 ;   改写（原来根本用不了）+注释翻译 By zhouzhihao 2022
 ;
-global int32
+global x86_bios_interrupt_raw
 
 struc regs16_t
 	.di	resw 1
@@ -64,7 +53,7 @@ endstruc
 %define CODE16                                 1001 * 8
 %define DATA16                                 1002 * 8
 %define STACK16                                (INT32_BASE - regs16_t_size)	; 实模式堆栈只需要存寄存器就好了 所以不用多大
-int32:
+x86_bios_interrupt_raw:
 		mov  [saved_ebx], ebx
 		mov  [saved_esi], esi
 		mov  [saved_edi], edi
@@ -72,14 +61,14 @@ int32:
 		cli                     			; 禁止中断
 		mov eax,0x400000
 		mov cr3,eax
-		; 复制reloc~int32_end的代码到INT32_BASE(0x7c00)
+		; 复制reloc~bios_interrupt_end的代码到INT32_BASE(0x7c00)
 		mov  esi, ADR_BOTPAK + reloc
 		mov  edi, INT32_BASE
-		mov  ecx, (int32_end - reloc)
+		mov  ecx, (bios_interrupt_end - reloc)
 		cld									; 复制方向（正向
 		rep  movsb
 		; jmp	dword	CODE32:INT32_BASE	; 这样不好返回系统
-		
+
 		mov	eax,CODE32						; 这样调用更好返回系统
 		push	eax
 		mov	eax,INT32_BASE
@@ -104,12 +93,12 @@ reloc:                               		; by Napalm
 		mov  ecx, regs16_t_size                ; ecx = 寄存器结构体的大小
 		mov  esp, edi
 		rep  movsb                             ; 将保护模式下堆栈中的寄存器结构体拷贝到实模式堆栈
-		
+
 		; 因为要复制（分页线性地址和分段线性地址不同）数据 所以推后关分页
 		mov  eax, cr0
 		and  eax, ~0x80000000				; 关闭内存分页
 		mov  cr0, eax
-		
+
 		jmp  dword CODE16:REBASE(p_mode16)      ; 跳到16位保护模式（为切换回实模式做缓冲
 [bits 16]
 p_mode16:
@@ -180,7 +169,7 @@ p_mode32:
 		rep  movsb
 		;sti                                    ; 开中断
 		retf                                    ; 返回上面的call far
-		
+
 resetpic:                                  ; reset's 8259 master and slave pic vectors
 		push ax                                ; expects bh = master vector, bl = slave vector
 		mov  al, 0x11                          ; 0x11 = ICW1_INIT | ICW1_ICW4
@@ -199,16 +188,16 @@ resetpic:                                  ; reset's 8259 master and slave pic v
 		out  0xA1, al                          ; send ICW4 to slave pic
 		pop  ax                                ; restore ax from stack
 		ret                                    ; return to caller
-		
+
 stack32_ptr:                               ; address in 32bit stack after we
 	dd 0x00000000                          ;   save all general purpose registers
-		
+
 idt32_ptr:                                 ; IDT table pointer for 32bit access
 	dw 0x0000                              ; table limit (size)
 	dd 0x00000000                          ; table base address
-		
+
 idt16_ptr:                                 ; IDT table pointer for 16bit access
 	dw 0x03FF                              ; table limit (size)
 	dd 0x00000000                          ; table base address
 
-int32_end:                                 ; end marker (so we can copy the code)
+bios_interrupt_end:                        ; end marker (so we can copy the code)

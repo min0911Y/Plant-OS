@@ -23,6 +23,37 @@ typedef struct {
   uint32_t ss;
 } x86_interrupt_frame_t;
 
+void x86_user_frame_init(x86_interrupt_frame_t *frame, uint32_t eip,
+                         uint32_t esp);
+
+void null_inthandler(void);
+void asm_error0(void);
+void asm_error1(void);
+void asm_error3(void);
+void asm_error4(void);
+void asm_error5(void);
+void asm_error6(void);
+void asm_error7(void);
+void asm_error8(void);
+void asm_error9(void);
+void asm_error10(void);
+void asm_error11(void);
+void asm_error12(void);
+void asm_error13(void);
+void asm_error14(void);
+void asm_error16(void);
+void asm_error17(void);
+void asm_error18(void);
+void asm_inthandler20(void);
+void asm_inthandler21(void);
+void asm_inthandler2c(void);
+void asm_ide_irq(void);
+void asm_net_api(void);
+void floppy_int(void);
+void PCNET_ASM_INTHANDLER(void);
+void RTL8139_ASM_INTHANDLER(void);
+void asm_rtc_handler(void);
+void asm_sb16_handler(void);
 void x86_syscall_entry(void);
 void x86_custom_syscall_entry(void);
 __attribute__((noreturn)) void

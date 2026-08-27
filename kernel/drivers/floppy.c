@@ -2,11 +2,12 @@
  * Copyright by GazOS
  * min0911 & zhouzhihao 对其进行略微修改并移植
  */
+#include <arch/x86/bios.h>
+#include <arch/x86/interrupt.h>
 #include <dos.h>
 
 volatile int floppy_int_count = 0;
 mtask *waiter = NULL;
-void floppy_int(void);
 mtask *floppy_use = NULL;
 void reset(void);
 void wait_floppy_interrupt(void);
@@ -95,8 +96,10 @@ void init_floppy() {
     return;
   }
   // 设置软盘驱动器的中断服务程序
-  struct GATE_DESCRIPTOR *idt = (struct GATE_DESCRIPTOR *)ADR_IDT;
-  set_gatedesc(idt + 0x26, (uintptr_t)floppy_int, 2 * 8, AR_INTGATE32);
+  if (!interrupt_register_entry(IRQ_BASE_VECTOR + 6, floppy_int)) {
+    printk("floppy: invalid interrupt entry\n");
+    return;
+  }
   irq_mask_clear(0x6); // 清除IRQ6的中断
   printk("FLOPPY DISK:RESETING\n");
   floppy_io_failed = 0;
@@ -524,7 +527,7 @@ void bios_fdc_rw(int block, unsigned char *blockbuff, int read,
   r.dx = N(head, 0);
   r.es = 0x7e0;
   r.bx = 0;
-  INT(0x13, &r);
+  x86_bios_interrupt(0x13, &r);
   if (read) {
     memcpy(blockbuff, p_tbaddr, 512);
   }

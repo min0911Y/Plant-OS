@@ -1,11 +1,11 @@
 #include <ELF.h>
+#include <arch.h>
 #include <arch/x86/interrupt.h>
 #include <dos.h>
 #include <limits.h>
 #include <user_space.h>
 extern char *shell_data;
 extern unsigned shell_size;
-extern struct TSS32 tss;
 #define DIDX(addr) (((unsigned)addr >> 22) & 0x3ff) // 获取 addr 的页目录索引
 #define TIDX(addr) (((unsigned)addr >> 12) & 0x3ff) // 获取 addr 的页表索引
 #define PAGE(idx) ((unsigned)idx << 12) // 获取页索引 idx 对应的页开始的位置
@@ -275,34 +275,17 @@ void task_to_user_mode_shell() {
   }
   *(unsigned char *)(USER_HEAP_END) = 1;
   task->user_mode = 1;
-  tss.esp0 = task->top;
+  arch_task_set_kernel_stack(task->top);
 #ifdef KERNEL_PERF
   perf_boot_stop_and_dump("shell-iret");
 #endif
 
   x86_interrupt_frame_t iframe;
-  iframe.edi = 1;
-  iframe.esi = 2;
-  iframe.ebp = 3;
-  iframe.esp_dummy = 4;
-  iframe.ebx = 5;
-  iframe.edx = 6;
-  iframe.ecx = 7;
-  iframe.eax = 8;
-  iframe.gs = GET_SEL(5 * 8, SA_RPL3);
-  iframe.ds = GET_SEL(3 * 8, SA_RPL3);
-  iframe.es = GET_SEL(3 * 8, SA_RPL3);
-  iframe.fs = GET_SEL(3 * 8, SA_RPL3);
-  iframe.ss = GET_SEL(3 * 8, SA_RPL3);
-  iframe.cs = GET_SEL(4 * 8, SA_RPL3);
-  iframe.eip = user_eip;
-  iframe.eflags = 0b10 | 1 << 9;
-  iframe.esp = layout.stack_top;
+  x86_user_frame_init(&iframe, user_eip, layout.stack_top);
   x86_return_to_user(&iframe);
 }
 void task_to_user_mode_elf(char *filename) {
   mtask *task = current_task();
-  tss.eflags = 0x202;
   int executable_size = vfs_filesize(filename);
   char *p = executable_size <= 0 ? NULL : page_malloc(executable_size);
   if (p == NULL) {
@@ -357,7 +340,7 @@ void task_to_user_mode_elf(char *filename) {
     *(unsigned char *)(USER_HEAP_END) = 0;
   }
   task->user_mode = 1;
-  tss.esp0 = task->top;
+  arch_task_set_kernel_stack(task->top);
 #ifdef KERNEL_PERF
   if (task_is_boot_shell_name(filename)) {
     perf_boot_stop_and_dump("psh-iret");
@@ -365,23 +348,7 @@ void task_to_user_mode_elf(char *filename) {
 #endif
 
   x86_interrupt_frame_t iframe;
-  iframe.edi = 1;
-  iframe.esi = 2;
-  iframe.ebp = 3;
-  iframe.esp_dummy = 4;
-  iframe.ebx = 5;
-  iframe.edx = 6;
-  iframe.ecx = 7;
-  iframe.eax = 8;
-  iframe.gs = GET_SEL(5 * 8, SA_RPL3);
-  iframe.ds = GET_SEL(3 * 8, SA_RPL3);
-  iframe.es = GET_SEL(3 * 8, SA_RPL3);
-  iframe.fs = GET_SEL(3 * 8, SA_RPL3);
-  iframe.ss = GET_SEL(3 * 8, SA_RPL3);
-  iframe.cs = GET_SEL(4 * 8, SA_RPL3);
-  iframe.eip = user_eip;
-  iframe.eflags = 0b10 | 1 << 9;
-  iframe.esp = layout.stack_top;
+  x86_user_frame_init(&iframe, user_eip, layout.stack_top);
   x86_return_to_user(&iframe);
 }
 int os_execute(char *filename, char *line) {

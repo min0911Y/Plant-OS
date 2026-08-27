@@ -1,10 +1,10 @@
 // pcnet.c
 // AMD pcnet 网卡驱动
 // Copyright (C) zhouzhihao & min0911_ 2022
+#include <arch/x86/interrupt.h>
 #include <dos.h>
 #include <drivers.h>
 extern int PCI_ADDR_BASE;
-void PCNET_ASM_INTHANDLER(void);
 #define CARD_VENDOR_ID 0x1022
 #define CARD_DEVICE_ID 0x2000
 //  为了使用该寄存器，必须将RAP设置为这些值
@@ -47,14 +47,6 @@ static struct BufferDescriptor* recvBufferDesc;
 static uint8_t recvBufferDescMemory[2048 + 15];
 static uint8_t recvBuffers[8][2048 + 15];
 static uint8_t currentRecvBuffer;
-
-static void set_handler(int IRQ, int addr) {
-  // 注册中断
-  struct GATE_DESCRIPTOR* idt = (struct GATE_DESCRIPTOR*)ADR_IDT;
-  set_gatedesc(idt + 0x20 + IRQ, (uintptr_t)addr, 2 * 8, AR_INTGATE32);
-  irq_configure(IRQ, IRQ_TRIGGER_LEVEL, IRQ_POLARITY_LOW);
-  irq_mask_clear(IRQ);
-}
 void into_32bitsRW() {
   // 切换到32位读写模式 DWIO（BCR18,bit7）=1
   // 此时还处于16位读写模式
@@ -201,8 +193,15 @@ bool pcnet_find_card() {
 void init_pcnet_card() {
   // 允许PCNET网卡产生中断
   // 1.注册中断
-  set_handler(pci_get_drive_irq(bus, dev, func),
-              (uintptr_t)PCNET_ASM_INTHANDLER);
+  uint8_t irq = pci_get_drive_irq(bus, dev, func);
+  if (!irq_is_valid(irq) ||
+      !interrupt_register_entry(IRQ_BASE_VECTOR + irq,
+                                PCNET_ASM_INTHANDLER)) {
+    logk("pcnet: invalid interrupt entry\n");
+    return;
+  }
+  irq_configure(irq, IRQ_TRIGGER_LEVEL, IRQ_POLARITY_LOW);
+  irq_mask_clear(irq);
   // 2,写COMMAND和STATUS寄存器
   uint32_t conf = pci_read_command_status(bus, dev, func);
   conf &= 0xffff0000;  // 保留STATUS寄存器，清除COMMAND寄存器

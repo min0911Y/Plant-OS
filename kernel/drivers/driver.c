@@ -67,11 +67,6 @@
 //   }
 //   return;
 // }
-// void driver_set_handler(drv_t driver, int func_addr, int handler_num) {
-//   struct GATE_DESCRIPTOR* idt = (struct GATE_DESCRIPTOR*)ADR_IDT;
-//   set_gatedesc(idt + handler_num, (int)func_addr, driver->drv_task->sel,
-//                AR_INTGATE32);
-// }
 // drv_t driver_find(drv_type_t type) {
 //   for (int i = 0; i < MAX_DRIVERS; i++) {
 //     if (drv_ctl->drivers[i].drv_type == type) {

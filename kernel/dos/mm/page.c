@@ -1099,7 +1099,6 @@ void page_set_physics_attr_pde(uint32_t vaddr, void *paddr, uint32_t attr,
   flush_tlb((unsigned)pte);
   flush_tlb(vaddr);
 }
-extern struct TSS32 tss;
 void PF(unsigned edi, unsigned esi, unsigned ebp, unsigned esp, unsigned ebx,
         unsigned edx, unsigned ecx, unsigned eax, unsigned gs, unsigned fs,
         unsigned es, unsigned ds, unsigned error, unsigned eip, unsigned cs,

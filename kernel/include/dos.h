@@ -14,14 +14,7 @@
 #include <stdio.h>
 #include <string.h>
 
-// gdtidt.c
-void set_segmdesc(struct SEGMENT_DESCRIPTOR *sd, unsigned int limit, int base,
-                  int ar);
-void set_gatedesc(struct GATE_DESCRIPTOR *gd, uintptr_t offset, int selector,
-                  int ar);
 void init_pic(void);
-void init_gdtidt(void);
-void register_intr_handler(int num, uintptr_t addr);
 // timer.c
 void init_pit(void);
 struct TIMER *timer_alloc(void);
@@ -32,14 +25,6 @@ void timer_init(struct TIMER *timer, struct FIFO8 *fifo, unsigned char data);
 void timer_settime(struct TIMER *timer, unsigned int timeout);
 void inthandler20(int cs, perf_irq_frame_t *frame);
 // mtask.c
-#define SA_RPL_MASK 0xFFFC
-#define SA_TI_MASK 0xFFFB
-#define SA_TIL 4 // 设置此项，将从LDT中寻找
-#define SA_RPL0 0
-#define SA_RPL1 1
-#define SA_RPL2 2
-#define SA_RPL3 3
-#define GET_SEL(cs, rpl) ((cs & SA_RPL_MASK & SA_TI_MASK) | (rpl))
 mtask *current_task();
 mtask *get_task(unsigned tid);
 mtask *create_task(uintptr_t eip, unsigned esp, unsigned ticks, unsigned floor);
@@ -113,24 +98,13 @@ int page_link(unsigned addr);
 int page_link_share(unsigned addr);
 void pde_retain(unsigned addr);
 // nasmfunc.asm
-void int32(unsigned char intnum, regs16_t *regs);
-void floppy_int(void);
 int get_eip();
 void farjmp(int eip, int cs);
 void farcall(int eip, int cs);
 void ASM_call(int i);
-void asm_gui_api();
-void asm_net_api();
-void asm_inthandler2c();
-void asm_inthandler20();
-void asm_inthandler21();
-void asm_ide_irq();
-void asm_rtc_handler(void);
-void RTL8139_ASM_INTHANDLER(void);
 void io_cli(void);
 void io_sti(void);
 void io_stihlt(void);
-void load_tr(int tr);
 void io_out8(int port, int data);
 void io_out16(int port, int data);
 void io_out32(int port, int data);
@@ -139,8 +113,6 @@ int io_in16(int port);
 int io_in32(int port);
 int io_load_eflags(void);
 void io_store_eflags(int eflags);
-void load_gdtr(int limit, int addr);
-void load_idtr(int limit, int addr);
 int load_cr0(void);
 void store_cr0(int cr0);
 void gensound(int notes, int dup);
@@ -151,30 +123,9 @@ int get_cpu4(unsigned eax);
 int get_cpu5(unsigned eax);
 int get_cpu6(unsigned eax);
 int get_cpu7(unsigned eax);
-void asm_error0();
-void asm_error1();
-void asm_error3();
-void asm_error4();
-void asm_error5();
-void asm_error6();
-void asm_error7();
-void asm_error8();
-void asm_error9();
-void asm_error10();
-void asm_error11();
-void asm_error12();
-void asm_error13();
-void asm_error14();
-void asm_error16();
-void asm_error17();
-void asm_error18();
-void null_inthandler();
-void PCNET_ASM_INTHANDLER(void);
-void asm_sb16_handler(void);
 void __init_PIT();
 void init_float();
 // other.c
-void INT(unsigned char intnum, regs16_t *regs);
 void ERROR0(uint32_t eip);
 void ERROR1(uint32_t eip);
 void ERROR3(uint32_t eip);

@@ -1,4 +1,5 @@
 // 多任务重构 -- mtask.c (区别与以前的多任务)
+#include <arch.h>
 #include <arch/x86/interrupt.h>
 #include <dos.h>
 #include <irq.h>
@@ -16,7 +17,6 @@ void task_switch(mtask *next);
 static void reset_task_slot(mtask *task, int tid);
 char default_drive = 'A';
 mtask m[255];
-struct TSS32 tss;
 mtask *idle_task;
 mtask *current = NULL;
 char mtask_stop_flag = 0;
@@ -148,7 +148,7 @@ void task_next() {
     next = idle_task;
   }
   if (next->user_mode == 1) {
-    tss.esp0 = next->top;
+    arch_task_set_kernel_stack(next->top);
   }
   if (next->urgent) {
     next->urgent = 0;
@@ -288,26 +288,10 @@ void task_to_user_mode(unsigned eip, unsigned esp) {
   logk("TTT %d\n", task->tid);
   x86_interrupt_frame_t iframe;
 
-  iframe.edi = 1;
-  iframe.esi = 2;
-  iframe.ebp = 3;
-  iframe.esp_dummy = 4;
-  iframe.ebx = 5;
-  iframe.edx = 6;
-  iframe.ecx = 7;
-  iframe.eax = 8;
-
+  x86_user_frame_init(&iframe, eip, esp);
   iframe.gs = 0;
-  iframe.ds = GET_SEL(3 * 8, SA_RPL3);
-  iframe.es = GET_SEL(3 * 8, SA_RPL3);
-  iframe.fs = GET_SEL(3 * 8, SA_RPL3);
-  iframe.ss = GET_SEL(3 * 8, SA_RPL3);
-  iframe.cs = GET_SEL(4 * 8, SA_RPL3);
-  iframe.eip = eip;
-  iframe.eflags = 0b10 | 1 << 9;
-  iframe.esp = esp;
   task->user_mode = 1;
-  tss.esp0 = task->top;
+  arch_task_set_kernel_stack(task->top);
   // task_exit(0);
   // change_page_task_id(current_task()->tid, iframe->esp - 64 * 1024, 64 *
   // 1024);
@@ -542,11 +526,7 @@ int into_mtask() {
   asm volatile("fninit");
   asm volatile("fnsave (%%eax) \n" ::"a"(&public_fpu));
   fpu_disable();
-  struct SEGMENT_DESCRIPTOR *gdt = (struct SEGMENT_DESCRIPTOR *)ADR_GDT;
-  memset(&tss, 0, sizeof(tss));
-  tss.ss0 = 1 * 8;
-  set_segmdesc(gdt + 103, 103, (int)(uintptr_t)&tss, AR_TSS32);
-  load_tr(103 * 8);
+  arch_task_state_init();
   idle_task = create_task((uintptr_t)idle, 0, 1, 3);
   if (idle_task == NULL) {
     Panic_K("unable to create bootstrap tasks");

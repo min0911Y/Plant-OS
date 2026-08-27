@@ -28,12 +28,6 @@ void bios_read_hd_sec(unsigned LBA, unsigned char* buffer) {
   while (*(unsigned char*)(0x7e00) != 0xff)
     ;
 
-  // regs16_t r;
-  // r.ax = 0x4200;
-  // r.ds = 0x7e0;
-  // r.si = 0x0;
-  // r.dx = 0x0080;
-  // INT(0x13, &r);
 }
 void bios_write_hd_sec(unsigned LBA, unsigned char* buffer) {
   memcpy((void *)0x8000, buffer, 512);
@@ -48,12 +42,6 @@ void bios_write_hd_sec(unsigned LBA, unsigned char* buffer) {
   send_ipc_message(2, "b", 1, asynchronous);
   while (*(unsigned char*)(0x7e00) != 0xff)
     ;
-  // regs16_t r;
-  // r.ax = 0x4200;
-  // r.ds = 0x7e0;
-  // r.si = 0x0;
-  // r.dx = 0x0080;
-  // INT(0x13, &r);
 }
 void drivers_idehdd_read(unsigned int LBA,
                          unsigned int number,

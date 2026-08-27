@@ -1,3 +1,4 @@
+#include <arch/x86/bios.h>
 #include <dos.h>
 #include <drivers.h>
 
@@ -14,7 +15,7 @@ int check_vbe_mode(int mode, struct VBEINFO *vinfo) {
   regs.cx = mode + 0x4000;
   regs.es = (int)(vinfo) / 0x10;
   regs.di = (int)(vinfo) % 0x10;
-  INT(0x10, &regs);
+  x86_bios_interrupt(0x10, &regs);
   if (regs.ax != 0x004f)
     return -1;
   return 0;
@@ -26,20 +27,20 @@ int SwitchVBEMode(int mode) {
   regs16_t regs = {0};
   regs.ax = 0x4f02;
   regs.bx = mode + 0x4000;
-  INT(0x10, &regs);
+  x86_bios_interrupt(0x10, &regs);
   return 0;
 }
 void SwitchToText8025_BIOS() {
   regs16_t regs = {0};
   regs.ax = 0x0003;
-  INT(0x10, &regs);
+  x86_bios_interrupt(0x10, &regs);
   init_palette();
   clear();
 }
 void SwitchTo320X200X256_BIOS() {
   regs16_t regs = {0};
   regs.ax = 0x0013;
-  INT(0x10, &regs);
+  x86_bios_interrupt(0x10, &regs);
 }
 void *GetSVGACardMemAddress() {
   struct VBEINFO *vinfo = (struct VBEINFO *)(uintptr_t)VBEINFO_ADDRESS;
@@ -50,7 +51,7 @@ char *GetSVGACharOEMString() {
   r.ax = 0x4f00;
   r.es = 0x07e0;
   r.di = 0x0000;
-  INT(0x10, &r);
+  x86_bios_interrupt(0x10, &r);
   VESAControllerInfo *info = (VESAControllerInfo *)VBEINFO_ADDRESS;
   return (char *)(uintptr_t)rmfarptr2ptr(info->oemString);
 }
@@ -60,7 +61,7 @@ VESAModeInfo *GetVESAModeInfo(int mode) {
   r.cx = mode + 0x4000;
   r.es = 0x0700;
   r.di = 0x0000;
-  INT(0x10, &r);
+  x86_bios_interrupt(0x10, &r);
   if (r.ax != 0x004f)
     return NULL;
   return (VESAModeInfo *)(uintptr_t)0x7000;
@@ -72,7 +73,7 @@ void _get_all_mode() {
   regs.ax = 0x4f00;
   regs.es = 0x07e0;
   regs.di = 0x0000;
-  INT(0x10, &regs);
+  x86_bios_interrupt(0x10, &regs);
   VESAControllerInfo *vbe = (VESAControllerInfo *)(uintptr_t)VBEINFO_ADDRESS;
   unsigned short *mode = (unsigned short *)rmfarptr2ptr(vbe->videoModes);
   // int i = 0;
@@ -102,7 +103,7 @@ unsigned set_mode(int width, int height, int bpp) {
   regs.ax = 0x4f00;
   regs.es = 0x07e0;
   regs.di = 0x0000;
-  INT(0x10, &regs);
+  x86_bios_interrupt(0x10, &regs);
   VESAControllerInfo *vbe = (VESAControllerInfo *)(uintptr_t)VBEINFO_ADDRESS;
   unsigned short *mode = (unsigned short *)rmfarptr2ptr(vbe->videoModes);
   // int i = 0;

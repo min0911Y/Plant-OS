@@ -4,10 +4,8 @@ section .data
 		GLOBAL	io_in8,  io_in16,  io_in32
 		GLOBAL	io_out8, io_out16, io_out32
 		GLOBAL	io_load_eflags, io_store_eflags
-		GLOBAL	load_gdtr, load_idtr
 		GLOBAL ASM_call
 		GLOBAL	load_cr0, store_cr0,memtest_sub,farjmp,farcall,start_app
-		GLOBAL load_tr
 		GLOBAL get_eip,return_to_app,do_init_seg_register,entering_v86
 str: db 'Yun Xing Ni Ma De Kernel Xiang Si Shi Bu Shi',0
 section .text
@@ -25,9 +23,6 @@ farcall:		; void farjmp(int eip, int cs);
 	call    FAR [ESP+36]    ; eip, cs
 	popad
 	RET
-load_tr:
-	ltr [esp+4]
-	ret
 io_hlt:	; void io_hlt(void);
 		HLT
 		RET
@@ -147,18 +142,6 @@ io_store_eflags:	; void io_store_eflags(int eflags);
 		MOV		EAX,[ESP+4]
 		PUSH	EAX
 		POPFD		; POP EFLAGS 
-		RET
-
-load_gdtr:		; void load_gdtr(int limit, int addr);
-		MOV		AX,[ESP+4]		; limit
-		MOV		[ESP+6],AX
-		LGDT	[ESP+6]
-		RET
-
-load_idtr:		; void load_idtr(int limit, int addr);
-		MOV		AX,[ESP+4]		; limit
-		MOV		[ESP+6],AX
-		LIDT	[ESP+6]
 		RET
 
 ASM_call:  ;移动光标

@@ -1,3 +1,4 @@
+#include <arch.h>
 #include <dos.h>
 extern struct ide_device {
   unsigned char Reserved;      // 0 (Empty) or 1 (This Drive really exists).
@@ -133,7 +134,7 @@ void sysinit(void) {
   do_init_seg_register();
 
   init_page(); // 初始化分页
-  init_gdtidt();
+  arch_interrupt_init();
   init_pic();
   init_pit();
   init_acpi();

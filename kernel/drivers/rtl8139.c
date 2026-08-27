@@ -1,6 +1,7 @@
 // rtl8139.c
 // Realtek rtl8139 网卡驱动
 // Copyright (C) zhouzhihao 2023
+#include <arch/x86/interrupt.h>
 #include <dos.h>
 #define CARD_VENDOR_ID 0x10EC
 #define CARD_DEVICE_ID 0x8139
@@ -21,20 +22,12 @@
 #define RCR 0x44
 #define TSAD0 0x20
 #define TSD0 0x10
-void RTL8139_ASM_INTHANDLER(void);
 static uint8_t bus, dev, func;
 static uint32_t io_base;
 extern uint8_t mac0, mac1, mac2, mac3, mac4, mac5;
 static uint8_t *sendBuffer[4];
 static uint8_t *recvBuffer;
 static uint8_t currentSendBuffer;
-static void set_handler(int IRQ, int addr) {
-  // 注册中断
-  struct GATE_DESCRIPTOR *idt = (struct GATE_DESCRIPTOR *)ADR_IDT;
-  set_gatedesc(idt + 0x20 + IRQ, (uintptr_t)addr, 2 * 8, AR_INTGATE32);
-  irq_configure(IRQ, IRQ_TRIGGER_LEVEL, IRQ_POLARITY_LOW);
-  irq_mask_clear(IRQ);
-}
 static void init_Card_all() {
   recvBuffer = (uint8_t *)malloc(8192 + 16);
   for (int i = 0; i != 4; i++) {
@@ -114,8 +107,15 @@ bool rtl8139_find_card() {
   return true;
 }
 void init_rtl8139_card() {
-  set_handler(pci_get_drive_irq(bus, dev, func),
-              (uintptr_t)RTL8139_ASM_INTHANDLER);
+  uint8_t irq = pci_get_drive_irq(bus, dev, func);
+  if (!irq_is_valid(irq) ||
+      !interrupt_register_entry(IRQ_BASE_VECTOR + irq,
+                                RTL8139_ASM_INTHANDLER)) {
+    logk("rtl8139: invalid interrupt entry\n");
+    return;
+  }
+  irq_configure(irq, IRQ_TRIGGER_LEVEL, IRQ_POLARITY_LOW);
+  irq_mask_clear(irq);
   uint32_t conf = pci_read_command_status(bus, dev, func);
   conf &= 0xffff0000; // 保留STATUS寄存器，清除COMMAND寄存器
   conf |= 0x7;        // 设置第0~2位（允许PCNET网卡产生中断

@@ -1,7 +1,8 @@
 include ../../cdef.mk
 out_path_src := ../../obj/
 incpath_src := ../../include/
-obj_arch := $(out_path_src)irq.o $(out_path_src)user_return.obj
+obj_arch := $(out_path_src)descriptor_tables.o $(out_path_src)irq.o \
+	$(out_path_src)bios_interrupt.obj $(out_path_src)user_return.obj
 
 default: $(obj_arch)
 

@@ -1,5 +1,5 @@
+#include <arch/x86/interrupt.h>
 #include <dos.h>
-void asm_rtc_handler();
 int cnt = 0;
 void rtc_irq() {
   send_eoi(8);
@@ -20,7 +20,10 @@ void rtc_stop() {
 }
 int rtc_init() {
   logk("rtc init\n");
-  register_intr_handler(0x28, (uintptr_t)asm_rtc_handler);
+  if (!interrupt_register_entry(IRQ_BASE_VECTOR + 8, asm_rtc_handler)) {
+    logk("rtc: invalid interrupt entry\n");
+    return -1;
+  }
   rtc_stop();
   irq_mask_clear(8);
   return 0;

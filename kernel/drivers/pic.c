@@ -233,7 +233,10 @@ void pic_disable(void) {
   io_out8(PIC1_IMR, 0xff);
 }
 
-static void pic_mask(unsigned char irq, int masked) {
+static void pic_mask(unsigned irq, int masked) {
+  if (irq >= 16) {
+    return;
+  }
   uint16_t port;
   uint8_t bit;
   if (irq < 8) {
@@ -253,6 +256,8 @@ static void pic_mask(unsigned char irq, int masked) {
   io_out8(port, *mask);
 }
 
+bool irq_is_valid(unsigned irq) { return irq < MAX_IRQS; }
+
 void send_eoi(int irq) {
   if (apic_enabled) {
     apic_send_eoi();
@@ -267,7 +272,10 @@ void send_eoi(int irq) {
   }
 }
 
-void irq_mask_clear(unsigned char irq) {
+void irq_mask_clear(unsigned irq) {
+  if (!irq_is_valid(irq)) {
+    return;
+  }
   if (apic_enabled) {
     apic_unmask_irq(irq);
     return;
@@ -275,7 +283,10 @@ void irq_mask_clear(unsigned char irq) {
   pic_mask(irq, 0);
 }
 
-void irq_mask_set(unsigned char irq) {
+void irq_mask_set(unsigned irq) {
+  if (!irq_is_valid(irq)) {
+    return;
+  }
   if (apic_enabled) {
     apic_mask_irq(irq);
     return;
@@ -283,8 +294,8 @@ void irq_mask_set(unsigned char irq) {
   pic_mask(irq, 1);
 }
 
-void irq_configure(unsigned char irq, int trigger_mode, int polarity) {
-  if (irq >= MAX_IRQS) {
+void irq_configure(unsigned irq, int trigger_mode, int polarity) {
+  if (!irq_is_valid(irq)) {
     return;
   }
 
@@ -562,24 +573,24 @@ void apic_timer_use_irq0(void) {
   irq_mask_clear(APIC_TIMER_IRQ);
 }
 
-void apic_route_irq(unsigned char irq, unsigned char vector) {
-  if (!apic_enabled || irq >= MAX_IRQS) {
+void apic_route_irq(unsigned irq, unsigned char vector) {
+  if (!apic_enabled || !irq_is_valid(irq)) {
     return;
   }
   ioapic_program_gsi(irq_to_gsi[irq], vector, irq_masked[irq], irq_trigger[irq],
                      irq_polarity[irq]);
 }
 
-void apic_configure_irq(unsigned char irq, int trigger_mode, int polarity) {
-  if (!apic_enabled || irq >= MAX_IRQS) {
+void apic_configure_irq(unsigned irq, int trigger_mode, int polarity) {
+  if (!apic_enabled || !irq_is_valid(irq)) {
     return;
   }
   ioapic_program_gsi(irq_to_gsi[irq], IRQ_BASE_VECTOR + irq, irq_masked[irq],
                      trigger_mode, polarity);
 }
 
-void apic_mask_irq(unsigned char irq) {
-  if (!apic_enabled || irq >= MAX_IRQS) {
+void apic_mask_irq(unsigned irq) {
+  if (!apic_enabled || !irq_is_valid(irq)) {
     return;
   }
   irq_masked[irq] = 1;
@@ -587,8 +598,8 @@ void apic_mask_irq(unsigned char irq) {
                      irq_trigger[irq], irq_polarity[irq]);
 }
 
-void apic_unmask_irq(unsigned char irq) {
-  if (!apic_enabled || irq >= MAX_IRQS) {
+void apic_unmask_irq(unsigned irq) {
+  if (!apic_enabled || !irq_is_valid(irq)) {
     return;
   }
   irq_masked[irq] = 0;

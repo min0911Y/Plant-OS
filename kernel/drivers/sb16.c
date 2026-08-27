@@ -2,6 +2,7 @@
  * sb 16 driver
  * https://github.com/StevenBaby/onix/blob/dev/src/kernel/sb16.c
  */
+#include <arch/x86/interrupt.h>
 #include <dos.h>
 #include <drivers.h>
 
@@ -85,13 +86,17 @@ void sb16_handler(int* esp) {
   task_run(sb.use_task);
 }
 void disable_sb16() {
+  if (!interrupt_register_entry(IRQ_BASE_VECTOR + SB16_IRQ,
+                                asm_sb16_handler)) {
+    logk("sb16: invalid interrupt entry\n");
+    return;
+  }
   sb.addr = (char*)DMA_BUF_ADDR;
   sb.mode = MODE_STEREO16;
   sb.channel = 5;
   sb.use_task = NULL;
   irq_configure(SB16_IRQ, IRQ_TRIGGER_LEVEL, IRQ_POLARITY_LOW);
   irq_mask_clear(SB16_IRQ);
-  register_intr_handler(SB16_IRQ + 0x20, (uintptr_t)asm_sb16_handler);
 }
 static void sb_reset() {
   io_out8(SB_RESET, 1);
