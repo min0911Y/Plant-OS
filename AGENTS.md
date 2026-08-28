@@ -29,7 +29,7 @@
 - `kernel/drivers/`：存储、网络、输入、显示、声音、PCI、时钟等驱动。
 - `kernel/fs/`：FAT、PFS、ISO9660、VFS、ELF 加载及路径/文件实现。
 - `kernel/io/`：文本/图形显示、TTY、输入栈和日志。
-- `kernel/net/`：lwIP 2.2.1（`third_party/lwip`）及 Plant OS 的 raw-API 适配、DHCP 和用户态 socket 句柄实现；网卡帧适配位于 `kernel/drivers/network.c`。
+- `kernel/net/`：lwIP 2.2.1（`third_party/lwip`）、`net_stack.c` 的链路/DHCP 生命周期和 `socket.c` 的用户态 socket 端点实现；网卡帧适配位于 `kernel/drivers/network.c`。
 <!-- 过时：`kernel/cmd/` 保存内核命令实现。 -->
 - `kernel/cmd/`：系统调用到用户态 `apps/psh` 命令模式的适配层。不得恢复旧内核 `if/else` 命令解析器及其 `chat`、`netgobang` 实现；构造执行请求时 `argv[0]` 必须是实际 shell `psh.bin`。
 - 用户可见的磁盘重挂载命令唯一名称是 `remount_drive`，接受单字母盘符或常规 `X:` 写法并在内部规范化为大写盘符；仓库调用方统一使用 `remount_drive X:`，不得保留 `rdrv` 别名。
@@ -133,12 +133,13 @@ python3 scripts/kernel-perf.py \
 
 ### 网络栈
 
-- 网络协议的唯一实现是 `kernel/net/third_party/lwip`（上游 lwIP 2.2.1）加 `kernel/net/net_stack.c`。禁止恢复手写 ARP、IPv4、ICMP、UDP、TCP、DHCP、DNS、HTTP、FTP 或第二套协议状态机。
-- 当前端口使用 `NO_SYS=1` 和 lwIP raw API：网卡 IRQ 交付完整、无 FCS 的以太网帧，`net_stack_tick()` 在时钟中断中驱动 lwIP timeout。调用 raw API 的普通内核路径必须以 `irq_save()`/`irq_restore()` 串行化，不能引入未受保护的 netconn/socket 线程层。
+- 网络协议的唯一实现是 `kernel/net/third_party/lwip`（上游 lwIP 2.2.1）加 `kernel/net/net_stack.c`/`socket.c`。禁止恢复手写 ARP、IPv4、ICMP、UDP、TCP、DHCP、DNS、HTTP、FTP 或第二套协议状态机。
+- 当前端口使用 `NO_SYS=1` 和 lwIP raw API：网卡 IRQ 交付完整、无 FCS 的以太网帧，`net_stack_tick()` 在时钟中断中驱动 lwIP timeout，`socket.c` 只把 raw callback 封装为用户端点。调用 raw API 的普通内核路径必须以 `irq_save()`/`irq_restore()` 串行化，不能引入未受保护的 netconn/socket 线程层。
 - `kernel/drivers/network.c` 只负责选择链路驱动；PCnet/RTL8139 只负责 PCI、DMA、寄存器和 IRQ。驱动必须报告实际接收长度，并接收不含 FCS 的发送帧；不得恢复 `Card_Recv_Handler`、`netcard_send`、IP 缓存、DHCP 忙等或驱动内协议解析。
-- 用户态 `Socket_*` 是以 task group 为所有者的整数句柄，不是内核指针。它们通过统一 `SYSCALL_NETWORK`（`int 0x36`）分派；send/recv 必须验证用户地址和长度，任务组退出必须释放自己的 handle。不得恢复 DPL3 的 `int 0x30` 网络入口。
+- 用户态网络 ABI 是 `apps/include/socket.h` 的 `socket`/`bind`/`connect`/`listen`/`accept`/`sendto`/`recvfrom`/`socket_close`，句柄按 task group 所有而不是内核指针，并通过 `SYSCALL_SOCKET`（`int 0x36`，编号 `0x5e`）的定长 request 分派；内核与 `libp` 必须同步更新 request 布局、操作枚举和错误码。`AF_INET` 支持 TCP stream、UDP datagram 与 `IPPROTO_ICMP` raw socket；`AF_LOCAL` 支持全局命名的 stream/datagram 端点，accept 出来的服务端句柄归监听者 task group。不得恢复 `Socket_*`、独立 `ping` syscall、DPL3 的 `int 0x30` 网络入口或跨层暴露 PCB 指针。
+- socket 阻塞调用通过 `WAIT_REASON_SOCKET` 的 waiter 和 lwIP callback 唤醒，连接超时由 `net_socket_tick()` 检查；不得退化为反复 `task_next()` 轮询。RAW 接收必须复制完整 IPv4 packet 后再让 lwIP 继续处理，不能借用会被协议栈改写的 pbuf。
 - `network=enable` 仅启动异步 lwIP DHCP；地址可在租约完成前为零，不能把网络启动改回阻塞式 DHCP 或持久化旧的 `ip/gateway/submask/dns` 环境变量。
-- 网络验证优先使用 `nettest.bin`：它等待 DHCP 并 ping QEMU user-net 网关；传入可选 TCP echo 端口时再验证 connect/send/recv。自动验证时临时修改 `sys.cfg` 与 `init.mst`，结束后立即恢复，仍禁止 `sendkey`。
+- 网络验证优先使用 `nettest.bin`：它先验证跨进程 `AF_LOCAL` stream、`AF_LOCAL` datagram，再等待 DHCP、向 QEMU user-net 网关发送 `AF_INET` UDP datagram 并 ping 该网关；传入可选 TCP echo 端口时再验证 connect/send/recv。`ping.bin <host-or-ipv4> [count]` 通过 `getaddrinfo` 使用 lwIP DNS，适合额外验证域名解析与 raw ICMP。自动验证时临时修改 `sys.cfg` 与 `init.mst`，结束后立即恢复，仍禁止 `sendkey`。
 
 ### 系统调用、IPC 和 RPC
 

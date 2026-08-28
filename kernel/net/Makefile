@@ -32,12 +32,15 @@ lwip_core_objects := \
 	$(out_path_src)lwip_ipv4_ip4_frag.o \
 	$(out_path_src)lwip_netif_ethernet.o
 
-obj_net := $(out_path_src)net_stack.o $(out_path_src)lwip_port.o \
+obj_net := $(out_path_src)net_stack.o $(out_path_src)socket.o $(out_path_src)lwip_port.o \
 	$(lwip_core_objects)
 
 default: $(obj_net)
 
 $(out_path_src)net_stack.o: net_stack.c Makefile
+	gcc $(lwip_cflags) -c $< -o $@
+
+$(out_path_src)socket.o: socket.c Makefile
 	gcc $(lwip_cflags) -c $< -o $@
 
 $(out_path_src)lwip_port.o: lwip_port/lwip_port.c Makefile

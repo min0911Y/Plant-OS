@@ -349,8 +349,9 @@ static void task_clear_external_refs(mtask *task) {
   timer_cancel_for_task(task);
   high_text_cursor_task_exited(task);
   task_clear_ipc_refs(task);
+  net_socket_cancel_waits(task->tid, task->generation);
   if (task->kind == TASK_PROCESS && task->tid == task->tgid) {
-    net_task_cleanup(task->tgid);
+    net_socket_task_cleanup(task->tgid);
   }
   sb16_remove_task(task);
   vdisk_remove_task(task->tid);

@@ -29,6 +29,7 @@ default : Makefile
 	make -r -C Maze
 	make -r -C clock
 	make -r -C nettest
+	make -r -C ping
 	make -r -C editor
 	make -r -C lua
 	make -r -C ttf

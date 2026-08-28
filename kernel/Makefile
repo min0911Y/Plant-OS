@@ -35,7 +35,7 @@ OBJS_BOOTPACK = $(OUTPATH)kernelc.o $(OUTPATH)screen.o $(OUTPATH)command.o $(OUT
 				$(OUTPATH)pcnet.o $(OUTPATH)ipc.o $(OUTPATH)tty.o $(OUTPATH)page.o $(OUTPATH)serial.o $(OUTPATH)log.o \
 				$(OUTPATH)path.o $(OUTPATH)Draw.o $(OUTPATH)HighTextMode.o $(OUTPATH)pic.o $(OUTPATH)bmp.o $(OUTPATH)sb16.o \
 				$(OUTPATH)lock.o $(OUTPATH)elf.o $(OUTPATH)driver.o $(OUTPATH)md5.o $(OUTPATH)libcpp.o $(OUTPATH)rand.o \
-				$(OUTPATH)time.o $(OUTPATH)net_stack.o $(OUTPATH)lwip_port.o $(OUTPATH)lwip_core_init.o $(OUTPATH)lwip_core_def.o \
+				$(OUTPATH)time.o $(OUTPATH)net_stack.o $(OUTPATH)socket.o $(OUTPATH)lwip_port.o $(OUTPATH)lwip_core_init.o $(OUTPATH)lwip_core_def.o \
 				$(OUTPATH)lwip_core_dns.o $(OUTPATH)lwip_core_inet_chksum.o $(OUTPATH)lwip_core_ip.o $(OUTPATH)lwip_core_mem.o \
 				$(OUTPATH)lwip_core_memp.o $(OUTPATH)lwip_core_netif.o $(OUTPATH)lwip_core_pbuf.o $(OUTPATH)lwip_core_raw.o \
 				$(OUTPATH)lwip_core_sys.o $(OUTPATH)lwip_core_tcp.o $(OUTPATH)lwip_core_tcp_in.o $(OUTPATH)lwip_core_tcp_out.o \
@@ -139,6 +139,7 @@ Mimg : make_dir $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $
 		mcopy -i ./disk.img $(APPSOUTPATH)guitest.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)exc_test.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)lua.bin ::
+		mcopy -i ./disk.img $(APPSOUTPATH)ping.bin ::
 
 		mcopy -i ./disk.img $(RESPATH)init.mst ::
 
@@ -180,6 +181,7 @@ Mimg : make_dir $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $
 		mcopy -i boot.img $(APPSOUTPATH)my_basic.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)copydir.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)nettest.bin ::
+		mcopy -i boot.img $(APPSOUTPATH)ping.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)dktest.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)rpctest.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)guitest.bin ::
@@ -274,7 +276,7 @@ Mimg : make_dir $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $
 		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/limits.h ::/tcc/include
 		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/locale.h ::/tcc/include
 		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/math.h ::/tcc/include
-		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/net.h ::/tcc/include
+		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/socket.h ::/tcc/include
 		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/rand.h ::/tcc/include
 		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/setjmp.h ::/tcc/include
 		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/stdarg.h ::/tcc/include

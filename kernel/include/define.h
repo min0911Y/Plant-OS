@@ -210,7 +210,8 @@ enum WAIT_REASON {
   WAIT_REASON_DISK,
   WAIT_REASON_TIMER,
   WAIT_REASON_TASK_GROUP_LOCK,
-  WAIT_REASON_IPC
+  WAIT_REASON_IPC,
+  WAIT_REASON_SOCKET
 };
 typedef struct mtask {
   arch_task_context_t *context;

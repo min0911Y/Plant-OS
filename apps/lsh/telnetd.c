@@ -10,7 +10,9 @@
  */
 #include "telnetd.h"
 
-#include <net.h>
+#include <socket.h>
+#include <stdio.h>
+#include <string.h>
 
 #include "shell.h"
 #include "shell_cmd_group.h"
@@ -27,7 +29,7 @@ static NewThread newThread;
 /**
  * @brief telnet server socket
  */
-static socket_t telnetdSocket;
+static socket_t telnetdSocket = -1;
 
 /**
  * @brief telent server shell
@@ -41,7 +43,7 @@ static int telnetdPort = TELNETD_DEFAULT_SERVER_PORT;
 
 static void telnetdServer(void);
 static void telnetdConnection(int client);
-static void telentdWrite(char *data, short len);
+static signed short telentdWrite(char *data, unsigned short len);
 
 /**
  * @brief telnet 协议命令
@@ -66,14 +68,13 @@ int telentdInit(NewThread newThreadInterface) {
  *
  * @return int 0 启动telent成功 -1 启动失败
  */
-#define A(x) (x >> 24)
-#define B(x) ((x >> 16) & 0xff)
-#define C(x) ((x >> 8) & 0xff)
-#define D(x) (x & 0xff)
 int telnetdStart() {
-  unsigned IP;
-  IP = GetIP();
-  printf("%d.%d.%d.%d\n", A(IP), B(IP), C(IP), D(IP));
+  struct in_addr address;
+  if (socket_interface_address(&address) == 0) {
+    uint32_t value = ntohl(address.s_addr);
+    printf("%d.%d.%d.%d\n", value >> 24, (value >> 16) & 0xff,
+           (value >> 8) & 0xff, value & 0xff);
+  }
   telnetdServer();
 
   return 0;
@@ -84,12 +85,10 @@ int telnetdStart() {
  *
  */
 void telnetdStop() {
-  //   Socket_Free(telnetdSocket);
-  //   if (telnetdShell != NULL) {
-  //     Socket_Free(
-  //         (socket_t)shellCompanionGet(telnetdShell,
-  //         SHELL_COMPANION_ID_TELNETD));
-  //   }
+  if (telnetdSocket >= 0) {
+    socket_close(telnetdSocket);
+    telnetdSocket = -1;
+  }
 }
 
 /**
@@ -106,18 +105,22 @@ void telnetdSetPort(int port) { telnetdPort = port; }
  *
  */
 static void telnetdServer(void) {
-  telnetdSocket = Socket_Alloc(TCP_PROTOCOL);
-  Socket_Init(telnetdSocket, 0, 0, GetIP(), telnetdPort);
-  if (1) {
-    while (1) {
-      listen(telnetdSocket);
-      uint32_t client = telnetdSocket;
-      telnetdConnection(client);
-      // newThread(telnetdConnection, (void *)client);
-      return;
-    }
+  struct sockaddr_in address;
+  memset(&address, 0, sizeof(address));
+  address.sin_family = AF_INET;
+  address.sin_port = htons((uint16_t)telnetdPort);
+  telnetdSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  if (telnetdSocket < 0 ||
+      bind(telnetdSocket, (const struct sockaddr *)&address,
+           sizeof(address)) != 0 ||
+      listen(telnetdSocket, 1) != 0) {
+    telnetdStop();
+    return;
   }
-  //   close(telnetdSocket);
+  int client = accept(telnetdSocket, NULL, NULL);
+  if (client >= 0) {
+    telnetdConnection(client);
+  }
 }
 
 /**
@@ -127,15 +130,14 @@ static void telnetdServer(void) {
  *
  */
 extern Shell shell;
-unsigned short userShellRead1(char *data, unsigned short len) {
+signed short userShellRead1(char *data, unsigned short len) {
   int client = (int)shellCompanionGet(telnetdShell, SHELL_COMPANION_ID_TELNETD);
-  unsigned short length = len;
-  int l = Socket_Recv(client, data, len);
-  if (!l) {
-    Socket_Free(client);
-    exit(0);
+  int l = recv(client, data, len, 0);
+  if (l <= 0) {
+    socket_close(client);
+    return 0;
   }
-  return len;
+  return (signed short)l;
 }
 static void telnetdConnection(int client) {
   // for(;;);
@@ -145,8 +147,8 @@ static void telnetdConnection(int client) {
   telnetdShell = SHELL_MALLOC(sizeof(Shell));
   char shellPathBuffer[512] = "/";
   /** 处理 telent 协议 */
-  Socket_Send(client, telnetCmd, 9);
-  Socket_Recv(client, data, 6);
+  send(client, telnetCmd, 9, 0);
+  recv(client, data, 6, 0);
 
   shell.write = telentdWrite;
   shell.read = userShellRead1;
@@ -160,11 +162,12 @@ static void telnetdConnection(int client) {
  * @param len 数据长度
  *
  */
-static void telentdWrite(char *data, short len) {
+static signed short telentdWrite(char *data, unsigned short len) {
   int client = (int)shellCompanionGet(telnetdShell, SHELL_COMPANION_ID_TELNETD);
-  if (client != 0) {
-    Socket_Send(client, data, len);
+  if (client == 0) {
+    return -1;
   }
+  return (signed short)send(client, data, len, 0);
 }
 
 ShellCommand telnetdGroup[] = {

@@ -288,7 +288,7 @@ enum syscall_id {
   SYSCALL_MODULE_UNLOAD = 0x5b,
   SYSCALL_MODULE_LIST = 0x5c,
   SYSCALL_IPC = 0x5d,
-  SYSCALL_NETWORK = 0x5e,
+  SYSCALL_SOCKET = 0x5e,
   SYSCALL_COUNT,
 };
 
@@ -1225,57 +1225,273 @@ static void syscall_ipc(x86_interrupt_frame_t *frame) {
   frame->eax = ipc_syscall_dispatch(frame->ebx, frame->ecx, frame->edx);
 }
 
-static void syscall_network(x86_interrupt_frame_t *frame) {
-  uint32_t owner_group = current_task()->tgid;
-  switch (frame->ebx) {
-  case NET_SYSCALL_OPEN:
-    frame->eax = frame->ecx > 0xffu
-                     ? -1
-                     : net_socket_open(owner_group, (uint8_t)frame->ecx);
-    break;
-  case NET_SYSCALL_CLOSE:
-    frame->eax = net_socket_close(owner_group, (int)frame->ecx);
-    break;
-  case NET_SYSCALL_CONFIGURE:
-    frame->eax = frame->esi > 0xffffu || frame->ebp > 0xffffu
-                     ? -1
-                     : net_socket_configure(
-                           owner_group, (int)frame->ecx, frame->edx,
-                           (uint16_t)frame->esi, frame->edi,
-                           (uint16_t)frame->ebp);
-    break;
-  case NET_SYSCALL_SEND:
-    frame->eax =
-        frame->esi > 0xffffu || !user_range_ok(frame->edx, frame->esi)
-            ? -1
-            : net_socket_send(owner_group, (int)frame->ecx,
-                              (const void *)(uintptr_t)frame->edx,
-                              frame->esi);
-    break;
-  case NET_SYSCALL_RECV:
-    frame->eax =
-        frame->esi == 0 || frame->esi > 0xffffu ||
-                !user_range_ok(frame->edx, frame->esi)
-            ? -1
-            : net_socket_recv(owner_group, (int)frame->ecx,
-                              (void *)(uintptr_t)frame->edx, frame->esi);
-    break;
-  case NET_SYSCALL_CONNECT:
-    frame->eax = net_socket_connect(owner_group, (int)frame->ecx);
-    break;
-  case NET_SYSCALL_LISTEN:
-    frame->eax = net_socket_listen(owner_group, (int)frame->ecx);
-    break;
-  case NET_SYSCALL_GET_IP:
-    frame->eax = net_stack_ip();
-    break;
-  case NET_SYSCALL_PING:
-    frame->eax = net_stack_ping(frame->ecx);
-    break;
-  default:
-    frame->eax = -1;
-    break;
+typedef struct {
+  uint16_t family;
+  uint8_t data[14];
+} socket_user_sockaddr_t;
+
+typedef struct {
+  uint16_t family;
+  uint16_t port;
+  uint32_t address;
+  uint8_t zero[8];
+} socket_user_sockaddr_in_t;
+
+typedef struct {
+  uint16_t family;
+  char path[NET_SOCKET_LOCAL_PATH_MAX];
+} socket_user_sockaddr_un_t;
+
+static int socket_parse_user_address(uint32_t pointer, uint32_t length,
+                                     net_socket_address_t *address) {
+  if (address == NULL || length < sizeof(uint16_t) ||
+      !user_range_ok(pointer, length)) {
+    return NET_SOCKET_ERR_INVAL;
   }
+
+  const socket_user_sockaddr_t *source =
+      (const socket_user_sockaddr_t *)(uintptr_t)pointer;
+  if (source->family == NET_SOCKET_AF_INET) {
+    if (length < sizeof(socket_user_sockaddr_in_t)) {
+      return NET_SOCKET_ERR_INVAL;
+    }
+    const socket_user_sockaddr_in_t *inet =
+        (const socket_user_sockaddr_in_t *)(uintptr_t)pointer;
+    memset(address, 0, sizeof(*address));
+    address->family = NET_SOCKET_AF_INET;
+    address->value.inet.address = inet->address;
+    address->value.inet.port = inet->port;
+    return 0;
+  }
+  if (source->family != NET_SOCKET_AF_LOCAL) {
+    return NET_SOCKET_ERR_INVAL;
+  }
+
+  const socket_user_sockaddr_un_t *local =
+      (const socket_user_sockaddr_un_t *)(uintptr_t)pointer;
+  uint32_t capacity = length - sizeof(local->family);
+  if (capacity > NET_SOCKET_LOCAL_PATH_MAX) {
+    capacity = NET_SOCKET_LOCAL_PATH_MAX;
+  }
+  uint32_t path_length = 0;
+  while (path_length < capacity && local->path[path_length] != '\0') {
+    path_length++;
+  }
+  if (path_length == capacity) {
+    return NET_SOCKET_ERR_INVAL;
+  }
+  memset(address, 0, sizeof(*address));
+  address->family = NET_SOCKET_AF_LOCAL;
+  address->value.local.length = (uint16_t)path_length;
+  memcpy(address->value.local.path, local->path, path_length);
+  return 0;
+}
+
+static int socket_write_user_address(net_socket_syscall_request_t *request,
+                                     const net_socket_address_t *address) {
+  if (request == NULL || address == NULL) {
+    return NET_SOCKET_ERR_INVAL;
+  }
+  uint32_t required = address->family == NET_SOCKET_AF_INET
+                          ? sizeof(socket_user_sockaddr_in_t)
+                          : sizeof(socket_user_sockaddr_un_t);
+  if (request->address == 0) {
+    request->address_length = required;
+    return 0;
+  }
+  if (request->address_length < required ||
+      !user_range_ok(request->address, required)) {
+    return NET_SOCKET_ERR_INVAL;
+  }
+
+  if (address->family == NET_SOCKET_AF_INET) {
+    socket_user_sockaddr_in_t *inet =
+        (socket_user_sockaddr_in_t *)(uintptr_t)request->address;
+    memset(inet, 0, sizeof(*inet));
+    inet->family = NET_SOCKET_AF_INET;
+    inet->port = address->value.inet.port;
+    inet->address = address->value.inet.address;
+  } else if (address->family == NET_SOCKET_AF_LOCAL) {
+    socket_user_sockaddr_un_t *local =
+        (socket_user_sockaddr_un_t *)(uintptr_t)request->address;
+    memset(local, 0, sizeof(*local));
+    local->family = NET_SOCKET_AF_LOCAL;
+    memcpy(local->path, address->value.local.path,
+           address->value.local.length);
+  } else {
+    return NET_SOCKET_ERR_INVAL;
+  }
+  request->address_length = required;
+  return 0;
+}
+
+typedef int (*socket_syscall_handler_t)(uint32_t owner_group,
+                                        net_socket_syscall_request_t *request);
+
+static int socket_syscall_create(uint32_t owner_group,
+                                 net_socket_syscall_request_t *request) {
+  return net_socket_create(owner_group, request->domain, request->type,
+                           request->protocol);
+}
+
+static int socket_syscall_close(uint32_t owner_group,
+                                net_socket_syscall_request_t *request) {
+  return net_socket_close(owner_group, request->socket);
+}
+
+static int socket_syscall_bind(uint32_t owner_group,
+                               net_socket_syscall_request_t *request) {
+  net_socket_address_t address;
+  int result = socket_parse_user_address(request->address,
+                                         request->address_length, &address);
+  return result == 0 ? net_socket_bind(owner_group, request->socket, &address)
+                     : result;
+}
+
+static int socket_syscall_connect(uint32_t owner_group,
+                                  net_socket_syscall_request_t *request) {
+  net_socket_address_t address;
+  int result = socket_parse_user_address(request->address,
+                                         request->address_length, &address);
+  return result == 0 ? net_socket_connect(owner_group, request->socket, &address)
+                     : result;
+}
+
+static int socket_syscall_listen(uint32_t owner_group,
+                                 net_socket_syscall_request_t *request) {
+  return net_socket_listen(owner_group, request->socket, request->backlog);
+}
+
+static int socket_syscall_accept(uint32_t owner_group,
+                                 net_socket_syscall_request_t *request) {
+  net_socket_address_t address;
+  int accepted = net_socket_accept(owner_group, request->socket, &address);
+  if (accepted < 0) {
+    return accepted;
+  }
+  int result = socket_write_user_address(request, &address);
+  if (result != 0) {
+    (void)net_socket_close(owner_group, accepted);
+    return result;
+  }
+  return accepted;
+}
+
+static int socket_syscall_sendto(uint32_t owner_group,
+                                 net_socket_syscall_request_t *request) {
+  if (request->length != 0 &&
+      !user_range_ok(request->buffer, request->length)) {
+    return NET_SOCKET_ERR_INVAL;
+  }
+  net_socket_address_t address;
+  const net_socket_address_t *destination = NULL;
+  if (request->address != 0 || request->address_length != 0) {
+    int result = socket_parse_user_address(request->address,
+                                           request->address_length, &address);
+    if (result != 0) {
+      return result;
+    }
+    destination = &address;
+  }
+  return net_socket_sendto(owner_group, request->socket,
+                           (const void *)(uintptr_t)request->buffer,
+                           request->length, request->flags, destination);
+}
+
+static int socket_syscall_recvfrom(uint32_t owner_group,
+                                   net_socket_syscall_request_t *request) {
+  if (request->length != 0 &&
+      !user_range_ok(request->buffer, request->length)) {
+    return NET_SOCKET_ERR_INVAL;
+  }
+  if (request->address == 0 && request->address_length != 0) {
+    return NET_SOCKET_ERR_INVAL;
+  }
+  net_socket_address_t address;
+  net_socket_address_t *source = request->address == 0 ? NULL : &address;
+  int received = net_socket_recvfrom(owner_group, request->socket,
+                                     (void *)(uintptr_t)request->buffer,
+                                     request->length, request->flags, source);
+  if (received < 0 || source == NULL) {
+    return received;
+  }
+  int result = socket_write_user_address(request, source);
+  return result == 0 ? received : result;
+}
+
+static int socket_syscall_getname(uint32_t owner_group,
+                                  net_socket_syscall_request_t *request,
+                                  bool peer) {
+  net_socket_address_t address;
+  int result = net_socket_getname(owner_group, request->socket, peer, &address);
+  return result == 0 ? socket_write_user_address(request, &address) : result;
+}
+
+static int socket_syscall_getsockname(uint32_t owner_group,
+                                      net_socket_syscall_request_t *request) {
+  return socket_syscall_getname(owner_group, request, false);
+}
+
+static int socket_syscall_getpeername(uint32_t owner_group,
+                                      net_socket_syscall_request_t *request) {
+  return socket_syscall_getname(owner_group, request, true);
+}
+
+static int socket_syscall_resolve(uint32_t owner_group,
+                                  net_socket_syscall_request_t *request) {
+  (void)owner_group;
+  if (request->length == 0 || request->length > 255 ||
+      !user_range_ok(request->buffer, request->length) ||
+      !user_range_ok(request->address, sizeof(uint32_t)) ||
+      ((const char *)(uintptr_t)request->buffer)[request->length - 1] != '\0') {
+    return NET_SOCKET_ERR_INVAL;
+  }
+  return net_socket_resolve((const char *)(uintptr_t)request->buffer,
+                            request->length,
+                            (uint32_t *)(uintptr_t)request->address);
+}
+
+static int socket_syscall_interface_address(
+    uint32_t owner_group, net_socket_syscall_request_t *request) {
+  (void)owner_group;
+  if (!user_range_ok(request->address, sizeof(uint32_t))) {
+    return NET_SOCKET_ERR_INVAL;
+  }
+  uint32_t address = net_stack_ipv4();
+  if (address == 0) {
+    return NET_SOCKET_ERR_AGAIN;
+  }
+  *(uint32_t *)(uintptr_t)request->address = address;
+  return 0;
+}
+
+static const socket_syscall_handler_t
+    socket_syscall_handlers[NET_SOCKET_SYSCALL_COUNT] = {
+        [NET_SOCKET_SYSCALL_CREATE] = socket_syscall_create,
+        [NET_SOCKET_SYSCALL_CLOSE] = socket_syscall_close,
+        [NET_SOCKET_SYSCALL_BIND] = socket_syscall_bind,
+        [NET_SOCKET_SYSCALL_CONNECT] = socket_syscall_connect,
+        [NET_SOCKET_SYSCALL_LISTEN] = socket_syscall_listen,
+        [NET_SOCKET_SYSCALL_ACCEPT] = socket_syscall_accept,
+        [NET_SOCKET_SYSCALL_SENDTO] = socket_syscall_sendto,
+        [NET_SOCKET_SYSCALL_RECVFROM] = socket_syscall_recvfrom,
+        [NET_SOCKET_SYSCALL_GETSOCKNAME] = socket_syscall_getsockname,
+        [NET_SOCKET_SYSCALL_GETPEERNAME] = socket_syscall_getpeername,
+        [NET_SOCKET_SYSCALL_RESOLVE] = socket_syscall_resolve,
+        [NET_SOCKET_SYSCALL_INTERFACE_ADDRESS] = socket_syscall_interface_address,
+};
+
+static void syscall_socket(x86_interrupt_frame_t *frame) {
+  if (frame->ebx >= NET_SOCKET_SYSCALL_COUNT ||
+      socket_syscall_handlers[frame->ebx] == NULL ||
+      !user_range_ok(frame->ecx, sizeof(net_socket_syscall_request_t))) {
+    frame->eax = NET_SOCKET_ERR_INVAL;
+    return;
+  }
+  net_socket_syscall_request_t *request =
+      (net_socket_syscall_request_t *)(uintptr_t)frame->ecx;
+  frame->eax = socket_syscall_handlers[frame->ebx](current_task()->tgid,
+                                                    request);
 }
 
 static const syscall_handler_t syscall_handlers[SYSCALL_COUNT] = {
@@ -1360,7 +1576,7 @@ static const syscall_handler_t syscall_handlers[SYSCALL_COUNT] = {
     [SYSCALL_MODULE_UNLOAD] = syscall_module,
     [SYSCALL_MODULE_LIST] = syscall_module,
     [SYSCALL_IPC] = syscall_ipc,
-    [SYSCALL_NETWORK] = syscall_network,
+    [SYSCALL_SOCKET] = syscall_socket,
 };
 
 void x86_syscall_dispatch(x86_interrupt_frame_t *frame) {

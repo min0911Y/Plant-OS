@@ -2,10 +2,10 @@
 #include <syscall.h>
 #include <stdlib.h>
 #include <string.h>
-#include <net.h>
+#include <socket.h>
 #include <arg.h>
 #include <time.h>
-static socket_t socket;
+static socket_t ng_socket;
 static unsigned int ng_size;      // 网卡发来的数据包的大小
 static unsigned char* ng_buffer;  // 数据将会保存在这里
 static int now; // 谁先手（值为1对面先手，0的话自己先手）
@@ -39,8 +39,8 @@ static void NETGOBANG_OnClick() {
 
 int SelRoom() {
   unsigned char str[100];
-  Socket_Send(socket, (uint8_t *)"RMLS", 5);
-  Socket_Recv(socket, ng_buffer, 4096);
+  send(ng_socket, "RMLS", 5, 0);
+  recv(ng_socket, ng_buffer, 4096, 0);
   strcpy((char *)str, (char *)ng_buffer);
   int len = strlen((char *)str);
   for (int i = 0, j = 0; i < len; i++) {
@@ -126,14 +126,14 @@ void FS2() {  // 根据ng_buffer获取对方的x，y信息
 }
 void dual() {
   system("cls");
-  Socket_Send(socket, (uint8_t *)"R", 2);
+  send(ng_socket, "R", 2, 0);
   printf("Wait to ready.\n");
-  Socket_Recv(socket, ng_buffer, 4096);
+  recv(ng_socket, ng_buffer, 4096, 0);
   if (now) {
     while (1) {
       ViewMap();
       printf("Waiting...");
-      Socket_Recv(socket, ng_buffer, 4096);
+      recv(ng_socket, ng_buffer, 4096, 0);
       goto_xy(0, 19);
       printf("Next!                         ");
       if (*ng_buffer == 'W') {  // 服务器告诉我们，已经分出胜负了
@@ -144,8 +144,8 @@ void dual() {
         int uid = strtol(suid, NULL, 10);
         char ss[50];
         sprintf(ss, "GETPL %d", uid);
-        Socket_Send(socket, (uint8_t *)ss, strlen(ss) + 1);
-        Socket_Recv(socket, ng_buffer, 4096);
+        send(ng_socket, ss, strlen(ss) + 1, 0);
+        recv(ng_socket, ng_buffer, 4096, 0);
         char name[50];
         get_arg(name, (char *)ng_buffer, 0);
         printf("Winner is %s(UID:%d)\n", name, uid);
@@ -156,7 +156,7 @@ void dual() {
       RE:
         goto_xy(0, 19);
         printf("Waiting...");
-        Socket_Recv(socket, ng_buffer, 4096);
+        recv(ng_socket, ng_buffer, 4096, 0);
         if (*ng_buffer == 'W') {
           system("cls");
           // printf("%s\n", ng_buffer);
@@ -167,8 +167,8 @@ void dual() {
           int uid = strtol(suid, NULL, 10);
           char ss[50];
           sprintf(ss, "GETPL %d", uid);
-          Socket_Send(socket, (uint8_t *)ss, strlen(ss) + 1);
-          Socket_Recv(socket, ng_buffer, 4096);
+          send(ng_socket, ss, strlen(ss) + 1, 0);
+          recv(ng_socket, ng_buffer, 4096, 0);
           char name[50];
           get_arg(name, (char *)ng_buffer, 0);
           printf("Winner is %s(UID:%d)\n", name, uid);
@@ -192,7 +192,7 @@ void dual() {
       char s1[50]; // 发送缓冲区
        // size置0
       sprintf(s1, "U %d %d", x, y); // U命令，告诉服务器我已落子
-      Socket_Send(socket, (uint8_t *)s1, strlen(s1) + 1); // 调用Socket API发送
+      send(ng_socket, s1, strlen(s1) + 1, 0); // 调用Socket API发送
     }
   } else {
     while (1) {
@@ -203,10 +203,10 @@ void dual() {
       FS(&x, &y);
       char s1[50];
       sprintf(s1, "U %d %d", x, y);
-      Socket_Send(socket, (uint8_t *)s1, strlen(s1) + 1);
+      send(ng_socket, s1, strlen(s1) + 1, 0);
       ViewMap();
       printf("Waiting...");
-      Socket_Recv(socket, ng_buffer, 4096);
+      recv(ng_socket, ng_buffer, 4096, 0);
       goto_xy(0, 19);
       printf("Next!                         ");
       if (*ng_buffer == 'W') {
@@ -217,8 +217,8 @@ void dual() {
         int uid = strtol(suid, NULL, 10);
         char ss[50];
         sprintf(ss, "GETPL %d", uid);
-        Socket_Send(socket, (uint8_t *)ss, strlen(ss) + 1);
-        Socket_Recv(socket, ng_buffer, 4096);
+        send(ng_socket, ss, strlen(ss) + 1, 0);
+        recv(ng_socket, ng_buffer, 4096, 0);
         char name[50];
         get_arg(name, (char *)ng_buffer, 0);
         printf("Winner is %s(UID:%d)\n", name, uid);
@@ -227,7 +227,7 @@ void dual() {
         return;
       } else if (*ng_buffer != 'Y') {
       RE1:
-        Socket_Recv(socket, ng_buffer, 4096);
+        recv(ng_socket, ng_buffer, 4096, 0);
         goto_xy(0, 19);
         printf("Waiting...");
         if (*ng_buffer == 'W') {
@@ -238,8 +238,8 @@ void dual() {
           int uid = strtol(suid, NULL, 10);
           char ss[50];
           sprintf(ss, "GETPL %d", uid);
-          Socket_Send(socket, (uint8_t *)ss, strlen(ss) + 1);
-          Socket_Recv(socket, ng_buffer, 4096);
+          send(ng_socket, ss, strlen(ss) + 1, 0);
+          recv(ng_socket, ng_buffer, 4096, 0);
           char name[50] = {0};
           get_arg(name, (char *)ng_buffer, 0);
           printf("Winner is %s(UID:%d)\n", name, uid);
@@ -277,14 +277,14 @@ void switchUI() {
       scan(s1, 20);
       char s3[50];
       sprintf(s3, "CRT %s", s1);
-      Socket_Send(socket, (uint8_t *)s3, strlen(s3) + 1);
-      Socket_Recv(socket, ng_buffer, 4096);
+      send(ng_socket, s3, strlen(s3) + 1, 0);
+      recv(ng_socket, ng_buffer, 4096, 0);
       printf("Waiting player to join this room...\n");
-      Socket_Recv(socket, ng_buffer, 4096);
+      recv(ng_socket, ng_buffer, 4096, 0);
       now = 0;
       dual();
-      Socket_Send(socket, (uint8_t *)"EXIT", 5);
-      Socket_Recv(socket, ng_buffer, 4096);
+      send(ng_socket, "EXIT", 5, 0);
+      recv(ng_socket, ng_buffer, 4096, 0);
     } else if (strcmp(s, "2") == 0) {
       int rid = SelRoom();
       if (rid == -1) {
@@ -292,8 +292,8 @@ void switchUI() {
       } else {
         char s2[50];
         sprintf(s2, "IN %d", rid);
-        Socket_Send(socket, (uint8_t *)s2, strlen(s2) + 1);
-        Socket_Recv(socket, ng_buffer, 4096);
+        send(ng_socket, s2, strlen(s2) + 1, 0);
+        recv(ng_socket, ng_buffer, 4096, 0);
         if (*ng_buffer == 'E') {
           printf("Error: You can't join a room with people\n");
           system("pause");
@@ -301,11 +301,11 @@ void switchUI() {
         }
         now = 1;
         dual();
-        Socket_Send(socket, (uint8_t *)"EXIT", 5);
-        Socket_Recv(socket, ng_buffer, 4096);
+        send(ng_socket, "EXIT", 5, 0);
+        recv(ng_socket, ng_buffer, 4096, 0);
       }
     } else if (strcmp(s, "3") == 0) {
-      Socket_Free(socket);
+      socket_close(ng_socket);
       return;
     }
   }
@@ -321,21 +321,21 @@ int main(int argc, char **argv) {
   scan(str, 128);
   uint16_t port = (uint16_t)strtol(str, NULL, 10);
   printf("Connect the Server...\n");
-  if (ping(ip_) == -1) {
-    printf("The ICMP Packet is not from the ip.\n");
-    return 0;
-  }
-  socket = Socket_Alloc(TCP_PROTOCOL);
-  uint32_t ip = GetIP();
-  srand(time(NULL));
-  Socket_Init(socket, ip_, port, ip, rand());
-  if (connect(socket) == -1) {
+  struct sockaddr_in endpoint;
+  memset(&endpoint, 0, sizeof(endpoint));
+  endpoint.sin_family = AF_INET;
+  endpoint.sin_addr.s_addr = htonl(ip_);
+  endpoint.sin_port = htons(port);
+  ng_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  if (ng_socket < 0 ||
+      connect(ng_socket, (const struct sockaddr *)&endpoint,
+              sizeof(endpoint)) != 0) {
     printf("Connect the Server Failed.\n");
     return 0;
   }
   ng_buffer = malloc(4096);
-  Socket_Send(socket, (uint8_t *)"TEST", 5);
-  Socket_Recv(socket, ng_buffer, 4096);
+  send(ng_socket, "TEST", 5, 0);
+  recv(ng_socket, ng_buffer, 4096, 0);
   if (strcmp((char *)ng_buffer, "OK") != 0) {
     printf("The Server don't support NETGOBANG.\n");
     return 0;
@@ -347,15 +347,15 @@ int main(int argc, char **argv) {
   NETGOBANG_OnClick();
   if (!mode) {
     sprintf((char *)str, "REG %s %s", usr, password);
-    Socket_Send(socket, str, strlen((char *)str) + 1);
-    Socket_Recv(socket, ng_buffer, 4096);
+    send(ng_socket, str, strlen((char *)str) + 1, 0);
+    recv(ng_socket, ng_buffer, 4096, 0);
     sprintf((char *)str, "LOG %s %s", usr, password);
-    Socket_Send(socket, str, strlen((char *)str) + 1);
-    Socket_Recv(socket, ng_buffer, 4096);
+    send(ng_socket, str, strlen((char *)str) + 1, 0);
+    recv(ng_socket, ng_buffer, 4096, 0);
   } else if (mode) {
     sprintf((char *)str, "LOG %s %s", usr, password);
-    Socket_Send(socket, str, strlen((char *)str) + 1);
-    Socket_Recv(socket, ng_buffer, 4096);
+    send(ng_socket, str, strlen((char *)str) + 1, 0);
+    recv(ng_socket, ng_buffer, 4096, 0);
   }
   switchUI();
 }
