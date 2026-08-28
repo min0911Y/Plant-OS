@@ -126,12 +126,12 @@ static bool find_in_search_path(const char *file_name, char **result) {
 static unsigned div_round_up(unsigned num, unsigned size) {
   return (num + size - 1) / size;
 }
-static void print_directory(void) {
+static int print_directory(const char *path) {
   struct finfo_block *entries;
   size_t count;
-  if (list_directory("", &entries, &count) != 0) {
+  if (list_directory(path, &entries, &count) != 0) {
     printf("Unable to list directory.\n");
-    return;
+    return 1;
   }
   for (size_t i = 0; i < count; i++) {
     if (entries[i].type == DIR) {
@@ -145,6 +145,7 @@ static void print_directory(void) {
   }
   printf("\n");
   free(entries);
+  return 0;
 }
 static void print_memory_usage(void) {
   printf("Used/Total: %u/%u\n", mem_used(), div_round_up(mem_total(), 0x1000));
@@ -177,14 +178,13 @@ struct simple_command {
 
 static const struct simple_command simple_commands[] = {
     {"cls", clear},
-    {"dir", print_directory},
     {"mem", print_memory_usage},
     {"pause", pause_shell},
     {"lsmod", list_modules},
 };
 
 static const char *const argument_commands[] = {
-    "del", "cd", "mkfile", "type", "remount_drive",
+    "dir", "del", "cd", "mkfile", "type", "remount_drive",
     "color", "mkdir", "insmod", "rmmod", "format",
 };
 
@@ -266,6 +266,13 @@ static int run_command(int argc, char **argv) {
   int result = 0;
   if (argc == 0) {
     return 1;
+  }
+  if (strcmp("dir", argv[0]) == 0) {
+    if (argc > 2) {
+      printf("dir [directory]\n");
+      return 1;
+    }
+    return print_directory(argc == 2 ? argv[1] : "");
   }
   for (unsigned i = 0; i < sizeof(simple_commands) / sizeof(simple_commands[0]);
        i++) {

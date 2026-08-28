@@ -34,7 +34,7 @@
 - `kernel/cmd/`：系统调用到用户态 `apps/psh` 命令模式的适配层。不得恢复旧内核 `if/else` 命令解析器及其 `chat`、`netgobang` 实现；构造执行请求时 `argv[0]` 必须是实际 shell `psh.bin`。
 - 用户可见的磁盘重挂载命令唯一名称是 `remount_drive`，接受单字母盘符或常规 `X:` 写法并在内部规范化为大写盘符；仓库调用方统一使用 `remount_drive X:`，不得保留 `rdrv` 别名。
 <!-- 过时：用户态 shell 及安装工具通过 `rdrv` 重挂载磁盘，并由调用方直接传递未经校验的盘符。 -->
-- `apps/psh` 中严格无参的简单内建命令（`cls`、`dir`、`mem`、`pause`、`lsmod`）通过只读命令表分派；有参命令继续按各自语义解析和校验，不要把不同参数模型硬塞进同一处理表。
+- `apps/psh` 中严格无参的简单内建命令（`cls`、`mem`、`pause`、`lsmod`）通过只读命令表分派；`dir` 独立接受零或一个目录参数，零参数传空路径枚举当前目录，有参数则直接传给 `list_directory`。有参命令继续按各自语义解析和校验，不要把不同参数模型硬塞进同一处理表。
 <!-- 过时：`apps/psh` 的所有简单无参内建命令都在主命令函数中使用连续 `if/else` 分派。 -->
 - `apps/psh -c` 直接把 `argv[2..]` 作为命令 argv 交给统一分派，不拼接后重新解析。交互输入也使用 `apps/libp/runtime_args.c` 的同一 quote/backslash-aware parser；所有内建命令校验 exact argc，外部命令通过共享的可逆 builder 生成执行命令行。
 <!-- 过时：`psh -c` 只接受一个不含空格的命令参数。 -->
@@ -160,7 +160,7 @@ python3 scripts/kernel-perf.py \
 - 顶层系统调用与 IPC 子操作使用“语义化枚举 + designated initializer 处理表”分派。固定 ABI 编号表以枚举的 `COUNT` 作为容量，保留既有编号但不保留旧的 `if/else` 分派兼容层。
 - 表处理函数应对应真实的 API 或同一职责域；不要为了减少函数体行数创建只转发一次的无意义包装。
 - 文件读取与 VFS mount/change/unmount 用户态包装必须保留并返回内核 `eax` 状态；内核、`apps/libp` 和 `apps/include/syscall.h` 的返回语义必须一致。
-- 目录枚举的用户态 API 是 `list_directory(path, finfo **entries, size_t *count)`：先查询条目数，再按容量填充；合法空目录返回成功且 `count == 0`，失败返回负状态。目录变化导致容量不足时由 `libp` 重新查询并安全重试，不得恢复固定 512 项缓冲区、尾部零哨兵或无容量的旧 `listfile` ABI。
+- 目录枚举的用户态 API 是 `list_directory(path, finfo **entries, size_t *count)`：空路径枚举当前目录，非空路径必须按当前文件系统的相对/绝对目录语义解析；先查询条目数，再按容量填充；合法空目录返回成功且 `count == 0`，失败返回负状态。目录变化导致容量不足时由 `libp` 重新查询并安全重试，不得恢复固定 512 项缓冲区、尾部零哨兵或无容量的旧 `listfile` ABI。
 <!-- 过时：`listfile(path)` 固定分配 512 个 `finfo_block`，由内核写入零名称哨兵。 -->
 - 命令行 syscall 同样使用 query + capacity；`get_command_line` 动态取得一份 mutable storage。C/C++ 启动代码共同调用 `runtime_arguments_load`，argv 指针数组动态分配并指向该 storage，main 返回后统一 destroy；不得恢复 `GetCmdline`、1024 字节 line 或 128 项/字节 argv 上限。
 <!-- 过时：C 与 C++ 启动代码分别用 `GetCmdline` 写固定 1024 缓冲，再为每个 argv 固定分配 128 字节。 -->

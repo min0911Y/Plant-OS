@@ -494,8 +494,8 @@ void file_savefat(int *fat, int clustno, int count, vfs_t *vfs) {
   Disk_Write(get_dm(vfs).Fat2Address / get_dm(vfs).SectorBytes + first_sector,
              sector_count, source, vfs->disk_number);
 }
-struct FAT_FILEINFO *file_search(char *name, struct FAT_FILEINFO *finfo,
-                                 int max) {
+static struct FAT_FILEINFO *file_search(const char *name,
+                                        struct FAT_FILEINFO *finfo, int max) {
   int i, j;
   char s[12];
   for (j = 0; j < 11; j++) {
@@ -530,8 +530,8 @@ struct FAT_FILEINFO *file_search(char *name, struct FAT_FILEINFO *finfo,
   }
   return 0; /*没有找到*/
 }
-struct FAT_FILEINFO *dict_search(char *name, struct FAT_FILEINFO *finfo,
-                                 int max) {
+static struct FAT_FILEINFO *dict_search(const char *name,
+                                        struct FAT_FILEINFO *finfo, int max) {
   int i, j;
   char s[12];
   for (j = 0; j < 11; j++) {
@@ -563,194 +563,117 @@ struct FAT_FILEINFO *dict_search(char *name, struct FAT_FILEINFO *finfo,
   }
   return 0; /*没有找到*/
 }
-struct FAT_FILEINFO *Get_File_Address(char *path1, vfs_t *vfs) {
-  if (path1 == NULL || vfs == NULL || path1[0] == '\0') {
+enum fat_path_target {
+  FAT_PATH_FILE,
+  FAT_PATH_PARENT_OR_DIRECTORY,
+  FAT_PATH_DIRECTORY,
+};
+
+static struct FAT_FILEINFO *fat_directory_for_entry(
+    vfs_t *vfs, const struct FAT_FILEINFO *entry) {
+  if (vfs == NULL || entry == NULL) {
     return NULL;
   }
-  struct FAT_FILEINFO *bmpDict = get_now_dir(vfs);
-  size_t path_length = strlen(path1);
-  if (path_length >= INT_MAX) {
+  uint32_t cluster = get_clustno(entry->clustno_high, entry->clustno_low);
+  if (cluster == 0) {
+    return get_dm(vfs).root_directory;
+  }
+  if (get_dm(vfs).directory_clustno_list == NULL ||
+      get_dm(vfs).directory_list == NULL) {
     return NULL;
   }
-  char *path = (char *)malloc(path_length + 1);
-  if (path == NULL) {
-    return NULL;
-  }
-  char *bmp = path;
-  memcpy(path, path1, path_length + 1);
-  strtoupper(path);
-  if (strncmp("/", path, 1) == 0) {
-    path += 1;
-    bmpDict = get_dm(vfs).root_directory;
-  }
-  if (path[0] == '\\' || path[0] == '/') {
-    // 跳过反斜杠和正斜杠
-    for (size_t i = 0; i < strlen(path); i++) {
-      if (path[i] != '\\' && path[i] != '/') {
-        path += i;
-        break;
-      }
+  for (int index = 1;; index++) {
+    struct List *cluster_entry =
+        FindForCount(index, get_dm(vfs).directory_clustno_list);
+    if (cluster_entry == NULL) {
+      return NULL;
+    }
+    if (cluster_entry->val == cluster) {
+      struct List *directory_entry =
+          FindForCount(index, get_dm(vfs).directory_list);
+      return directory_entry == NULL
+                 ? NULL
+                 : (struct FAT_FILEINFO *)(uintptr_t)directory_entry->val;
     }
   }
-  if (path[0] == '\0') {
-    free(bmp);
-    return NULL;
-  }
-  char *temp_name = (char *)malloc(128);
-  if (temp_name == NULL) {
-    free(bmp);
-    return NULL;
-  }
-  struct FAT_FILEINFO *finfo = get_dm(vfs).root_directory;
-  int i = 0;
-  while (1) {
-    int j;
-    size_t length = strlen(path);
-    for (j = 0; i < (int)length; i++, j++) {
-      if (j >= 127) {
-        free(temp_name);
-        free(bmp);
-        return NULL;
-      }
-      if (path[i] == '\\' || path[i] == '/') {
-        i++;
-        break;
-      }
-      temp_name[j] = path[i];
-    }
-    temp_name[j] = '\0';
-    finfo = dict_search(temp_name, bmpDict, get_directory_max(bmpDict, vfs));
-    if (finfo == 0) {
-      if (path[i] != '\0') {
-        free((void *)temp_name);
-        free((void *)bmp);
-        return 0;
-      }
-      finfo = file_search(temp_name, bmpDict, get_directory_max(bmpDict, vfs));
-      if (finfo == 0) {
-        free((void *)temp_name);
-        free((void *)bmp);
-        return 0;
-      } else {
-        goto END;
-      }
-    } else {
-      if (get_clustno(finfo->clustno_high, finfo->clustno_low) != 0) {
-        for (int count = 1;
-             FindForCount(count, get_dm(vfs).directory_clustno_list) != NULL;
-             count++) {
-          struct List *list =
-              FindForCount(count, get_dm(vfs).directory_clustno_list);
-          if (get_clustno(finfo->clustno_high, finfo->clustno_low) ==
-              list->val) {
-            list = FindForCount(count, get_dm(vfs).directory_list);
-            bmpDict = (struct FAT_FILEINFO *)list->val;
-            break;
-          }
-        }
-      } else {
-        bmpDict = get_dm(vfs).root_directory;
-      }
-      clean(temp_name, 128);
-    }
-  }
-END:
-  free((void *)temp_name);
-  free((void *)bmp);
-  return finfo;
 }
-struct FAT_FILEINFO *Get_dictaddr(char *path1, vfs_t *vfs) {
-  if (path1 == NULL || vfs == NULL) {
+
+static struct FAT_FILEINFO *fat_directory_child(vfs_t *vfs,
+                                                 struct FAT_FILEINFO *directory,
+                                                 const char *name) {
+  if (directory == NULL || name == NULL) {
     return NULL;
   }
-  struct FAT_FILEINFO *bmpDict = get_now_dir(vfs);
-  if (path1[0] == '\0') {
-    return bmpDict;
+  if (strcmp(name, ".") == 0) {
+    return directory;
   }
-  size_t path_length = strlen(path1);
-  if (path_length >= INT_MAX) {
+  if (strcmp(name, "..") == 0 && directory == get_dm(vfs).root_directory) {
+    return directory;
+  }
+  struct FAT_FILEINFO *entry =
+      dict_search(name, directory, get_directory_max(directory, vfs));
+  return entry == NULL ? NULL : fat_directory_for_entry(vfs, entry);
+}
+
+static struct FAT_FILEINFO *fat_resolve_path(vfs_t *vfs, const char *path,
+                                              enum fat_path_target target) {
+  if (vfs == NULL || path == NULL) {
     return NULL;
   }
-  char *path = (char *)malloc(path_length + 1);
-  if (path == NULL) {
+
+  struct FAT_FILEINFO *directory = get_now_dir(vfs);
+  if (directory == NULL) {
     return NULL;
   }
-  char *bmp = path;
-  memcpy(path, path1, path_length + 1);
-  strtoupper(path);
-  if (strncmp("/", path, 1) == 0) {
-    path += 1;
-    bmpDict = get_dm(vfs).root_directory;
-  }
-  if (path[0] == '\\' || path[0] == '/') {
-    // 跳过反斜杠和正斜杠
-    for (size_t i = 0; i < strlen(path); i++) {
-      if (path[i] != '\\' && path[i] != '/') {
-        path += i;
-        break;
-      }
+  const char *cursor = path;
+  if (*cursor == '/' || *cursor == '\\') {
+    directory = get_dm(vfs).root_directory;
+    while (*cursor == '/' || *cursor == '\\') {
+      cursor++;
     }
   }
-  if (path[0] == '\0') {
-    free(bmp);
-    return bmpDict;
-  }
-  char *temp_name = (char *)malloc(128);
-  if (temp_name == NULL) {
-    free(bmp);
-    return NULL;
-  }
-  struct FAT_FILEINFO *finfo;
-  int i = 0;
-  while (1) {
-    int j;
-    size_t length = strlen(path);
-    for (j = 0; i < (int)length; i++, j++) {
-      if (j >= 127) {
-        free(temp_name);
-        free(bmp);
+
+  while (*cursor != '\0') {
+    const char *component_start = cursor;
+    while (*cursor != '\0' && *cursor != '/' && *cursor != '\\') {
+      cursor++;
+    }
+    size_t component_length = (size_t)(cursor - component_start);
+    if (component_length == 0 || component_length >= 13) {
+      return NULL;
+    }
+    char component[13];
+    memcpy(component, component_start, component_length);
+    component[component_length] = '\0';
+
+    while (*cursor == '/' || *cursor == '\\') {
+      cursor++;
+    }
+    if (*cursor != '\0') {
+      directory = fat_directory_child(vfs, directory, component);
+      if (directory == NULL) {
         return NULL;
       }
-      if (path[i] == '\\' || path[i] == '/') {
-        i++;
-        break;
-      }
-      temp_name[j] = path[i];
+      continue;
     }
-    temp_name[j] = '\0';
-    finfo = dict_search(temp_name, bmpDict, get_directory_max(bmpDict, vfs));
-    if (finfo == 0) {
-      if (path[i] != 0) {
-        bmpDict = NULL;
-      }
-      goto END;
-    } else {
-      if (get_clustno(finfo->clustno_high, finfo->clustno_low) != 0) {
-        for (int count = 1;
-             FindForCount(count, get_dm(vfs).directory_clustno_list) != NULL;
-             count++) {
-          struct List *list =
-              FindForCount(count, get_dm(vfs).directory_clustno_list);
-          if (get_clustno(finfo->clustno_high, finfo->clustno_low) ==
-              list->val) {
-            list = FindForCount(count, get_dm(vfs).directory_list);
-            bmpDict = (struct FAT_FILEINFO *)list->val;
-            break;
-          }
-        }
-      } else {
-        bmpDict = get_dm(vfs).root_directory;
-      }
-      clean(temp_name, 128);
-      if (path[i] == '\0') {
-        goto END;
-      }
+
+    if (target == FAT_PATH_FILE) {
+      return file_search(component, directory,
+                         get_directory_max(directory, vfs));
     }
+    struct FAT_FILEINFO *child = fat_directory_child(vfs, directory, component);
+    return target == FAT_PATH_DIRECTORY ? child
+                                        : child == NULL ? directory : child;
   }
-END:
-  free((void *)temp_name);
-  free((void *)bmp);
-  return bmpDict;
+  return target == FAT_PATH_FILE ? NULL : directory;
+}
+
+static struct FAT_FILEINFO *Get_File_Address(const char *path, vfs_t *vfs) {
+  return fat_resolve_path(vfs, path, FAT_PATH_FILE);
+}
+
+static struct FAT_FILEINFO *Get_dictaddr(const char *path, vfs_t *vfs) {
+  return fat_resolve_path(vfs, path, FAT_PATH_PARENT_OR_DIRECTORY);
 }
 struct fat_cursor_update {
   List *directory_list;
@@ -1835,14 +1758,8 @@ static void fat_free_file_list(List *files) {
 }
 List *Fat_ListFile(struct vfs_t *vfs, char *dictpath) {
   fat_op_lock(vfs);
-  if (dictpath[0] != '\0' && strcmp(dictpath, "/") != 0) {
-    struct FAT_FILEINFO *entry = Get_File_Address(dictpath, vfs);
-    if (entry == NULL || entry->type != 0x10) {
-      fat_op_unlock(vfs);
-      return NULL;
-    }
-  }
-  struct FAT_FILEINFO *finfo = Get_dictaddr(dictpath, vfs);
+  struct FAT_FILEINFO *finfo =
+      fat_resolve_path(vfs, dictpath, FAT_PATH_DIRECTORY);
   if (finfo == NULL) {
     fat_op_unlock(vfs);
     return NULL;

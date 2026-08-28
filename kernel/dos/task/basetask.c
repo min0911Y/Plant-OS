@@ -62,7 +62,7 @@ void init() {
   ide_initialize(0x1F0, 0x3F6, 0x170, 0x376, 0x000);
   printk("init ahci\n");
   ahci_init();
-  init_palette();
+  // init_palette();
   vfs_mount_all_disks();
   char system_drive = find_system_drive();
   if (system_drive == 0 || !vfs_check_mount(system_drive) ||
