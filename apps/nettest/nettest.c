@@ -36,6 +36,12 @@ static void nettest_local_address(struct sockaddr_un *address,
   strcpy(address->sun_path, path);
 }
 
+static void nettest_loopback_address(struct sockaddr_in *address) {
+  memset(address, 0, sizeof(*address));
+  address->sin_family = AF_INET;
+  address->sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+}
+
 static int nettest_local_dgram(void) {
   struct sockaddr_un server_address;
   nettest_local_address(&server_address, "nettest.dgram");
@@ -119,6 +125,109 @@ static int nettest_local_stream(void) {
   return result == 0 && waittid((unsigned)child) == 0 ? 0 : -1;
 }
 
+static int nettest_loopback_udp(void) {
+  struct sockaddr_in endpoint;
+  nettest_loopback_address(&endpoint);
+  socket_t server = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+  socket_t client = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+  int result = server >= 0 && client >= 0 &&
+                       bind(server, (const struct sockaddr *)&endpoint,
+                            sizeof(endpoint)) == 0
+                   ? 0
+                   : -1;
+  socklen_t endpoint_length = sizeof(endpoint);
+  if (result == 0 &&
+      getsockname(server, (struct sockaddr *)&endpoint, &endpoint_length) != 0) {
+    result = -1;
+  }
+  if (result == 0 &&
+      sendto(client, "loop", 4, 0, (const struct sockaddr *)&endpoint,
+             sizeof(endpoint)) != 4) {
+    result = -1;
+  }
+
+  char buffer[8];
+  struct sockaddr_storage source;
+  socklen_t source_length = sizeof(source);
+  int received = result == 0
+                     ? recvfrom(server, buffer, sizeof(buffer), 0,
+                                (struct sockaddr *)&source, &source_length)
+                     : -1;
+  const struct sockaddr_in *from = (const struct sockaddr_in *)&source;
+  if (received != 4 || memcmp(buffer, "loop", 4) != 0 ||
+      source.ss_family != AF_INET ||
+      from->sin_addr.s_addr != htonl(INADDR_LOOPBACK)) {
+    result = -1;
+  }
+  if (server >= 0) {
+    socket_close(server);
+  }
+  if (client >= 0) {
+    socket_close(client);
+  }
+  return result;
+}
+
+static int nettest_loopback_stream(void) {
+  struct sockaddr_in endpoint;
+  nettest_loopback_address(&endpoint);
+  socket_t listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  socket_t server = -1;
+  socklen_t endpoint_length = sizeof(endpoint);
+  if (listener < 0 ||
+      bind(listener, (const struct sockaddr *)&endpoint, sizeof(endpoint)) != 0 ||
+      getsockname(listener, (struct sockaddr *)&endpoint, &endpoint_length) != 0 ||
+      listen(listener, 1) != 0) {
+    if (listener >= 0) {
+      socket_close(listener);
+    }
+    return -1;
+  }
+
+  int child = fork();
+  if (child < 0) {
+    socket_close(listener);
+    return -1;
+  }
+  if (child == 0) {
+    socket_t client = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    char buffer[8];
+    int result = client >= 0 &&
+                 connect(client, (const struct sockaddr *)&endpoint,
+                         sizeof(endpoint)) == 0 &&
+                 send(client, "ping", 4, 0) == 4 &&
+                 recv(client, buffer, sizeof(buffer), 0) == 4 &&
+                 memcmp(buffer, "pong", 4) == 0
+                     ? 0
+                     : -1;
+    if (client >= 0) {
+      socket_close(client);
+    }
+    exit(result == 0 ? 0 : 1);
+  }
+
+  char buffer[8];
+  server = accept(listener, NULL, NULL);
+  int result = server >= 0 && recv(server, buffer, sizeof(buffer), 0) == 4 &&
+                       memcmp(buffer, "ping", 4) == 0 &&
+                       send(server, "pong", 4, 0) == 4
+                   ? 0
+                   : -1;
+  bool child_waited = false;
+  if (result == 0) {
+    result = waittid((unsigned)child) == 0 ? 0 : -1;
+    child_waited = true;
+  }
+  if (server >= 0) {
+    socket_close(server);
+  }
+  socket_close(listener);
+  if (!child_waited) {
+    (void)waittid((unsigned)child);
+  }
+  return result;
+}
+
 static int nettest_ping(const struct sockaddr_in *target) {
   socket_t socket_fd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
   if (socket_fd < 0) {
@@ -169,6 +278,15 @@ static int nettest_ping(const struct sockaddr_in *target) {
   return result;
 }
 
+static int nettest_loopback(void) {
+  struct sockaddr_in target;
+  nettest_loopback_address(&target);
+  return nettest_loopback_udp() == 0 && nettest_loopback_stream() == 0 &&
+                 nettest_ping(&target) == 0
+             ? 0
+             : -1;
+}
+
 static int nettest_udp(const struct sockaddr_in *target) {
   struct sockaddr_in endpoint = *target;
   endpoint.sin_port = htons(9);
@@ -210,13 +328,25 @@ static int nettest_tcp(const struct sockaddr_in *target, const char *text) {
 }
 
 int main(int argc, char **argv) {
+  if (argc == 2 && strcmp(argv[1], "loopback") == 0) {
+    if (nettest_loopback() != 0) {
+      printf("IPv4 loopback test failed.\n");
+      return 2;
+    }
+    printf("IPv4 loopback OK.\n");
+    return 0;
+  }
   if (argc != 1 && argc != 2) {
-    printf("Usage: nettest.bin [tcp-echo-port]\n");
+    printf("Usage: nettest.bin [loopback|tcp-echo-port]\n");
     return 1;
+  }
+  if (nettest_loopback() != 0) {
+    printf("IPv4 loopback test failed.\n");
+    return 2;
   }
   if (nettest_local_dgram() != 0 || nettest_local_stream() != 0) {
     printf("AF_LOCAL socket test failed.\n");
-    return 2;
+    return 3;
   }
 
   struct in_addr local;
@@ -229,7 +359,7 @@ int main(int argc, char **argv) {
   }
   if (local.s_addr == 0) {
     printf("DHCP timeout.\n");
-    return 3;
+    return 4;
   }
 
   struct sockaddr_in gateway;
@@ -238,15 +368,15 @@ int main(int argc, char **argv) {
   gateway.sin_addr.s_addr = htonl((ntohl(local.s_addr) & 0xffffff00u) | 2u);
   if (nettest_udp(&gateway) != 0) {
     printf("UDP gateway send test failed.\n");
-    return 4;
+    return 5;
   }
   if (nettest_ping(&gateway) != 0) {
     printf("ICMP gateway test failed.\n");
-    return 5;
+    return 6;
   }
   if (argc == 2 && nettest_tcp(&gateway, argv[1]) != 0) {
     printf("TCP echo test failed.\n");
-    return 6;
+    return 7;
   }
 
   uint32_t host = ntohl(local.s_addr);

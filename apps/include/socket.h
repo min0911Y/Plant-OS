@@ -48,7 +48,9 @@ enum socket_result {
   SOCKET_ERR_PROTOCOL = -10,
 };
 
+/* INADDR_* constants are host byte order; store them in s_addr with htonl(). */
 #define INADDR_ANY ((uint32_t)0)
+#define INADDR_LOOPBACK ((uint32_t)0x7f000001u)
 #define INET_ADDRSTRLEN 16
 #define UNIX_PATH_MAX 108
 

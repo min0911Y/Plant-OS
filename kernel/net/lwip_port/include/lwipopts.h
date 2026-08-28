@@ -33,6 +33,9 @@
 #define LWIP_TIMERS_CUSTOM 0
 #define LWIP_NETIF_STATUS_CALLBACK 1
 #define LWIP_NETIF_LINK_CALLBACK 0
+/* Use lwIP's native lo interface.  NO_SYS polling happens in
+ * net_stack_tick(), outside raw-API output callbacks. */
+#define LWIP_NETIF_LOOPBACK 1
 
 #define MEM_ALIGNMENT 4
 #define MEM_SIZE (64 * 1024)

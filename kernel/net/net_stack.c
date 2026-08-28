@@ -17,7 +17,8 @@
 static struct netif net_interface;
 static uint8_t net_mac[6];
 static uint8_t net_transmit_frame[NET_FRAME_BYTES];
-static bool net_started;
+static bool net_initialized;
+static bool net_interface_started;
 
 static err_t net_link_output(struct netif *interface, struct pbuf *packet) {
   (void)interface;
@@ -52,7 +53,8 @@ static void net_interface_status(struct netif *interface) {
 }
 
 static void net_receive_frame(const uint8_t *frame, uint16_t length) {
-  if (!net_started || frame == NULL || length < 14 || length > NET_FRAME_BYTES) {
+  if (!net_interface_started || frame == NULL || length < 14 ||
+      length > NET_FRAME_BYTES) {
     return;
   }
 
@@ -68,13 +70,27 @@ static void net_receive_frame(const uint8_t *frame, uint16_t length) {
   irq_restore(state);
 }
 
-bool net_stack_start(void) {
-  if (net_started) {
-    return true;
+void net_stack_initialize(void) {
+  if (net_initialized) {
+    return;
   }
 
   irq_state_t state = irq_save();
-  lwip_init();
+  if (!net_initialized) {
+    lwip_init();
+    net_initialized = true;
+  }
+  irq_restore(state);
+}
+
+bool net_stack_start(void) {
+  net_stack_initialize();
+
+  irq_state_t state = irq_save();
+  if (net_interface_started) {
+    irq_restore(state);
+    return true;
+  }
 
   const char *driver = NULL;
   if (!net_link_start(net_receive_frame, net_mac, &driver)) {
@@ -96,14 +112,13 @@ bool net_stack_start(void) {
   netif_set_status_callback(&net_interface, net_interface_status);
   netif_set_link_up(&net_interface);
   netif_set_up(&net_interface);
-  net_started = true;
   if (dhcp_start(&net_interface) != ERR_OK) {
     logk("network: DHCP start failed\n");
-    net_started = false;
     netif_remove(&net_interface);
     irq_restore(state);
     return false;
   }
+  net_interface_started = true;
   irq_restore(state);
 
   logk("network: %s ready\n", driver);
@@ -111,24 +126,25 @@ bool net_stack_start(void) {
 }
 
 void net_stack_tick(void) {
-  if (!net_started) {
+  if (!net_initialized) {
     return;
   }
   irq_state_t state = irq_save();
   sys_check_timeouts();
+  netif_poll_all();
   PBUF_CHECK_FREE_OOSEQ();
   irq_restore(state);
 }
 
 bool net_stack_ready(void) {
   irq_state_t state = irq_save();
-  bool ready = net_started;
+  bool ready = net_initialized;
   irq_restore(state);
   return ready;
 }
 
 uint32_t net_stack_ipv4(void) {
-  if (!net_started) {
+  if (!net_interface_started) {
     return 0;
   }
   irq_state_t state = irq_save();

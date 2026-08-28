@@ -82,8 +82,12 @@ typedef struct {
   } value;
 } net_socket_address_t;
 
+/* Initializes lwIP and its always-available loopback interface. */
+void net_stack_initialize(void);
+/* Starts the optional Ethernet interface and asynchronous DHCP client. */
 bool net_stack_start(void);
 void net_stack_tick(void);
+/* True after net_stack_initialize(), including when Ethernet is disabled. */
 bool net_stack_ready(void);
 uint32_t net_stack_ipv4(void);
 

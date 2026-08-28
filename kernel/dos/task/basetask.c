@@ -73,6 +73,7 @@ void init() {
   current_task()->drive = system_drive;
   current_task()->drive_number = system_drive - 'A';
   env_init();
+  net_stack_initialize();
 
   if (env_read("network") == NULL) {
     printk("WARNING: you haven't set the network value in env.cfg, system will "
@@ -87,7 +88,7 @@ void init() {
   if (strcmp(env_read("network"), "enable") == 0) {
     logk("network: start lwIP\n");
     if (!net_stack_start()) {
-      WARNING_K("network: no supported card or lwIP initialization failed");
+      WARNING_K("network: Ethernet unavailable; loopback remains available");
     }
   }
   if (strcmp("HIGHTEXTMODE", env_read("video_mode")) == 0) {

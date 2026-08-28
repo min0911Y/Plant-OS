@@ -91,7 +91,12 @@ int main(int argc, char **argv) {
     printf("count must be between 1 and 100.\n");
     return 1;
   }
-  if (ping_wait_for_network() != 0) {
+  struct in_addr literal;
+  bool loopback_target =
+      inet_pton(AF_INET, argv[1], &literal) != 0 &&
+      literal.s_addr == htonl(INADDR_LOOPBACK);
+  if (!loopback_target && strcmp(argv[1], "localhost") != 0 &&
+      ping_wait_for_network() != 0) {
     printf("network address was not assigned.\n");
     return 2;
   }

@@ -4,6 +4,7 @@ out_path_src := ../obj/
 incpath_src := ../include/
 lwip_root := third_party/lwip/src
 lwip_port := lwip_port/include
+lwip_options := $(lwip_port)/lwipopts.h
 lwip_cflags := -I./$(lwip_port) -I./$(lwip_root)/include \
 	$(KERNEL_COMMON_CFLAGS) -O2 -w $(KERNEL_PACKED_BITFIELD_FLAGS)
 
@@ -37,20 +38,20 @@ obj_net := $(out_path_src)net_stack.o $(out_path_src)socket.o $(out_path_src)lwi
 
 default: $(obj_net)
 
-$(out_path_src)net_stack.o: net_stack.c Makefile
+$(out_path_src)net_stack.o: net_stack.c $(lwip_options) Makefile
 	gcc $(lwip_cflags) -c $< -o $@
 
-$(out_path_src)socket.o: socket.c Makefile
+$(out_path_src)socket.o: socket.c $(lwip_options) Makefile
 	gcc $(lwip_cflags) -c $< -o $@
 
-$(out_path_src)lwip_port.o: lwip_port/lwip_port.c Makefile
+$(out_path_src)lwip_port.o: lwip_port/lwip_port.c $(lwip_options) Makefile
 	gcc $(lwip_cflags) -c $< -o $@
 
-$(out_path_src)lwip_core_%.o: $(lwip_root)/core/%.c Makefile
+$(out_path_src)lwip_core_%.o: $(lwip_root)/core/%.c $(lwip_options) Makefile
 	gcc $(lwip_cflags) -c $< -o $@
 
-$(out_path_src)lwip_ipv4_%.o: $(lwip_root)/core/ipv4/%.c Makefile
+$(out_path_src)lwip_ipv4_%.o: $(lwip_root)/core/ipv4/%.c $(lwip_options) Makefile
 	gcc $(lwip_cflags) -c $< -o $@
 
-$(out_path_src)lwip_netif_%.o: $(lwip_root)/netif/%.c Makefile
+$(out_path_src)lwip_netif_%.o: $(lwip_root)/netif/%.c $(lwip_options) Makefile
 	gcc $(lwip_cflags) -c $< -o $@
