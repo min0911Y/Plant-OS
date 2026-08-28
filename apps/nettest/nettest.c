@@ -228,7 +228,8 @@ static int nettest_loopback_stream(void) {
   return result;
 }
 
-static int nettest_ping(const struct sockaddr_in *target, unsigned *elapsed) {
+static int nettest_ping(const struct sockaddr_in *target,
+                        uint64_t *elapsed_ns) {
   socket_t socket_fd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
   if (socket_fd < 0) {
     return -1;
@@ -243,7 +244,7 @@ static int nettest_ping(const struct sockaddr_in *target, unsigned *elapsed) {
   header->identifier = htons(identifier);
   header->sequence = htons(1);
   header->checksum = htons(nettest_checksum(request, sizeof(request)));
-  unsigned started = (unsigned)clock();
+  uint64_t started = monotonic_ns();
   if (sendto(socket_fd, request, sizeof(request), 0,
              (const struct sockaddr *)target, sizeof(*target)) !=
       sizeof(request)) {
@@ -251,9 +252,9 @@ static int nettest_ping(const struct sockaddr_in *target, unsigned *elapsed) {
     return -1;
   }
 
-  unsigned deadline = (unsigned)clock() + 2000;
+  uint64_t deadline = monotonic_ns() + 2000000000ull;
   int result = -1;
-  while ((int)((unsigned)clock() - deadline) < 0) {
+  while (monotonic_ns() < deadline) {
     uint8_t packet[1600];
     int length = recv(socket_fd, packet, sizeof(packet), MSG_DONTWAIT);
     if (length == SOCKET_ERR_AGAIN) {
@@ -271,8 +272,8 @@ static int nettest_ping(const struct sockaddr_in *target, unsigned *elapsed) {
         (const nettest_icmp_header_t *)(packet + ip_length);
     if (reply->type == 0 && reply->code == 0 &&
         ntohs(reply->identifier) == identifier && ntohs(reply->sequence) == 1) {
-      if (elapsed != NULL) {
-        *elapsed = (unsigned)clock() - started;
+      if (elapsed_ns != NULL) {
+        *elapsed_ns = monotonic_ns() - started;
       }
       result = 0;
       break;
@@ -282,12 +283,26 @@ static int nettest_ping(const struct sockaddr_in *target, unsigned *elapsed) {
   return result;
 }
 
+static int nettest_monotonic_clock(void) {
+  uint64_t previous = monotonic_ns();
+  for (unsigned attempt = 0; attempt < 16; attempt++) {
+    uint64_t current = monotonic_ns();
+    if (current > previous && current - previous < 10000000ull) {
+      return 0;
+    }
+    previous = current;
+  }
+  return -1;
+}
+
 static int nettest_loopback(void) {
   struct sockaddr_in target;
   nettest_loopback_address(&target);
-  unsigned elapsed = 0;
-  return nettest_loopback_udp() == 0 && nettest_loopback_stream() == 0 &&
-                 nettest_ping(&target, &elapsed) == 0 && elapsed <= 10
+  uint64_t elapsed_ns = 0;
+  return nettest_monotonic_clock() == 0 && nettest_loopback_udp() == 0 &&
+                 nettest_loopback_stream() == 0 &&
+                 nettest_ping(&target, &elapsed_ns) == 0 &&
+                 elapsed_ns < 10000000ull
              ? 0
              : -1;
 }

@@ -61,7 +61,7 @@ typedef struct {
   uint8_t registerBitWidth;
   uint8_t registerBitOffset;
   uint8_t accessWidth;
-  uintptr_t address;
+  uint64_t address;
 } __attribute__((packed)) AcpiAddress;
 
 typedef struct {
@@ -121,8 +121,39 @@ static uint32_t acpi_bsp_id;
 static AcpiIoApicInfo acpi_ioapics[ACPI_MAX_IOAPICS];
 static uint32_t acpi_ioapic_total;
 static AcpiIrqRoute acpi_irq_routes[ACPI_IRQ_COUNT];
-static HpetInfo* hpetInfo = NULL;
-static uint64_t hpetPeriod = 0;
+static volatile HpetInfo* hpetInfo = NULL;
+static uint32_t hpetPeriodNs;
+static uint32_t hpetPeriodFsRemainder;
+
+#define HPET_CAP_COUNTER_64BIT (1ull << 13)
+#define HPET_CONFIG_OFFSET 0x10u
+#define HPET_COUNTER_OFFSET 0xf0u
+#define HPET_CONFIG_ENABLE 1u
+#define FEMTOSECONDS_PER_NANOSECOND 1000000u
+
+static volatile uint32_t* hpet_register32(uint32_t offset) {
+  return (volatile uint32_t*)((uintptr_t)hpetInfo + offset);
+}
+
+static uint64_t hpet_counter_read(void) {
+  volatile uint32_t* counter = hpet_register32(HPET_COUNTER_OFFSET);
+  uint32_t high_before;
+  uint32_t high_after;
+  uint32_t low;
+  do {
+    high_before = counter[1];
+    low = counter[0];
+    high_after = counter[1];
+  } while (high_before != high_after);
+  return ((uint64_t)high_after << 32) | low;
+}
+
+/* Keep division behind a call boundary so freestanding GCC does not combine
+ * quotient and remainder into the non-exported __udivmoddi4 helper. */
+static __attribute__((noinline)) uint64_t hpet_divide_fs_per_ns(
+    uint64_t value) {
+  return value / FEMTOSECONDS_PER_NANOSECOND;
+}
 
 static void acpi_init_irq_routes(void) {
   for (int i = 0; i < ACPI_IRQ_COUNT; i++) {
@@ -265,16 +296,32 @@ static void hpet_initialize(void) {
     return;
   }
 
-  hpetInfo = (HpetInfo*)(uintptr_t)hpet->hpetAddress.address;
-  uint32_t counterClockPeriod = (uint32_t)(hpetInfo->generalCapabilities >> 32);
-  if (!counterClockPeriod) {
+  uint64_t address = hpet->hpetAddress.address;
+  if (hpet->hpetAddress.addressSpaceID != 0 || address == 0 ||
+      address > 0xffffffffull) {
+    logk("acpi: unsupported HPET address\n");
     return;
   }
 
-  hpetPeriod = counterClockPeriod / 1000000;
-  hpetInfo->generalConfiguration |= 1;
-  logk("acpi: HPET %08x period=%08x\n", (uint32_t)(uintptr_t)hpetInfo,
-       (uint32_t)hpetPeriod);
+  hpetInfo = (volatile HpetInfo*)(uintptr_t)(uint32_t)address;
+  uint64_t capabilities = hpetInfo->generalCapabilities;
+  uint32_t period_fs = (uint32_t)(capabilities >> 32);
+  if (period_fs == 0 || (capabilities & HPET_CAP_COUNTER_64BIT) == 0) {
+    logk("acpi: HPET counter is unavailable or not 64-bit\n");
+    hpetInfo = NULL;
+    return;
+  }
+
+  hpetPeriodNs = period_fs / FEMTOSECONDS_PER_NANOSECOND;
+  hpetPeriodFsRemainder = period_fs % FEMTOSECONDS_PER_NANOSECOND;
+  volatile uint32_t* config = hpet_register32(HPET_CONFIG_OFFSET);
+  volatile uint32_t* counter = hpet_register32(HPET_COUNTER_OFFSET);
+  config[0] &= ~HPET_CONFIG_ENABLE;
+  counter[0] = 0;
+  counter[1] = 0;
+  config[0] |= HPET_CONFIG_ENABLE;
+  logk("acpi: HPET %08x period_fs=%d\n", (uint32_t)(uintptr_t)hpetInfo,
+       period_fs);
 }
 
 void init_acpi(void) {
@@ -373,11 +420,23 @@ int acpi_shutdown(void) {
   return 1;
 }
 
-uint64_t nanoTime() {
+bool hpet_available(void) { return hpetInfo != NULL; }
+
+uint64_t monotonic_time_ns(void) {
   if (!hpetInfo) {
-    return 0;
+    return (uint64_t)timerctl.count * 10000000ull;
   }
-  return hpetInfo->mainCounterValue * hpetPeriod;
+  uint64_t counter = hpet_counter_read();
+  uint64_t nanoseconds = counter * hpetPeriodNs;
+  if (hpetPeriodFsRemainder != 0) {
+    uint64_t whole = hpet_divide_fs_per_ns(counter);
+    uint64_t remainder =
+        counter - whole * FEMTOSECONDS_PER_NANOSECOND;
+    nanoseconds += whole * hpetPeriodFsRemainder;
+    nanoseconds +=
+        hpet_divide_fs_per_ns(remainder * hpetPeriodFsRemainder);
+  }
+  return nanoseconds;
 }
 
 void usleep(uint64_t nano) {
@@ -388,20 +447,8 @@ void usleep(uint64_t nano) {
     return;
   }
 
-  uint64_t targetTime = nanoTime();
-  uint64_t after = 0;
-  while (1) {
-    uint64_t n = nanoTime();
-    if (n < targetTime) {
-      after += 0xffffffff - targetTime + n;
-      targetTime = n;
-    } else {
-      after += n - targetTime;
-      targetTime = n;
-    }
-    if (after >= nano) {
-      return;
-    }
+  uint64_t started = monotonic_time_ns();
+  while (monotonic_time_ns() - started < nano) {
   }
 }
 

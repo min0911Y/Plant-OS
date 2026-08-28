@@ -347,15 +347,14 @@ static uint64_t cpu_tsc_khz_from_cpuid(void) {
 }
 
 static uint64_t cpu_tsc_khz_from_hpet(void) {
-  uint64_t before_ns = nanoTime();
-  if (!before_ns && !nanoTime()) {
+  if (!hpet_available()) {
     return 0;
   }
 
   uint64_t start_tsc = rdtsc64();
-  uint64_t start_ns = nanoTime();
+  uint64_t start_ns = monotonic_time_ns();
   uint64_t target_ns = start_ns + 1000000ull;
-  while (nanoTime() < target_ns) {
+  while (monotonic_time_ns() < target_ns) {
   }
   uint64_t delta_tsc = rdtsc64() - start_tsc;
   if (!delta_tsc) {

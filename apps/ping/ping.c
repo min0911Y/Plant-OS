@@ -6,7 +6,7 @@
 #include <time.h>
 
 #define PING_PAYLOAD_BYTES 32u
-#define PING_TIMEOUT_MS 1000u
+#define PING_TIMEOUT_NS 1000000000ull
 #define PING_DHCP_WAIT_MS 10000u
 
 typedef struct __attribute__((packed)) {
@@ -137,7 +137,7 @@ int main(int argc, char **argv) {
     header->sequence = htons((uint16_t)sequence);
     header->checksum = htons(ping_checksum(request, sizeof(request)));
 
-    unsigned started = (unsigned)clock();
+    uint64_t started = monotonic_ns();
     int sent = sendto(socket_fd, request, sizeof(request), 0,
                       (const struct sockaddr *)&target, sizeof(target));
     if (sent != sizeof(request)) {
@@ -147,8 +147,8 @@ int main(int argc, char **argv) {
     }
 
     int matched = 0;
-    unsigned deadline = started + PING_TIMEOUT_MS;
-    while ((int)((unsigned)clock() - deadline) < 0) {
+    uint64_t deadline = started + PING_TIMEOUT_NS;
+    while (monotonic_ns() < deadline) {
       uint8_t reply[1600];
       struct sockaddr_storage source;
       socklen_t source_length = sizeof(source);
@@ -172,14 +172,20 @@ int main(int argc, char **argv) {
                     sizeof(source_text)) == NULL) {
         strcpy(source_text, target_text);
       }
-      unsigned elapsed = (unsigned)clock() - started;
-      const char *comparison = elapsed == 0 ? "<" : "=";
-      if (elapsed == 0) {
-        elapsed = 10;
+      uint64_t elapsed_ns = monotonic_ns() - started;
+      uint32_t elapsed_us = (uint32_t)(elapsed_ns / 1000ull);
+      if (elapsed_us == 0) {
+        printf("%d bytes from %s: icmp_seq=%d time<1 us\n",
+               size - (reply[0] & 0x0fu) * 4, source_text, sequence);
+      } else if (elapsed_us < 1000) {
+        printf("%d bytes from %s: icmp_seq=%d time=%d us\n",
+               size - (reply[0] & 0x0fu) * 4, source_text, sequence,
+               elapsed_us);
+      } else {
+        printf("%d bytes from %s: icmp_seq=%d time=%d.%03d ms\n",
+               size - (reply[0] & 0x0fu) * 4, source_text, sequence,
+               elapsed_us / 1000, elapsed_us % 1000);
       }
-      printf("%d bytes from %s: icmp_seq=%d time%s%d ms\n",
-             size - (reply[0] & 0x0fu) * 4, source_text, sequence,
-             comparison, elapsed);
       received++;
       matched = 1;
       break;

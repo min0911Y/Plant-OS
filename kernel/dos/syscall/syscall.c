@@ -289,6 +289,7 @@ enum syscall_id {
   SYSCALL_MODULE_LIST = 0x5c,
   SYSCALL_IPC = 0x5d,
   SYSCALL_SOCKET = 0x5e,
+  SYSCALL_MONOTONIC_NS = 0x5f,
   SYSCALL_COUNT,
 };
 
@@ -912,6 +913,12 @@ static void syscall_timestamp(x86_interrupt_frame_t *frame) {
 
 static void syscall_uptime(x86_interrupt_frame_t *frame) {
   frame->eax = timerctl.count * 10;
+}
+
+static void syscall_monotonic_ns(x86_interrupt_frame_t *frame) {
+  uint64_t nanoseconds = monotonic_time_ns();
+  frame->eax = (uint32_t)nanoseconds;
+  frame->edx = (uint32_t)(nanoseconds >> 32);
 }
 
 static void syscall_reset_fpu(x86_interrupt_frame_t *frame) {
@@ -1577,6 +1584,7 @@ static const syscall_handler_t syscall_handlers[SYSCALL_COUNT] = {
     [SYSCALL_MODULE_LIST] = syscall_module,
     [SYSCALL_IPC] = syscall_ipc,
     [SYSCALL_SOCKET] = syscall_socket,
+    [SYSCALL_MONOTONIC_NS] = syscall_monotonic_ns,
 };
 
 void x86_syscall_dispatch(x86_interrupt_frame_t *frame) {

@@ -16,6 +16,7 @@ struct tm {
 typedef unsigned int time_t;
 time_t time(time_t *timer);
 clock_t clock();
+uint64_t monotonic_ns(void);
 void clock_gettime(int* sec1, int* usec1);
 time_t mktime(struct tm* tm);
 double difftime(time_t t1, time_t t0);

@@ -99,9 +99,9 @@ struct tm *localtime(time_t *t1) {
 }
 
 void clock_gettime(int *sec1, int *usec1) {
-  int b = clock() * 10;
-  *sec1 = b / 1000;
-  *usec1 = (b % 1000) * 1000;
+  uint64_t nanoseconds = monotonic_ns();
+  *sec1 = (int)(nanoseconds / 1000000000ull);
+  *usec1 = (int)((nanoseconds % 1000000000ull) / 1000ull);
 }
 double difftime(time_t t1, time_t t0) { return t1 - t0; }
 time_t mktime(struct tm *tm) {

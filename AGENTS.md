@@ -139,7 +139,7 @@ python3 scripts/kernel-perf.py \
 - 用户态网络 ABI 是 `apps/include/socket.h` 的 `socket`/`bind`/`connect`/`listen`/`accept`/`sendto`/`recvfrom`/`socket_close`，句柄按 task group 所有而不是内核指针，并通过 `SYSCALL_SOCKET`（`int 0x36`，编号 `0x5e`）的定长 request 分派；内核与 `libp` 必须同步更新 request 布局、操作枚举和错误码。`AF_INET` 支持 TCP stream、UDP datagram 与 `IPPROTO_ICMP` raw socket；`AF_LOCAL` 支持全局命名的 stream/datagram 端点，accept 出来的服务端句柄归监听者 task group。不得恢复 `Socket_*`、独立 `ping` syscall、DPL3 的 `int 0x30` 网络入口或跨层暴露 PCB 指针。
 - socket 阻塞调用通过 `WAIT_REASON_SOCKET` 的 waiter 和 lwIP callback 唤醒，连接超时由 `net_socket_tick()` 检查；不得退化为反复 `task_next()` 轮询。RAW 接收必须复制完整 IPv4 packet 后再让 lwIP 继续处理，不能借用会被协议栈改写的 pbuf。
 - `network=enable` 仅启动以太网和异步 lwIP DHCP；`lo` 不依赖网卡或租约，地址可在租约完成前为零，不能把网络启动改回阻塞式 DHCP 或持久化旧的 `ip/gateway/submask/dns` 环境变量。
-- 网络验证优先使用 `nettest.bin`：`nettest.bin loopback` 在无需网卡/DHCP 时验证 `127.0.0.1` 的 UDP、TCP 和 ICMP，并要求 ICMP 在当前 10ms 时钟精度下不超过一个 tick；完整模式再验证跨进程 `AF_LOCAL` stream、`AF_LOCAL` datagram、DHCP、QEMU user-net 网关 UDP/ICMP，以及可选 TCP echo。`ping.bin <host-or-ipv4> [count]` 通过 `getaddrinfo` 使用 lwIP DNS，`ping.bin localhost` 和 `ping.bin 127.0.0.1` 不等待 DHCP，适合验证回环 raw ICMP；同 tick 回复显示为 `time<10 ms`，不要把时钟量化值当作实际协议处理耗时。自动验证时临时修改 `sys.cfg` 与 `init.mst`，结束后立即恢复，仍禁止 `sendkey`。
+- 网络验证优先使用 `nettest.bin`：`nettest.bin loopback` 在无需网卡/DHCP 时验证 HPET 单调时间能在一个 10ms tick 内前进、`127.0.0.1` 的 UDP/TCP/ICMP，以及通过 `monotonic_ns()` 测得的 ICMP RTT 小于 10ms；完整模式再验证跨进程 `AF_LOCAL` stream、`AF_LOCAL` datagram、DHCP、QEMU user-net 网关 UDP/ICMP，以及可选 TCP echo。`ping.bin <host-or-ipv4> [count]` 通过 `getaddrinfo` 使用 lwIP DNS，`ping.bin localhost` 和 `ping.bin 127.0.0.1` 不等待 DHCP，适合验证回环 raw ICMP；RTT 使用 HPET 单调纳秒时间，按微秒或三位小数毫秒显示。自动验证时临时修改 `sys.cfg` 与 `init.mst`，结束后立即恢复，仍禁止 `sendkey`。
 
 ### 系统调用、IPC 和 RPC
 
@@ -160,6 +160,7 @@ python3 scripts/kernel-perf.py \
 用户指针来自 `0x70000000` 以上的用户地址空间。新增系统调用时必须复用现有的用户地址/长度验证方式，不能直接把用户指针当作可信内核指针。涉及阻塞、超时或任务退出时，还要检查等待原因、唤醒路径、时钟中断和孤儿/资源清理。
 
 - 顶层系统调用与 IPC 子操作使用“语义化枚举 + designated initializer 处理表”分派。固定 ABI 编号表以枚举的 `COUNT` 作为容量，保留既有编号但不保留旧的 `if/else` 分派兼容层。
+- `clock()`/`SYSCALL_UPTIME` 保持既有毫秒 ABI；高分辨率单调时间使用 `monotonic_ns()`/`SYSCALL_MONOTONIC_NS`，按 i386 64 位返回约定由 `EDX:EAX` 返回纳秒。内核优先稳定读取 64 位 HPET counter 并用完整 femtosecond period 换算，HPET 不可用时才退回 10ms tick；不得把 HPET MMIO 指针暴露给用户态或改变旧 `clock()` 的单位。
 - 表处理函数应对应真实的 API 或同一职责域；不要为了减少函数体行数创建只转发一次的无意义包装。
 - GUI 进程是名为 `gui` 的 RPC 服务。用户态 GUI API 只使用不透明 `window_t` 句柄和 `gui_rpc.h` 的定长协议，禁止恢复 `int 0x72`、`set_custom_handler`、跨页执行 GUI 函数或向客户端暴露 GUI 内部指针。创建窗口时由 GUI 通过带 tid/generation 校验的共享映射一次性提供 framebuffer 与单生产者/单消费者事件队列；像素写入、事件/键盘轮询必须直接访问该共享区域。`window_refresh` 在共享 damage 状态中合并矩形，只在从空闲变为待处理时发送无应答 RPC；该通知使用 `IPC_DELIVER_NOW`，接收端正因 IPC 等待时内核直接交接时间片，避免等下一个时钟 tick。该标志只用于短小、无锁的低延迟单向通知，不能在中断上下文或持有会阻塞的锁时使用。`0xf0100000..0xf1000000` 是客户端 GUI 映射保留区，关闭窗口前由客户端解除映射。
 - 文件读取与 VFS mount/change/unmount 用户态包装必须保留并返回内核 `eax` 状态；内核、`apps/libp` 和 `apps/include/syscall.h` 的返回语义必须一致。
