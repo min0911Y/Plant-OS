@@ -121,11 +121,13 @@ static void ipc_wake_senders(uint32_t to_tid) {
   }
 }
 
-static void ipc_wake_receiver(mtask *task) {
+static bool ipc_wake_receiver(mtask *task) {
   if (task->state == WAITING && task->wait_reason == WAIT_REASON_IPC &&
       task->ipc_wait_peer == TASK_ID_NONE) {
     task_run(task);
+    return true;
   }
+  return false;
 }
 
 // 任务退出时的清理：丢掉自己没读完的消息、注销服务名、放走等它收信的发送者。
@@ -270,7 +272,14 @@ int ipc_send(uint32_t to_tid, uint32_t to_generation, uint32_t type, uint32_t id
       slot->seq = ipc->seq++;
       slot->used = 1;
       ipc->count++;
-      ipc_wake_receiver(to);
+      bool receiver_woken = ipc_wake_receiver(to);
+      if ((flags & IPC_DELIVER_NOW) && receiver_woken) {
+        /* The caller explicitly requests low latency.  task_next() runs with
+         * the same saved interrupt state as the queue update, so the receiver
+         * observes the message before this sender resumes. */
+        mtask_run_now(to);
+        task_next();
+      }
       irq_restore(state);
       return IPC_OK;
     }

@@ -81,6 +81,7 @@ struct TIMERCTL {
 #define asynchronous 2
 // ipc_send / ipc_recv 的标志位
 #define IPC_NOWAIT 0x01     // 队列满/无消息时立刻返回，不阻塞
+#define IPC_DELIVER_NOW 0x02 // 接收者因收信阻塞时直接切换给它
 #define IPC_ANY_TID ((uint32_t)-1) // ipc_recv：接收任意发送者的消息
 // IPC 返回值（0 或正数表示成功）
 #define IPC_OK 0

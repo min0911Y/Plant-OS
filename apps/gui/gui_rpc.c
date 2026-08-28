@@ -143,6 +143,7 @@ static int gui_create_window(rpc_call_t *call) {
   gui_event_queue_init(&shared->events);
   gui_event_queue_init(&shared->key_press);
   gui_event_queue_init(&shared->key_up);
+  gui_damage_init(&shared->damage);
   window->shared = shared;
   window->keyboard_events = false;
   window->handle_stay = gui_event_stay;
@@ -208,11 +209,11 @@ static int gui_close_window(rpc_call_t *call) {
 }
 
 static int gui_refresh_window(rpc_call_t *call) {
-  if (call->arg_len != sizeof(gui_rpc_refresh_request_t)) {
+  if (call->arg_len != sizeof(gui_rpc_window_request_t)) {
     return RPC_ERR_INVAL;
   }
 
-  const gui_rpc_refresh_request_t *request = call->arg;
+  const gui_rpc_window_request_t *request = call->arg;
   TaskLock();
   gui_remote_window_t *remote = gui_remote_find(call, request->window_id);
   if (remote == NULL) {
@@ -220,24 +221,23 @@ static int gui_refresh_window(rpc_call_t *call) {
     return RPC_ERR_INVAL;
   }
 
-  int x0 = (int)(int16_t)(request->first >> 16);
-  int y0 = (int)(int16_t)request->first;
-  int x1 = (int)(int16_t)(request->last >> 16);
-  int y1 = (int)(int16_t)request->last;
-  if (x0 < 0) {
-    x0 = 0;
-  }
-  if (y0 < 0) {
-    y0 = 0;
-  }
-  if (x1 > remote->window->xsize) {
-    x1 = remote->window->xsize;
-  }
-  if (y1 > remote->window->ysize) {
-    y1 = remote->window->ysize;
-  }
-  if (x0 < x1 && y0 < y1) {
-    sheet_refresh(remote->window->sht, x0, y0, x1, y1);
+  gui_rect_t rect;
+  if (gui_damage_take(&remote->window->shared->damage, &rect)) {
+    if (rect.x0 < 0) {
+      rect.x0 = 0;
+    }
+    if (rect.y0 < 0) {
+      rect.y0 = 0;
+    }
+    if (rect.x1 > remote->window->xsize) {
+      rect.x1 = remote->window->xsize;
+    }
+    if (rect.y1 > remote->window->ysize) {
+      rect.y1 = remote->window->ysize;
+    }
+    if (rect.x0 < rect.x1 && rect.y0 < rect.y1) {
+      sheet_refresh(remote->window->sht, rect.x0, rect.y0, rect.x1, rect.y1);
+    }
   }
   TaskUnlock();
   return RPC_OK;

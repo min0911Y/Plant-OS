@@ -427,7 +427,7 @@ int rpc_notify(rpc_endpoint_t *ep, unsigned opcode, const void *arg,
   out.type = RPC_TYPE_NOTIFY;
   out.id = rpc_next_id++;
   out.size = sizeof(rpc_wire_t) + arg_len;
-  out.flags = IPC_NOWAIT;
+  out.flags = IPC_NOWAIT | IPC_DELIVER_NOW;
   out.timeout_ms = 0;
   out.from_filter = IPC_ANY_TID;
   out.data = tx;

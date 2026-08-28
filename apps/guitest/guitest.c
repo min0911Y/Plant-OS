@@ -39,6 +39,10 @@ int main(void) {
     close_window(window);
     return 5;
   }
+  for (int i = 0; i < 16; i++) {
+    draw_px(window, i, 0, 0x0000ffff);
+    window_refresh(window, i << 16, ((i + 1) << 16) | 1);
+  }
   window_refresh(window, 0, (64 << 16) | 64);
   window_start_recv_keyboard(window);
   (void)window_get_event(window);

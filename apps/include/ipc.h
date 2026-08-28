@@ -9,6 +9,7 @@ extern "C" {
 #define IPC_MAX_MSG_SIZE 4096      // 单条消息负载上限
 #define IPC_NAME_MAX 32            // 服务名最大长度（含结尾 '\0'）
 #define IPC_NOWAIT 0x01            // 不阻塞
+#define IPC_DELIVER_NOW 0x02       // 唤醒收信者后直接让出当前时间片
 #define IPC_ANY_TID ((unsigned)-1) // 接收任意发送者的消息
 
 #define IPC_OK 0
@@ -29,7 +30,7 @@ typedef struct {
   unsigned type;            // 消息类型（自定义）
   unsigned id;              // 关联号（自定义）
   unsigned size;            // 发送：负载长度；接收：入参为容量，出参为实际长度
-  unsigned flags;           // IPC_NOWAIT
+  unsigned flags;           // IPC_NOWAIT | IPC_DELIVER_NOW
   unsigned timeout_ms;      // 0 表示一直等
   unsigned from_filter;     // 接收：只收该 tid 的消息，IPC_ANY_TID 表示都收
   void *data;               // 负载缓冲区

@@ -195,14 +195,36 @@ void window_refresh(window_t window, int first, int last) {
   if (window == NULL || gui_connect() != RPC_OK) {
     return;
   }
-  gui_rpc_refresh_request_t request = {
-      .window_id = window->id,
-      .first = (uint32_t)first,
-      .last = (uint32_t)last,
+  gui_rect_t rect = {
+      .x0 = (int16_t)((uint32_t)first >> 16),
+      .y0 = (int16_t)first,
+      .x1 = (int16_t)((uint32_t)last >> 16),
+      .y1 = (int16_t)last,
   };
-  gui_connection_failed(
-      rpc_notify(&gui_endpoint, GUI_RPC_REFRESH_WINDOW, &request,
-                 sizeof(request)));
+  if (rect.x0 < 0) {
+    rect.x0 = 0;
+  }
+  if (rect.y0 < 0) {
+    rect.y0 = 0;
+  }
+  if (rect.x1 > (int32_t)window->width) {
+    rect.x1 = window->width;
+  }
+  if (rect.y1 > (int32_t)window->height) {
+    rect.y1 = window->height;
+  }
+  if (rect.x0 >= rect.x1 || rect.y0 >= rect.y1 ||
+      !gui_damage_add(&window->shared->damage, &rect)) {
+    return;
+  }
+
+  gui_rpc_window_request_t request = {.window_id = window->id};
+  int result = rpc_notify(&gui_endpoint, GUI_RPC_REFRESH_WINDOW, &request,
+                          sizeof(request));
+  if (result != RPC_OK) {
+    gui_damage_unsignal(&window->shared->damage);
+    gui_connection_failed(result);
+  }
 }
 
 void *window_get_fb(window_t window) {

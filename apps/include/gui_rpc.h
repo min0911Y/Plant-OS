@@ -27,10 +27,92 @@ typedef struct {
 } gui_event_queue_t;
 
 typedef struct {
+  int32_t x0;
+  int32_t y0;
+  int32_t x1;
+  int32_t y1;
+} gui_rect_t;
+
+typedef struct {
+  volatile uint32_t lock;
+  volatile uint32_t queued;
+  volatile uint32_t dirty;
+  gui_rect_t rect;
+} gui_damage_t;
+
+typedef struct {
   gui_event_queue_t events;
   gui_event_queue_t key_press;
   gui_event_queue_t key_up;
+  gui_damage_t damage;
 } gui_window_shared_t;
+
+static inline void gui_damage_lock(gui_damage_t *damage) {
+  uint32_t locked = 1;
+  do {
+    asm volatile("xchgl %0, %1"
+                 : "+r"(locked), "+m"(damage->lock)
+                 :
+                 : "memory");
+  } while (locked);
+}
+
+static inline void gui_damage_unlock(gui_damage_t *damage) {
+  asm volatile("" ::: "memory");
+  damage->lock = 0;
+}
+
+static inline void gui_damage_init(gui_damage_t *damage) {
+  damage->lock = 0;
+  damage->queued = 0;
+  damage->dirty = 0;
+}
+
+static inline bool gui_damage_add(gui_damage_t *damage,
+                                  const gui_rect_t *rect) {
+  gui_damage_lock(damage);
+  if (!damage->dirty) {
+    damage->rect = *rect;
+    damage->dirty = 1;
+  } else {
+    if (rect->x0 < damage->rect.x0) {
+      damage->rect.x0 = rect->x0;
+    }
+    if (rect->y0 < damage->rect.y0) {
+      damage->rect.y0 = rect->y0;
+    }
+    if (rect->x1 > damage->rect.x1) {
+      damage->rect.x1 = rect->x1;
+    }
+    if (rect->y1 > damage->rect.y1) {
+      damage->rect.y1 = rect->y1;
+    }
+  }
+  bool signal = !damage->queued;
+  damage->queued = 1;
+  gui_damage_unlock(damage);
+  return signal;
+}
+
+static inline void gui_damage_unsignal(gui_damage_t *damage) {
+  gui_damage_lock(damage);
+  damage->queued = 0;
+  gui_damage_unlock(damage);
+}
+
+static inline bool gui_damage_take(gui_damage_t *damage, gui_rect_t *rect) {
+  gui_damage_lock(damage);
+  if (!damage->dirty) {
+    damage->queued = 0;
+    gui_damage_unlock(damage);
+    return false;
+  }
+  *rect = damage->rect;
+  damage->dirty = 0;
+  damage->queued = 0;
+  gui_damage_unlock(damage);
+  return true;
+}
 
 static inline void gui_event_queue_init(gui_event_queue_t *queue) {
   queue->read = 0;
@@ -136,11 +218,5 @@ typedef struct {
 typedef struct {
   uint32_t window_id;
 } gui_rpc_window_request_t;
-
-typedef struct {
-  uint32_t window_id;
-  uint32_t first;
-  uint32_t last;
-} gui_rpc_refresh_request_t;
 
 #endif
