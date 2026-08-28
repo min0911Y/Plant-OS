@@ -173,15 +173,11 @@ int main(int argc, char **argv) {
         strcpy(source_text, target_text);
       }
       uint64_t elapsed_ns = monotonic_ns() - started;
-      uint32_t elapsed_us = (uint32_t)(elapsed_ns / 1000ull);
-      if (elapsed_us == 0) {
-        printf("%d bytes from %s: icmp_seq=%d time<1 us\n",
+      if (elapsed_ns < 1000ull) {
+        printf("%d bytes from %s: icmp_seq=%d time<0.001 ms\n",
                size - (reply[0] & 0x0fu) * 4, source_text, sequence);
-      } else if (elapsed_us < 1000) {
-        printf("%d bytes from %s: icmp_seq=%d time=%d us\n",
-               size - (reply[0] & 0x0fu) * 4, source_text, sequence,
-               elapsed_us);
       } else {
+        uint32_t elapsed_us = (uint32_t)((elapsed_ns + 500ull) / 1000ull);
         printf("%d bytes from %s: icmp_seq=%d time=%d.%03d ms\n",
                size - (reply[0] & 0x0fu) * 4, source_text, sequence,
                elapsed_us / 1000, elapsed_us % 1000);

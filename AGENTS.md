@@ -139,7 +139,7 @@ python3 scripts/kernel-perf.py \
 - 用户态网络 ABI 是 `apps/include/socket.h` 的 `socket`/`bind`/`connect`/`listen`/`accept`/`sendto`/`recvfrom`/`socket_close`，句柄按 task group 所有而不是内核指针，并通过 `SYSCALL_SOCKET`（`int 0x36`，编号 `0x5e`）的定长 request 分派；内核与 `libp` 必须同步更新 request 布局、操作枚举和错误码。`AF_INET` 支持 TCP stream、UDP datagram 与 `IPPROTO_ICMP` raw socket；`AF_LOCAL` 支持全局命名的 stream/datagram 端点，accept 出来的服务端句柄归监听者 task group。不得恢复 `Socket_*`、独立 `ping` syscall、DPL3 的 `int 0x30` 网络入口或跨层暴露 PCB 指针。
 - socket 阻塞调用通过 `WAIT_REASON_SOCKET` 的 waiter 和 lwIP callback 唤醒，连接超时由 `net_socket_tick()` 检查；不得退化为反复 `task_next()` 轮询。RAW 接收必须复制完整 IPv4 packet 后再让 lwIP 继续处理，不能借用会被协议栈改写的 pbuf。
 - `network=enable` 仅启动以太网和异步 lwIP DHCP；`lo` 不依赖网卡或租约，地址可在租约完成前为零，不能把网络启动改回阻塞式 DHCP 或持久化旧的 `ip/gateway/submask/dns` 环境变量。
-- 网络验证优先使用 `nettest.bin`：`nettest.bin loopback` 在无需网卡/DHCP 时验证 HPET 单调时间能在一个 10ms tick 内前进、`127.0.0.1` 的 UDP/TCP/ICMP，以及通过 `monotonic_ns()` 测得的 ICMP RTT 小于 10ms；完整模式再验证跨进程 `AF_LOCAL` stream、`AF_LOCAL` datagram、DHCP、QEMU user-net 网关 UDP/ICMP，以及可选 TCP echo。`ping.bin <host-or-ipv4> [count]` 通过 `getaddrinfo` 使用 lwIP DNS，`ping.bin localhost` 和 `ping.bin 127.0.0.1` 不等待 DHCP，适合验证回环 raw ICMP；RTT 使用 HPET 单调纳秒时间，按微秒或三位小数毫秒显示。自动验证时临时修改 `sys.cfg` 与 `init.mst`，结束后立即恢复，仍禁止 `sendkey`。
+- 网络验证优先使用 `nettest.bin`：`nettest.bin loopback` 在无需网卡/DHCP 时验证 HPET 单调时间能在一个 10ms tick 内前进、`127.0.0.1` 的 UDP/TCP/ICMP，以及通过 `monotonic_ns()` 测得的 ICMP RTT 小于 10ms；完整模式再验证跨进程 `AF_LOCAL` stream、`AF_LOCAL` datagram、DHCP、QEMU user-net 网关 UDP/ICMP，以及可选 TCP echo。`ping.bin <host-or-ipv4> [count]` 通过 `getaddrinfo` 使用 lwIP DNS，`ping.bin localhost` 和 `ping.bin 127.0.0.1` 不等待 DHCP，适合验证回环 raw ICMP；RTT 使用 HPET 单调纳秒时间，统一按三位小数毫秒显示，低于 1 微秒时显示 `time<0.001 ms`。自动验证时临时修改 `sys.cfg` 与 `init.mst`，结束后立即恢复，仍禁止 `sendkey`。
 
 ### 系统调用、IPC 和 RPC
 
