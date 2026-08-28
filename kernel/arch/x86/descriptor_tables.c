@@ -237,8 +237,6 @@ void arch_interrupt_init(void) {
   x86_interrupt_entry_set(0x2f, asm_ide_irq, X86_ACCESS_INTERRUPT_GATE);
   x86_interrupt_entry_set(0x36, x86_syscall_entry,
                           X86_USER_ACCESS(X86_ACCESS_INTERRUPT_GATE));
-  x86_interrupt_entry_set(0x72, x86_custom_syscall_entry,
-                          X86_USER_ACCESS(X86_ACCESS_INTERRUPT_GATE));
 
   x86_descriptor_table_pointer_t idt_pointer = {
       .limit = X86_IDT_LIMIT,

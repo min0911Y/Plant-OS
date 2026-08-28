@@ -90,6 +90,10 @@ uint32_t page_get_attr_pde(unsigned vaddr, unsigned pde);
 void set_line_address(unsigned val, unsigned line, unsigned pde, unsigned size);
 int page_link_pde(unsigned addr, unsigned pde);
 uint32_t page_get_phy_pde(unsigned vaddr, unsigned pde);
+bool page_share_range_pde(uint32_t source, uint32_t target, uint32_t size,
+                          uint32_t source_pde, uint32_t target_pde);
+bool page_unmap_shared_range_pde(uint32_t target, uint32_t size,
+                                 uint32_t target_pde);
 void page_links(unsigned start, unsigned numbers);
 int page_link(unsigned addr);
 int page_link_share(unsigned addr);

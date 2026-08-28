@@ -4,6 +4,7 @@ typedef unsigned int vram_t;
 typedef vram_t color_t;
 #include "list.h"
 #include <ctypes.h>
+#include <gui_rpc.h>
 struct tty {
   int using1;                              // 使用标志
   void *vram;                              // 显存（也可以当做图层）
@@ -49,8 +50,6 @@ typedef struct textbox textbox_t;
 #define argb(a, r, g, b) ((a) << 24 | (r) << 16 | (g) << 8 | (b))
 void gui();
 
-void gui_api(int edi, int esi, int ebp, int esp, int ebx, int edx, int ecx,
-             int eax);
 typedef struct {
   List *phead; // 队头
   List *ctl;
@@ -63,20 +62,10 @@ struct FIFO8 {
   unsigned char *buf;
   int p, q, size, free, flags;
 };
-struct FIFO32 {
-  int *buf;
-  int size, free, flags;
-  int next_r, next_w;
-};
 void fifo8_init(struct FIFO8 *fifo, int size, unsigned char *buf);
 int fifo8_put(struct FIFO8 *fifo, unsigned char data);
 int fifo8_get(struct FIFO8 *fifo);
 int fifo8_status(struct FIFO8 *fifo);
-
-void fifo32_init(struct FIFO32 *fifo, int size, int *buf);
-int fifo32_put(struct FIFO32 *fifo, int data);
-int fifo32_get(struct FIFO32 *fifo);
-int fifo32_status(struct FIFO32 *fifo);
 #define MAX_SHEETS 256
 
 
@@ -105,6 +94,7 @@ desktop_t *get_now_desktop();
 
 struct window {
   bool using1;
+  bool owns_vram;
   desktop_t *desktop;
   console_t *console;
   super_window_t *super_window;
@@ -115,8 +105,8 @@ struct window {
   char *title;
   struct FIFO8 *fifo_keypress;
   struct FIFO8 *fifo_keyup;
-  struct FIFO32 *events;
-  unsigned int event[32];
+  gui_window_shared_t *shared;
+  bool keyboard_events;
   void (*display)(window_t *window, int x, int y, int pos);
   void (*hide)(window_t *window);
   void (*draw)(window_t *window, int x, int y, int x1, int y1, color_t color);
@@ -124,7 +114,7 @@ struct window {
   void (*handle_left)(window_t *window, gmouse_t *gmouse);
   void (*handle_right)(window_t *window, gmouse_t *gmouse);
   void (*handle_stay)(window_t *window, gmouse_t *gmouse);
-  void (*handle_left_for_api)(window_t *window, gmouse_t *gmouse);
+  void (*handle_client_left)(window_t *window, gmouse_t *gmouse);
   void (*handle_mouse_wheel)(window_t *window, gmouse_t *gmouse,unsigned val);
   void (*close)(window_t *window);
 };
@@ -153,8 +143,9 @@ struct super_window {
   void (*close)(super_window_t *super_window);
 };
 
-window_t *create_window(desktop_t *desktop, char *title, int xsize, int ysize,
-                        unsigned tid);
+window_t *create_window(desktop_t *desktop, const char *title, int xsize,
+                        int ysize, unsigned tid, vram_t *vram);
+void destroy_window(window_t *window);
 super_window_t *create_super_window(window_t *window);
 
 struct gmouse {
@@ -243,5 +234,7 @@ void sheet_updown(struct SHEET *sht, int height);
 void sheet_refresh(struct SHEET *sht, int bx0, int by0, int bx1, int by1);
 void sheet_slide(struct SHEET *sht, int vx0, int vy0);
 void sheet_free(struct SHEET *sht);
+
+int gui_rpc_service_start(void);
 
 #endif

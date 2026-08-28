@@ -7,22 +7,22 @@
 #include <string.h>
 #include <syscall.h>
 #include <time.h>
+#include <rpc.h>
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_NO_THREAD_LOCALS
 #include "stb_image.h"
 #define STB_IMAGE_RESIZE_IMPLEMENTATION
 #include "stb_image_resize.h"
-static struct VBEINFO *vinfo;
 desktop_t *desktop0;
 static void click1(button_t *button) {
   window_t *a =
-      create_window(desktop0, "console", 80 * 8 + 8, 25 * 16 + 28, NowTaskID());
+      create_window(desktop0, "console", 80 * 8 + 8, 25 * 16 + 28,
+                    NowTaskID(), NULL);
   a->display(a, 0, 0, 3);
   create_console(a, 80 * 8, 25 * 16, 4, 24);
 }
 
 unsigned char *ascfont, *hzkfont;
-void handle(uint32_t *a) { logkf("%c", a[2]); }
 char *ttf_buffer;
 stbtt_fontinfo font;
 uint32_t LCD_AlphaBlend(uint32_t foreground_color, uint32_t background_color,
@@ -183,134 +183,6 @@ void print_box_ttf(struct SHEET *sht, vram_t *vram, char *buf, unsigned fc,
   free(bitmap);
   free(r);
 }
-enum {
-  EDI,
-  ESI,
-  EBP,
-  ESP,
-  EBX,
-  EDX,
-  ECX,
-  EAX,
-  M_PDE,
-  C_PDE,
-  TID
-}; // M_PDE是GUI程序的PDE，C_PDE是调用者的PDE
-enum { MOUSE_STAY = 1, MOUSE_CLICK_LEFT, MOUSE_CLICK_RIGHT, CLOSE_WINDOW,MOUSE_WHEEL };
-#define PACK_XY(x, y) ((x << 16) | y)
-void handle_stay_api(window_t *window, gmouse_t *gmouse) {
-  // queue_push(window->events, MOUSE_STAY);
-  // queue_push(window->events, PACK_XY(gmouse->x, gmouse->y));
-  fifo32_put(window->events, MOUSE_STAY);
-  fifo32_put(window->events,
-             PACK_XY(gmouse->x - window->x, gmouse->y - window->y));
-}
-void handle_click_left_api(window_t *window, gmouse_t *gmouse) {
-  // queue_push(window->events, MOUSE_CLICK_LEFT);
-  // queue_push(window->events, PACK_XY(gmouse->x, gmouse->y));
-  fifo32_put(window->events, MOUSE_CLICK_LEFT);
-  fifo32_put(window->events,
-             PACK_XY(gmouse->x - window->x, gmouse->y - window->y));
-}
-void handle_click_right_api(window_t *window, gmouse_t *gmouse) {
-  // queue_push(window->events, MOUSE_CLICK_RIGHT);
-  // queue_push(window->events, PACK_XY(gmouse->x, gmouse->y));
-  fifo32_put(window->events, MOUSE_CLICK_RIGHT);
-  fifo32_put(window->events,
-             PACK_XY(gmouse->x - window->x, gmouse->y - window->y));
-}
-void handle_close_window(window_t *window) {
-  // queue_push(window->events, CLOSE_WINDOW);
-  fifo32_put(window->events, CLOSE_WINDOW);
-}
-void handle_mouse_wheel(window_t *window, gmouse_t *gmouse, unsigned val) {
-  // queue_push(window->events, MOUSE_CLICK_RIGHT);
-  // queue_push(window->events, PACK_XY(gmouse->x, gmouse->y));
-  fifo32_put(window->events, MOUSE_WHEEL);
-  fifo32_put(window->events,
-             PACK_XY(gmouse->x - window->x, gmouse->y - window->y));
-  fifo32_put(window->events, val);
-}
-void gui_api1(uint32_t *a) {
-  if (a[EAX] == 0x01) {
-    logkf("H %d %d\n", a[EDI], a[ESI]);
-    window_t *wnd =
-        create_window(desktop0, (char *)a[EBX], a[EDI], a[ESI], 0);
-    wnd->events = (struct FIFO32 *)malloc(sizeof(struct FIFO32));
-    fifo32_init(wnd->events, 32, wnd->event);
-    wnd->handle_stay = handle_stay_api;
-    wnd->handle_left_for_api = handle_click_left_api;
-    wnd->handle_right = handle_click_right_api;
-    wnd->close = handle_close_window;
-    wnd->handle_mouse_wheel = handle_mouse_wheel;
-    wnd->display(wnd, a[ECX], a[EDX], 1);
-    wnd->tid = a[TID];
-    a[EAX] = (uintptr_t)wnd;
-  } else if (a[EAX] == 0x02) {
-    window_t *wnd = (window_t *)a[ECX];
-    a[EAX] = fifo32_get(wnd->events);
-  } else if (a[EAX] == 0x03) {
-    window_t *wnd = (window_t *)a[ECX];
-    free(wnd->events);
-    if (wnd->console != NULL) {
-      wnd->console->close(wnd->console);
-    } else if (wnd->super_window != NULL) {
-      wnd->super_window->close(wnd->super_window);
-    }
-    int count = 1;
-    for (; list_search_by_count(count, wnd->desktop->window_list)->val !=
-           (uintptr_t)wnd;
-         count++)
-      ;
-    list_delete_by_count(count, wnd->desktop->window_list);
-    sheet_free(wnd->sht);
-    free((void *)wnd->vram);
-    free((void *)wnd);
-  } else if (a[EAX] == 0x04) {
-    window_t *wnd = (window_t *)a[ECX];
-    wnd->vram[a[EDX] * wnd->xsize + a[ESI]] = a[EDI];
-  } else if (a[EAX] == 0x05) {
-    window_t *wnd = (window_t *)a[ECX];
-    sheet_refresh(wnd->sht, a[EDX] >> 16, a[EDX] & 0xffff, a[ESI] >> 16,
-                  a[ESI] & 0xffff);
-  } else if (a[EAX] == 0x06) // 设置framebuffer
-  {
-    window_t *wnd = (window_t *)a[ECX];
-    uintptr_t buf = (uintptr_t)wnd->vram;
-    mem_map(0xfd000000, wnd->xsize * wnd->ysize * 4 + (buf & 0xfff), a[C_PDE],
-            buf, a[M_PDE]);
-    a[EAX] = 0xfd000000 + (buf & 0xfff);
-  } else if (a[EAX] == 0x07) {
-    window_t *wnd = (window_t *)a[ECX];
-    wnd->fifo_keypress = malloc(sizeof(struct FIFO8));
-    uint8_t *buf = (uint8_t *)malloc(128);
-    fifo8_init(wnd->fifo_keypress, 128, buf);
-    wnd->fifo_keyup = malloc(sizeof(struct FIFO8));
-    uint8_t *buf1 = (uint8_t *)malloc(128);
-    fifo8_init(wnd->fifo_keyup, 128, buf1);
-
-  } else if (a[EAX] == 0x08) {
-    window_t *wnd = (window_t *)a[ECX];
-    free(wnd->fifo_keypress->buf);
-    free(wnd->fifo_keypress);
-    wnd->fifo_keypress = NULL;
-    free(wnd->fifo_keyup->buf);
-    free(wnd->fifo_keyup);
-    wnd->fifo_keyup = NULL;
-  } else if (a[EAX] == 0x09) {
-    window_t *wnd = (window_t *)a[ECX];
-    a[EAX] = fifo8_status(wnd->fifo_keypress);
-  } else if (a[EAX] == 0x0a) {
-    window_t *wnd = (window_t *)a[ECX];
-    a[EAX] = fifo8_get(wnd->fifo_keypress);
-  } else if (a[EAX] == 0x0b) {
-    window_t *wnd = (window_t *)a[ECX];
-    a[EAX] = fifo8_status(wnd->fifo_keyup);
-  } else if (a[EAX] == 0x0c) {
-    window_t *wnd = (window_t *)a[ECX];
-    a[EAX] = fifo8_get(wnd->fifo_keyup);
-  }
-}
 void convert_ABGR_to_ARGB(uint32_t *bitmap, size_t num_pixels) {
   for (size_t i = 0; i < num_pixels; ++i) {
     uint32_t pixel = bitmap[i];
@@ -325,7 +197,6 @@ void main() {
   // char *s34 = malloc(64*1024*1024);
   // free(s34);
   ttf_buffer = malloc(filesize("font.ttf"));
-  unsigned char buf[100];
   printf("Reading font...");
   api_ReadFile("font.ttf", ttf_buffer);
   printf("Done.\n");
@@ -337,14 +208,11 @@ void main() {
   }
   printf("\n\n");
   int xsize_input, ysize_input;
-  char *buffer_input;
-re:
   xsize_input = 1024;
   ysize_input = 768;
   uintptr_t vram;
   vram = set_mode(xsize_input, ysize_input);
 
-  set_custom_handler((uintptr_t)gui_api1);
   logkf("vram = %08x\n", vram);
   ascfont = (unsigned char *)malloc(filesize("font.bin"));
   hzkfont = (unsigned char *)malloc(filesize("HZK16"));
@@ -420,7 +288,8 @@ re:
   //                18, 30, COL_000000);
 
   window_t *window2 =
-      create_window(desktop0, "console", 80 * 8 + 8, 25 * 16 + 28, NowTaskID());
+      create_window(desktop0, "console", 80 * 8 + 8, 25 * 16 + 28,
+                    NowTaskID(), NULL);
 
   window2->display(window2, 250, 250, 3);
   gmouse_t *gmouse0 =
@@ -428,7 +297,8 @@ re:
   console_t *console0 = create_console(window2, 80 * 8, 25 * 16, 4, 24);
   // console_t *console1 = create_console(window3, 40 * 8, 20 * 16, 4, 24);
 
-  window_t *window1 = create_window(desktop0, "ToolBox", 200, 200, NowTaskID());
+  window_t *window1 =
+      create_window(desktop0, "ToolBox", 200, 200, NowTaskID(), NULL);
   super_window_t *super_window0 = create_super_window(window1);
   window1->display(window1, 200, 200, 2);
   button_t *button0 =
@@ -445,11 +315,19 @@ re:
   info = localtime(&rawtime);
 
   strftime(buffer, 80, "当前时间：%Y-%m-%d %H:%M:%S", info);
+  TaskLock();
   print_box_ttf(desktop0->sht, desktop0->vram, buffer, COL_FFFFFF,
                 argb(0, 58, 110, 165), 512 - 200, 0, desktop0->xsize,
                 background);
+  TaskUnlock();
+  int rpc_status = gui_rpc_service_start();
+  if (rpc_status != RPC_OK) {
+    logkf("GUI RPC service failed: %d\n", rpc_status);
+    return;
+  }
   for (;;) {
-    if (clock() - clock1 >= 1000) {
+    unsigned elapsed = clock() - clock1;
+    if (elapsed >= 1000) {
       clock1 = clock();
 
       rawtime = time(&rawtime);
@@ -457,11 +335,17 @@ re:
       info = localtime(&rawtime);
 
       strftime(buffer, 80, "当前时间：%Y-%m-%d %H:%M:%S", info);
+      TaskLock();
       print_box_ttf(desktop0->sht, desktop0->vram, buffer, COL_FFFFFF,
                     argb(0, 58, 110, 165), 512 - 200, 0, desktop0->xsize,
                     background);
+      TaskUnlock();
     } else {
-      api_yield();
+      rpc_status = rpc_serve_once(1000 - elapsed);
+      if (rpc_status != RPC_OK && rpc_status != RPC_ERR_TIMEOUT) {
+        logkf("GUI RPC service stopped: %d\n", rpc_status);
+        return;
+      }
     }
   }
 }

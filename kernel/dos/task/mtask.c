@@ -322,9 +322,6 @@ static void task_clear_ipc_refs(mtask *task) {
 static void task_clear_external_refs(mtask *task) {
   extern mtask *keyboard_use_task;
   extern int disable_flag;
-  extern unsigned custom_handler;
-  extern unsigned custom_handler_pde;
-  extern mtask *custom_handler_owner;
 
   mtask *leader = get_task(task->tgid);
   if (leader && leader->group_lock_owner == task->tid) {
@@ -348,11 +345,6 @@ static void task_clear_external_refs(mtask *task) {
   if (keyboard_use_task == task) {
     keyboard_use_task = NULL;
     disable_flag = 0;
-  }
-  if (custom_handler_owner == task) {
-    custom_handler = 0;
-    custom_handler_pde = 0;
-    custom_handler_owner = NULL;
   }
   timer_cancel_for_task(task);
   high_text_cursor_task_exited(task);

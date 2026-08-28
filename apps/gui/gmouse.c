@@ -76,7 +76,9 @@ void gmouse(gmouse_t *gmouse) {
         key_up_status() == 0) {
       api_yield();
       continue;
-    } else if (mouse_dat_status() != 0) {
+    }
+    TaskLock();
+    if (mouse_dat_status() != 0) {
       int i = mouse_dat_get();
       //  logkf("%02x\n",i);
       if (mouse_decode(&mdec, i) != 0) {
@@ -278,8 +280,12 @@ void gmouse(gmouse_t *gmouse) {
       //   gmouse->click_textbox_last->add_char(gmouse->click_textbox_last,
       //                                        keytable1[i]);
       // }
-      if (r->fifo_keypress) {
-        fifo8_put(r->fifo_keypress, i);
+      if (r != NULL) {
+        if (r->shared != NULL && r->keyboard_events) {
+          gui_event_queue_push(&r->shared->key_press, i);
+        } else if (r->fifo_keypress != NULL) {
+          fifo8_put(r->fifo_keypress, i);
+        }
       }
     } else if (key_up_status() != 0) {
       window_t *r = NULL;
@@ -306,8 +312,12 @@ void gmouse(gmouse_t *gmouse) {
         }
       }
       uint8_t i = get_key_up();
-      if (r->fifo_keyup) {
-        fifo8_put(r->fifo_keyup, i);
+      if (r != NULL) {
+        if (r->shared != NULL && r->keyboard_events) {
+          gui_event_queue_push(&r->shared->key_up, i);
+        } else if (r->fifo_keyup != NULL) {
+          fifo8_put(r->fifo_keyup, i);
+        }
       }
     }
     // api_yield();
@@ -320,6 +330,7 @@ void gmouse(gmouse_t *gmouse) {
       old = new;
       task_set_level_higher(old);
     }
+    TaskUnlock();
   }
 }
 void draw_mouse_cursor(vram_t *mouse, int bc) {

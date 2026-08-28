@@ -3,6 +3,7 @@
 // 传输层用的是内核的 IPC 消息队列（见 ipc.h）：
 //   请求  : type = RPC_TYPE_REQUEST, id = 调用序号, 负载 = rpc_wire_t + 参数
 //   应答  : type = RPC_TYPE_REPLY,   id = 同一个调用序号, 负载 = rpc_wire_t + 返回值
+//   通知  : type = RPC_TYPE_NOTIFY,  无应答，适合可合并的低延迟更新
 //
 // 关键特性：等待应答的过程中仍然会处理别人发来的请求，
 // 所以 A 调 B 的过程中 B 可以回头调 A（互相调用 / 可重入），不会死锁。
@@ -15,6 +16,7 @@ extern "C" {
 
 #define RPC_TYPE_REQUEST 1
 #define RPC_TYPE_REPLY 2
+#define RPC_TYPE_NOTIFY 3
 
 #define RPC_MAX_NESTING 8 // 最大嵌套调用深度
 #define RPC_MAX_HANDLER 32
@@ -30,6 +32,7 @@ extern "C" {
 #define RPC_ERR_TRANSPORT -105  // 底层 IPC 出错（对方可能已经退出）
 #define RPC_ERR_NESTING -106    // 嵌套调用太深
 #define RPC_ERR_NOMEM -107      // 内存不足
+#define RPC_ERR_BUSY -108       // 非阻塞通知的目标队列已满
 
 // 处理函数返回这个值表示「故意不回复」（用于测试超时/单向通知）
 #define RPC_NO_REPLY 0x7ffffffe
@@ -49,8 +52,8 @@ typedef struct {
   unsigned call_id;           // 调用序号
   const void *arg;            // 参数
   unsigned arg_len;           // 参数长度
-  void *ret;                  // 返回值缓冲区（RPC_MAX_PAYLOAD 字节）
-  unsigned ret_cap;           // 缓冲区容量
+  void *ret;                  // 返回值缓冲区（通知时为 NULL）
+  unsigned ret_cap;           // 缓冲区容量（通知时为 0）
   unsigned ret_len;           // 处理函数负责填写实际返回长度
 } rpc_call_t;
 

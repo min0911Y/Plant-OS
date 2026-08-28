@@ -2,8 +2,8 @@
 section .data
 GLOBAL asm_inthandler21, asm_inthandler20
 EXTERN inthandler21, inthandler20, inthandler2c, signal_deal
-EXTERN x86_syscall_dispatch, x86_custom_syscall_dispatch
-GLOBAL x86_syscall_entry, x86_custom_syscall_entry
+EXTERN x86_syscall_dispatch
+GLOBAL x86_syscall_entry
 GLOBAL asm_inthandler2c, floppy_int
 section .text
 global null_inthandler
@@ -32,26 +32,6 @@ x86_syscall_entry:
   pop ds
   iretd
 
-x86_custom_syscall_entry:
-  push ds
-  push es
-  push fs
-  push gs
-  pusha
-  mov eax, esp
-  push eax
-  mov ax, ss
-  mov ds, ax
-  mov es, ax
-  call x86_custom_syscall_dispatch
-  add esp, 4
-  call signal_deal
-  popa
-  pop gs
-  pop fs
-  pop es
-  pop ds
-  iretd
 extern flint
 floppy_int:
 	push ds

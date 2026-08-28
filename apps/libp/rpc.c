@@ -38,6 +38,8 @@ static int rpc_map_ipc_error(int rc) {
     return RPC_ERR_TOOBIG;
   case IPC_ERR_NOMEM:
     return RPC_ERR_NOMEM;
+  case IPC_ERR_FULL:
+    return RPC_ERR_BUSY;
   case IPC_ERR_INVAL:
     return RPC_ERR_INVAL;
   default:
@@ -116,25 +118,20 @@ static int rpc_stash_take(unsigned id, void *ret, unsigned ret_cap,
   return RPC_OK;
 }
 
-// 处理一条请求并把应答发回去
+// 处理一条请求；通知不生成应答，避免无消费者的 reply 占满队列。
 static void rpc_dispatch(ipc_msg_t *msg, void *buffer) {
   rpc_wire_t *wire = (rpc_wire_t *)buffer;
   unsigned arg_len = msg->size - sizeof(rpc_wire_t);
   rpc_handler_t handler = rpc_find_handler(wire->opcode);
   unsigned ret_len = 0;
-  int status;
-  char *reply;
+  int status = RPC_ERR_BAD_OPCODE;
+  int reply_required = msg->type == RPC_TYPE_REQUEST;
+  char reply[sizeof(rpc_wire_t) + RPC_MAX_PAYLOAD];
 
   if (wire->len < arg_len) {
     arg_len = wire->len;
   }
-  reply = (char *)malloc(sizeof(rpc_wire_t) + RPC_MAX_PAYLOAD);
-  if (!reply) {
-    return;
-  }
-  if (!handler) {
-    status = RPC_ERR_BAD_OPCODE;
-  } else {
+  if (handler) {
     rpc_call_t call;
     call.opcode = wire->opcode;
     call.caller_tid = msg->peer_tid;
@@ -142,16 +139,16 @@ static void rpc_dispatch(ipc_msg_t *msg, void *buffer) {
     call.call_id = msg->id;
     call.arg = (const char *)buffer + sizeof(rpc_wire_t);
     call.arg_len = arg_len;
-    call.ret = reply + sizeof(rpc_wire_t);
-    call.ret_cap = RPC_MAX_PAYLOAD;
+    call.ret = reply_required ? reply + sizeof(rpc_wire_t) : NULL;
+    call.ret_cap = reply_required ? RPC_MAX_PAYLOAD : 0;
     call.ret_len = 0;
     status = handler(&call);
-    if (status == RPC_NO_REPLY) {
-      free(reply);
-      return;
-    }
     ret_len = call.ret_len > RPC_MAX_PAYLOAD ? RPC_MAX_PAYLOAD : call.ret_len;
   }
+  if (!reply_required || status == RPC_NO_REPLY) {
+    return;
+  }
+
   rpc_wire_t *out_wire = (rpc_wire_t *)reply;
   out_wire->opcode = wire->opcode;
   out_wire->status = status;
@@ -168,7 +165,6 @@ static void rpc_dispatch(ipc_msg_t *msg, void *buffer) {
   out.from_filter = IPC_ANY_TID;
   out.data = reply;
   ipc_send_msg(&out);
-  free(reply);
 }
 
 // 等 call_id 的应答；期间收到的请求会就地处理，因此支持互相调用
@@ -178,7 +174,7 @@ static int rpc_wait_reply(unsigned call_id, void *ret, unsigned ret_cap,
   int use_deadline = timeout_ms != 0;
   int found = 0;
   int status = rpc_stash_take(call_id, ret, ret_cap, ret_len, &found);
-  char *rx;
+  char rx[IPC_MAX_MSG_SIZE];
   int result;
 
   if (found) {
@@ -186,10 +182,6 @@ static int rpc_wait_reply(unsigned call_id, void *ret, unsigned ret_cap,
   }
   if (use_deadline) {
     deadline = (unsigned)clock() + timeout_ms;
-  }
-  rx = (char *)malloc(IPC_MAX_MSG_SIZE);
-  if (!rx) {
-    return RPC_ERR_NOMEM;
   }
   for (;;) {
     unsigned wait_ms = 0;
@@ -202,7 +194,7 @@ static int rpc_wait_reply(unsigned call_id, void *ret, unsigned ret_cap,
       wait_ms = deadline - now;
     }
     ipc_msg_t got;
-    int rc = ipc_recv_any(rx, IPC_MAX_MSG_SIZE, &got, wait_ms);
+    int rc = ipc_recv_any(rx, sizeof(rx), &got, wait_ms);
     if (rc < 0) {
       result = rpc_map_ipc_error(rc);
       break;
@@ -232,15 +224,18 @@ static int rpc_wait_reply(unsigned call_id, void *ret, unsigned ret_cap,
       }
       if (rpc_is_outstanding(got.id)) {
         // 是外层调用的应答，先收着，等外层自己来取
-        rpc_stash_put(got.id, wire->status, rx + sizeof(rpc_wire_t), wire->len);
+        unsigned len = wire->len;
+        if (len > got.size - sizeof(rpc_wire_t)) {
+          len = got.size - sizeof(rpc_wire_t);
+        }
+        rpc_stash_put(got.id, wire->status, rx + sizeof(rpc_wire_t), len);
       }
       continue; // 其它情况是迟到的应答，丢掉
     }
-    if (got.type == RPC_TYPE_REQUEST) {
+    if (got.type == RPC_TYPE_REQUEST || got.type == RPC_TYPE_NOTIFY) {
       rpc_dispatch(&got, rx); // 可能再次进入 rpc_call（嵌套调用）
     }
   }
-  free(rx);
   return result;
 }
 
@@ -288,27 +283,24 @@ int rpc_unregister_handler(unsigned opcode) {
 }
 
 int rpc_serve_once(unsigned timeout_ms) {
-  char *rx = (char *)malloc(IPC_MAX_MSG_SIZE);
+  char rx[IPC_MAX_MSG_SIZE];
   ipc_msg_t got;
-  int rc;
-
-  if (!rx) {
-    return RPC_ERR_NOMEM;
-  }
-  rc = ipc_recv_any(rx, IPC_MAX_MSG_SIZE, &got, timeout_ms);
+  int rc = ipc_recv_any(rx, sizeof(rx), &got, timeout_ms);
   if (rc < 0) {
-    free(rx);
     return rpc_map_ipc_error(rc);
   }
   if (got.size >= sizeof(rpc_wire_t)) {
     rpc_wire_t *wire = (rpc_wire_t *)rx;
-    if (got.type == RPC_TYPE_REQUEST) {
+    if (got.type == RPC_TYPE_REQUEST || got.type == RPC_TYPE_NOTIFY) {
       rpc_dispatch(&got, rx);
     } else if (got.type == RPC_TYPE_REPLY && rpc_is_outstanding(got.id)) {
-      rpc_stash_put(got.id, wire->status, rx + sizeof(rpc_wire_t), wire->len);
+      unsigned len = wire->len;
+      if (len > got.size - sizeof(rpc_wire_t)) {
+        len = got.size - sizeof(rpc_wire_t);
+      }
+      rpc_stash_put(got.id, wire->status, rx + sizeof(rpc_wire_t), len);
     }
   }
-  free(rx);
   return RPC_OK;
 }
 
@@ -350,7 +342,7 @@ int rpc_connect(const char *name, rpc_endpoint_t *ep, unsigned timeout_ms) {
 int rpc_call_tid(unsigned tid, unsigned generation, unsigned opcode,
                  const void *arg, unsigned arg_len, void *ret, unsigned ret_cap,
                  unsigned *ret_len, unsigned timeout_ms) {
-  char *tx;
+  char tx[sizeof(rpc_wire_t) + RPC_MAX_PAYLOAD];
   unsigned call_id;
   int rc;
 
@@ -362,10 +354,6 @@ int rpc_call_tid(unsigned tid, unsigned generation, unsigned opcode,
   }
   if (rpc_depth >= RPC_MAX_NESTING) {
     return RPC_ERR_NESTING;
-  }
-  tx = (char *)malloc(sizeof(rpc_wire_t) + arg_len);
-  if (!tx) {
-    return RPC_ERR_NOMEM;
   }
   call_id = rpc_next_id++;
   if (rpc_next_id == 0) {
@@ -392,7 +380,6 @@ int rpc_call_tid(unsigned tid, unsigned generation, unsigned opcode,
 
   rpc_outstanding[rpc_depth++] = call_id;
   rc = ipc_send_msg(&out);
-  free(tx);
   if (rc != IPC_OK) {
     rpc_depth--;
     return rpc_map_ipc_error(rc);
@@ -414,7 +401,7 @@ int rpc_call(rpc_endpoint_t *ep, unsigned opcode, const void *arg,
 
 int rpc_notify(rpc_endpoint_t *ep, unsigned opcode, const void *arg,
                unsigned arg_len) {
-  char *tx;
+  char tx[sizeof(rpc_wire_t) + RPC_MAX_PAYLOAD];
   int rc;
 
   if (!ep) {
@@ -423,9 +410,8 @@ int rpc_notify(rpc_endpoint_t *ep, unsigned opcode, const void *arg,
   if (arg_len > RPC_MAX_PAYLOAD) {
     return RPC_ERR_TOOBIG;
   }
-  tx = (char *)malloc(sizeof(rpc_wire_t) + arg_len);
-  if (!tx) {
-    return RPC_ERR_NOMEM;
+  if (arg_len && !arg) {
+    return RPC_ERR_INVAL;
   }
   rpc_wire_t *wire = (rpc_wire_t *)tx;
   wire->opcode = opcode;
@@ -438,17 +424,16 @@ int rpc_notify(rpc_endpoint_t *ep, unsigned opcode, const void *arg,
   ipc_msg_t out;
   out.peer_tid = ep->tid;
   out.peer_generation = ep->generation;
-  out.type = RPC_TYPE_REQUEST;
+  out.type = RPC_TYPE_NOTIFY;
   out.id = rpc_next_id++;
   out.size = sizeof(rpc_wire_t) + arg_len;
-  out.flags = 0;
-  out.timeout_ms = RPC_REPLY_TIMEOUT_MS;
+  out.flags = IPC_NOWAIT;
+  out.timeout_ms = 0;
   out.from_filter = IPC_ANY_TID;
   out.data = tx;
   if (rpc_next_id == 0) {
     rpc_next_id = 1;
   }
   rc = ipc_send_msg(&out);
-  free(tx);
   return rc == IPC_OK ? RPC_OK : rpc_map_ipc_error(rc);
 }

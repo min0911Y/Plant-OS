@@ -142,8 +142,9 @@ void api_yield(void);
 tty_t tty_alloc(void *vram,unsigned handle,unsigned xsize,unsigned ysize);
 void tty_set(unsigned tid,tty_t tty);
 void tty_free(tty_t tty);
-void set_custom_handler(uintptr_t handler);
-void mem_map(unsigned a1,unsigned sz,unsigned a_pde,unsigned b1,unsigned b_pde);
+int shared_memory_map_to(unsigned target_tid, unsigned target_generation,
+                         const void *source, void *target, unsigned size);
+int shared_memory_unmap(void *target, unsigned size);
 void task_set_level_higher(unsigned tid);
 void task_set_level_normal(unsigned tid);
 void use_keyboard();

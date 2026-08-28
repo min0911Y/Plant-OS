@@ -97,7 +97,7 @@ void handle_left_window(window_t *window, gmouse_t *gmouse) {
     // printk("You hide a window.\n");
     return;
   }
-  if(window->sht->height != window->sht->ctl->top - 1)
+  if (window->sht->height != window->sht->ctl->top - 1)
     window->display(window, window->x, window->y, window->sht->ctl->top - 1);
   if (window->console != NULL) {
     if (window->console->handle_left != NULL) {
@@ -108,32 +108,65 @@ void handle_left_window(window_t *window, gmouse_t *gmouse) {
       window->super_window->handle_left(window, gmouse);
     }
   }
-  if(window->handle_left_for_api)
-    window->handle_left_for_api(window,gmouse);
+  if (window->handle_client_left) {
+    window->handle_client_left(window, gmouse);
+  }
 }
 
-window_t *create_window(desktop_t *desktop, char *title, int xsize, int ysize,
-                        unsigned tid) {
+window_t *create_window(desktop_t *desktop, const char *title, int xsize,
+                        int ysize, unsigned tid, vram_t *vram) {
+  if (desktop == NULL || title == NULL || xsize <= 0 || ysize <= 0) {
+    return NULL;
+  }
   window_t *res = (window_t *)malloc(sizeof(window_t));
+  if (res == NULL) {
+    return NULL;
+  }
   res->desktop = desktop;
-  res->vram = (vram_t *)malloc(xsize * ysize * sizeof(vram_t));
+  res->owns_vram = vram == NULL;
+  res->vram = vram == NULL ? (vram_t *)malloc(xsize * ysize * sizeof(vram_t))
+                           : vram;
+  if (res->vram == NULL) {
+    free(res);
+    return NULL;
+  }
   res->xsize = xsize;
   res->ysize = ysize;
   res->title = malloc(strlen(title) + 1);
+  if (res->title == NULL) {
+    if (res->owns_vram) {
+      free(res->vram);
+    }
+    free(res);
+    return NULL;
+  }
   strcpy(res->title, title);
   res->sht = sheet_alloc(desktop->shtctl);
-  res->tid = 0;
+  if (res->sht == NULL) {
+    free(res->title);
+    if (res->owns_vram) {
+      free(res->vram);
+    }
+    free(res);
+    return NULL;
+  }
+  res->tid = tid;
   res->display = display_window;
   res->hide = hide_window;
   res->draw = draw_window;
   res->puts = puts_window;
   res->handle_left = handle_left_window;
-  res->handle_left_for_api = NULL;
+  res->handle_client_left = NULL;
   res->handle_right = NULL;
   res->handle_stay = NULL;
+  res->handle_mouse_wheel = NULL;
   res->close = close_window;
   res->console = NULL;
   res->super_window = NULL;
+  res->fifo_keypress = NULL;
+  res->fifo_keyup = NULL;
+  res->shared = NULL;
+  res->keyboard_events = false;
   res->sht->wnd = res;
   list_add_val((uintptr_t)res, desktop->window_list);
 
@@ -206,4 +239,26 @@ window_t *create_window(desktop_t *desktop, char *title, int xsize, int ysize,
     }
   }
   return res;
+}
+
+void destroy_window(window_t *window) {
+  if (window == NULL) {
+    return;
+  }
+  for (List *entry = window->desktop->window_list->next; entry != NULL;
+       entry = entry->next) {
+    if (entry->val == (uintptr_t)window) {
+      list_delete_child(entry, window->desktop->window_list);
+      break;
+    }
+  }
+  if (window->sht != NULL) {
+    window->sht->wnd = NULL;
+    sheet_free(window->sht);
+  }
+  if (window->owns_vram) {
+    free(window->vram);
+  }
+  free(window->title);
+  free(window);
 }

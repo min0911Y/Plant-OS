@@ -1,5 +1,6 @@
 // 链表
 #include "mst.h"
+#include <stdlib.h>
 #define page_kmalloc malloc
 #define page_kfree(p, sz) free((p))
 List *list_add_val(uintptr_t val, struct List* Obj) {

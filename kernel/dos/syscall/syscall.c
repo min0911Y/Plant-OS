@@ -8,13 +8,6 @@
 
 unsigned div_round_up(unsigned num, unsigned size);
 
-unsigned custom_handler;
-unsigned custom_handler_pde;
-mtask *custom_handler_owner;
-
-void page_set_physics_attr_pde(uint32_t vaddr, void *paddr, uint32_t attr,
-                               unsigned pde_backup);
-
 static void keyboard_press(uint8_t data, uint32_t tid) {
   fifo8_put(get_task(tid)->Pkeyfifo, data);
 }
@@ -287,8 +280,8 @@ enum syscall_id {
   SYSCALL_TTY_FREE = 0x53,
   SYSCALL_RETURN_TO_APP = 0x54,
   SYSCALL_USE_KEYBOARD = 0x55,
-  SYSCALL_CUSTOM_HANDLER = 0x56,
-  SYSCALL_MAP_MEMORY = 0x57,
+  SYSCALL_RESERVED_CUSTOM_HANDLER = 0x56,
+  SYSCALL_SHARED_MEMORY = 0x57,
   SYSCALL_TASK_LEVEL_HIGH = 0x58,
   SYSCALL_TASK_LEVEL_NORMAL = 0x59,
   SYSCALL_MODULE_LOAD = 0x5a,
@@ -1143,30 +1136,51 @@ static void syscall_use_keyboard(x86_interrupt_frame_t *frame) {
   keyboard_use_task = current_task();
 }
 
-static void syscall_custom_handler(x86_interrupt_frame_t *frame) {
-  if (!custom_handler) {
-    custom_handler = frame->ebx;
-    custom_handler_pde = current_task()->pde;
-    custom_handler_owner = current_task();
+enum shared_memory_operation {
+  SHARED_MEMORY_MAP_TO = 0x01,
+  SHARED_MEMORY_UNMAP = 0x02,
+};
+
+static bool shared_memory_range_ok(uint32_t address, uint32_t size,
+                                   uint32_t lower, uint32_t upper) {
+  if (size == 0 || size > upper - lower ||
+      ((address | size) & 0xfffu) != 0 || address < lower) {
+    return false;
   }
+  return address <= upper - size;
 }
 
-static void syscall_map_memory(x86_interrupt_frame_t *frame) {
-  unsigned target = frame->ebx & 0xfffff000;
-  unsigned size = frame->ecx;
-  unsigned target_pde = frame->edx;
-  unsigned source = frame->esi & 0xfffff000;
-  unsigned source_pde = frame->edi;
-  unsigned count = div_round_up(size, 0x1000);
+static void syscall_shared_memory(x86_interrupt_frame_t *frame) {
+  bool success = false;
+  if (frame->ebx == SHARED_MEMORY_MAP_TO) {
+    if (!shared_memory_range_ok(frame->edi, frame->ebp, USER_SPACE_START,
+                                USER_HEAP_END) ||
+        !shared_memory_range_ok(frame->esi, frame->ebp, USER_HEAP_END,
+                                USER_SHARED_END)) {
+      frame->eax = -1;
+      return;
+    }
 
-  irq_state_t state = irq_save();
-  for (unsigned i = 0; i < count; i++) {
-    unsigned physical = page_get_phy_pde(source + i * 0x1000, source_pde);
-    page_set_physics_attr_pde(
-        target + i * 0x1000, (void *)(uintptr_t)physical,
-        PG_P | PG_USU | PG_RWW | PG_SHARED, target_pde);
+    irq_state_t state = irq_save();
+    mtask *target = get_task(frame->ecx);
+    if (target != NULL && target->state != DIED &&
+        target->generation == frame->edx && target->pde != 0) {
+      success = page_share_range_pde(frame->edi, frame->esi, frame->ebp,
+                                     current_task()->pde, target->pde);
+    }
+    irq_restore(state);
+  } else if (frame->ebx == SHARED_MEMORY_UNMAP) {
+    if (!shared_memory_range_ok(frame->esi, frame->ebp, USER_HEAP_END,
+                                USER_SHARED_END)) {
+      frame->eax = -1;
+      return;
+    }
+    irq_state_t state = irq_save();
+    success = page_unmap_shared_range_pde(frame->esi, frame->ebp,
+                                           current_task()->pde);
+    irq_restore(state);
   }
-  irq_restore(state);
+  frame->eax = success ? 0 : -1;
 }
 
 static void syscall_task_level(x86_interrupt_frame_t *frame) {
@@ -1339,8 +1353,7 @@ static const syscall_handler_t syscall_handlers[SYSCALL_COUNT] = {
     [SYSCALL_TTY_FREE] = syscall_tty_object,
     [SYSCALL_RETURN_TO_APP] = syscall_return_to_app,
     [SYSCALL_USE_KEYBOARD] = syscall_use_keyboard,
-    [SYSCALL_CUSTOM_HANDLER] = syscall_custom_handler,
-    [SYSCALL_MAP_MEMORY] = syscall_map_memory,
+    [SYSCALL_SHARED_MEMORY] = syscall_shared_memory,
     [SYSCALL_TASK_LEVEL_HIGH] = syscall_task_level,
     [SYSCALL_TASK_LEVEL_NORMAL] = syscall_task_level,
     [SYSCALL_MODULE_LOAD] = syscall_module,
@@ -1356,50 +1369,4 @@ void x86_syscall_dispatch(x86_interrupt_frame_t *frame) {
     return;
   }
   syscall_handlers[frame->eax](frame);
-}
-
-void x86_custom_syscall_dispatch(x86_interrupt_frame_t *frame) {
-  if (!custom_handler || custom_handler_owner == NULL) {
-    return;
-  }
-
-  mtask *task = current_task();
-  unsigned *alloc_size = task->alloc_size;
-  unsigned alloc_addr = task->alloc_addr;
-  unsigned tid = task->tid;
-  task->alloc_size = custom_handler_owner->alloc_size;
-  task->alloc_addr = custom_handler_owner->alloc_addr;
-  task->tid = custom_handler_owner->tid;
-
-  unsigned args[] = {
-      frame->edi,         frame->esi, frame->ebp, frame->esp_dummy,
-      frame->ebx,         frame->edx, frame->ecx, frame->eax,
-      custom_handler_pde, task->pde,  tid,
-  };
-  char *argument_copy = NULL;
-  if (frame->ebx) {
-    char *source = (char *)(uintptr_t)frame->ebx;
-    argument_copy = malloc(strlen(source) + 1);
-    strcpy(argument_copy, source);
-    args[4] = (uintptr_t)argument_copy;
-  }
-
-  call_across_page((uint32_t(*)(void *))(uintptr_t)custom_handler,
-                   custom_handler_pde, args);
-  if (argument_copy) {
-    free(argument_copy);
-    args[4] = frame->ebx;
-  }
-
-  frame->edi = args[0];
-  frame->esi = args[1];
-  frame->ebp = args[2];
-  frame->esp_dummy = args[3];
-  frame->ebx = args[4];
-  frame->edx = args[5];
-  frame->ecx = args[6];
-  frame->eax = args[7];
-  task->alloc_size = alloc_size;
-  task->alloc_addr = alloc_addr;
-  task->tid = tid;
 }

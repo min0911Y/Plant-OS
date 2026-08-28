@@ -5,6 +5,7 @@
 
 #define USER_SPACE_START 0x70000000u
 #define USER_HEAP_END 0xf0000000u
+#define USER_SHARED_END 0xf1000000u
 
 struct user_runtime_layout {
   uint32_t total_pages;

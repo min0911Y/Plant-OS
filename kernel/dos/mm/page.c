@@ -501,6 +501,140 @@ static int page_ensure_user_table(uint32_t *pde_entry) {
   return 1;
 }
 
+static int page_prepare_user_table(uint32_t *pde_entry) {
+  if (!page_ensure_user_table(pde_entry)) {
+    return 0;
+  }
+  if (page_refcount_entry(*pde_entry) <= 1) {
+    *pde_entry = page_entry_add_flags(*pde_entry, PAGE_USER_RW_FLAGS);
+    return 1;
+  }
+
+  uint32_t old_entry = *pde_entry;
+  void *new_table = page_malloc_one_count_from_4gb();
+  if (new_table == NULL) {
+    return 0;
+  }
+  memcpy(new_table, (void *)page_entry_addr(old_entry), PAGE_SIZE_BYTES);
+  page_ref_dec_entry(old_entry);
+  *pde_entry = page_entry_make((uint32_t)(uintptr_t)new_table,
+                               page_entry_flags(old_entry) |
+                                   PAGE_USER_RW_FLAGS);
+  return 1;
+}
+
+bool page_share_range_pde(uint32_t source, uint32_t target, uint32_t size,
+                          uint32_t source_pde, uint32_t target_pde) {
+  if (size == 0 || (source | target | size) & (PAGE_SIZE_BYTES - 1)) {
+    return false;
+  }
+
+  uint32_t source_pde_backup = current_task()->pde;
+  uint32_t mapped = 0;
+  bool result = false;
+  current_task()->pde = PDE_ADDRESS;
+  x86_cr3_write(PDE_ADDRESS);
+
+  for (uint32_t offset = 0; offset < size; offset += PAGE_SIZE_BYTES) {
+    uint32_t source_address = source + offset;
+    uint32_t target_address = target + offset;
+    uint32_t *source_directory = page_dir_entry(source_pde, source_address);
+    uint32_t source_directory_entry = *source_directory;
+    if (!page_entry_has_all(source_directory_entry, PAGE_USER_PRESENT_FLAGS) ||
+        !page_prepare_user_table(source_directory)) {
+      goto rollback;
+    }
+    uint32_t *source_entry =
+        page_table_entry_from_dir(*source_directory, source_address);
+    uint32_t source_mapping = *source_entry;
+    if (!page_entry_has_all(source_mapping, PAGE_USER_PRESENT_FLAGS)) {
+      goto rollback;
+    }
+
+    uint32_t *target_directory = page_dir_entry(target_pde, target_address);
+    if (!page_prepare_user_table(target_directory)) {
+      goto rollback;
+    }
+    uint32_t *target_entry =
+        page_table_entry_from_dir(*target_directory, target_address);
+    if (page_entry_has_any(*target_entry, PG_P)) {
+      /* The dedicated shared-user range inherits bootstrap identity PTEs.
+       * Its caller has already reserved the address, so replace that stale
+       * mapping instead of treating it as an application collision. */
+      if (page_refcount_entry(*target_entry) != 0) {
+        page_ref_dec_entry(*target_entry);
+      }
+    }
+
+    *source_entry = page_entry_add_flags(source_mapping, PG_SHARED | PG_RWW);
+    page_ref_inc_idx(IDX(page_entry_addr(source_mapping)));
+    *target_entry = page_entry_make(page_entry_addr(source_mapping),
+                                    PAGE_USER_RW_FLAGS | PG_SHARED);
+    mapped += PAGE_SIZE_BYTES;
+  }
+  result = true;
+  goto restore;
+
+rollback:
+  for (uint32_t offset = 0; offset < mapped; offset += PAGE_SIZE_BYTES) {
+    uint32_t target_address = target + offset;
+    uint32_t *target_directory = page_dir_entry(target_pde, target_address);
+    uint32_t *target_entry =
+        page_table_entry_from_dir(*target_directory, target_address);
+    page_ref_dec_entry(*target_entry);
+    *target_entry = 0;
+  }
+
+restore:
+  current_task()->pde = source_pde_backup;
+  x86_cr3_write(source_pde_backup);
+  return result;
+}
+
+bool page_unmap_shared_range_pde(uint32_t target, uint32_t size,
+                                 uint32_t target_pde) {
+  if (size == 0 || (target | size) & (PAGE_SIZE_BYTES - 1)) {
+    return false;
+  }
+
+  uint32_t pde_backup = current_task()->pde;
+  bool result = false;
+  current_task()->pde = PDE_ADDRESS;
+  x86_cr3_write(PDE_ADDRESS);
+
+  for (uint32_t offset = 0; offset < size; offset += PAGE_SIZE_BYTES) {
+    uint32_t *directory = page_dir_entry(target_pde, target + offset);
+    if (!page_entry_has_all(*directory, PAGE_USER_PRESENT_FLAGS)) {
+      goto restore;
+    }
+    uint32_t *entry = page_table_entry_from_dir(*directory, target + offset);
+    if (!page_entry_has_all(*entry, PAGE_USER_PRESENT_FLAGS) ||
+        !page_entry_has_any(*entry, PG_SHARED)) {
+      goto restore;
+    }
+  }
+
+  for (uint32_t offset = 0; offset < size; offset += PAGE_SIZE_BYTES) {
+    uint32_t *directory = page_dir_entry(target_pde, target + offset);
+    if (!page_prepare_user_table(directory)) {
+      goto restore;
+    }
+  }
+
+  for (uint32_t offset = 0; offset < size; offset += PAGE_SIZE_BYTES) {
+    uint32_t *directory = page_dir_entry(target_pde, target + offset);
+    uint32_t *entry = page_table_entry_from_dir(*directory, target + offset);
+    page_ref_dec_entry(*entry);
+    *entry = 0;
+  }
+  result = true;
+
+restore:
+  current_task()->pde = pde_backup;
+  x86_cr3_write(pde_backup);
+  return result;
+}
+
 int page_link_pde(unsigned addr, unsigned pde) {
 
   unsigned pde_backup = current_task()->pde;
