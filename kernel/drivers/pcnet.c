@@ -224,8 +224,7 @@ int pcnet_link_transmit(const uint8_t *frame, uint16_t length) {
   return 0;
 }
 
-void PCNET_IRQ(int *frame) {
-  (void)frame;
+void PCNET_IRQ(void) {
   bool reschedule = false;
   uint16_t status = pcnet_read_csr(PCNET_CSR0);
   pcnet_write_csr(PCNET_CSR0, status);

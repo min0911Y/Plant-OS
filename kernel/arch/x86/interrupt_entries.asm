@@ -68,20 +68,10 @@ PCNET_ASM_INTHANDLER:
   push fs
   push gs
   pusha
-	PUSH	ES
-	PUSH	DS
-	PUSHAD
-	MOV		EAX,ESP
-	PUSH	EAX
-	MOV		AX,SS
-	MOV		DS,AX
-	MOV		ES,AX
-	CALL	PCNET_IRQ
-	POP		EAX
-	;call signal_deal
-	POPAD
-	POP		DS
-	POP		ES
+  mov ax, ss
+  mov ds, ax
+  mov es, ax
+  call PCNET_IRQ
   popa
   pop gs
   pop fs
@@ -97,20 +87,10 @@ RTL8139_ASM_INTHANDLER:
   push fs
   push gs
   pusha
-	PUSH	ES
-	PUSH	DS
-	PUSHAD
-	MOV		EAX,ESP
-	PUSH	EAX
-	MOV		AX,SS
-	MOV		DS,AX
-	MOV		ES,AX
-	CALL	RTL8139_IRQ
-	POP		EAX
-	;call signal_deal
-	POPAD
-	POP		DS
-	POP		ES
+  mov ax, ss
+  mov ds, ax
+  mov es, ax
+  call RTL8139_IRQ
   popa
   pop gs
   pop fs

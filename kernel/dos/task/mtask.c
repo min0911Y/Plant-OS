@@ -136,7 +136,15 @@ void task_next() {
       }
   }
   if (next == NULL) {
+    if (current->state == RUNNING) {
+      current->running = 0;
+      return;
+    }
     next = idle_task;
+  }
+  if (next == current) {
+    current->running = 0;
+    return;
   }
   if (next->user_mode == 1) {
     arch_task_set_kernel_stack(next->top);
