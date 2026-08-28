@@ -57,22 +57,22 @@ static uint16_t rtl8139_read16(uint16_t offset) {
   return x86_port_read16(rtl8139.io_base + offset);
 }
 
-static void rtl8139_deliver_frame(uint16_t length) {
+static bool rtl8139_deliver_frame(uint16_t length) {
   uint16_t frame_length = length - 4;
   uint16_t offset = rtl8139.receive_offset + 4;
   if (offset + frame_length <= RTL8139_RX_RING_BYTES) {
-    rtl8139.receive(rtl8139_receive_buffer + offset, frame_length);
-    return;
+    return rtl8139.receive(rtl8139_receive_buffer + offset, frame_length);
   }
 
   uint16_t first = RTL8139_RX_RING_BYTES - offset;
   memcpy(rtl8139_wrapped_frame, rtl8139_receive_buffer + offset, first);
   memcpy(rtl8139_wrapped_frame + first, rtl8139_receive_buffer,
          frame_length - first);
-  rtl8139.receive(rtl8139_wrapped_frame, frame_length);
+  return rtl8139.receive(rtl8139_wrapped_frame, frame_length);
 }
 
-static void rtl8139_receive(void) {
+static bool rtl8139_receive(void) {
+  bool reschedule = false;
   while ((x86_port_read8(rtl8139.io_base + RTL8139_CMD) &
           RTL8139_CMD_RX_EMPTY) == 0) {
     uint16_t status;
@@ -88,16 +88,17 @@ static void rtl8139_receive(void) {
       }
       rtl8139.receive_offset = 0;
       x86_port_write16(rtl8139.io_base + RTL8139_CAPR, 0);
-      return;
+      return reschedule;
     }
 
-    rtl8139_deliver_frame(length);
+    reschedule |= rtl8139_deliver_frame(length);
     rtl8139.receive_offset =
         (rtl8139.receive_offset + length + 4 + 3) & ~((uint16_t)3);
     rtl8139.receive_offset %= RTL8139_RX_RING_BYTES;
     x86_port_write16(rtl8139.io_base + RTL8139_CAPR,
                      rtl8139.receive_offset - 16);
   }
+  return reschedule;
 }
 
 bool rtl8139_link_start(net_link_receive_t receive, uint8_t mac[6]) {
@@ -187,12 +188,16 @@ int rtl8139_link_transmit(const uint8_t *frame, uint16_t length) {
 }
 
 void RTL8139_IRQ(void) {
+  bool reschedule = false;
   uint16_t status = rtl8139_read16(RTL8139_ISR);
   x86_port_write16(rtl8139.io_base + RTL8139_ISR, status);
   if (rtl8139.active && (status & 0x0001) != 0) {
-    rtl8139_receive();
+    reschedule = rtl8139_receive();
   }
   if (rtl8139.active) {
     send_eoi(rtl8139.irq);
+  }
+  if (reschedule) {
+    task_next();
   }
 }

@@ -56,6 +56,7 @@ typedef struct {
   uint32_t owner_group;
   uint32_t generation;
   uint32_t queued_bytes;
+  uint32_t receive_timeout_ticks;
   uint32_t peer_generation;
   uint32_t pending_parent_generation;
   uint16_t pending_count;
@@ -108,9 +109,28 @@ static net_socket_packet_t net_packets[NET_SOCKET_PACKET_CAPACITY];
 static net_socket_packet_t *net_packet_free;
 static net_dns_request_t net_dns_requests[NET_SOCKET_DNS_REQUEST_CAPACITY];
 static bool net_socket_initialized;
+static bool net_socket_input_active;
+static bool net_socket_input_woke_task;
+
+void net_socket_input_begin(void) {
+  net_socket_input_active = true;
+  net_socket_input_woke_task = false;
+}
+
+bool net_socket_input_end(void) {
+  bool woke_task = net_socket_input_woke_task;
+  net_socket_input_active = false;
+  net_socket_input_woke_task = false;
+  return woke_task;
+}
 
 static bool net_socket_deadline_passed(uint32_t deadline) {
   return deadline != 0 && (int32_t)(timerctl.count - deadline) >= 0;
+}
+
+static uint32_t net_socket_deadline_after(uint32_t ticks) {
+  uint32_t deadline = timerctl.count + ticks;
+  return deadline == 0 ? 1 : deadline;
 }
 
 static void net_socket_waiter_init(net_socket_waiter_t *waiter) {
@@ -134,6 +154,10 @@ static void net_socket_waiter_wake(net_socket_waiter_t *waiter) {
   net_socket_waiter_init(waiter);
   if (task != NULL && task->generation == generation) {
     task_run(task);
+    if (net_socket_input_active && task->ready) {
+      mtask_run_now(task);
+      net_socket_input_woke_task = true;
+    }
   }
 }
 
@@ -646,6 +670,7 @@ static err_t net_socket_tcp_accept(void *arg, struct tcp_pcb *pcb,
   child->type = NET_SOCKET_STREAM;
   child->protocol = NET_SOCKET_PROTOCOL_TCP;
   child->state = NET_SOCKET_INET_TCP_CONNECTED;
+  child->receive_timeout_ticks = listener->receive_timeout_ticks;
   child->pcb.tcp = pcb;
   net_socket_address_from_ip(&child->local, &pcb->local_ip,
                              lwip_htons(pcb->local_port));
@@ -944,6 +969,7 @@ static int net_socket_connect_local_stream(net_socket_t *socket,
   child->domain = NET_SOCKET_AF_LOCAL;
   child->type = NET_SOCKET_STREAM;
   child->state = NET_SOCKET_LOCAL_CONNECTED;
+  child->receive_timeout_ticks = listener->receive_timeout_ticks;
   child->local = listener->local;
   if (socket->bound) {
     child->peer = socket->local;
@@ -1124,6 +1150,7 @@ int net_socket_listen(uint32_t owner_group, int handle, int backlog) {
 
 int net_socket_accept(uint32_t owner_group, int handle,
                       net_socket_address_t *peer_address) {
+  uint32_t deadline = 0;
   for (;;) {
     irq_state_t state = irq_save();
     net_socket_system_init();
@@ -1146,7 +1173,10 @@ int net_socket_accept(uint32_t owner_group, int handle,
       irq_restore(state);
       return accepted;
     }
-    int result = net_socket_wait(&listener->acceptor, 0, state);
+    if (deadline == 0 && listener->receive_timeout_ticks != 0) {
+      deadline = net_socket_deadline_after(listener->receive_timeout_ticks);
+    }
+    int result = net_socket_wait(&listener->acceptor, deadline, state);
     if (result != 0) {
       return result;
     }
@@ -1483,6 +1513,7 @@ int net_socket_recvfrom(uint32_t owner_group, int handle, void *data,
     return NET_SOCKET_ERR_INVAL;
   }
 
+  uint32_t deadline = 0;
   for (;;) {
     irq_state_t state = irq_save();
     net_socket_system_init();
@@ -1553,7 +1584,10 @@ int net_socket_recvfrom(uint32_t owner_group, int handle, void *data,
       irq_restore(state);
       return NET_SOCKET_ERR_AGAIN;
     }
-    int result = net_socket_wait(&socket->reader, 0, state);
+    if (deadline == 0 && socket->receive_timeout_ticks != 0) {
+      deadline = net_socket_deadline_after(socket->receive_timeout_ticks);
+    }
+    int result = net_socket_wait(&socket->reader, deadline, state);
     if (result != 0) {
       return result;
     }
@@ -1582,6 +1616,24 @@ int net_socket_getname(uint32_t owner_group, int handle, bool peer,
     net_socket_refresh_local(socket);
     *address = socket->local;
   }
+  irq_restore(state);
+  return 0;
+}
+
+int net_socket_set_option(uint32_t owner_group, int handle, int level,
+                          int option, uint32_t value) {
+  if (level != NET_SOCKET_SOL_SOCKET || option != NET_SOCKET_SO_RCVTIMEO) {
+    return NET_SOCKET_ERR_PROTOCOL;
+  }
+  uint32_t ticks = value / 10u + (value % 10u != 0);
+  irq_state_t state = irq_save();
+  net_socket_system_init();
+  net_socket_t *socket = net_socket_find(owner_group, handle);
+  if (socket == NULL) {
+    irq_restore(state);
+    return NET_SOCKET_ERR_NOENT;
+  }
+  socket->receive_timeout_ticks = ticks;
   irq_restore(state);
   return 0;
 }

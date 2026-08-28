@@ -3,7 +3,7 @@
 
 #include <ctypes.h>
 
-typedef void (*net_link_receive_t)(const uint8_t *frame, uint16_t length);
+typedef bool (*net_link_receive_t)(const uint8_t *frame, uint16_t length);
 
 bool net_link_start(net_link_receive_t receive, uint8_t mac[6],
                     const char **name);

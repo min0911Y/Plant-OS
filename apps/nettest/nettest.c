@@ -234,6 +234,12 @@ static int nettest_ping(const struct sockaddr_in *target,
   if (socket_fd < 0) {
     return -1;
   }
+  struct timeval receive_timeout = {.tv_sec = 2, .tv_usec = 0};
+  if (setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &receive_timeout,
+                 sizeof(receive_timeout)) != 0) {
+    socket_close(socket_fd);
+    return -1;
+  }
   uint8_t request[sizeof(nettest_icmp_header_t) + 16];
   memset(request, 0x5a, sizeof(request));
   nettest_icmp_header_t *header = (nettest_icmp_header_t *)request;
@@ -252,14 +258,12 @@ static int nettest_ping(const struct sockaddr_in *target,
     return -1;
   }
 
-  uint64_t deadline = monotonic_ns() + 2000000000ull;
   int result = -1;
-  while (monotonic_ns() < deadline) {
+  for (;;) {
     uint8_t packet[1600];
-    int length = recv(socket_fd, packet, sizeof(packet), MSG_DONTWAIT);
-    if (length == SOCKET_ERR_AGAIN) {
-      sleep(10);
-      continue;
+    int length = recv(socket_fd, packet, sizeof(packet), 0);
+    if (length < 0) {
+      break;
     }
     if (length < 20 || (packet[0] >> 4) != 4) {
       continue;

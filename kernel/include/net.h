@@ -18,7 +18,16 @@ enum net_socket_syscall_operation {
   NET_SOCKET_SYSCALL_GETPEERNAME,
   NET_SOCKET_SYSCALL_RESOLVE,
   NET_SOCKET_SYSCALL_INTERFACE_ADDRESS,
+  NET_SOCKET_SYSCALL_SET_OPTION,
   NET_SOCKET_SYSCALL_COUNT,
+};
+
+enum net_socket_option_level {
+  NET_SOCKET_SOL_SOCKET = 1,
+};
+
+enum net_socket_option {
+  NET_SOCKET_SO_RCVTIMEO = 1,
 };
 
 enum net_socket_family {
@@ -111,8 +120,12 @@ int net_socket_recvfrom(uint32_t owner_group, int handle, void *data,
                         net_socket_address_t *peer_address);
 int net_socket_getname(uint32_t owner_group, int handle, bool peer,
                        net_socket_address_t *address);
+int net_socket_set_option(uint32_t owner_group, int handle, int level,
+                          int option, uint32_t value);
 int net_socket_resolve(const char *name, uint32_t length,
                        uint32_t *address);
+void net_socket_input_begin(void);
+bool net_socket_input_end(void);
 void net_socket_tick(void);
 void net_socket_cancel_waits(uint32_t tid, uint32_t generation);
 void net_socket_task_cleanup(uint32_t owner_group);

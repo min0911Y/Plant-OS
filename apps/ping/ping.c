@@ -6,7 +6,6 @@
 #include <time.h>
 
 #define PING_PAYLOAD_BYTES 32u
-#define PING_TIMEOUT_NS 1000000000ull
 #define PING_DHCP_WAIT_MS 10000u
 
 typedef struct __attribute__((packed)) {
@@ -121,6 +120,15 @@ int main(int argc, char **argv) {
     printf("cannot create ICMP socket: %d\n", socket_fd);
     return 4;
   }
+  struct timeval receive_timeout = {.tv_sec = 1, .tv_usec = 0};
+  int option_result =
+      setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &receive_timeout,
+                 sizeof(receive_timeout));
+  if (option_result != 0) {
+    printf("cannot set ICMP receive timeout: %d\n", option_result);
+    socket_close(socket_fd);
+    return 4;
+  }
 
   printf("PING %s (%s): %d data bytes\n", argv[1], target_text,
          PING_PAYLOAD_BYTES);
@@ -147,17 +155,12 @@ int main(int argc, char **argv) {
     }
 
     int matched = 0;
-    uint64_t deadline = started + PING_TIMEOUT_NS;
-    while (monotonic_ns() < deadline) {
+    for (;;) {
       uint8_t reply[1600];
       struct sockaddr_storage source;
       socklen_t source_length = sizeof(source);
-      int size = recvfrom(socket_fd, reply, sizeof(reply), MSG_DONTWAIT,
+      int size = recvfrom(socket_fd, reply, sizeof(reply), 0,
                           (struct sockaddr *)&source, &source_length);
-      if (size == SOCKET_ERR_AGAIN) {
-        sleep(10);
-        continue;
-      }
       if (size < 0) {
         break;
       }

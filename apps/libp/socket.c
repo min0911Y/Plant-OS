@@ -154,6 +154,32 @@ int getpeername(socket_t socket, struct sockaddr *address, socklen_t *length) {
   return socket_getname(socket, address, length, SOCKET_SYSCALL_GETPEERNAME);
 }
 
+int setsockopt(socket_t socket, int level, int option, const void *value,
+               socklen_t length) {
+  if (level != SOL_SOCKET || option != SO_RCVTIMEO || value == NULL ||
+      length != sizeof(struct timeval)) {
+    return SOCKET_ERR_INVAL;
+  }
+  const struct timeval *timeout = (const struct timeval *)value;
+  if (timeout->tv_sec < 0 || timeout->tv_usec < 0 ||
+      timeout->tv_usec >= 1000000) {
+    return SOCKET_ERR_INVAL;
+  }
+  uint64_t milliseconds = (uint64_t)(uint32_t)timeout->tv_sec * 1000ull +
+                          ((uint32_t)timeout->tv_usec + 999u) / 1000u;
+  if (milliseconds > 0xffffffffull) {
+    return SOCKET_ERR_INVAL;
+  }
+
+  socket_syscall_request_t request;
+  socket_request_init(&request);
+  request.socket = socket;
+  request.domain = level;
+  request.type = option;
+  request.length = (uint32_t)milliseconds;
+  return socket_call(SOCKET_SYSCALL_SET_OPTION, &request);
+}
+
 int inet_pton(int family, const char *text, void *address) {
   if (family != AF_INET || text == NULL || address == NULL) {
     return 0;

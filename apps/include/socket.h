@@ -11,6 +11,11 @@ typedef int socket_t;
 typedef uint16_t sa_family_t;
 typedef uint32_t socklen_t;
 
+struct timeval {
+  int32_t tv_sec;
+  int32_t tv_usec;
+};
+
 enum socket_family {
   AF_UNSPEC = 0,
   AF_LOCAL = 1,
@@ -33,6 +38,14 @@ enum socket_protocol {
 
 enum socket_message_flag {
   MSG_DONTWAIT = 1u,
+};
+
+enum socket_option_level {
+  SOL_SOCKET = 1,
+};
+
+enum socket_option {
+  SO_RCVTIMEO = 1,
 };
 
 enum socket_result {
@@ -131,6 +144,7 @@ enum socket_syscall_operation {
   SOCKET_SYSCALL_GETPEERNAME,
   SOCKET_SYSCALL_RESOLVE,
   SOCKET_SYSCALL_INTERFACE_ADDRESS,
+  SOCKET_SYSCALL_SET_OPTION,
   SOCKET_SYSCALL_COUNT,
 };
 
@@ -161,6 +175,8 @@ int recvfrom(socket_t socket, void *data, uint32_t length, uint32_t flags,
              struct sockaddr *address, socklen_t *address_length);
 int getsockname(socket_t socket, struct sockaddr *address, socklen_t *length);
 int getpeername(socket_t socket, struct sockaddr *address, socklen_t *length);
+int setsockopt(socket_t socket, int level, int option, const void *value,
+               socklen_t length);
 
 int inet_pton(int family, const char *text, void *address);
 const char *inet_ntop(int family, const void *address, char *text,

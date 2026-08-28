@@ -1472,6 +1472,12 @@ static int socket_syscall_interface_address(
   return 0;
 }
 
+static int socket_syscall_set_option(
+    uint32_t owner_group, net_socket_syscall_request_t *request) {
+  return net_socket_set_option(owner_group, request->socket, request->domain,
+                               request->type, request->length);
+}
+
 static const socket_syscall_handler_t
     socket_syscall_handlers[NET_SOCKET_SYSCALL_COUNT] = {
         [NET_SOCKET_SYSCALL_CREATE] = socket_syscall_create,
@@ -1486,6 +1492,7 @@ static const socket_syscall_handler_t
         [NET_SOCKET_SYSCALL_GETPEERNAME] = socket_syscall_getpeername,
         [NET_SOCKET_SYSCALL_RESOLVE] = socket_syscall_resolve,
         [NET_SOCKET_SYSCALL_INTERFACE_ADDRESS] = socket_syscall_interface_address,
+        [NET_SOCKET_SYSCALL_SET_OPTION] = socket_syscall_set_option,
 };
 
 static void syscall_socket(x86_interrupt_frame_t *frame) {

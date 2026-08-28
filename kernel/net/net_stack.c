@@ -52,22 +52,26 @@ static void net_interface_status(struct netif *interface) {
        (uint8_t)(address >> 16), (uint8_t)(address >> 8), (uint8_t)address);
 }
 
-static void net_receive_frame(const uint8_t *frame, uint16_t length) {
+static bool net_receive_frame(const uint8_t *frame, uint16_t length) {
   if (!net_interface_started || frame == NULL || length < 14 ||
       length > NET_FRAME_BYTES) {
-    return;
+    return false;
   }
 
   irq_state_t state = irq_save();
+  bool woke_task = false;
   struct pbuf *packet = pbuf_alloc(PBUF_RAW, length, PBUF_POOL);
   if (packet != NULL && pbuf_take(packet, frame, length) == ERR_OK) {
+    net_socket_input_begin();
     if (net_interface.input(packet, &net_interface) != ERR_OK) {
       pbuf_free(packet);
     }
+    woke_task = net_socket_input_end();
   } else if (packet != NULL) {
     pbuf_free(packet);
   }
   irq_restore(state);
+  return woke_task;
 }
 
 void net_stack_initialize(void) {

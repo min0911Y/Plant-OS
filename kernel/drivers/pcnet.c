@@ -110,20 +110,22 @@ static void pcnet_prepare_rings(const uint8_t mac[6]) {
       (uint32_t)(uintptr_t)pcnet_transmit_descriptors;
 }
 
-static void pcnet_receive(void) {
+static bool pcnet_receive(void) {
+  bool reschedule = false;
   for (;;) {
     pcnet_descriptor_t *descriptor =
         &pcnet_receive_descriptors[pcnet.next_receive];
     uint32_t flags = descriptor->flags;
     if ((flags & PCNET_DESC_OWN) != 0) {
-      return;
+      return reschedule;
     }
 
     uint16_t length = (uint16_t)(descriptor->flags2 & 0x0fffu);
     if ((flags & (PCNET_DESC_ERR | PCNET_DESC_STP | PCNET_DESC_ENP)) ==
             (PCNET_DESC_STP | PCNET_DESC_ENP) &&
         length >= 4 && length - 4 >= 14 && length - 4 <= PCNET_FRAME_MAX) {
-      pcnet.receive(pcnet_receive_buffers[pcnet.next_receive], length - 4);
+      reschedule |=
+          pcnet.receive(pcnet_receive_buffers[pcnet.next_receive], length - 4);
     }
 
     pcnet_rearm_receive(descriptor);
@@ -224,12 +226,16 @@ int pcnet_link_transmit(const uint8_t *frame, uint16_t length) {
 
 void PCNET_IRQ(int *frame) {
   (void)frame;
+  bool reschedule = false;
   uint16_t status = pcnet_read_csr(PCNET_CSR0);
   pcnet_write_csr(PCNET_CSR0, status);
   if (pcnet.active && (status & 0x0400) != 0) {
-    pcnet_receive();
+    reschedule = pcnet_receive();
   }
   if (pcnet.active) {
     send_eoi(pcnet.irq);
+  }
+  if (reschedule) {
+    task_next();
   }
 }
