@@ -228,7 +228,7 @@ static int nettest_loopback_stream(void) {
   return result;
 }
 
-static int nettest_ping(const struct sockaddr_in *target) {
+static int nettest_ping(const struct sockaddr_in *target, unsigned *elapsed) {
   socket_t socket_fd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
   if (socket_fd < 0) {
     return -1;
@@ -243,6 +243,7 @@ static int nettest_ping(const struct sockaddr_in *target) {
   header->identifier = htons(identifier);
   header->sequence = htons(1);
   header->checksum = htons(nettest_checksum(request, sizeof(request)));
+  unsigned started = (unsigned)clock();
   if (sendto(socket_fd, request, sizeof(request), 0,
              (const struct sockaddr *)target, sizeof(*target)) !=
       sizeof(request)) {
@@ -270,6 +271,9 @@ static int nettest_ping(const struct sockaddr_in *target) {
         (const nettest_icmp_header_t *)(packet + ip_length);
     if (reply->type == 0 && reply->code == 0 &&
         ntohs(reply->identifier) == identifier && ntohs(reply->sequence) == 1) {
+      if (elapsed != NULL) {
+        *elapsed = (unsigned)clock() - started;
+      }
       result = 0;
       break;
     }
@@ -281,8 +285,9 @@ static int nettest_ping(const struct sockaddr_in *target) {
 static int nettest_loopback(void) {
   struct sockaddr_in target;
   nettest_loopback_address(&target);
+  unsigned elapsed = 0;
   return nettest_loopback_udp() == 0 && nettest_loopback_stream() == 0 &&
-                 nettest_ping(&target) == 0
+                 nettest_ping(&target, &elapsed) == 0 && elapsed <= 10
              ? 0
              : -1;
 }
@@ -370,7 +375,7 @@ int main(int argc, char **argv) {
     printf("UDP gateway send test failed.\n");
     return 5;
   }
-  if (nettest_ping(&gateway) != 0) {
+  if (nettest_ping(&gateway, NULL) != 0) {
     printf("ICMP gateway test failed.\n");
     return 6;
   }

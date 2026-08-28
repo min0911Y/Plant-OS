@@ -172,9 +172,14 @@ int main(int argc, char **argv) {
                     sizeof(source_text)) == NULL) {
         strcpy(source_text, target_text);
       }
-      printf("%d bytes from %s: icmp_seq=%d time=%d ms\n",
+      unsigned elapsed = (unsigned)clock() - started;
+      const char *comparison = elapsed == 0 ? "<" : "=";
+      if (elapsed == 0) {
+        elapsed = 10;
+      }
+      printf("%d bytes from %s: icmp_seq=%d time%s%d ms\n",
              size - (reply[0] & 0x0fu) * 4, source_text, sequence,
-             (unsigned)clock() - started);
+             comparison, elapsed);
       received++;
       matched = 1;
       break;

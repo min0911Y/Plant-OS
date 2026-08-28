@@ -1042,6 +1042,7 @@ int net_socket_connect(uint32_t owner_group, int handle,
   socket->peer = *address;
   socket->state = NET_SOCKET_INET_TCP_CONNECTING;
   uint32_t deadline = timerctl.count + NET_SOCKET_CONNECT_TIMEOUT_TICKS;
+  net_stack_poll_local(address->value.inet.address);
   irq_restore(state);
 
   for (;;) {
@@ -1317,6 +1318,7 @@ static int net_socket_send_tcp(uint32_t owner_group, int handle,
       if (error == ERR_OK) {
         (void)tcp_output(socket->pcb.tcp);
         sent += part;
+        net_stack_poll_local(socket->peer.value.inet.address);
         irq_restore(state);
         continue;
       }
@@ -1370,6 +1372,7 @@ static int net_socket_send_udp(net_socket_t *socket, const void *data,
     return net_socket_lwip_error(error);
   }
   net_socket_udp_refresh_local(socket);
+  net_stack_poll_local(destination->value.inet.address);
   return (int)length;
 }
 
@@ -1397,7 +1400,11 @@ static int net_socket_send_raw(net_socket_t *socket, const void *data,
   net_socket_ip_from_address(&remote, destination->value.inet.address);
   err_t error = raw_sendto(socket->pcb.raw, packet, &remote);
   pbuf_free(packet);
-  return error == ERR_OK ? (int)length : net_socket_lwip_error(error);
+  if (error != ERR_OK) {
+    return net_socket_lwip_error(error);
+  }
+  net_stack_poll_local(destination->value.inet.address);
+  return (int)length;
 }
 
 int net_socket_sendto(uint32_t owner_group, int handle, const void *data,

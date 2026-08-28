@@ -134,12 +134,12 @@ python3 scripts/kernel-perf.py \
 ### 网络栈
 
 - 网络协议的唯一实现是 `kernel/net/third_party/lwip`（上游 lwIP 2.2.1）加 `kernel/net/net_stack.c`/`socket.c`。禁止恢复手写 ARP、IPv4、ICMP、UDP、TCP、DHCP、DNS、HTTP、FTP 或第二套协议状态机。
-- 当前端口使用 `NO_SYS=1` 和 lwIP raw API：网卡 IRQ 交付完整、无 FCS 的以太网帧，`net_stack_tick()` 在时钟中断中驱动 lwIP timeout 并轮询 lwIP 原生 loopif，`socket.c` 只把 raw callback 封装为用户端点。`net_stack_initialize()` 无条件创建 `lo`（`127.0.0.1`），与以太网/DHCP 生命周期分离；不得手写回环包或从 raw-API output callback 直接重入 `ip4_input`。调用 raw API 的普通内核路径必须以 `irq_save()`/`irq_restore()` 串行化，不能引入未受保护的 netconn/socket 线程层。
+- 当前端口使用 `NO_SYS=1` 和 lwIP raw API：网卡 IRQ 交付完整、无 FCS 的以太网帧，`net_stack_tick()` 在时钟中断中驱动 lwIP timeout 并轮询 lwIP 原生 loopif，`socket.c` 只把 raw callback 封装为用户端点。`net_stack_initialize()` 无条件创建 `lo`（`127.0.0.1`），与以太网/DHCP 生命周期分离；本机 IPv4 输出必须等 lwIP output 调用完全返回后再通过 `net_stack_poll_local()` 立即 drain 回环队列，时钟轮询仅作兜底，不得手写回环包或从 raw-API output callback 直接重入 `ip4_input`。调用 raw API 的普通内核路径必须以 `irq_save()`/`irq_restore()` 串行化，不能引入未受保护的 netconn/socket 线程层。
 - `kernel/drivers/network.c` 只负责选择链路驱动；PCnet/RTL8139 只负责 PCI、DMA、寄存器和 IRQ。驱动必须报告实际接收长度，并接收不含 FCS 的发送帧；不得恢复 `Card_Recv_Handler`、`netcard_send`、IP 缓存、DHCP 忙等或驱动内协议解析。
 - 用户态网络 ABI 是 `apps/include/socket.h` 的 `socket`/`bind`/`connect`/`listen`/`accept`/`sendto`/`recvfrom`/`socket_close`，句柄按 task group 所有而不是内核指针，并通过 `SYSCALL_SOCKET`（`int 0x36`，编号 `0x5e`）的定长 request 分派；内核与 `libp` 必须同步更新 request 布局、操作枚举和错误码。`AF_INET` 支持 TCP stream、UDP datagram 与 `IPPROTO_ICMP` raw socket；`AF_LOCAL` 支持全局命名的 stream/datagram 端点，accept 出来的服务端句柄归监听者 task group。不得恢复 `Socket_*`、独立 `ping` syscall、DPL3 的 `int 0x30` 网络入口或跨层暴露 PCB 指针。
 - socket 阻塞调用通过 `WAIT_REASON_SOCKET` 的 waiter 和 lwIP callback 唤醒，连接超时由 `net_socket_tick()` 检查；不得退化为反复 `task_next()` 轮询。RAW 接收必须复制完整 IPv4 packet 后再让 lwIP 继续处理，不能借用会被协议栈改写的 pbuf。
 - `network=enable` 仅启动以太网和异步 lwIP DHCP；`lo` 不依赖网卡或租约，地址可在租约完成前为零，不能把网络启动改回阻塞式 DHCP 或持久化旧的 `ip/gateway/submask/dns` 环境变量。
-- 网络验证优先使用 `nettest.bin`：`nettest.bin loopback` 在无需网卡/DHCP 时验证 `127.0.0.1` 的 UDP、TCP 和 ICMP；完整模式再验证跨进程 `AF_LOCAL` stream、`AF_LOCAL` datagram、DHCP、QEMU user-net 网关 UDP/ICMP，以及可选 TCP echo。`ping.bin <host-or-ipv4> [count]` 通过 `getaddrinfo` 使用 lwIP DNS，`ping.bin localhost` 和 `ping.bin 127.0.0.1` 不等待 DHCP，适合验证回环 raw ICMP。自动验证时临时修改 `sys.cfg` 与 `init.mst`，结束后立即恢复，仍禁止 `sendkey`。
+- 网络验证优先使用 `nettest.bin`：`nettest.bin loopback` 在无需网卡/DHCP 时验证 `127.0.0.1` 的 UDP、TCP 和 ICMP，并要求 ICMP 在当前 10ms 时钟精度下不超过一个 tick；完整模式再验证跨进程 `AF_LOCAL` stream、`AF_LOCAL` datagram、DHCP、QEMU user-net 网关 UDP/ICMP，以及可选 TCP echo。`ping.bin <host-or-ipv4> [count]` 通过 `getaddrinfo` 使用 lwIP DNS，`ping.bin localhost` 和 `ping.bin 127.0.0.1` 不等待 DHCP，适合验证回环 raw ICMP；同 tick 回复显示为 `time<10 ms`，不要把时钟量化值当作实际协议处理耗时。自动验证时临时修改 `sys.cfg` 与 `init.mst`，结束后立即恢复，仍禁止 `sendkey`。
 
 ### 系统调用、IPC 和 RPC
 

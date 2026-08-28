@@ -136,6 +136,23 @@ void net_stack_tick(void) {
   irq_restore(state);
 }
 
+void net_stack_poll_local(uint32_t address) {
+  if (!net_initialized) {
+    return;
+  }
+
+  irq_state_t state = irq_save();
+  ip4_addr_t destination;
+  ip4_addr_set_u32(&destination, address);
+  bool local = ip4_addr_isloopback(&destination) ||
+               (net_interface_started &&
+                address == ip4_addr_get_u32(netif_ip4_addr(&net_interface)));
+  if (local) {
+    netif_poll_all();
+  }
+  irq_restore(state);
+}
+
 bool net_stack_ready(void) {
   irq_state_t state = irq_save();
   bool ready = net_initialized;

@@ -87,6 +87,8 @@ void net_stack_initialize(void);
 /* Starts the optional Ethernet interface and asynchronous DHCP client. */
 bool net_stack_start(void);
 void net_stack_tick(void);
+/* Drains queued traffic when address is loopback or the local Ethernet IP. */
+void net_stack_poll_local(uint32_t address);
 /* True after net_stack_initialize(), including when Ethernet is disabled. */
 bool net_stack_ready(void);
 uint32_t net_stack_ipv4(void);
