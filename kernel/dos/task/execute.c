@@ -65,6 +65,10 @@ static inline bool page_entry_has_any(uint32_t entry, uint32_t flags) {
   return (entry & flags) != 0;
 }
 
+static inline bool page_entry_has_all(uint32_t entry, uint32_t flags) {
+  return (entry & flags) == flags;
+}
+
 static inline uint32_t *page_table_entry_from_dir(uint32_t pde_entry,
                                                   unsigned index) {
   return (uint32_t *)(page_entry_addr(pde_entry) + index * PAGE_ENTRY_BYTES);
@@ -110,33 +114,38 @@ bool user_runtime_layout_calculate(uint32_t aligned_image_end,
 }
 
 static bool task_clone_user_page_tables(unsigned pde) {
-  for (int i = DIDX(PAGE_USER_CLONE_BASE) * 4; i < 0x1000; i += 4) {
-    uint32_t *pde_entry = (uint32_t *)(pde + i);
-    if (!page_entry_has_any(*pde_entry, PG_P)) {
+  for (uint32_t offset = DIDX(PAGE_USER_CLONE_BASE) * PAGE_ENTRY_BYTES;
+       offset < PAGE_SIZE_BYTES; offset += PAGE_ENTRY_BYTES) {
+    uint32_t *pde_entry = (uint32_t *)(pde + offset);
+    if (!page_entry_has_all(*pde_entry, PAGE_USER_PRESENT_FLAGS)) {
       continue;
     }
 
     unsigned table_refs = page_ref_count(page_entry_addr(*pde_entry));
-    if (page_entry_has_any(*pde_entry, PG_SHARED) || table_refs > 1) {
-      if (table_refs > 1) {
-        uint32_t old = page_entry_addr(*pde_entry);
-        void *new_table = page_malloc_one_count_from_4gb();
-        if (new_table == NULL) {
+    if (table_refs == 0) {
+      return false;
+    }
+    if (table_refs > 1) {
+      uint32_t old = page_entry_addr(*pde_entry);
+      void *new_table = page_malloc_one_count_from_4gb();
+      if (new_table == NULL) {
+        return false;
+      }
+      *pde_entry = (unsigned)new_table;
+      memcpy(new_table, (void *)old, PAGE_SIZE_BYTES);
+      page_ref_release(old);
+    }
+    *pde_entry = page_entry_add_flags(*pde_entry, PAGE_USER_RW_FLAGS);
+    for (uint32_t index = 0; index < PAGE_SIZE_BYTES / PAGE_ENTRY_BYTES;
+         index++) {
+      uint32_t *pte_entry = page_table_entry_from_dir(*pde_entry, index);
+      if (page_entry_has_any(*pte_entry, PG_SHARED)) {
+        if (!page_entry_has_all(*pte_entry, PAGE_USER_PRESENT_FLAGS)) {
           return false;
         }
-        *pde_entry = (unsigned)new_table;
-        memcpy(new_table, (void *)old, PAGE_SIZE_BYTES);
-        page_ref_release(old);
-        *pde_entry = page_entry_add_flags(*pde_entry, PAGE_USER_RW_FLAGS);
-      } else {
-        *pde_entry = page_entry_add_flags(*pde_entry, PAGE_USER_RW_FLAGS);
-      }
-    }
-    for (int j = 0; j < 0x1000 / 4; j++) {
-      uint32_t *pte_entry = page_table_entry_from_dir(*pde_entry, (unsigned)j);
-      if (page_entry_has_any(*pte_entry, PG_SHARED)) {
-        *pte_entry = page_entry_make(page_entry_addr(*pte_entry),
-                                     PAGE_USER_PRESENT_FLAGS);
+        /* A new executable does not inherit process-owned shared mappings. */
+        page_ref_release(page_entry_addr(*pte_entry));
+        *pte_entry = 0;
       }
     }
   }

@@ -115,7 +115,7 @@ make -C kernel MEMTEST=0 MEMSIZE_MB=512
 - QEMU 命令使用 `-serial stdio`；启动、崩溃和测试输出优先从串口收集。不要只依赖图形界面现象。
 - 需要自动运行系统内命令时，临时修改 `kernel/res/init.mst`，构建并测试后立即恢复该文件。禁止用 QEMU monitor 的 `sendkey` 注入命令。
 - IPC/RPC 改动可在系统中运行 `rpctest.bin`；磁盘和任务生命周期相关改动可结合 `dktest.bin`。两者都已由 `kernel/Makefile` 打包进主镜像。
-- GUI RPC 与共享映射改动可运行 `guitest.bin`：它 fork 出 `gui.bin`，验证服务发现、窗口创建、共享 framebuffer、异步刷新、键盘队列控制与关闭回收，并在串口输出 `GUITEST PASS`。自动运行时仍临时修改 `init.mst`，测试后立即恢复。
+- GUI RPC 与共享映射改动可运行 `guitest.bin`：它 fork 出 `gui.bin`，验证服务发现、窗口创建、共享 framebuffer、异步刷新、键盘队列控制与关闭回收，并在串口输出 `GUITEST PASS`。高任务数与多客户端刷新回归使用 `guitest.bin stress`：它保持 120 个负载进程和 48 个窗口，再从两个全新的 exec 地址空间按 50ms 周期持续刷新，任一窗口的共享 damage 连续 2 秒未被消费即失败，成功时输出 `GUISTRESS PASS`。自动运行时仍临时修改 `init.mst`，测试后立即恢复。
 - x86 异常入口与用户异常退出可在系统中运行 `exc_test.bin`，它依次验证 `#DE`、`#UD`、`#GP`、`#PF` 的子进程退出状态；该程序同样已打包进主镜像。
 - SMP FPU 保存、恢复、fork 快照与迁移回归使用 `fputest.bin`：它按 CPU 数创建多个独立进程，在 x87 栈保留哨兵值后连续主动让出 CPU，并校验多次切换及 fork 两侧的完整状态；成功时串口输出 `FPUTEST PASS`。
 
@@ -188,6 +188,7 @@ python3 scripts/kernel-perf.py \
 - PC speaker 完全由 `kernel/drivers/beep.c` 用 `arch/x86/io.h` 直接编程 PIT channel 2 与 port `0x61`，时长通过 `sleep()` 计时；不得回到基于 port `0x61` refresh 位的忙等或汇编实现。
 - 物理内存探测在 `kernel/dos/mm/mem.c` 内用 C 完成：先用 AC 位区分 386/486，再在一次 `irq_save()`/`irq_restore()` 临界区内 read-modify-write 设置并清除 `X86_CR0_CD|X86_CR0_NW`，探测本身用 `volatile uint32_t` 写-取反-回读并恢复原值，步长从 1GiB 逐次缩到 1/4（最小 4KiB）。该文件用 `KERNEL_NOKASAN_CFLAGS` 编译，探测循环不得引入 KASAN 插桩或打印。
 - 分页由 `init_page()`（`kernel/dos/mm/page.c`）一次完成：构造 PDE/PTE 与页管理器后自己写 CR3 并以 read-modify-write 置 `X86_CR0_PG|X86_CR0_WP`；调用方不得再单独补写 WP，也不得恢复 `C_init_page` + 汇编 wrapper 的两段式实现。
+- 高地址 bootstrap 页表是仅内核可见、未逐地址空间计入引用数的隐式共享映射。任何路径要在原本不含 `PG_USU` 的 PDE 中建立用户映射，必须先分配并清零私有页表，禁止原地添加 user/write 位或修改该全局页表。exec 装载准备只处理同时 present+user 的 PDE，并丢弃继承的 `PG_SHARED` PTE；不得把设备映射或 GUI 共享页降级成只读映射后留给新程序。用户页映射统一经 `page_prepare_user_table` 完成页表分离，不得恢复已删除的 `page_links`/`page_link_share` 旁路。
 - 内核入口的 boot ABI 检查是 `arch_boot_verify()`（`kernel/arch/x86/descriptor_tables.c`），只校验 CS 等于内核代码 selector，失败时直写文本 VRAM 并 `cli; hlt` 停机；不得依赖 loader 的 IDT 或 `int 0x36` 打印。段寄存器在 `arch_interrupt_init` 里紧跟 `lgdt` 重新载入内核数据段 selector，`do_init_seg_register` 这类独立入口不再存在。
 - 分页启用后必须永久设置 `X86_CR0_WP`，使 ring0 写只读用户页也触发 `#PF` 并进入 COW；后续 CR0 修改必须使用 read-modify-write 保留 WP，不得写入会清除该位的固定值。
 - descriptor table 与任务状态的通用入口是 `arch_interrupt_init`、`arch_task_state_init` 和 `arch_task_set_kernel_stack`；GDT/IDT/TSS 的地址、limit、布局、selector、access bits 及 `lgdt`/`lidt`/`ltr` 只能出现在 `kernel/arch/x86/` 私有实现中。首次 GDT/IDT 构造和活动 descriptor 更新必须全程保存并关闭中断；IDT 必须先完整构造全部 256 个有效入口再执行 `lidt`，`0xff` 默认入口必须可直接安全返回且不发送错误 EOI。
