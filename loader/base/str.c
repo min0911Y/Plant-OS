@@ -1,4 +1,5 @@
 /* a string lib for miniset */
+#include <dosldr.h>
 #include "mstr.h"
 mstr* mstr_init() {
     mstr* ms = (mstr*)malloc(sizeof(mstr));
@@ -54,5 +55,4 @@ void mstr_free(mstr* ms) {
     free(ms->buf);
     free(ms);
 }
-
 

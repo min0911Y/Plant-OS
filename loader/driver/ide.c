@@ -1,5 +1,5 @@
 #include <dosldr.h>
-static inline nul(char *f, ...) {}
+static inline void nul(char *f, ...) {}
 #define printk nul
 unsigned char ide_read(unsigned char channel, unsigned char reg);
 #define inb io_in8
@@ -103,11 +103,13 @@ static inline void insl(uint32_t port, uint32_t *addr, int cnt) {
 }
 static void Read(char drive, unsigned char *buffer, unsigned int number,
                  unsigned int lba) {
-  ide_read_sectors(drive - 'C', number, lba, 1 * 8, buffer);
+  ide_read_sectors(drive - 'C', number, lba, 1 * 8,
+                   (unsigned int)(uintptr_t)buffer);
 }
 static void Write(char drive, unsigned char *buffer, unsigned int number,
                   unsigned int lba) {
-  ide_write_sectors(drive - 'C', number, lba, 1 * 8, buffer);
+  ide_write_sectors(drive - 'C', number, lba, 1 * 8,
+                    (unsigned int)(uintptr_t)buffer);
 }
 void ide_initialize(unsigned int BAR0, unsigned int BAR1, unsigned int BAR2,
                     unsigned int BAR3, unsigned int BAR4) {
@@ -278,13 +280,17 @@ void ide_read_buffer(unsigned char channel, unsigned char reg,
     ide_write(channel, ATA_REG_CONTROL, 0x80 | channels[channel].nIEN);
   // asm("pushw %es; movw %ds, %ax; movw %ax, %es");
   if (reg < 0x08)
-    insl(channels[channel].base + reg - 0x00, buffer, quads);
+    insl(channels[channel].base + reg - 0x00,
+         (uint32_t *)(uintptr_t)buffer, quads);
   else if (reg < 0x0C)
-    insl(channels[channel].base + reg - 0x06, buffer, quads);
+    insl(channels[channel].base + reg - 0x06,
+         (uint32_t *)(uintptr_t)buffer, quads);
   else if (reg < 0x0E)
-    insl(channels[channel].ctrl + reg - 0x0A, buffer, quads);
+    insl(channels[channel].ctrl + reg - 0x0A,
+         (uint32_t *)(uintptr_t)buffer, quads);
   else if (reg < 0x16)
-    insl(channels[channel].bmide + reg - 0x0E, buffer, quads);
+    insl(channels[channel].bmide + reg - 0x0E,
+         (uint32_t *)(uintptr_t)buffer, quads);
   // asm("popw %es;");
   if (reg > 0x07 && reg < 0x0C)
     ide_write(channel, ATA_REG_CONTROL, channels[channel].nIEN);
@@ -507,7 +513,7 @@ unsigned char ide_ata_access(unsigned char direction, unsigned char drive,
   // DMA Write.
   else if (direction == 0) {
     // PIO Read.
-    uint16_t *word_ = edi;
+    uint16_t *word_ = (uint16_t *)(uintptr_t)edi;
     for (i = 0; i < numsects; i++) {
       printk("read %d\n", i);
       if (err = ide_polling(channel, 1))
@@ -522,7 +528,7 @@ unsigned char ide_ata_access(unsigned char direction, unsigned char drive,
   } else {
     // PIO Write.
 
-    uint16_t *word_ = edi;
+    uint16_t *word_ = (uint16_t *)(uintptr_t)edi;
     for (i = 0; i < numsects; i++) {
       printk("write %d\n", i);
       ide_polling(channel, 0); // Polling.
@@ -616,14 +622,14 @@ unsigned char ide_atapi_read(unsigned char drive, unsigned int lba,
   // (VIII): Sending the packet data:
   // ------------------------------------------------------------------
   printk("VIII\n");
-  uint16_t *_atapi_packet = atapi_packet;
+  uint16_t *_atapi_packet = (uint16_t *)atapi_packet;
   for (int i = 0; i < 6; i++) {
     io_out16(bus, _atapi_packet[i]);
   }
   // (IX): Receiving Data:
   // ------------------------------------------------------------------
   printk("IX\n");
-  uint16_t *_word = edi;
+  uint16_t *_word = (uint16_t *)(uintptr_t)edi;
   for (i = 0; i < numsects; i++) {
     ide_wait_irq(); // Wait for an IRQ.
     if (err = ide_polling(channel, 1))

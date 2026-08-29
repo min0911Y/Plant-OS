@@ -547,7 +547,7 @@ static int lua_ReadFile(lua_State* L) {
   const char* s = lua_tolstring(L, 1, &l);
   if(filesize(s) != -1) {
     char* buf = malloc(filesize(s) + 1);
-    api_ReadFile(s,buf);
+    api_readfile(s,buf);
     lua_pushstring(L, buf);
     free(buf);
   } else {

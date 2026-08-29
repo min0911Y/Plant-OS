@@ -65,7 +65,7 @@ static vfs_t *findSeat(vfs_t *vstl) {
 static vfs_t *check_disk_fs(uint8_t disk_number) {
   for (int i = 0; i < 26; i++) {
     if (vfsstl[i].flag == 1) {
-      if (vfsstl[i].Check(disk_number)) {
+      if (vfsstl[i].check(disk_number)) {
         return &vfsstl[i];
       }
     }
@@ -100,8 +100,8 @@ static void vfs_destroy_mount(struct vfs_mount *mount) {
   }
   mount->instances = NULL;
   irq_restore(instance_state);
-  if (mount->filesystem.DeleteFs != NULL) {
-    mount->filesystem.DeleteFs(&mount->filesystem);
+  if (mount->filesystem.delete_fs != NULL) {
+    mount->filesystem.delete_fs(&mount->filesystem);
   }
   if (unregister_retired) {
     irq_state_t interrupt_state = irq_save();
@@ -205,12 +205,12 @@ static void vfs_release_instance(vfs_t *vfs) {
   }
   struct vfs_mount *mount = vfs->mount_owner;
   vfs_unregister_instance(vfs);
-  while (FindForCount(1, vfs->path) != NULL) {
-    free((void *)(uintptr_t)FindForCount(vfs->path->ctl->all, vfs->path)->val);
+  while (list_get(1, vfs->path) != NULL) {
+    free((void *)(uintptr_t)list_get(vfs->path->ctl->all, vfs->path)->val);
     DeleteVal(vfs->path->ctl->all, vfs->path);
   }
-  if (vfs->ReleaseCache != NULL) {
-    vfs->ReleaseCache(vfs);
+  if (vfs->release_cache != NULL) {
+    vfs->release_cache(vfs);
   }
   DeleteList(vfs->path);
   free(vfs);
@@ -218,8 +218,8 @@ static void vfs_release_instance(vfs_t *vfs) {
 }
 
 static vfs_t *vfs_create_instance(struct vfs_mount *mount) {
-  if (mount == NULL || mount->filesystem.CopyCache == NULL ||
-      mount->filesystem.ReleaseCache == NULL || mount->filesystem.cd == NULL) {
+  if (mount == NULL || mount->filesystem.copy_cache == NULL ||
+      mount->filesystem.release_cache == NULL || mount->filesystem.cd == NULL) {
     vfs_release_mount_reference(mount);
     return NULL;
   }
@@ -231,15 +231,15 @@ static vfs_t *vfs_create_instance(struct vfs_mount *mount) {
   memcpy(instance, &mount->filesystem, sizeof(vfs_t));
   instance->mount_prev = NULL;
   instance->mount_next = NULL;
-  if (!mount->filesystem.CopyCache(instance, &mount->filesystem)) {
+  if (!mount->filesystem.copy_cache(instance, &mount->filesystem)) {
     free(instance);
     vfs_release_mount_reference(mount);
     return NULL;
   }
   instance->path = NewList();
   if (instance->path == NULL) {
-    if (instance->ReleaseCache != NULL) {
-      instance->ReleaseCache(instance);
+    if (instance->release_cache != NULL) {
+      instance->release_cache(instance);
     }
     free(instance);
     vfs_release_mount_reference(mount);
@@ -379,7 +379,7 @@ bool vfs_mount_disk(uint8_t disk_number, uint8_t drive) {
   mount->filesystem.disk_number = normalized_disk;
   mount->filesystem.flag = 1;
 
-  if (!mount->filesystem.InitFs(&mount->filesystem, normalized_disk)) {
+  if (!mount->filesystem.init_fs(&mount->filesystem, normalized_disk)) {
     interrupt_state = irq_save();
     if (vfs_mounts[seat] == mount) {
       vfs_mounts[seat] = NULL;
@@ -447,12 +447,12 @@ bool vfs_readfile(char *path, char *buffer) {
     return false;
   }
   logk("Readfile %s to %08x\n", path, buffer);
-  if (resolved.filesystem->ReadFile == NULL) {
+  if (resolved.filesystem->read_file == NULL) {
     vfs_close_path(new_path, &resolved);
     return false;
   }
   bool result =
-      resolved.filesystem->ReadFile(resolved.filesystem, new_path, buffer);
+      resolved.filesystem->read_file(resolved.filesystem, new_path, buffer);
   vfs_close_path(new_path, &resolved);
   logk("OK\n");
   return result;
@@ -464,11 +464,11 @@ bool vfs_writefile(char *path, char *buffer, int size) {
     WARNING_K("Attempt read a nonexistent disk");
     return false;
   }
-  if (resolved.filesystem->WriteFile == NULL) {
+  if (resolved.filesystem->write_file == NULL) {
     vfs_close_path(new_path, &resolved);
     return false;
   }
-  bool result = resolved.filesystem->WriteFile(
+  bool result = resolved.filesystem->write_file(
       resolved.filesystem, new_path, buffer, size);
   vfs_close_path(new_path, &resolved);
   return result;
@@ -480,11 +480,11 @@ uint32_t vfs_filesize(char *filename) {
     WARNING_K("Attempt read a nonexistent disk");
     return -1;
   }
-  if (resolved.filesystem->FileSize == NULL) {
+  if (resolved.filesystem->file_size == NULL) {
     vfs_close_path(new_path, &resolved);
     return -1;
   }
-  int result = resolved.filesystem->FileSize(resolved.filesystem, new_path);
+  int result = resolved.filesystem->file_size(resolved.filesystem, new_path);
   vfs_close_path(new_path, &resolved);
   return result;
 }
@@ -495,12 +495,12 @@ List *vfs_listfile(char *dictpath) { // dictpath == "" 则表示当前路径
     WARNING_K("Attempt read a nonexistent disk");
     return NULL;
   }
-  if (resolved.filesystem->ListFile == NULL) {
+  if (resolved.filesystem->list_file == NULL) {
     vfs_close_path(new_path, &resolved);
     return NULL;
   }
   List *result =
-      resolved.filesystem->ListFile(resolved.filesystem, new_path);
+      resolved.filesystem->list_file(resolved.filesystem, new_path);
   vfs_close_path(new_path, &resolved);
   return result;
 }
@@ -512,12 +512,12 @@ bool vfs_delfile(char *filename) {
     WARNING_K("Attempt read a nonexistent disk");
     return false;
   }
-  if (resolved.filesystem->DelFile == NULL) {
+  if (resolved.filesystem->del_file == NULL) {
     vfs_close_path(new_path, &resolved);
     return false;
   }
   bool result =
-      resolved.filesystem->DelFile(resolved.filesystem, new_path);
+      resolved.filesystem->del_file(resolved.filesystem, new_path);
   vfs_close_path(new_path, &resolved);
   return result;
 }
@@ -528,12 +528,12 @@ bool vfs_deldir(char *dictname) {
     WARNING_K("Attempt read a nonexistent disk");
     return false;
   }
-  if (resolved.filesystem->DelDict == NULL) {
+  if (resolved.filesystem->del_dict == NULL) {
     vfs_close_path(new_path, &resolved);
     return false;
   }
   bool result =
-      resolved.filesystem->DelDict(resolved.filesystem, new_path);
+      resolved.filesystem->del_dict(resolved.filesystem, new_path);
   vfs_close_path(new_path, &resolved);
   return result;
 }
@@ -544,12 +544,12 @@ bool vfs_createfile(char *filename) {
     WARNING_K("Attempt read a nonexistent disk");
     return false;
   }
-  if (resolved.filesystem->CreateFile == NULL) {
+  if (resolved.filesystem->create_file == NULL) {
     vfs_close_path(new_path, &resolved);
     return false;
   }
   bool result =
-      resolved.filesystem->CreateFile(resolved.filesystem, new_path);
+      resolved.filesystem->create_file(resolved.filesystem, new_path);
   vfs_close_path(new_path, &resolved);
   return result;
 }
@@ -560,12 +560,12 @@ bool vfs_createdict(char *filename) {
     WARNING_K("Attempt read a nonexistent disk");
     return false;
   }
-  if (resolved.filesystem->CreateDict == NULL) {
+  if (resolved.filesystem->create_dict == NULL) {
     vfs_close_path(new_path, &resolved);
     return false;
   }
   bool result =
-      resolved.filesystem->CreateDict(resolved.filesystem, new_path);
+      resolved.filesystem->create_dict(resolved.filesystem, new_path);
   vfs_close_path(new_path, &resolved);
   return result;
 }
@@ -583,12 +583,12 @@ bool vfs_renamefile(char *filename, char *filename_of_new) {
     return false;
   }
   if (source.filesystem->mount_owner != destination.filesystem->mount_owner ||
-      source.filesystem->RenameFile == NULL) {
+      source.filesystem->rename_file == NULL) {
     vfs_close_path(destination_path, &destination);
     vfs_close_path(source_path, &source);
     return false;
   }
-  bool result = source.filesystem->RenameFile(
+  bool result = source.filesystem->rename_file(
       source.filesystem, source_path, destination_path);
   vfs_close_path(destination_path, &destination);
   vfs_close_path(source_path, &source);
@@ -601,12 +601,12 @@ bool vfs_attrib(char *filename, ftype type) {
     WARNING_K("Attempt read a nonexistent disk");
     return false;
   }
-  if (resolved.filesystem->Attrib == NULL) {
+  if (resolved.filesystem->attrib == NULL) {
     vfs_close_path(new_path, &resolved);
     return false;
   }
   bool result =
-      resolved.filesystem->Attrib(resolved.filesystem, new_path, type);
+      resolved.filesystem->attrib(resolved.filesystem, new_path, type);
   vfs_close_path(new_path, &resolved);
   return result;
 }
@@ -618,8 +618,8 @@ bool vfs_format(uint8_t disk_number, char *FSName) {
   bool (*format)(uint8_t) = NULL;
   for (int i = 0; i < 26; i++) {
     if (strcmp(vfsstl[i].FSName, FSName) == 0 && vfsstl[i].flag == 1 &&
-        vfsstl[i].Format != NULL) {
-      format = vfsstl[i].Format;
+        vfsstl[i].format != NULL) {
+      format = vfsstl[i].format;
       break;
     }
   }
@@ -672,12 +672,12 @@ vfs_file *vfs_fileinfo(char *filename) {
     WARNING_K("Attempt read a nonexistent disk");
     return NULL;
   }
-  if (resolved.filesystem->FileInfo == NULL) {
+  if (resolved.filesystem->fileinfo == NULL) {
     vfs_close_path(new_path, &resolved);
     return NULL;
   }
   vfs_file *result =
-      resolved.filesystem->FileInfo(resolved.filesystem, new_path);
+      resolved.filesystem->fileinfo(resolved.filesystem, new_path);
   vfs_close_path(new_path, &resolved);
   return result;
 }
@@ -723,8 +723,8 @@ bool vfs_clone_for_task(mtask *src, mtask *dest) {
   if (instance == NULL) {
     return false;
   }
-  for (int i = 1; FindForCount(i, src->nfs->path) != NULL; i++) {
-    List *entry = FindForCount(i, src->nfs->path);
+  for (int i = 1; list_get(i, src->nfs->path) != NULL; i++) {
+    List *entry = list_get(i, src->nfs->path);
     if (!instance->cd(instance, (char *)(uintptr_t)entry->val)) {
       vfs_release_instance(instance);
       return false;
@@ -778,8 +778,8 @@ void vfs_getPath(char *buffer) {
   insert_char(buffer, 2, '\\');
   PDEBUG("%s", vfs_now->FSName);
   int pos = strlen(buffer);
-  for (int i = 1; FindForCount(i, vfs_now->path) != NULL; i++) {
-    l = FindForCount(i, vfs_now->path);
+  for (int i = 1; list_get(i, vfs_now->path) != NULL; i++) {
+    l = list_get(i, vfs_now->path);
     path = (char *)l->val;
     insert_str(buffer, path, pos);
     pos += strlen(path);
@@ -788,15 +788,15 @@ void vfs_getPath(char *buffer) {
   }
   delete_char(buffer, pos - 1);
 }
-void vfs_getPath_no_drive(char *buffer) {
+void vfs_get_path_without_drive(char *buffer) {
   char *path;
   List *l;
   buffer[0] = 0;
   PDEBUG("%s", vfs_now->FSName);
   int pos = strlen(buffer);
   int i;
-  for (i = 1; FindForCount(i, vfs_now->path) != NULL; i++) {
-    l = FindForCount(i, vfs_now->path);
+  for (i = 1; list_get(i, vfs_now->path) != NULL; i++) {
+    l = list_get(i, vfs_now->path);
     path = (char *)l->val;
     insert_char(buffer, pos, '/');
     pos++;
@@ -833,8 +833,8 @@ void init_vfs() {
 bool vfs_register_fs(vfs_t vfs) {
   PDEBUG("Register file system: %s", vfs.FSName);
   PDEBUG("looking for a seat of vfsstl.........");
-  if (vfs.Check == NULL || vfs.InitFs == NULL || vfs.CopyCache == NULL ||
-      vfs.ReleaseCache == NULL || vfs.cd == NULL) {
+  if (vfs.check == NULL || vfs.init_fs == NULL || vfs.copy_cache == NULL ||
+      vfs.release_cache == NULL || vfs.cd == NULL) {
     return false;
   }
   vfs_t *seat;

@@ -100,7 +100,7 @@ void pci_config(unsigned int bus,
 }
 void init_PCI(unsigned int adder_Base) {
   unsigned int i, BUS, Equipment, F, ADDER, *i1;
-  unsigned char *PCI_DATA = adder_Base, *PCI_DATA1;
+  unsigned char *PCI_DATA = (unsigned char *)(uintptr_t)adder_Base, *PCI_DATA1;
   for (BUS = 0; BUS < 256; BUS++) {                     //查询总线
     for (Equipment = 0; Equipment < 32; Equipment++) {  //查询设备
       for (F = 0; F < 8; F++) {                         //查询功能
@@ -127,7 +127,7 @@ void init_PCI(unsigned int adder_Base) {
             for (ADDER = 0; ADDER < 256; ADDER = ADDER + 4) {
               pci_config(BUS, F, Equipment, ADDER);
               i = io_in32(PCI_DATA_PORT);
-              i1 = i;
+              i1 = (unsigned int *)(uintptr_t)i;
               //*i1 = PCI_DATA1;
               memcpy(PCI_DATA1, &i, 4);
               PCI_DATA1 = PCI_DATA1 + 4;

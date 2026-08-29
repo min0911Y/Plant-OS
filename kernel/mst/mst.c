@@ -334,8 +334,8 @@ PRIVATE void free_space(SPACE* space);
 PRIVATE void process_token(MST_Object* mobj) {
   TOKEN* t_bmp[2];
   int idx = 0;
-  for (int i = 1; FindForCount(i, mobj->token) != NULL; i++) {
-    TOKEN* t = (TOKEN*)FindForCount(i, mobj->token)->val;
+  for (int i = 1; list_get(i, mobj->token) != NULL; i++) {
+    TOKEN* t = (TOKEN*)list_get(i, mobj->token)->val;
     t_bmp[idx] = t;
     if (idx) {
       if (t_bmp[0]->t == STRING &&
@@ -352,8 +352,8 @@ PRIVATE void process_token(MST_Object* mobj) {
 PRIVATE int parser_space(MST_Object* mst, int idx, SPACE* space, int mode);
 PRIVATE int parser_array(MST_Object* mst, int idx, Array* arr) {
   int i = idx;
-  for (; FindForCount(i, mst->token) != NULL; i++) {
-    TOKEN* t = (TOKEN*)FindForCount(i, mst->token)->val;
+  for (; list_get(i, mst->token) != NULL; i++) {
+    TOKEN* t = (TOKEN*)list_get(i, mst->token)->val;
     if (t->t == ARRAY_END) {
       break;
     }
@@ -475,8 +475,8 @@ PRIVATE int parser_array(MST_Object* mst, int idx, Array* arr) {
 PRIVATE void free_space(SPACE* space);
 PRIVATE void free_arr(Array* arr) {
   int i = 1;
-  for (; FindForCount(i, arr->the_array) != NULL; i++) {
-    Array_data* v = (Array_data*)FindForCount(i, arr->the_array)->val;
+  for (; list_get(i, arr->the_array) != NULL; i++) {
+    Array_data* v = (Array_data*)list_get(i, arr->the_array)->val;
     switch (v->vt) {
       case INTEGER:
         free(v->obj);
@@ -505,8 +505,8 @@ PRIVATE void free_space(SPACE* space) {
   if (!space) {
     return;
   }
-  for (; FindForCount(i, space->the_space) != NULL; i++) {
-    Var* v = (Var*)FindForCount(i, space->the_space)->val;
+  for (; list_get(i, space->the_space) != NULL; i++) {
+    Var* v = (Var*)list_get(i, space->the_space)->val;
     switch (v->vt) {
       case INTEGER:
         free(v->obj);
@@ -533,8 +533,8 @@ PRIVATE void free_space(SPACE* space) {
 PRIVATE int parser_space(MST_Object* mst, int idx, SPACE* space, int mode) {
   int i = idx;
   int flag = 0;
-  for (; FindForCount(i, mst->token) != NULL; i++) {
-    TOKEN* t = (TOKEN*)FindForCount(i, mst->token)->val;
+  for (; list_get(i, mst->token) != NULL; i++) {
+    TOKEN* t = (TOKEN*)list_get(i, mst->token)->val;
     if (!mode && t->t == SPACE_END) {
       flag = 1;
       break;
@@ -546,7 +546,7 @@ PRIVATE int parser_space(MST_Object* mst, int idx, SPACE* space, int mode) {
         return -1;
       }
       v->name = t->tok;
-      List* tk_list1 = FindForCount(i + 1, mst->token);
+      List* tk_list1 = list_get(i + 1, mst->token);
       if (!tk_list1) {
         free(v);
         mst->err = SYNTAX_ERROR;
@@ -558,7 +558,7 @@ PRIVATE int parser_space(MST_Object* mst, int idx, SPACE* space, int mode) {
         mst->err = SYNTAX_ERROR;
         return -1;
       }
-      List* tk_list2 = FindForCount(i + 2, mst->token);
+      List* tk_list2 = list_get(i + 2, mst->token);
       if (!tk_list2) {
         free(v);
         mst->err = SYNTAX_ERROR;
@@ -731,8 +731,8 @@ PUBLIC MST_API MST_Object* Init_MstObj(char* string) {
   return result;
 }
 PUBLIC MST_API Var* MST_GetVar(char* name, SPACE* space) {
-  for (int i = 1; FindForCount(i, space->the_space) != NULL; i++) {
-    Var* sp = (Var*)FindForCount(i, space->the_space)->val;
+  for (int i = 1; list_get(i, space->the_space) != NULL; i++) {
+    Var* sp = (Var*)list_get(i, space->the_space)->val;
     if (strcmp(name, sp->name) == 0) {
       return sp;
     }
@@ -768,10 +768,10 @@ PUBLIC MST_API char* MST_Space_GetStr(Var* var) {
   return n->str;
 }
 PUBLIC MST_API Array_data* MST_Array_Get(Array* arr, int idx) {
-  if (FindForCount(idx + 1, arr->the_array) == NULL) {
+  if (list_get(idx + 1, arr->the_array) == NULL) {
     return NULL;
   }
-  return (Array_data*)FindForCount(idx + 1, arr->the_array)->val;
+  return (Array_data*)list_get(idx + 1, arr->the_array)->val;
 }
 PUBLIC MST_API int MST_Array_get_integer(Array_data* ad) {
   if (ad->vt != INTEGER) {
@@ -807,8 +807,8 @@ PUBLIC MST_API void MST_FreeObj(MST_Object* mst) {
   }
   free(mst->string);
   if (mst->token != NULL) {
-    for (int i = 1; FindForCount(i, mst->token) != NULL; i++) {
-      TOKEN* t = (TOKEN*)FindForCount(i, mst->token)->val;
+    for (int i = 1; list_get(i, mst->token) != NULL; i++) {
+      TOKEN* t = (TOKEN*)list_get(i, mst->token)->val;
       free(t->tok);
       free(t);
     }

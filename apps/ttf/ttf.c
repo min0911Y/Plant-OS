@@ -115,7 +115,7 @@ int main(int argc, char **argv) {
   ttf_buffer = malloc(filesize("font.ttf"));
   unsigned char buf[100];
   printf("Reading font...");
-  api_ReadFile("font.ttf", ttf_buffer);
+  api_readfile("font.ttf", ttf_buffer);
   printf("Done.\n");
   stbtt_InitFont(&font, ttf_buffer, stbtt_GetFontOffsetForIndex(ttf_buffer, 0));
   system("PAUSE");

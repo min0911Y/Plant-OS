@@ -16,7 +16,7 @@ RESPATH = ./res/
 INCPATH  = ./include/
 OUTPATH = ./obj/
 IMGPATH = ./img/
-LOADERPATH = ../Loader/out/
+LOADERPATH = ../loader/out/
 ARCHX86PATH = ./arch/x86/
 QEMU_CPUS ?= 4
 
@@ -28,13 +28,13 @@ DEL      = rm
 
 OBJS_BOOTPACK = $(OUTPATH)kernelc.o $(OUTPATH)screen.o $(OUTPATH)command.o $(OUTPATH)timer.o \
 				$(OUTPATH)mem.o $(OUTPATH)file.o $(OUTPATH)bios_interrupt.obj \
-				$(OUTPATH)interrupt_entries.obj $(OUTPATH)exceptions.obj $(OUTPATH)vga.o $(OUTPATH)harddisk.o $(OUTPATH)TextMode.o  \
-				$(OUTPATH)mouse.o $(OUTPATH)acpi.o $(OUTPATH)Input_Stack.o $(OUTPATH)descriptor_tables.o $(OUTPATH)arg.o \
+				$(OUTPATH)interrupt_entries.obj $(OUTPATH)exceptions.obj $(OUTPATH)vga.o $(OUTPATH)harddisk.o $(OUTPATH)tm.o  \
+				$(OUTPATH)mouse.o $(OUTPATH)acpi.o $(OUTPATH)is.o $(OUTPATH)descriptor_tables.o $(OUTPATH)arg.o \
 				$(OUTPATH)other.o $(OUTPATH)floppy.o $(OUTPATH)dma.o $(OUTPATH)init.o $(OUTPATH)main.o \
 				$(OUTPATH)std.o $(OUTPATH)sheet.o $(OUTPATH)vbe.o $(OUTPATH)cmos.o $(OUTPATH)pci.o $(OUTPATH)fat.o \
 				$(OUTPATH)beep.o $(OUTPATH)syscall.o $(OUTPATH)fifo.o $(OUTPATH)list.o $(OUTPATH)input.o $(OUTPATH)keyboard.o \
 				$(OUTPATH)pcnet.o $(OUTPATH)ipc.o $(OUTPATH)tty.o $(OUTPATH)page.o $(OUTPATH)serial.o $(OUTPATH)log.o \
-				$(OUTPATH)path.o $(OUTPATH)Draw.o $(OUTPATH)HighTextMode.o $(OUTPATH)pic.o $(OUTPATH)bmp.o $(OUTPATH)sb16.o \
+				$(OUTPATH)path.o $(OUTPATH)draw.o $(OUTPATH)httm.o $(OUTPATH)pic.o $(OUTPATH)bmp.o $(OUTPATH)sb16.o \
 				$(OUTPATH)lock.o $(OUTPATH)elf.o $(OUTPATH)driver.o $(OUTPATH)md5.o $(OUTPATH)libcpp.o $(OUTPATH)rand.o \
 				$(OUTPATH)time.o $(OUTPATH)net_stack.o $(OUTPATH)socket.o $(OUTPATH)lwip_port.o $(OUTPATH)lwip_core_init.o $(OUTPATH)lwip_core_def.o \
 				$(OUTPATH)lwip_core_dns.o $(OUTPATH)lwip_core_inet_chksum.o $(OUTPATH)lwip_core_ip.o $(OUTPATH)lwip_core_mem.o \

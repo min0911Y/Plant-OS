@@ -42,7 +42,7 @@ static void read_back(const char *path) {
     printf("alloc failed\n");
     exit(5);
   }
-  if (!api_ReadFile((char *)path, buf)) {
+  if (!api_readfile((char *)path, buf)) {
     printf("read failed: %s\n", path);
     free(buf);
     exit(6);

@@ -17,7 +17,7 @@
 
 ## 启动与运行模型
 
-- `kernel/boot/` 生成启动扇区；`Loader/` 生成 `Loader/out/dosldr.bin`，链接地址为 `0x100000`，入口为 `loader_main`；加载器再寻找并装载 `kernel.bin`。
+- `kernel/boot/` 生成启动扇区；`loader/` 生成 `loader/out/dosldr.bin`，链接地址为 `0x100000`，入口为 `loader_main`；加载器再寻找并装载 `kernel.bin`。
 - 内核生成 `kernel/obj/kernel.bin`，链接地址为 `0x280000`，入口为 `KernelMain`（`kernel/dos/init/main.c`）。
 - 用户程序统一链接到 `0x70000000`，链接入口为 `Main`。`apps/libp/entry.c` 或 `apps/libp/cppstart.cpp` 完成运行时初始化后调用应用自己的 `main(argc, argv)`。
 - 内核与应用共享的是项目自定义 ABI，不是 Linux ABI。地址、结构体布局、寄存器约定和中断号都可能是兼容性边界；不要随意改成宿主平台惯例。
@@ -48,7 +48,7 @@
 <!-- 过时：`interrupt_disable/get_interrupt_state/set_interrupt_state` 在 `kernel/dos/task/lock.c` 中实现并从 `dos.h` 暴露。 -->
 <!-- 过时：GDT/IDT 地址、descriptor/TSS 布局和 `set_segmdesc`/`set_gatedesc`/`load_*` 从 `define.h`、`dos.h` 暴露给通用代码。 -->
 - `kernel/res/`：打包进镜像的资源；资源是否进入镜像由 `kernel/Makefile` 中显式的 `mcopy` 命令决定。
-- `Loader/`：独立的加载器，包含自己的驱动、文件系统和基础库实现。不要假设它能直接复用内核实现。
+- `loader/`：独立的加载器，包含自己的驱动、文件系统和基础库实现。不要假设它能直接复用内核实现。
 - `apps/include/`：用户态头文件和公开 ABI。
 - `apps/libp/`：用户态 C/C++ 启动代码、系统调用、内存/标准库、IPC/RPC 等基础库。
 - `apps/<name>/`：各个用户程序；通常每个目录有自己的 `Makefile`，产物写入 `apps/out/`。
@@ -66,14 +66,14 @@
 
 ```sh
 make -C apps
-make -C Loader
+make -C loader
 make -C kernel
 ```
 
 顺序很重要：
 
 - `apps` 先生成 `apps/libs/*.a` 和 `apps/out/*.bin`。
-- `Loader` 生成内核制镜像时需要的 `Loader/out/dosldr.bin`。
+- `loader` 生成内核制镜像时需要的 `loader/out/dosldr.bin`。
 - `kernel` 最后编译内核、模块并创建/填充 `kernel/boot.img`、`kernel/disk.img` 和 `kernel/img/*.img`。
 - `make -C kernel full` 会构建应用，但仍假定加载器和部分已有产物可用，不能替代上面的干净构建顺序。
 
@@ -84,7 +84,7 @@ make -C kernel
 make -C apps/rpctest
 
 # 只重编加载器
-make -C Loader
+make -C loader
 
 # 已存在 kernel/obj 时，快速检查某个内核子系统
 make -C kernel/dos/task
@@ -207,7 +207,7 @@ python3 scripts/kernel-perf.py \
 <!-- 过时：`task_id` 可在页面变为共享后继续代表创建者，任务退出时 `gc` 通过循环递减把该 owner 的页面引用强制清零。 -->
 - 用户态 ELF loader 接收真实 image size，完整验证 Ehdr/phdr/PT_LOAD、文件范围、用户虚拟范围、对齐、溢出和 executable entry。装载严格分两阶段：全部 segment 页映射成功后才复制文件数据和清零 BSS；共享物理页的相邻 segment 不重复 `page_link`。不得恢复无 size 的 `elf32_get_max_vaddr/load_elf` 接口。
 - 用户程序保持 `.text`/公开链接基址 `0x70000000`。通用链接参数使用 `-N -Ttext 0x70000000`，避免 GNU ld 额外生成低于用户边界的 header PT_LOAD；因此现阶段会出现 RWX LOAD 警告，而 loader 仍要求所有 segment/page 均不低于 `USER_SPACE_START`，entry 必须落在带 `PF_X` 的 load segment 内。
-- 继续拆分架构代码时只处理 `kernel/`；`Loader/` 保持当前实现，除非任务明确要求修改。
+- 继续拆分架构代码时只处理 `kernel/`；`loader/` 保持当前实现，除非任务明确要求修改。
 
 ### SMP 与多核调度
 
@@ -246,24 +246,24 @@ python3 scripts/kernel-perf.py \
 
 ### 加载器、文件系统和磁盘格式
 
-- `Loader/` 与 `kernel/` 各自有 FAT/PFS/VFS 和驱动代码。修改磁盘结构或加载协议时必须检查两边的结构定义和读写逻辑，不能只修一侧。
+- `loader/` 与 `kernel/` 各自有 FAT/PFS/VFS 和驱动代码。修改磁盘结构或加载协议时必须检查两边的结构定义和读写逻辑，不能只修一侧。
 - 内核挂载状态显式区分 `INITIALIZING`、`ACTIVE`、`RETIRED`。任务 VFS 实例和显式 `X:` 路径操作都通过挂载引用保持共享缓存存活；卸载先从活动表摘除挂载，并在最后一个引用释放后再销毁缓存。
-- 每个物理盘记录 retired generation 计数和 format reservation。新挂载可与 retired generation 并存；format 遇到零引用的 active 挂载时在同一临界区摘除挂载并取得 reservation，再在锁外依次销毁缓存和格式化，仍被任务引用、正在初始化或存在 retired 引用时必须保持现状并失败。mount 初始化与 format 必须互斥，retired 计数只能在 `DeleteFs` 完整结束后递减，保证 format 不会与销毁并发。
+- 每个物理盘记录 retired generation 计数和 format reservation。新挂载可与 retired generation 并存；format 遇到零引用的 active 挂载时在同一临界区摘除挂载并取得 reservation，再在锁外依次销毁缓存和格式化，仍被任务引用、正在初始化或存在 retired 引用时必须保持现状并失败。mount 初始化与 format 必须互斥，retired 计数只能在 `delete_fs` 完整结束后递减，保证 format 不会与销毁并发。
 - 显式盘符路径必须在保存中断状态的短临界区 acquire 活动挂载，文件系统调用在临界区外执行并在结束后 release；相对路径由当前任务实例持有引用。不得让活动挂载中的裸 `vfs_t *` 逃逸。
 - 每个 mount owner 通过 `vfs_t` 内嵌 prev/next 维护动态 instance 链，包含 owner root、任务实例和 clone replay 的临时实例；完整 create 后短 irq 临界区注册，release/abort 在释放 cache 前注销。文件系统需要更新共享 cursor 时遍历 owner instance 链，不得扫描固定任务数组。
 - rename 是双路径操作：源和目标都要独立 acquire/resolve，只允许同一 mount owner，并向文件系统传递去除盘符的两条路径。跨盘 rename 必须失败。
-- 文件系统 `cd` 需要先准备新 cursor/path 状态，malloc 和 `AddVal` 全部成功后才 commit；`..` 必须先验证非空。目录缓存、bitmap 和 ListFile 的 list append 失败必须回滚并释放已分配项。
-- 内核虚拟盘 `Disk_Read` 的物理扇区固定为 512 字节，因此当前 FAT 实现只接受 BPB `BytsPerSec == 512`。多簇目录缓冲区的每簇偏移必须使用 `ClustnoBytes`，数据簇号必须先验证 `>= 2` 且整簇落在磁盘范围内。
+- 文件系统 `cd` 需要先准备新 cursor/path 状态，malloc 和 `AddVal` 全部成功后才 commit；`..` 必须先验证非空。目录缓存、bitmap 和 list_file 的 list append 失败必须回滚并释放已分配项。
+- 内核虚拟盘 `disk_read` 的物理扇区固定为 512 字节，因此当前 FAT 实现只接受 BPB `BytsPerSec == 512`。多簇目录缓冲区的每簇偏移必须使用 `ClustnoBytes`，数据簇号必须先验证 `>= 2` 且整簇落在磁盘范围内。
 - 虚拟盘可通过 `register_vdisk_at` 预留 ABI 盘符；软盘、DEVFS 和 legacy IDE 分别固定使用 `A:`、`B:` 与 `C:` 起的设备槽，不能退回 first-free 注册导致 IDE 回调访问的设备编号与 `vdisk` 容量元数据错位。ATA IDENTIFY 声明 48-bit LBA 但容量字段为零时必须回退 28-bit 容量。
 - FAT format 根据磁盘容量选择 FAT12/16/32，迭代计算 FAT 长度并只使用 2 的幂次 sectors-per-cluster；FAT 表和根目录必须完整清零、写入标准保留项，并回读 boot sector、两份 FAT 和根目录后才报告成功。不得恢复未初始化格式化缓冲区或任意非 2 次幂簇大小。
-- FAT 表 API 的长度统一表示条目数，循环使用 `i < count`；FAT12 奇数末项、链目标、保留标记和磁盘范围必须在写入缓存前验证，损坏 FAT 使 `InitFs` 失败。新目录只写 `.`、`..` 和标准 `0x00` 终止项，不创建 `NULL` 伪文件或额外占用簇。
+- FAT 表 API 的长度统一表示条目数，循环使用 `i < count`；FAT12 奇数末项、链目标、保留标记和磁盘范围必须在写入缓存前验证，损坏 FAT 使 `init_fs` 失败。新目录只写 `.`、`..` 和标准 `0x00` 终止项，不创建 `NULL` 伪文件或额外占用簇。
 <!-- 过时：FAT 保存长度表示“末项偏移”并使用 `i <= length`，新目录额外创建名为 `NULL` 的占位文件。 -->
 - FAT mkdir 直接持有 parent slot、child cluster 和可选的 parent-extension cluster；所有分配、list append 与 realloc 在提交 parent entry/FAT 前完成并可逆序回滚，提交后直接写标准目录簇，不得恢复 `mkfile -> 再查路径 -> del 回滚` 的间接流程。
 <!-- 过时：FAT mkdir 先创建普通文件，再通过路径重新查找并改写为目录，失败时调用通用 `del` 猜测所有权。 -->
 - `vfs_clone_for_task` 从源实例直接 acquire 挂载（允许源挂载已 retired），在临时实例完整重放工作目录后才替换目标实例。clone 失败必须保持目标原状，任务创建、线程、fork 和执行路径必须检查失败并完整回滚。
-- 内核文件系统 `InitFs`、`CopyCache` 返回成功状态；初始化失败必须清理部分资源和挂载 reservation，不能无条件把挂载发布为 active。新增 clone/free 路径必须同步维护该所有权，不能在仍有引用时直接调用文件系统 `DeleteFs`。
+- 内核文件系统 `init_fs`、`copy_cache` 返回成功状态；初始化失败必须清理部分资源和挂载 reservation，不能无条件把挂载发布为 active。新增 clone/free 路径必须同步维护该所有权，不能在仍有引用时直接调用文件系统 `delete_fs`。
 - PFS format 必须在写盘前完整读取并校验 boot sector 与 `dosldr.bin`，按 boot sector 每次 92 个扇区的读取粒度动态扩大并清零 loader 保留区，再把 bitmap/root 布置在保留区之后；检查长度、磁盘容量和分配失败，所有区域写后校验并把真实失败传播到 VFS/psh/安装器。VFS 统一负责安全摘除无人使用的活动挂载；psh 格式化成功后重新挂载目标盘，安装器成功后重新 mount/change，失败时按逆序尽力恢复源盘。
-- PFS path resolver 在每个出口都写明 error，复制路径前检查 NULL、长度和 malloc；需要 leaf name 的调用返回 parent block + 原路径 span，需要完整目录的调用解析到最终目录。`pfs_FileInfo` 在分配前验证名称容量，内核 `fopen` 的 FILE/buffer/name/read 任一步失败都逆序释放。
+- PFS path resolver 在每个出口都写明 error，复制路径前检查 NULL、长度和 malloc；需要 leaf name 的调用返回 parent block + 原路径 span，需要完整目录的调用解析到最终目录。`pfs_fileinfo` 在分配前验证名称容量，内核 `fopen` 的 FILE/buffer/name/read 任一步失败都逆序释放。
 - 启动系统盘必须同时包含 `init.bin`、`psh.bin`、`sys.cfg`；探测失败必须 panic，不得退回可能是 DEVFS 的 `first_vdisk()`。显式盘符剥离依赖标准重叠 `memmove` 语义，修改基础内存函数后必须做冷启动验证。
 <!-- 过时：系统盘文件探测全部失败后仍退回第一个虚拟盘继续启动。 -->
 - 启动扇区、加载地址、ELF 入口和分区/文件系统布局属于启动 ABI；任何改动都需要完整构建和冷启动验证。
@@ -278,7 +278,7 @@ python3 scripts/kernel-perf.py \
 - 优先使用仓库已有的整数类型、分配器、字符串/内存函数、锁和日志接口。引入宿主专用 API 前先确认它确实只用于 `scripts/` 或宿主工具。
 - `NewList`、`AddVal`、TTY 和 MST 构造路径都可能分配失败；调用者必须在解引用前检查，失败时回滚已 append 的节点并释放 token buffer、嵌套 list 和外层对象，不得继续使用部分构造的状态。
 - 该代码大量依赖 32 位指针和整数互转。新增代码应使用项目已有的 `uintptr_t`/固定宽度类型表达地址，并显式检查溢出、对齐和范围。
-- 不要修改或提交 `apps/out/`、`apps/libs/`、`Loader/out/`、`kernel/obj/`、`kernel/img/`、`kernel/*.img`、`kernel/*.log` 等生成物，除非任务明确要求交付镜像或二进制。
+- 不要修改或提交 `apps/out/`、`apps/libs/`、`loader/out/`、`kernel/obj/`、`kernel/img/`、`kernel/*.img`、`kernel/*.log` 等生成物，除非任务明确要求交付镜像或二进制。
 - 不要随意执行全量 `clean`：清理规则会递归删除大量产物，之后完整重建耗时且会重新创建大型镜像。需要清理时只清理与任务相关、可确认可重建的目标。
 
 ## 提交前检查

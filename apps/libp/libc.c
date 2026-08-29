@@ -5049,7 +5049,7 @@ int fgetc(FILE *stream) {
       return EOF;
     } else {
       if (stream->read_flag == 1) {
-        api_ReadFile(stream->name, stream->buffer);
+        api_readfile(stream->name, stream->buffer);
         stream->read_flag = 0;
       }
       return stream->buffer[stream->p++];
@@ -5066,7 +5066,7 @@ int fputc(int ch, FILE *stream) {
     }
     if (CANREAD(stream->mode)) {
       if (stream->read_flag == 1) {
-        api_ReadFile(stream->name, stream->buffer);
+        api_readfile(stream->name, stream->buffer);
         stream->read_flag = 0;
       }
     }

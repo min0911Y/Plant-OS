@@ -51,7 +51,7 @@ void scan(char *str, int length);
 void api_free(void *ptr, int size);
 int system(char *command);
 int filesize(char *filename);
-int api_ReadFile(char *filename, char *res);
+int api_readfile(char *filename, char *res);
 void bmpview(char *filename);
 void Draw_Box(int x, int y, int w, int h, int color);
 void Draw_Px(int x, int y, int color);

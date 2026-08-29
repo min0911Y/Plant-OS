@@ -748,11 +748,11 @@ void F2S(double d, char* str, int l) {
     str[j] = buf[i];
   }
   str[j] = 0;
-  free(buf, 128);
+  free(buf);
   // 5.55 => 0.555 => <1 = true and b = 1
   // 1.56 0.156,15.6,156
 }
-int _Znaj(uint32_t size) {
+void *_Znaj(uint32_t size) {
   printk("_Znaj:%d\n", size);
   return malloc(size);
 }
@@ -799,8 +799,8 @@ void* memmove(void* dest, const void* src, int n) {
   进行操作。并不是因为操作的对象是字符串*/
   char* pdest = (char*)dest;
   const char* psrc = (const char*)src;
-  assert(dest);
-  assert(src);
+  assert(dest != NULL);
+  assert(src != NULL);
   if (pdest <= psrc && pdest >= psrc + n)  //正常情况下从前向后拷贝
   {
     while (n--) {

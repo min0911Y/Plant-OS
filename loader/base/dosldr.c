@@ -2,17 +2,17 @@
 #include <dosldr.h>
 
 struct TASK MainTask;
-void *malloc(int size);
-void *memcpy(void *s, const void *ct, size_t n);
+
 bool elf32Validate(Elf32_Ehdr *hdr) {
   return hdr->e_ident[EI_MAG0] == ELFMAG0 && hdr->e_ident[EI_MAG1] == ELFMAG1 &&
          hdr->e_ident[EI_MAG2] == ELFMAG2 && hdr->e_ident[EI_MAG3] == ELFMAG3;
 }
 void load_segment(Elf32_Phdr *phdr, void *elf) {
   printf("%08x %08x %d\n", phdr->p_vaddr, phdr->p_offset, phdr->p_filesz);
-  memcpy(phdr->p_vaddr, elf + phdr->p_offset, phdr->p_filesz);
+  memcpy((void *)phdr->p_vaddr, elf + phdr->p_offset, phdr->p_filesz);
   if (phdr->p_memsz > phdr->p_filesz) { // 这个是bss段
-    memset(phdr->p_vaddr + phdr->p_filesz, 0, phdr->p_memsz - phdr->p_filesz);
+    memset((void *)(uintptr_t)(phdr->p_vaddr + phdr->p_filesz), 0,
+           phdr->p_memsz - phdr->p_filesz);
   }
 }
 uint32_t load_elf(Elf32_Ehdr *hdr) {
@@ -43,7 +43,7 @@ int is_ide_device(uint8_t bus, uint8_t device, uint8_t function) {
 }
 int get_vdisk_type(char drive);
 void DOSLDR_MAIN() {
-  struct MEMMAN *memman = MEMMAN_ADDR;
+  struct MEMMAN *memman = (struct MEMMAN *)(uintptr_t)MEMMAN_ADDR;
   unsigned int memtotal;
   memtotal = 128 * 1024 * 1024;
   memman_init(memman);

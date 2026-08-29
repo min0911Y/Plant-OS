@@ -15,7 +15,7 @@ void AddVal(int val, struct List* Obj) {
   Obj->next = NULL;
   Obj->val = val;
 }
-struct List* FindForCount(int count, struct List* Obj) {
+struct List* list_get(int count, struct List* Obj) {
   for (int i = 0;; i++) {
     if (Obj == NULL) {
       // not found
@@ -28,7 +28,7 @@ struct List* FindForCount(int count, struct List* Obj) {
   }
 }
 void DeleteVal(int count, struct List* Obj) {
-  if (FindForCount(count, Obj) == NULL) {
+  if (list_get(count, Obj) == NULL) {
     // Not found!
     return;
   }
@@ -36,17 +36,17 @@ void DeleteVal(int count, struct List* Obj) {
     // 你删你麻痹头结点
     return;
   }
-  struct List* Will_Free = FindForCount(count, Obj);
-  if (FindForCount(count, Obj)->next == NULL) {
+  struct List* Will_Free = list_get(count, Obj);
+  if (list_get(count, Obj)->next == NULL) {
     // 是尾节点
-    FindForCount(count - 1, Obj)->next = NULL;
+    list_get(count - 1, Obj)->next = NULL;
   } else {
-    FindForCount(count - 1, Obj)->next = FindForCount(count + 1, Obj);
+    list_get(count - 1, Obj)->next = list_get(count + 1, Obj);
   }
   api_free(Will_Free, sizeof(struct List));
 }
 void InsertVal(int count, int val, struct List* Obj) {
-  if (FindForCount(count, Obj) == NULL) {
+  if (list_get(count, Obj) == NULL) {
     // Not found!
     return;
   }
@@ -55,14 +55,14 @@ void InsertVal(int count, int val, struct List* Obj) {
     return;
   }
 
-  if (FindForCount(count, Obj)->next == NULL) {
+  if (list_get(count, Obj)->next == NULL) {
     // 是尾节点
     AddVal(val, Obj);
   } else {
     struct List* Will = (struct List*)malloc(sizeof(struct List));
     Will->val = val;
-    Will->next = FindForCount(count, Obj)->next;
-    FindForCount(count, Obj)->next = Will;
+    Will->next = list_get(count, Obj)->next;
+    list_get(count, Obj)->next = Will;
   }
 }
 struct List* NewList() {
@@ -72,8 +72,8 @@ struct List* NewList() {
   return Obj;
 }
 void Change(int count, struct List* Obj, int val) {
-  if (FindForCount(count + 1, Obj) != NULL) {
-    FindForCount(count + 1, Obj)->val = val;
+  if (list_get(count + 1, Obj) != NULL) {
+    list_get(count + 1, Obj)->val = val;
   } else {
     AddVal(val, Obj);
   }
@@ -150,7 +150,7 @@ int main(int argc, char** argv) {
   MainNode = NewList();
   if (filesize(argv[1]) != -1) {
     char* buf = (char*)malloc(filesize(argv[1]));
-    api_ReadFile(argv[1], buf);
+    api_readfile(argv[1], buf);
     loadFile(buf, filesize(argv[1]));
     api_free(buf, filesize(argv[1]));
   }
@@ -188,8 +188,8 @@ int main(int argc, char** argv) {
       //打印列表
       char* p = malloc(GetLastCount(MainNode) + 1);
       int len = 0;
-      for (int i = 1; FindForCount(i, MainNode) != NULL; i++) {
-        p[i - 1] = (FindForCount(i, MainNode)->val);
+      for (int i = 1; list_get(i, MainNode) != NULL; i++) {
+        p[i - 1] = (list_get(i, MainNode)->val);
         len++;
       }
       if (filesize(argv[1]) == -1) {

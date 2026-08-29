@@ -3,7 +3,7 @@ GLOBAL tty_alloc,tty_free,tty_set,tty_notify_input
 GLOBAL putch,putstr,getch,get_mouse,get_xy,goto_xy
 GLOBAL SwitchTo320X200X256,SwitchToText8025,Draw_Char,sleep
 GLOBAL PrintChineseChar,PrintChineseStr,Draw_Str,api_malloc,api_free
-GLOBAL print,scan,system,filesize,api_ReadFile,api_get_env
+GLOBAL print,scan,system,filesize,api_readfile,api_get_env
 GLOBAL Draw_Box,Draw_Px,Text_Draw_Box,mem_used,mem_total
 GLOBAL input_char_inSM,api_beep,RAND,api_get_command_line,Get_System_Version,Copy,_kbhit
 GLOBAL mkdir,mkfile,Edit_File,SwitchTo320X200X256_BIOS,SwitchToText8025_BIOS
@@ -283,7 +283,7 @@ pop	edx
 pop	ebx
 ret
 
-api_ReadFile:
+api_readfile:
 push	ebx
 push	edx
 push	esi

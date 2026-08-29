@@ -31,7 +31,7 @@ PRIVATE void rollback_last_token(MST_Object* mst) {
     return;
   }
   size_t index = mst->token->ctl->all;
-  TOKEN* token = (TOKEN*)(uintptr_t)FindForCount(index, mst->token)->val;
+  TOKEN* token = (TOKEN*)(uintptr_t)list_get(index, mst->token)->val;
   DeleteVal(index, mst->token);
   free(token->tok);
   free(token);
@@ -379,8 +379,8 @@ PRIVATE bool build_array(mstr* result,
   return true;
 }
 PRIVATE bool build_space(mstr* result, SPACE* space, int spaces_no) {
-  for (int i = 1; FindForCount(i, space->the_space) != NULL; i++) {
-    Var* sp = (Var*)FindForCount(i, space->the_space)->val;
+  for (int i = 1; list_get(i, space->the_space) != NULL; i++) {
+    Var* sp = (Var*)list_get(i, space->the_space)->val;
     //  printk("name found!\n");
     char* n = (char*)malloc(strlen(sp->name) + 6);
     if (n == NULL) {
@@ -433,9 +433,9 @@ PRIVATE void free_mst_array(Array* array) {
   if (array == NULL || array->the_array == NULL) {
     return;
   }
-  for (int i = 1; FindForCount(i, array->the_array) != NULL; i++) {
+  for (int i = 1; list_get(i, array->the_array) != NULL; i++) {
     Array_data* value =
-        (Array_data*)(uintptr_t)FindForCount(i, array->the_array)->val;
+        (Array_data*)(uintptr_t)list_get(i, array->the_array)->val;
     if (value != NULL) {
       free_mst_value(value->vt, value->obj);
       free(value);
@@ -447,8 +447,8 @@ PRIVATE void free_mst_space(SPACE* space) {
   if (space == NULL || space->the_space == NULL) {
     return;
   }
-  for (int i = 1; FindForCount(i, space->the_space) != NULL; i++) {
-    Var* value = (Var*)(uintptr_t)FindForCount(i, space->the_space)->val;
+  for (int i = 1; list_get(i, space->the_space) != NULL; i++) {
+    Var* value = (Var*)(uintptr_t)list_get(i, space->the_space)->val;
     if (value != NULL) {
       free_mst_value(value->vt, value->obj);
       free(value);

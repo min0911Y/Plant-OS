@@ -11,7 +11,7 @@ int main(int argc, char **argv) {
   }
   unsigned char *hanzi =
       (unsigned char *)malloc(filesize("hanzi.txt"));
-  api_ReadFile("hanzi.txt", hanzi);
+  api_readfile("hanzi.txt", hanzi);
   printf("请输入拼音：");
   scan(pinyin, 100);
   printf(pinyin);

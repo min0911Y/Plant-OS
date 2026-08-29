@@ -71,7 +71,7 @@ bool have_vdisk(char drive) {
 }
 // 基于vdisk的通用读写
 #define SECTORS_ONCE 8
-void Disk_Read(unsigned int lba, unsigned int number, void *buffer,
+void disk_read(unsigned int lba, unsigned int number, void *buffer,
                char drive) {
   if (have_vdisk(drive)) {
     for (int i = 0; i < number; i += SECTORS_ONCE) {
@@ -96,7 +96,7 @@ int disk_Size(char drive) {
 }
 bool DiskReady(char drive) { return have_vdisk(drive); }
 int getReadyDisk() { return 0; }
-void Disk_Write(unsigned int lba, unsigned int number, void *buffer,
+void disk_write(unsigned int lba, unsigned int number, void *buffer,
                 char drive) {
   //  printf("%d\n",lba);
   if (have_vdisk(drive)) {

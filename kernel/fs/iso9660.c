@@ -111,7 +111,7 @@ typedef union {
   char _bits[2048];
 } l9660_vdesc;
 
-static void ISO_DeleteFs(struct vfs_t *vfs);
+static void ISO_delete_fs(struct vfs_t *vfs);
 
 typedef struct l9660_fs {
 #ifdef L9660_SINGLEBUFFER
@@ -480,7 +480,7 @@ bool read_sector(l9660_fs *fs, void *buf, uint32_t sector) {
   return CDROM_Read(sector, 1, buf, fs->disk_number);
 }
 
-bool ISO_Check(uint8_t disk_number) {
+bool ISO_check(uint8_t disk_number) {
   unsigned char *buffer = malloc(2049); // 假设扇区大小为 2048 字节
   if (buffer == NULL) {
     return false;
@@ -497,7 +497,7 @@ bool ISO_Check(uint8_t disk_number) {
   }
 }
 
-bool ISO_InitFs(struct vfs_t *vfs, uint8_t disk_number) {
+bool ISO_init_fs(struct vfs_t *vfs, uint8_t disk_number) {
   l9660_fs_status_t *fs_m =
       (l9660_fs_status_t *)malloc(sizeof(l9660_fs_status_t));
   if (fs_m == NULL) {
@@ -512,7 +512,7 @@ bool ISO_InitFs(struct vfs_t *vfs, uint8_t disk_number) {
   vfs->cache = (void *)fs_m;
   if (l9660_openfs(fs_m->fs, read_sector, disk_number) != L9660_OK ||
       l9660_fs_open_root(&fs_m->root_dir, fs_m->fs) != L9660_OK) {
-    ISO_DeleteFs(vfs);
+    ISO_delete_fs(vfs);
     return false;
   }
   fs_m->now_dir = fs_m->root_dir;
@@ -526,7 +526,7 @@ int ISO_CDFile(struct vfs_t *vfs, char *path) {
   return 0;
 }
 
-bool ISO_CopyCache(struct vfs_t *dest, struct vfs_t *src) {
+bool ISO_copy_cache(struct vfs_t *dest, struct vfs_t *src) {
   dest->cache = malloc(sizeof(l9660_fs_status_t));
   if (dest->cache == NULL) {
     return false;
@@ -534,12 +534,12 @@ bool ISO_CopyCache(struct vfs_t *dest, struct vfs_t *src) {
   memcpy(dest->cache, src->cache, sizeof(l9660_fs_status_t));
   return true;
 }
-static void ISO_ReleaseCache(struct vfs_t *vfs) {
+static void ISO_release_cache(struct vfs_t *vfs) {
   free(vfs->cache);
   vfs->cache = NULL;
 }
 
-static void ISO_DeleteFs(struct vfs_t *vfs) {
+static void ISO_delete_fs(struct vfs_t *vfs) {
   l9660_fs_status_t *status = (l9660_fs_status_t *)vfs->cache;
   if (status == NULL) {
     return;
@@ -555,7 +555,7 @@ int ISO_cd(struct vfs_t *vfs, char *dictname) {
   }
   if (strcmp(dictname, "/") == 0) {
     while (vfs->path->ctl->all != 0) {
-      free((void *)(uintptr_t)FindForCount(vfs->path->ctl->all, vfs->path)
+      free((void *)(uintptr_t)list_get(vfs->path->ctl->all, vfs->path)
                ->val);
       DeleteVal(vfs->path->ctl->all, vfs->path);
     }
@@ -590,7 +590,7 @@ RE:
 
   if (parent) {
     struct List *path_entry =
-        FindForCount(vfs->path->ctl->all, vfs->path);
+        list_get(vfs->path->ctl->all, vfs->path);
     if (path_entry == NULL) {
       if (free_flag) {
         free(dictname);
@@ -630,7 +630,7 @@ RE:
   return 1;
 }
 
-bool ISO_ReadFile(struct vfs_t *vfs, char *path, char *buffer) {
+bool ISO_read_file(struct vfs_t *vfs, char *path, char *buffer) {
   if (vfs == NULL || path == NULL || buffer == NULL) {
     return false;
   }
@@ -671,7 +671,7 @@ RE:
   return true;
 }
 
-List *ISO_ListFile(struct vfs_t *vfs, char *dictpath) {
+List *ISO_list_file(struct vfs_t *vfs, char *dictpath) {
   l9660_dir finfo;
   int free_flag = 0;
   if (strcmp(dictpath, "") == 0)
@@ -763,8 +763,8 @@ List *ISO_ListFile(struct vfs_t *vfs, char *dictpath) {
   return result;
 
 fail:
-  for (int i = 1; FindForCount(i, result) != NULL; i++) {
-    free((void *)(uintptr_t)FindForCount(i, result)->val);
+  for (int i = 1; list_get(i, result) != NULL; i++) {
+    free((void *)(uintptr_t)list_get(i, result)->val);
   }
   DeleteList(result);
   if (free_flag) {
@@ -772,7 +772,7 @@ fail:
   }
   return NULL;
 }
-int ISO_FileSize(struct vfs_t *vfs, char *filename) {
+int ISO_file_size(struct vfs_t *vfs, char *filename) {
   if (vfs == NULL || filename == NULL) {
     return -1;
   }
@@ -807,19 +807,19 @@ void init_iso9660() {
   fs.cache = NULL;
   strcpy(fs.FSName, "ISO9660");
 
-  fs.CopyCache = ISO_CopyCache;
-  fs.ReleaseCache = ISO_ReleaseCache;
-  fs.DeleteFs = ISO_DeleteFs;
-  fs.Check = ISO_Check;
-  fs.InitFs = ISO_InitFs;
-  fs.CreateFile = ISO_CDFile;
-  fs.CreateDict = ISO_CDFile;
-  fs.DelDict = ISO_CDFile;
-  fs.DelFile = ISO_CDFile;
+  fs.copy_cache = ISO_copy_cache;
+  fs.release_cache = ISO_release_cache;
+  fs.delete_fs = ISO_delete_fs;
+  fs.check = ISO_check;
+  fs.init_fs = ISO_init_fs;
+  fs.create_file = ISO_CDFile;
+  fs.create_dict = ISO_CDFile;
+  fs.del_dict = ISO_CDFile;
+  fs.del_file = ISO_CDFile;
   fs.cd = ISO_cd;
-  fs.ReadFile = ISO_ReadFile;
-  fs.ListFile = ISO_ListFile;
-  fs.FileSize = ISO_FileSize;
+  fs.read_file = ISO_read_file;
+  fs.list_file = ISO_list_file;
+  fs.file_size = ISO_file_size;
 
   vfs_register_fs(fs);
 }

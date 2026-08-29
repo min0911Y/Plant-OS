@@ -25,7 +25,7 @@ static bool copy_file(char *source, char *destination) {
   if (size != 0 && buffer == NULL) {
     return false;
   }
-  if ((size != 0 && !api_ReadFile(source, buffer)) ||
+  if ((size != 0 && !api_readfile(source, buffer)) ||
       !Edit_File(destination, buffer, size, 0)) {
     free(buffer);
     return false;
@@ -255,7 +255,7 @@ int main() {
     return 1;
   }
   char *config = (char *)malloc(len + 1);
-  if (config == NULL || (len != 0 && !api_ReadFile("setup.mst", config))) {
+  if (config == NULL || (len != 0 && !api_readfile("setup.mst", config))) {
     free(config);
     printf("Unable to read setup.mst.\n");
     return 1;

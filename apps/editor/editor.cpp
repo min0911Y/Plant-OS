@@ -1144,7 +1144,7 @@ public:
     c->index = 0;
 
     if (filesize(filename) != -1) {
-      api_ReadFile(filename, bf2);
+      api_readfile(filename, bf2);
       int fsz = filesize(filename);
       for (int i = 0, j = 0; i < fsz + 1000; i++) {
         if (bf2[i] != '\r') {

@@ -21,7 +21,7 @@ static bool read_file(const char *path, char **buffer, int *size) {
   if (file_size != 0 && data == NULL) {
     return false;
   }
-  if (file_size != 0 && !api_ReadFile((char *)path, data)) {
+  if (file_size != 0 && !api_readfile((char *)path, data)) {
     free(data);
     return false;
   }
@@ -93,7 +93,7 @@ int main() {
     }
     printf("Reading 002doom.bin file...");
     if (second_size != 0 &&
-        !api_ReadFile("002doom.bin", whole_file + first_size)) {
+        !api_readfile("002doom.bin", whole_file + first_size)) {
       printf("failed.\n");
       goto cleanup;
     }

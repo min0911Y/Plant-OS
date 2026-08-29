@@ -16,7 +16,7 @@ apps/sdl2_old/*.o
 c.py
 cloc.exe
 
-Loader/out
+loader/out
 
 fattools/fattools
 

@@ -1,7 +1,6 @@
 #ifndef __DOSLDR__H
 #define __DOSLDR__H
 #define page_kmalloc page_malloc
-#define page_free page_free
 #define page_malloc_one() page_malloc(4)
 typedef unsigned int size_t;
 typedef unsigned int uintptr_t;
@@ -72,6 +71,7 @@ struct MEMMAN {
   int frees, maxfrees, lostsize, losts;
   struct FREEINFO free[MEMMAN_FREES];
 };
+struct List;
 unsigned int memtest(unsigned int start, unsigned int end);
 void memman_init(struct MEMMAN *man);
 unsigned int memman_total(struct MEMMAN *man);
@@ -122,9 +122,9 @@ struct IDEHardDiskInfomationBlock {
 struct FAT_CACHE {
   unsigned int ADR_DISKIMG;
   struct FAT_FILEINFO *root_directory;
-  struct LIST *directory_list;
-  struct LIST *directory_max_list;
-  struct LIST *directory_clustno_list;
+  struct List *directory_list;
+  struct List *directory_max_list;
+  struct List *directory_clustno_list;
   int *fat;
   int FatMaxTerms;
   unsigned int ClustnoBytes;
@@ -159,23 +159,23 @@ typedef struct vfs_t {
   char FSName[255];
   int disk_number;
   uint8_t drive; // 大写（必须）
-  vfs_file *(*FileInfo)(struct vfs_t *vfs, char *filename);
-  struct List *(*ListFile)(struct vfs_t *vfs, char *dictpath);
-  bool (*ReadFile)(struct vfs_t *vfs, char *path, char *buffer);
-  bool (*WriteFile)(struct vfs_t *vfs, char *path, char *buffer, int size);
-  bool (*DelFile)(struct vfs_t *vfs, char *path);
-  bool (*DelDict)(struct vfs_t *vfs, char *path);
-  bool (*CreateFile)(struct vfs_t *vfs, char *filename);
-  bool (*CreateDict)(struct vfs_t *vfs, char *filename);
-  bool (*RenameFile)(struct vfs_t *vfs, char *filename, char *filename_of_new);
-  bool (*Attrib)(struct vfs_t *vfs, char *filename, ftype type);
-  bool (*Format)(uint8_t disk_number);
-  void (*InitFs)(struct vfs_t *vfs, uint8_t disk_number);
-  void (*DeleteFs)(struct vfs_t *vfs);
-  bool (*Check)(uint8_t disk_number);
+  vfs_file *(*fileinfo)(struct vfs_t *vfs, char *filename);
+  struct List *(*list_file)(struct vfs_t *vfs, char *dictpath);
+  bool (*read_file)(struct vfs_t *vfs, char *path, char *buffer);
+  bool (*write_file)(struct vfs_t *vfs, char *path, char *buffer, int size);
+  bool (*del_file)(struct vfs_t *vfs, char *path);
+  bool (*del_dict)(struct vfs_t *vfs, char *path);
+  bool (*create_file)(struct vfs_t *vfs, char *filename);
+  bool (*create_dict)(struct vfs_t *vfs, char *filename);
+  bool (*rename_file)(struct vfs_t *vfs, char *filename, char *filename_of_new);
+  bool (*attrib)(struct vfs_t *vfs, char *filename, ftype type);
+  bool (*format)(uint8_t disk_number);
+  void (*init_fs)(struct vfs_t *vfs, uint8_t disk_number);
+  void (*delete_fs)(struct vfs_t *vfs);
+  bool (*check)(uint8_t disk_number);
   bool (*cd)(struct vfs_t *vfs, char *dictName);
-  int (*FileSize)(struct vfs_t *vfs, char *filename);
-  void (*CopyCache)(struct vfs_t *dest, struct vfs_t *src);
+  int (*file_size)(struct vfs_t *vfs, char *filename);
+  void (*copy_cache)(struct vfs_t *dest, struct vfs_t *src);
   int flag;
 } vfs_t;
 struct FAT_FILEINFO {
@@ -208,7 +208,7 @@ struct List {
 typedef struct List List;
 
 void AddVal(uintptr_t val, struct List *Obj);
-struct List *FindForCount(size_t count, struct List *Obj);
+struct List *list_get(size_t count, struct List *Obj);
 void DeleteVal(size_t count, struct List *Obj);
 struct List *NewList();
 void Change(size_t count, struct List *Obj, uintptr_t val);
@@ -334,4 +334,78 @@ bool vfs_unmount_disk(uint8_t drive);
 bool vfs_attrib(char *filename, ftype type);
 vfs_file *vfs_fileinfo(char *filename);
 void Register_fat_fileSys();
+
+
+void *malloc(int size);
+void *page_malloc(int size);
+void page_free(void *p, int size);
+void free(void *p);
+void *realloc(void *ptr, uint32_t size);
+void clean(char *s, int len);
+void strtoupper(char *str);
+void insert_char(char *str, int pos, char ch);
+void delete_char(char *str, int pos);
+
+int strcmp(const char *s1, const char *s2);
+char *strcpy(char *dest, const char *src);
+char *strncpy(char *dest, const char *src, size_t n);
+char *strcat(char *dest, const char *src);
+char *strncat(char *dest, const char *src, size_t n);
+size_t strlen(const char *s);
+int memcmp(const void *s1, const void *s2, size_t n);
+void *memcpy(void *s, const void *ct, size_t n);
+void *memset(void *s, int c, size_t n);
+void *memmove(void *dest, const void *src, int n);
+char *strchr(const char *s, int c);
+char *strrchr(const char *s, int c);
+int strncmp(const char *s1, const char *s2, size_t n);
+int isspace(int c);
+int isdigit(int c);
+int isalpha(int c);
+int isupper(int c);
+
+void print(const char *str);
+void printk(char *s, ...);
+void clear(void);
+void Move_Cursor(short x, short y);
+void screen_ne(void);
+void putchar(char ch);
+void ASM_call(int value);
+void _IN(unsigned short selector, uint32_t entry);
+
+unsigned int memtest_sub(unsigned int start, unsigned int end);
+void init_gdtidt(void);
+void init_pic(void);
+void ClearMaskIrq(unsigned char irq);
+void set_gatedesc(struct GATE_DESCRIPTOR *gd, int offset, int selector,
+                  int ar);
+void init_floppy(void);
+void reg_pfs(void);
+void ahci_init(void);
+void dma_xfer(unsigned char channel, unsigned long address,
+              unsigned int length, unsigned char read);
+unsigned int get_year(void);
+unsigned int get_hour_hex(void);
+unsigned int get_min_hex(void);
+unsigned int get_day_of_month(void);
+unsigned int get_mon_hex(void);
+
+uint32_t read_pci(uint8_t bus, uint8_t device, uint8_t function,
+                  uint8_t registeroffset);
+uint32_t read_bar_n(uint8_t bus, uint8_t device, uint8_t function,
+                    uint8_t bar_n);
+uint32_t pci_read_command_status(uint8_t bus, uint8_t slot, uint8_t func);
+void pci_write_command_status(uint8_t bus, uint8_t slot, uint8_t func,
+                              uint32_t value);
+
+void disk_read(unsigned int lba, unsigned int number, void *buffer, char drive);
+void disk_write(unsigned int lba, unsigned int number, void *buffer, char drive);
+void init_vfs(void);
+void assert(int expression);
+void ide_write(unsigned char channel, unsigned char reg, unsigned char data);
+void ide_read_buffer(unsigned char channel, unsigned char reg,
+                     unsigned int buffer, unsigned int quads);
+
+
+
 #endif

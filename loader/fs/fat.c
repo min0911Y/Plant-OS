@@ -1,5 +1,8 @@
 // fat.c : fat文件系统的实现
 #include <dosldr.h>
+void file_savefat(int *fat, int clustno, int length, vfs_t *vfs);
+void mkfile(char *name, vfs_t *vfs);
+bool fat_write_file(struct vfs_t *vfs, char *path, char *buffer, int size);
 static inline int get_fat_date(unsigned short year, unsigned short month,
                                unsigned short day) {
   year -= 1980;
@@ -68,10 +71,10 @@ int get_directory_max(struct FAT_FILEINFO *directory, vfs_t *vfs) {
   if (directory == get_dm(vfs).root_directory) {
     return get_dm(vfs).RootMaxFiles;
   }
-  for (int i = 1; FindForCount(i, get_dm(vfs).directory_list) != NULL; i++) {
-    struct List *l = FindForCount(i, get_dm(vfs).directory_list);
+  for (int i = 1; list_get(i, get_dm(vfs).directory_list) != NULL; i++) {
+    struct List *l = list_get(i, get_dm(vfs).directory_list);
     if ((struct FAT_FILEINFO *)l->val == directory) {
-      return (int)FindForCount(i, get_dm(vfs).directory_max_list)->val;
+      return (int)list_get(i, get_dm(vfs).directory_max_list)->val;
     }
   }
 }
@@ -85,7 +88,7 @@ void file_loadfile(int clustno, int size, char *buf, int *fat, vfs_t *vfs) {
     uint32_t sec = (get_dm(vfs).FileDataAddress +
                     (clustno - 2) * get_dm(vfs).ClustnoBytes) /
                    get_dm(vfs).SectorBytes;
-    Disk_Read(sec, get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes,
+    disk_read(sec, get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes,
               img + i * get_dm(vfs).ClustnoBytes, vfs->disk_number);
     clustno = fat[clustno];
   }
@@ -141,7 +144,7 @@ void file_savefile(int clustno, int size, char *buf, int *fat,
     uint32_t sec = (get_dm(vfs).FileDataAddress +
                     (clustno - 2) * get_dm(vfs).ClustnoBytes) /
                    get_dm(vfs).SectorBytes;
-    Disk_Write(sec, get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes,
+    disk_write(sec, get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes,
                img + i * get_dm(vfs).ClustnoBytes, vfs->disk_number);
     clustno = fat[clustno];
   }
@@ -169,18 +172,18 @@ void file_savefile(int clustno, int size, char *buf, int *fat,
 }
 void file_saveinfo(struct FAT_FILEINFO *directory, vfs_t *vfs) {
   if (directory == get_dm(vfs).root_directory) {
-    Disk_Write(get_dm(vfs).RootDictAddress / get_dm(vfs).SectorBytes,
+    disk_write(get_dm(vfs).RootDictAddress / get_dm(vfs).SectorBytes,
                get_dm(vfs).RootMaxFiles * 32 / get_dm(vfs).SectorBytes,
                (void *)directory, vfs->disk_number);
   } else {
-    for (int i = 1; FindForCount(i, get_dm(vfs).directory_list) != NULL; i++) {
-      struct List *list = FindForCount(i, get_dm(vfs).directory_list);
+    for (int i = 1; list_get(i, get_dm(vfs).directory_list) != NULL; i++) {
+      struct List *list = list_get(i, get_dm(vfs).directory_list);
       if (list->val == directory) {
-        list = FindForCount(i, get_dm(vfs).directory_clustno_list);
-        int k = (int)FindForCount(i, get_dm(vfs).directory_max_list)->val * 32 /
+        list = list_get(i, get_dm(vfs).directory_clustno_list);
+        int k = (int)list_get(i, get_dm(vfs).directory_max_list)->val * 32 /
                 get_dm(vfs).ClustnoBytes;
         for (int j = list->val, l = 0; l != k; l++) {
-          Disk_Write((get_dm(vfs).FileDataAddress +
+          disk_write((get_dm(vfs).FileDataAddress +
                       (j - 2) * get_dm(vfs).ClustnoBytes) /
                          get_dm(vfs).SectorBytes,
                      get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes,
@@ -194,7 +197,8 @@ void file_saveinfo(struct FAT_FILEINFO *directory, vfs_t *vfs) {
   }
 }
 void file_savefat(int *fat, int clustno, int length, vfs_t *vfs) {
-  unsigned char *img = get_dm(vfs).ADR_DISKIMG + get_dm(vfs).Fat1Address;
+  unsigned char *img = (unsigned char *)(uintptr_t)(
+      get_dm(vfs).ADR_DISKIMG + get_dm(vfs).Fat1Address);
   int size, sec;
   if (get_dm(vfs).type == 12) {
     for (int i = 0; i <= length; i++) {
@@ -230,13 +234,15 @@ void file_savefat(int *fat, int clustno, int length, vfs_t *vfs) {
     size = length * 4 - 1;
     sec = clustno * 4;
   }
-  Disk_Write((get_dm(vfs).Fat1Address + sec) / get_dm(vfs).SectorBytes,
+  disk_write((get_dm(vfs).Fat1Address + sec) / get_dm(vfs).SectorBytes,
              size / get_dm(vfs).SectorBytes + 1,
-             get_dm(vfs).ADR_DISKIMG + get_dm(vfs).Fat1Address,
+             (void *)(uintptr_t)(get_dm(vfs).ADR_DISKIMG +
+                                 get_dm(vfs).Fat1Address),
              vfs->disk_number);
-  Disk_Write((get_dm(vfs).Fat2Address + sec) / get_dm(vfs).SectorBytes,
+  disk_write((get_dm(vfs).Fat2Address + sec) / get_dm(vfs).SectorBytes,
              size / get_dm(vfs).SectorBytes + 1,
-             get_dm(vfs).ADR_DISKIMG + get_dm(vfs).Fat2Address,
+             (void *)(uintptr_t)(get_dm(vfs).ADR_DISKIMG +
+                                 get_dm(vfs).Fat2Address),
              vfs->disk_number);
 }
 struct FAT_FILEINFO *file_search(char *name, struct FAT_FILEINFO *finfo,
@@ -368,13 +374,13 @@ struct FAT_FILEINFO *Get_File_Address(char *path1, vfs_t *vfs) {
     } else {
       if (get_clustno(finfo->clustno_high, finfo->clustno_low) != 0) {
         for (int count = 1;
-             FindForCount(count, get_dm(vfs).directory_clustno_list) != NULL;
+             list_get(count, get_dm(vfs).directory_clustno_list) != NULL;
              count++) {
           struct List *list =
-              FindForCount(count, get_dm(vfs).directory_clustno_list);
+              list_get(count, get_dm(vfs).directory_clustno_list);
           if (get_clustno(finfo->clustno_high, finfo->clustno_low) ==
               list->val) {
-            list = FindForCount(count, get_dm(vfs).directory_list);
+            list = list_get(count, get_dm(vfs).directory_list);
             bmpDict = (struct FAT_FILEINFO *)list->val;
             break;
           }
@@ -430,13 +436,13 @@ struct FAT_FILEINFO *Get_dictaddr(char *path1, vfs_t *vfs) {
     } else {
       if (get_clustno(finfo->clustno_high, finfo->clustno_low) != 0) {
         for (int count = 1;
-             FindForCount(count, get_dm(vfs).directory_clustno_list) != NULL;
+             list_get(count, get_dm(vfs).directory_clustno_list) != NULL;
              count++) {
           struct List *list =
-              FindForCount(count, get_dm(vfs).directory_clustno_list);
+              list_get(count, get_dm(vfs).directory_clustno_list);
           if (get_clustno(finfo->clustno_high, finfo->clustno_low) ==
               list->val) {
-            list = FindForCount(count, get_dm(vfs).directory_list);
+            list = list_get(count, get_dm(vfs).directory_list);
             bmpDict = (struct FAT_FILEINFO *)list->val;
             break;
           }
@@ -514,7 +520,7 @@ void mkdir(char *dictname, int last_clust, vfs_t *vfs) {
       get_fat_date(get_year(), get_mon_hex(), get_day_of_month());
   model[1].update_time = get_fat_time(get_hour_hex(), get_min_hex());
   model[1].type = 0x10;
-  Fat_WriteFile(vfs, dictname, (char *)&model[0], 32 * 3);
+  fat_write_file(vfs, dictname, (char *)&model[0], 32 * 3);
   struct FAT_FILEINFO *finfo = Get_File_Address(dictname, vfs);
   finfo->type = 0x10; // 是目录（文件夹的type属性是0x10）
   finfo->size = 0;
@@ -524,11 +530,11 @@ void mkdir(char *dictname, int last_clust, vfs_t *vfs) {
   if (last_clust == 0) {
     file_saveinfo(get_dm(vfs).root_directory, vfs);
   } else {
-    for (int i = 1; FindForCount(i, get_dm(vfs).directory_clustno_list) != NULL;
+    for (int i = 1; list_get(i, get_dm(vfs).directory_clustno_list) != NULL;
          i++) {
-      struct List *list = FindForCount(i, get_dm(vfs).directory_clustno_list);
+      struct List *list = list_get(i, get_dm(vfs).directory_clustno_list);
       if (list->val == last_clust) {
-        list = FindForCount(i, get_dm(vfs).directory_list);
+        list = list_get(i, get_dm(vfs).directory_list);
         struct FAT_FILEINFO *d_finfo = (struct FAT_FILEINFO *)list->val;
         file_saveinfo(d_finfo, vfs);
       }
@@ -539,13 +545,13 @@ void mkdir(char *dictname, int last_clust, vfs_t *vfs) {
                vfs);
 
   void *directory_alloc = page_malloc(get_dm(vfs).ClustnoBytes);
-  Disk_Read((get_dm(vfs).FileDataAddress +
+  disk_read((get_dm(vfs).FileDataAddress +
              (get_clustno(finfo->clustno_high, finfo->clustno_low) - 2) *
                  get_dm(vfs).ClustnoBytes) /
                 get_dm(vfs).SectorBytes,
             get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes, directory_alloc,
             vfs->disk_number);
-  AddVal(directory_alloc, get_dm(vfs).directory_list);
+  AddVal((uintptr_t)directory_alloc, get_dm(vfs).directory_list);
   AddVal(get_dm(vfs).ClustnoBytes / 32, get_dm(vfs).directory_max_list);
   return;
 }
@@ -631,12 +637,12 @@ int deldir(char *path, vfs_t *vfs) {
   if (finfo[1].clustno_low == 0) {
     root_finfo = get_dm(vfs).root_directory;
   } else {
-    for (int i = 1; FindForCount(i, get_dm(vfs).directory_clustno_list) != NULL;
+    for (int i = 1; list_get(i, get_dm(vfs).directory_clustno_list) != NULL;
          i++) {
-      if (FindForCount(i, get_dm(vfs).directory_clustno_list)->val ==
+      if (list_get(i, get_dm(vfs).directory_clustno_list)->val ==
           finfo[1].clustno_low) {
         root_finfo =
-            (struct FAT_FILEINFO *)FindForCount(i, get_dm(vfs).directory_list)
+            (struct FAT_FILEINFO *)list_get(i, get_dm(vfs).directory_list)
                 ->val;
         // printf("FIND ROOT %08x\n", root_finfo);
       }
@@ -696,19 +702,19 @@ void mkfile(char *name, vfs_t *vfs) {
       break;
     }
     if (i >= max && finfo != get_dm(vfs).root_directory) {
-      for (int j = 1; FindForCount(j, get_dm(vfs).directory_list) != NULL;
+      for (int j = 1; list_get(j, get_dm(vfs).directory_list) != NULL;
            j++) {
-        struct List *l = FindForCount(j, get_dm(vfs).directory_list);
+        struct List *l = list_get(j, get_dm(vfs).directory_list);
         if ((struct FAT_FILEINFO *)l->val == finfo) {
           max += get_dm(vfs).ClustnoBytes / 32;
-          FindForCount(j, get_dm(vfs).directory_max_list)->val = max;
+          list_get(j, get_dm(vfs).directory_max_list)->val = max;
           struct FAT_FILEINFO *finfo_ =
               (struct FAT_FILEINFO *)realloc((void *)finfo, max * 32);
           if (get_now_dir(vfs) == finfo) {
             get_now_dir(vfs) = finfo_;
           }
           finfo = finfo_;
-          l->val = finfo;
+          l->val = (uintptr_t)finfo;
           break;
         }
       }
@@ -764,7 +770,8 @@ int changedict(char *dictname, vfs_t *vfs) {
 
   if (strcmp(dictname, "/") == 0) {
     while (vfs->path->ctl->all != 0) {
-      page_free(FindForCount(vfs->path->ctl->all, vfs->path)->val, 255);
+      page_free((void *)(uintptr_t)list_get(vfs->path->ctl->all, vfs->path)->val,
+                255);
       DeleteVal(vfs->path->ctl->all, vfs->path);
     }
     get_now_dir(vfs) = get_dm(vfs).root_directory;
@@ -780,7 +787,8 @@ int changedict(char *dictname, vfs_t *vfs) {
   if (get_clustno(finfo->clustno_high, finfo->clustno_low) == 0) {
     //根目录
     while (vfs->path->ctl->all != 0) {
-      page_free(FindForCount(vfs->path->ctl->all, vfs->path)->val, 255);
+      page_free((void *)(uintptr_t)list_get(vfs->path->ctl->all, vfs->path)->val,
+                255);
       DeleteVal(vfs->path->ctl->all, vfs->path);
     }
     get_now_dir(vfs) = get_dm(vfs).root_directory;
@@ -792,19 +800,20 @@ int changedict(char *dictname, vfs_t *vfs) {
   if (strcmp(dictname, "..") != 0 && strcmp(dictname, ".") != 0) {
     char *dict = page_malloc(255);
     strcpy(dict, dictname);
-    AddVal(dict, vfs->path);
+    AddVal((uintptr_t)dict, vfs->path);
   }
 
   if (strcmp(dictname, "..") == 0) {
-    page_free(FindForCount(vfs->path->ctl->all, vfs->path)->val, 255);
+    page_free((void *)(uintptr_t)list_get(vfs->path->ctl->all, vfs->path)->val,
+              255);
     DeleteVal(vfs->path->ctl->all, vfs->path);
   }
   for (int count = 1;
-       FindForCount(count, get_dm(vfs).directory_clustno_list) != NULL;
+       list_get(count, get_dm(vfs).directory_clustno_list) != NULL;
        count++) {
-    struct List *list = FindForCount(count, get_dm(vfs).directory_clustno_list);
+    struct List *list = list_get(count, get_dm(vfs).directory_clustno_list);
     if (get_clustno(finfo->clustno_high, finfo->clustno_low) == list->val) {
-      list = FindForCount(count, get_dm(vfs).directory_list);
+      list = list_get(count, get_dm(vfs).directory_list);
       get_now_dir(vfs) = (struct FAT_FILEINFO *)list->val;
       break;
     }
@@ -860,10 +869,10 @@ int attrib(char *filename, ftype type, struct vfs_t *vfs) {
   file_saveinfo(Get_dictaddr(filename, vfs), vfs);
   return 1;
 }
-void fat_InitFS(struct vfs_t *vfs, uint8_t disk_number) {
+void fat_init_fs(struct vfs_t *vfs, uint8_t disk_number) {
   vfs->cache = malloc(sizeof(fat_cache));
   void *boot_sector = page_malloc(512);
-  Disk_Read(0, 1, boot_sector, disk_number);
+  disk_read(0, 1, boot_sector, disk_number);
 
   if (memcmp(boot_sector + BS_FileSysType, "FAT12   ", 8) == 0) {
     get_dm(vfs).type = 12;
@@ -924,7 +933,7 @@ void fat_InitFS(struct vfs_t *vfs, uint8_t disk_number) {
   get_dm(vfs).ADR_DISKIMG = (unsigned int)malloc(get_dm(vfs).RootDictAddress +
                                                  get_dm(vfs).RootMaxFiles * 32);
 
-  Disk_Read(0, sec, (void *)get_dm(vfs).ADR_DISKIMG, disk_number);
+  disk_read(0, sec, (void *)get_dm(vfs).ADR_DISKIMG, disk_number);
 
   get_dm(vfs).fat = malloc(get_dm(vfs).FatMaxTerms * sizeof(int));
   get_dm(vfs).FatClustnoFlags = malloc(get_dm(vfs).FatMaxTerms * sizeof(char));
@@ -957,12 +966,12 @@ void fat_InitFS(struct vfs_t *vfs, uint8_t disk_number) {
         uint32_t sec1 =
             (get_dm(vfs).FileDataAddress + (j - 2) * get_dm(vfs).ClustnoBytes) /
             get_dm(vfs).SectorBytes;
-        Disk_Read(sec1, get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes,
+        disk_read(sec1, get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes,
                   (char *)directory_alloc + l * get_dm(vfs).SectorBytes,
                   disk_number);
         j = get_dm(vfs).fat[j];
       }
-      AddVal((int)directory_alloc, (struct List *)get_dm(vfs).directory_list);
+      AddVal((uintptr_t)directory_alloc, get_dm(vfs).directory_list);
       AddVal(k * get_dm(vfs).ClustnoBytes / 32,
              (struct List *)get_dm(vfs).directory_max_list);
     }
@@ -972,10 +981,10 @@ void fat_InitFS(struct vfs_t *vfs, uint8_t disk_number) {
   }
 
   for (int i = 1;
-       FindForCount(i, (struct List *)get_dm(vfs).directory_list) != NULL;
+       list_get(i, (struct List *)get_dm(vfs).directory_list) != NULL;
        i++) {
     struct List *list =
-        FindForCount(i, (struct List *)get_dm(vfs).directory_list);
+        list_get(i, (struct List *)get_dm(vfs).directory_list);
     finfo = (struct FAT_FILEINFO *)list->val;
     for (int j = 0; j != get_directory_max(finfo, vfs); j++) {
       if (finfo[j].type == 0x10 && finfo[j].name[0] != 0xe5 &&
@@ -994,12 +1003,12 @@ void fat_InitFS(struct vfs_t *vfs, uint8_t disk_number) {
           uint32_t sec1 = (get_dm(vfs).FileDataAddress +
                            (m - 2) * get_dm(vfs).ClustnoBytes) /
                           get_dm(vfs).SectorBytes;
-          Disk_Read(sec1, get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes,
+          disk_read(sec1, get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes,
                     (char *)directory_alloc + l * get_dm(vfs).SectorBytes,
                     disk_number);
           m = get_dm(vfs).fat[m];
         }
-        AddVal((int)directory_alloc, (struct List *)get_dm(vfs).directory_list);
+        AddVal((uintptr_t)directory_alloc, get_dm(vfs).directory_list);
         AddVal(k * get_dm(vfs).ClustnoBytes / 32,
                (struct List *)get_dm(vfs).directory_max_list);
       }
@@ -1010,14 +1019,14 @@ void fat_InitFS(struct vfs_t *vfs, uint8_t disk_number) {
   }
   page_free(boot_sector, 512);
 }
-void Fat_CopyCache(struct vfs_t *dest, struct vfs_t *src) {
+void fat_copy_cache(struct vfs_t *dest, struct vfs_t *src) {
   dest->cache = malloc(sizeof(fat_cache));
   memcpy(dest->cache, src->cache, sizeof(fat_cache));
 }
-bool Fat_cd(struct vfs_t *vfs, char *dictName) {
+bool fat_cd(struct vfs_t *vfs, char *dictName) {
   return changedict(dictName, vfs);
 }
-bool Fat_ReadFile(struct vfs_t *vfs, char *path, char *buffer) {
+bool fat_read_file(struct vfs_t *vfs, char *path, char *buffer) {
   struct FAT_FILEINFO *finfo;
   finfo = Get_File_Address(path, vfs);
   if (finfo == 0) {
@@ -1028,14 +1037,14 @@ bool Fat_ReadFile(struct vfs_t *vfs, char *path, char *buffer) {
     return 1;
   }
 }
-bool Fat_WriteFile(struct vfs_t *vfs, char *path, char *buffer, int size) {
+bool fat_write_file(struct vfs_t *vfs, char *path, char *buffer, int size) {
   struct FAT_FILEINFO *finfo = Get_File_Address(path, vfs);
   file_savefile(get_clustno(finfo->clustno_high, finfo->clustno_low), size,
                 buffer, get_dm(vfs).fat, get_dm(vfs).FatClustnoFlags, vfs);
   finfo->size = size;
   file_saveinfo(Get_dictaddr(path, vfs), vfs);
 }
-List *Fat_ListFile(struct vfs_t *vfs, char *dictpath) {
+List *fat_list_file(struct vfs_t *vfs, char *dictpath) {
   struct FAT_FILEINFO *finfo = Get_dictaddr(dictpath, vfs);
   List *result = NewList();
   char s[30];
@@ -1087,21 +1096,21 @@ List *Fat_ListFile(struct vfs_t *vfs, char *dictpath) {
           }
           d->name[q] = 0;
           // printk("d->name = %s\n", d->name);
-          AddVal(d, result);
+          AddVal((uintptr_t)d, result);
         }
       }
     }
   }
   return result;
 }
-bool Fat_RenameFile(struct vfs_t *vfs, char *filename, char *filename_of_new) {
+bool fat_rename_file(struct vfs_t *vfs, char *filename, char *filename_of_new) {
   return rename(filename, filename_of_new, vfs);
 }
-bool Fat_CreateFile(struct vfs_t *vfs, char *filename) {
+bool fat_create_file(struct vfs_t *vfs, char *filename) {
   mkfile(filename, vfs);
   return true;
 }
-void Fat_DeleteFs(struct vfs_t *vfs) {
+void fat_delete_fs(struct vfs_t *vfs) {
   free((void *)get_dm(vfs).ADR_DISKIMG);
   free(get_dm(vfs).fat);
   free(get_dm(vfs).FatClustnoFlags);
@@ -1109,10 +1118,10 @@ void Fat_DeleteFs(struct vfs_t *vfs) {
   DeleteList(get_dm(vfs).directory_clustno_list);
   DeleteList(get_dm(vfs).directory_list);
 }
-bool Fat_Check(uint8_t disk_number) {
+bool fat_check(uint8_t disk_number) {
   printk("Fat Check\n");
   uint8_t *boot_sec = malloc(512);
-  Disk_Read(0, 1, boot_sec, disk_number);
+  disk_read(0, 1, boot_sec, disk_number);
   if (memcmp(boot_sec + BS_FileSysType, "FAT12   ", 8) == 0 ||
       memcmp(boot_sec + BS_FileSysType, "FAT16   ", 8) == 0 ||
       memcmp(boot_sec + BS_FileSysType + BPB_Fat32ExtByts, "FAT32   ",
@@ -1123,16 +1132,16 @@ bool Fat_Check(uint8_t disk_number) {
   free(boot_sec);
   return false;
 }
-bool Fat_DelFile(struct vfs_t *vfs, char *path) { return del(path, vfs); }
-bool Fat_DelDict(struct vfs_t *vfs, char *path) { return deldir(path, vfs); }
-int Fat_FileSize(struct vfs_t *vfs, char *filename) {
+bool fat_del_file(struct vfs_t *vfs, char *path) { return del(path, vfs); }
+bool fat_del_dict(struct vfs_t *vfs, char *path) { return deldir(path, vfs); }
+int fat_file_size(struct vfs_t *vfs, char *filename) {
   if (Get_File_Address(filename, vfs) == NULL) {
     return -1;
   }
   return Get_File_Address(filename, vfs)->size;
 }
-bool Fat_Format(uint8_t disk_number) { return format(disk_number); }
-bool Fat_CreateDict(struct vfs_t *vfs, char *filename) {
+bool fat_format(uint8_t disk_number) { return format(disk_number); }
+bool fat_create_dict(struct vfs_t *vfs, char *filename) {
   struct FAT_FILEINFO *finfo = Get_dictaddr(filename, vfs);
   int last_clustno = finfo[0].clustno_low;
   if (finfo == get_dm(vfs).root_directory) {
@@ -1140,10 +1149,10 @@ bool Fat_CreateDict(struct vfs_t *vfs, char *filename) {
   }
   mkdir(filename, last_clustno, vfs);
 }
-bool Fat_Attrib(struct vfs_t *vfs, char *filename, ftype type) {
+bool fat_attrib(struct vfs_t *vfs, char *filename, ftype type) {
   return attrib(filename, type, vfs);
 }
-vfs_file *Fat_FileInfo(struct vfs_t *vfs, char *filename) {
+vfs_file *fat_fileinfo(struct vfs_t *vfs, char *filename) {
   struct FAT_FILEINFO *finfo = Get_File_Address(filename, vfs);
   if (finfo == NULL) {
     return (vfs_file *)NULL;
@@ -1196,22 +1205,22 @@ void Register_fat_fileSys() {
   fs.flag = 1;
   fs.cache = NULL;
   strcpy(fs.FSName, "FAT");
-  fs.CopyCache = Fat_CopyCache;
-  fs.Format = Fat_Format;
-  fs.CreateFile = Fat_CreateFile;
-  fs.CreateDict = Fat_CreateDict;
-  fs.DelDict = Fat_DelDict;
-  fs.DelFile = Fat_DelFile;
-  fs.ReadFile = Fat_ReadFile;
-  fs.WriteFile = Fat_WriteFile;
-  fs.DeleteFs = Fat_DeleteFs;
-  fs.cd = Fat_cd;
-  fs.FileSize = Fat_FileSize;
-  fs.Check = Fat_Check;
-  fs.ListFile = Fat_ListFile;
-  fs.InitFs = fat_InitFS;
-  fs.RenameFile = Fat_RenameFile;
-  fs.Attrib = Fat_Attrib;
-  fs.FileInfo = Fat_FileInfo;
+  fs.copy_cache = fat_copy_cache;
+  fs.format = fat_format;
+  fs.create_file = fat_create_file;
+  fs.create_dict = fat_create_dict;
+  fs.del_dict = fat_del_dict;
+  fs.del_file = fat_del_file;
+  fs.read_file = fat_read_file;
+  fs.write_file = fat_write_file;
+  fs.delete_fs = fat_delete_fs;
+  fs.cd = fat_cd;
+  fs.file_size = fat_file_size;
+  fs.check = fat_check;
+  fs.list_file = fat_list_file;
+  fs.init_fs = fat_init_fs;
+  fs.rename_file = fat_rename_file;
+  fs.attrib = fat_attrib;
+  fs.fileinfo = fat_fileinfo;
   vfs_register_fs(fs);
 }

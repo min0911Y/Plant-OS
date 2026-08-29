@@ -47,7 +47,7 @@ static bool env_init(int command_mode) {
     printf("Unable to load env.cfg.\n");
     return false;
   }
-  if (!api_ReadFile("env.cfg", buff)) {
+  if (!api_readfile("env.cfg", buff)) {
     free(buff);
     printf("Unable to read env.cfg.\n");
     return false;
@@ -312,7 +312,7 @@ static int run_command(int argc, char **argv) {
     }
     char *contents = file_size == 0 ? NULL : malloc((size_t)file_size);
     if ((file_size != 0 && contents == NULL) ||
-        (file_size != 0 && !api_ReadFile(argv[1], contents))) {
+        (file_size != 0 && !api_readfile(argv[1], contents))) {
       free(contents);
       printf("Unable to read file.\n");
       return 1;

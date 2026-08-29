@@ -68,5 +68,6 @@ default : Makefile
 	make -r -C minewep
 	make -r -C bitz
 	make -r -C netgobang
+	make -r -C my_basic-master
 clean :
 	rm -rf libs/* out/*

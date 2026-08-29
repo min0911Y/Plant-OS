@@ -127,7 +127,7 @@ int fifo8_get(struct FIFO8 *fifo);
 int fifo8_status(struct FIFO8 *fifo);
 // list.c
 bool AddVal(uintptr_t val, struct List *Obj);
-struct List *FindForCount(size_t count, struct List *Obj);
+struct List *list_get(size_t count, struct List *Obj);
 void DeleteVal(size_t count, struct List *Obj);
 struct List *NewList();
 int GetLastCount(struct List *Obj);
@@ -141,8 +141,8 @@ void DriveSemaphoreGive(unsigned int drive_code);
 void vdisk_remove_task(unsigned tid);
 void sb16_remove_task(mtask *task);
 unsigned int disk_Size(char drive);
-void Disk_Read(unsigned int lba, unsigned int number, void *buffer, char drive);
-void Disk_Write(unsigned int lba, unsigned int number, void *buffer,
+void disk_read(unsigned int lba, unsigned int number, void *buffer, char drive);
+void disk_write(unsigned int lba, unsigned int number, void *buffer,
                 char drive);
 bool CDROM_Read(unsigned int lba, unsigned int number, void *buffer,
                 char drive);

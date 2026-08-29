@@ -160,13 +160,13 @@ int memman_free_4k(struct MEMMAN *man, unsigned int addr, unsigned int size) {
   return i;
 }
 void *page_malloc(int size) {
-  struct MEMMAN *man = MEMMAN_ADDR;
+  struct MEMMAN *man = (struct MEMMAN *)(uintptr_t)MEMMAN_ADDR;
   int p = (int)memman_alloc_4k(man, size);
-  clean(p, size);
-  return p;
+  clean((char *)(uintptr_t)p, size);
+  return (void *)(uintptr_t)p;
 }
 void page_free(void *p, int size) {
-  struct MEMMAN *man = MEMMAN_ADDR;
+  struct MEMMAN *man = (struct MEMMAN *)(uintptr_t)MEMMAN_ADDR;
   memman_free_4k(man, (unsigned int)p, size);
 }
 void *malloc(int size) {

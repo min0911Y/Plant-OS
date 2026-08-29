@@ -123,7 +123,7 @@ void print(const char *str)
 }
 void screen_ne() /*向下滚动一行*/
 {
-	char *p = 0xb8000 + 0 * 160 + 0;
+	char *p = (char *)(uintptr_t)(0xb8000 + 0 * 160 + 0);
 	int i, j;
 	/*清空第一行*/
 	for (i = 0; i < 160; i += 2)

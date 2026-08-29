@@ -5,6 +5,13 @@
 #include <dosldr.h>
 volatile int floppy_int_count = 0;
 void floppy_int(void);
+int fdc_rw(int block, unsigned char *blockbuff, int read,
+           unsigned long nosectors);
+void sendbyte(int byte);
+int getbyte(void);
+void reset(void);
+void wait_floppy_interrupt(void);
+void recalibrate(void);
 typedef struct DrvGeom {
   unsigned char heads;
   unsigned char tracks;

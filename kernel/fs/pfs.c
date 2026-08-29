@@ -7,8 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
-void pfs_DeleteFs(struct vfs_t *vfs);
-vfs_file *pfs_FileInfo(struct vfs_t *vfs, char *filename);
+void pfs_delete_fs(struct vfs_t *vfs);
+vfs_file *pfs_fileinfo(struct vfs_t *vfs, char *filename);
 
 void pfs_flush_bitmap(vfs_t *vfs);
 void pfs_get_file_index_by_path(vfs_t *vfs, char *path, uint32_t start_block,
@@ -20,13 +20,13 @@ void pfs_read_block(pfs_t *pfs, uint32_t lba, uint32_t numbers, void *buff) {
   if (!buff) {
     return;
   }
-  Disk_Read(lba, numbers, buff, pfs->disk_number);
+  disk_read(lba, numbers, buff, pfs->disk_number);
 }
 void pfs_write_block(pfs_t *pfs, uint32_t lba, uint32_t numbers, void *buff) {
   if (!buff) {
     return;
   }
-  Disk_Write(lba, numbers, buff, pfs->disk_number);
+  disk_write(lba, numbers, buff, pfs->disk_number);
 }
 #define now_pfs_t ((pfs_t *)(vfs->cache))
 static bool pfs_write_and_verify(pfs_t *pfs, uint32_t lba, uint32_t sectors,
@@ -49,7 +49,7 @@ static bool pfs_write_and_verify(pfs_t *pfs, uint32_t lba, uint32_t sectors,
 /*
   @brief 格式化磁盘为pfs
  */
-bool pfs_format(pfs_t p, const char volid[16]) {
+bool pfs_format_impl(pfs_t p, const char volid[16]) {
   if (volid == NULL || p.read_block == NULL || p.write_block == NULL) {
     return false;
   }
@@ -123,9 +123,9 @@ bool pfs_format(pfs_t p, const char volid[16]) {
  */
 uint32_t pfs_alloc_block(vfs_t *vfs, uint32_t *err) {
   List *l;
-  for (int i = 0, k = 1; (l = FindForCount(k, now_pfs_t->bitmap)); i++, k++) {
+  for (int i = 0, k = 1; (l = list_get(k, now_pfs_t->bitmap)); i++, k++) {
     uint32_t current_block = l->val;
-    List *buffer_entry = FindForCount(k, now_pfs_t->bitmap_buffer);
+    List *buffer_entry = list_get(k, now_pfs_t->bitmap_buffer);
     if (buffer_entry == NULL) {
       break;
     }
@@ -178,12 +178,12 @@ uint32_t pfs_alloc_block(vfs_t *vfs, uint32_t *err) {
 void pfs_free_block(vfs_t *vfs, uint32_t block) {
   uint32_t index_of_list = block / total_bits_of_one_sec + 1;
   uint32_t index_of_block = block % total_bits_of_one_sec;
-  List *l = FindForCount(index_of_list, now_pfs_t->bitmap);
+  List *l = list_get(index_of_list, now_pfs_t->bitmap);
   if (!l) {
     return;
   }
   uint8_t *bm;
-  bm = (uint8_t *)(uintptr_t)FindForCount(index_of_list,
+  bm = (uint8_t *)(uintptr_t)list_get(index_of_list,
                                           now_pfs_t->bitmap_buffer)
            ->val;
   unused(bm, index_of_block);
@@ -196,9 +196,9 @@ uint32_t pfs_alloc_block_mark(
     uint32_t *err) { // just mark, and save the bitmap to now_pfs_t->bitmap,
                      // but it wouldn't write the bitmap to the disk
   List *l;
-  for (int i = 0, k = 1; (l = FindForCount(k, now_pfs_t->bitmap)); i++, k++) {
+  for (int i = 0, k = 1; (l = list_get(k, now_pfs_t->bitmap)); i++, k++) {
     uint32_t current_block = l->val;
-    List *buffer_entry = FindForCount(k, now_pfs_t->bitmap_buffer);
+    List *buffer_entry = list_get(k, now_pfs_t->bitmap_buffer);
     if (buffer_entry == NULL) {
       break;
     }
@@ -280,12 +280,12 @@ void pfs_flush_bitmap(vfs_t *vfs) {
 void pfs_free_block_mark(vfs_t *vfs, uint32_t block) {
   uint32_t index_of_list = block / total_bits_of_one_sec + 1;
   uint32_t index_of_block = block % total_bits_of_one_sec;
-  List *l = FindForCount(index_of_list, now_pfs_t->bitmap);
+  List *l = list_get(index_of_list, now_pfs_t->bitmap);
   if (!l) {
     return;
   }
   uint8_t *bm;
-  bm = (uint8_t *)(uintptr_t)FindForCount(index_of_list,
+  bm = (uint8_t *)(uintptr_t)list_get(index_of_list,
                                           now_pfs_t->bitmap_buffer)
            ->val;
   unused(bm, index_of_block);
@@ -591,7 +591,7 @@ uint32_t pfs_get_idx_of_inode_by_name(vfs_t *vfs, char *name,
   }
   return 0;
 }
-void pfs_create_file(vfs_t *vfs, char *filename, uint32_t dict_block) {
+void pfs_create_file_impl(vfs_t *vfs, char *filename, uint32_t dict_block) {
   pfs_make_inode(vfs, pfs_create_inode(vfs, dict_block), filename, 1,
                  dict_block);
 }
@@ -628,7 +628,7 @@ void pfs_init_data_block(vfs_t *vfs, uint32_t dict_block) {
   d.next = 0;
   now_pfs_t->write_block(now_pfs_t, block2sector(dict_block, now_pfs_t), 1, &d);
 }
-void pfs_write_file(vfs_t *vfs, char *filename, uint32_t size, void *buff,
+void pfs_write_file_impl(vfs_t *vfs, char *filename, uint32_t size, void *buff,
                     uint32_t dict_block) {
   uint32_t err;
   uint32_t idx;
@@ -682,7 +682,7 @@ void pfs_write_file(vfs_t *vfs, char *filename, uint32_t size, void *buff,
   }
   pfs_set_inode_by_index(vfs, idx, dict_block, &i);
 }
-void pfs_read_file(vfs_t *vfs, char *filename, void *buff,
+void pfs_read_file_impl(vfs_t *vfs, char *filename, void *buff,
                    uint32_t dict_block) {
   uint32_t err;
   uint32_t idx;
@@ -738,7 +738,7 @@ uint32_t pfs_get_dict_block_by_name(vfs_t *vfs, char *name, uint32_t dict_block,
   }
   return i.dat;
 }
-void pfs_create_dict(vfs_t *vfs, char *name, uint32_t dict_block) {
+void pfs_create_dict_impl(vfs_t *vfs, char *name, uint32_t dict_block) {
   uint32_t idx = pfs_create_inode(vfs, dict_block);
   pfs_make_inode(vfs, idx, name, 2, dict_block);
   pfs_inode i = pfs_get_inode_by_index(vfs, idx, dict_block);
@@ -1030,18 +1030,18 @@ bool init_pfs(vfs_t *vfs, pfs_t p) {
   return true;
 
 fail:
-  pfs_DeleteFs(vfs);
+  pfs_delete_fs(vfs);
   return false;
 }
 
-bool pfs_InitFS(struct vfs_t *vfs, uint8_t disk_number) {
+bool pfs_init_fs(struct vfs_t *vfs, uint8_t disk_number) {
   pfs_t p;
   p.disk_number = disk_number;
   p.read_block = pfs_read_block;
   p.write_block = pfs_write_block;
   return init_pfs(vfs, p);
 }
-bool pfs_CopyCache(struct vfs_t *dest, struct vfs_t *src) {
+bool pfs_copy_cache(struct vfs_t *dest, struct vfs_t *src) {
   dest->cache = malloc(sizeof(pfs_t));
   if (dest->cache == NULL) {
     return false;
@@ -1055,7 +1055,7 @@ bool pfs_CopyCache(struct vfs_t *dest, struct vfs_t *src) {
   }
   return true;
 }
-static void pfs_ReleaseCache(struct vfs_t *vfs) {
+static void pfs_release_cache(struct vfs_t *vfs) {
   if (vfs->cache == NULL) {
     return;
   }
@@ -1072,7 +1072,7 @@ bool pfs_cd(struct vfs_t *vfs, char *dictName) {
   }
   if (strcmp("/", dictName) == 0) {
     while (vfs->path->ctl->all != 0) {
-      struct List *entry = FindForCount(vfs->path->ctl->all, vfs->path);
+      struct List *entry = list_get(vfs->path->ctl->all, vfs->path);
       free((void *)(uintptr_t)entry->val);
       DeleteVal(vfs->path->ctl->all, vfs->path);
     }
@@ -1088,9 +1088,9 @@ bool pfs_cd(struct vfs_t *vfs, char *dictName) {
         vfs->path->ctl->all == 0) {
       return false;
     }
-    struct List *block_entry = FindForCount(
+    struct List *block_entry = list_get(
         now_pfs_t->prev_dict_block->ctl->all, now_pfs_t->prev_dict_block);
-    struct List *path_entry = FindForCount(vfs->path->ctl->all, vfs->path);
+    struct List *path_entry = list_get(vfs->path->ctl->all, vfs->path);
     if (block_entry == NULL || path_entry == NULL) {
       return false;
     }
@@ -1133,24 +1133,24 @@ bool pfs_cd(struct vfs_t *vfs, char *dictName) {
   now_pfs_t->current_dict_block = new_dict_block;
   return true;
 }
-bool pfs_ReadFile(struct vfs_t *vfs, char *path, char *buffer) {
-  pfs_read_file(vfs, path, buffer, now_pfs_t->current_dict_block);
+bool pfs_read_file(struct vfs_t *vfs, char *path, char *buffer) {
+  pfs_read_file_impl(vfs, path, buffer, now_pfs_t->current_dict_block);
   return true;
 }
-bool pfs_WriteFile(struct vfs_t *vfs, char *path, char *buffer, int size) {
-  pfs_write_file(vfs, path, size, buffer, now_pfs_t->current_dict_block);
+bool pfs_write_file(struct vfs_t *vfs, char *path, char *buffer, int size) {
+  pfs_write_file_impl(vfs, path, size, buffer, now_pfs_t->current_dict_block);
   return true;
 }
 static void pfs_free_file_list(List *files) {
   if (files == NULL) {
     return;
   }
-  for (int i = 1; FindForCount(i, files) != NULL; i++) {
-    free((void *)(uintptr_t)FindForCount(i, files)->val);
+  for (int i = 1; list_get(i, files) != NULL; i++) {
+    free((void *)(uintptr_t)list_get(i, files)->val);
   }
   DeleteList(files);
 }
-List *pfs_ListFile(struct vfs_t *vfs, char *dictpath) {
+List *pfs_list_file(struct vfs_t *vfs, char *dictpath) {
   int flags = 1;
   pfs_dict_block pdb;
   List *result = NewList();
@@ -1161,7 +1161,7 @@ List *pfs_ListFile(struct vfs_t *vfs, char *dictpath) {
   if (strlen(dictpath) == 0) {
     dict_block = now_pfs_t->current_dict_block;
   } else {
-    vfs_file *info = pfs_FileInfo(vfs, dictpath);
+    vfs_file *info = pfs_fileinfo(vfs, dictpath);
     if (info == NULL || info->type != DIR) {
       free(info);
       DeleteList(result);
@@ -1246,7 +1246,7 @@ List *pfs_ListFile(struct vfs_t *vfs, char *dictpath) {
   }
   return result;
 }
-bool pfs_RenameFile(struct vfs_t *vfs, char *filename, char *filename_of_new) {
+bool pfs_rename_file(struct vfs_t *vfs, char *filename, char *filename_of_new) {
   char *source_name;
   char *destination_name;
   uint32_t source_error = 0;
@@ -1265,7 +1265,7 @@ bool pfs_RenameFile(struct vfs_t *vfs, char *filename, char *filename_of_new) {
   }
   return pfs_rename(vfs, source_name, destination_name, source_block);
 }
-bool pfs_CreateFile(struct vfs_t *vfs, char *filename) {
+bool pfs_create_file(struct vfs_t *vfs, char *filename) {
   char *e = NULL;
   uint32_t err = 0;
   uint32_t block = pfs_get_dict_block_by_path(
@@ -1273,16 +1273,16 @@ bool pfs_CreateFile(struct vfs_t *vfs, char *filename) {
   if (err == 0x114514 || e == NULL || *e == '\0') {
     return false;
   }
-  pfs_create_file(vfs, e, block);
+  pfs_create_file_impl(vfs, e, block);
   return true;
 }
-void pfs_DeleteFs(struct vfs_t *vfs) {
+void pfs_delete_fs(struct vfs_t *vfs) {
   if (vfs->cache == NULL) {
     return;
   }
   List *l;
   if (now_pfs_t->bitmap_buffer != NULL) {
-    for (int i = 1; (l = FindForCount(i, now_pfs_t->bitmap_buffer)) != NULL;
+    for (int i = 1; (l = list_get(i, now_pfs_t->bitmap_buffer)) != NULL;
          i++) {
       free((void *)(uintptr_t)l->val);
     }
@@ -1300,19 +1300,19 @@ void pfs_DeleteFs(struct vfs_t *vfs) {
   free(vfs->cache);
   vfs->cache = NULL;
 }
-bool pfs_Check(uint8_t disk_number) {
+bool pfs_check(uint8_t disk_number) {
   if (!DiskReady(disk_number)) {
     return false;
   }
   uint8_t mbr[512];
-  Disk_Read(0, 1, mbr, disk_number);
+  disk_read(0, 1, mbr, disk_number);
   pfs_mbr *mb = (pfs_mbr *)mbr;
   if (memcmp(mb->sign, "PFS\xff", 4) != 0) {
     return false;
   }
   return true;
 }
-bool pfs_DelFile(struct vfs_t *vfs, char *path) {
+bool pfs_del_file(struct vfs_t *vfs, char *path) {
   uint32_t b, err = 0;
   char *e = NULL;
   b = pfs_get_dict_block_by_path(vfs, path, &e, now_pfs_t->current_dict_block,
@@ -1323,7 +1323,7 @@ bool pfs_DelFile(struct vfs_t *vfs, char *path) {
   pfs_delete_file(vfs, e, b);
   return true;
 }
-bool pfs_DelDict(struct vfs_t *vfs, char *path) {
+bool pfs_del_dict(struct vfs_t *vfs, char *path) {
   uint32_t error = 0;
   char *name = NULL;
   uint32_t block = pfs_get_dict_block_by_path(
@@ -1334,7 +1334,7 @@ bool pfs_DelDict(struct vfs_t *vfs, char *path) {
   pfs_delete_dict(vfs, name, block);
   return true;
 }
-int pfs_FileSize(struct vfs_t *vfs, char *filename) {
+int pfs_file_size(struct vfs_t *vfs, char *filename) {
   uint32_t b, err = 0;
   char *e = NULL;
   b = pfs_get_dict_block_by_path(vfs, filename, &e,
@@ -1348,7 +1348,7 @@ int pfs_FileSize(struct vfs_t *vfs, char *filename) {
   }
   return r;
 }
-bool pfs_Format(uint8_t disk_number) {
+bool pfs_format(uint8_t disk_number) {
   if (!DiskReady(disk_number)) {
     return false;
   }
@@ -1357,9 +1357,9 @@ bool pfs_Format(uint8_t disk_number) {
   p.write_block = pfs_write_block;
   p.disk_number = disk_number;
   char vol[16] = "POWERINTDOS386";
-  return pfs_format(p, vol);
+  return pfs_format_impl(p, vol);
 }
-bool pfs_CreateDict(struct vfs_t *vfs, char *filename) {
+bool pfs_create_dict(struct vfs_t *vfs, char *filename) {
   char *e = NULL;
   uint32_t err = 0;
   uint32_t block = pfs_get_dict_block_by_path(
@@ -1367,17 +1367,17 @@ bool pfs_CreateDict(struct vfs_t *vfs, char *filename) {
   if (err == 0x114514 || e == NULL || *e == '\0') {
     return false;
   }
-  pfs_create_dict(vfs, e, block);
+  pfs_create_dict_impl(vfs, e, block);
   return true;
 }
-bool pfs_Attrib(struct vfs_t *vfs, char *filename, ftype type) {
+bool pfs_attrib(struct vfs_t *vfs, char *filename, ftype type) {
   (void)vfs;
   (void)filename;
   (void)type;
   printk("Sorry, pfs does not support attrib at this time.\n");
   return false;
 }
-vfs_file *pfs_FileInfo(struct vfs_t *vfs, char *filename) {
+vfs_file *pfs_fileinfo(struct vfs_t *vfs, char *filename) {
   if (vfs == NULL || filename == NULL ||
       strlen(filename) >= sizeof(((vfs_file *)0)->name)) {
     return NULL;
@@ -1411,23 +1411,23 @@ void reg_pfs() {
   fs.flag = 1;
   fs.cache = NULL;
   strcpy(fs.FSName, "PFS");
-  fs.CopyCache = pfs_CopyCache;
-  fs.ReleaseCache = pfs_ReleaseCache;
-  fs.Format = pfs_Format;
-  fs.CreateFile = pfs_CreateFile;
-  fs.CreateDict = pfs_CreateDict;
-  fs.DelDict = pfs_DelDict;
-  fs.DelFile = pfs_DelFile;
-  fs.ReadFile = pfs_ReadFile;
-  fs.WriteFile = pfs_WriteFile;
-  fs.DeleteFs = pfs_DeleteFs;
+  fs.copy_cache = pfs_copy_cache;
+  fs.release_cache = pfs_release_cache;
+  fs.format = pfs_format;
+  fs.create_file = pfs_create_file;
+  fs.create_dict = pfs_create_dict;
+  fs.del_dict = pfs_del_dict;
+  fs.del_file = pfs_del_file;
+  fs.read_file = pfs_read_file;
+  fs.write_file = pfs_write_file;
+  fs.delete_fs = pfs_delete_fs;
   fs.cd = pfs_cd;
-  fs.FileSize = pfs_FileSize;
-  fs.Check = pfs_Check;
-  fs.ListFile = pfs_ListFile;
-  fs.InitFs = pfs_InitFS;
-  fs.RenameFile = pfs_RenameFile;
-  fs.Attrib = pfs_Attrib;
-  fs.FileInfo = pfs_FileInfo;
+  fs.file_size = pfs_file_size;
+  fs.check = pfs_check;
+  fs.list_file = pfs_list_file;
+  fs.init_fs = pfs_init_fs;
+  fs.rename_file = pfs_rename_file;
+  fs.attrib = pfs_attrib;
+  fs.fileinfo = pfs_fileinfo;
   vfs_register_fs(fs);
 }

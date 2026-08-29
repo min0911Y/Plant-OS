@@ -209,7 +209,7 @@ void main() {
   // free(s34);
   ttf_buffer = malloc(filesize("font.ttf"));
   printf("Reading font...");
-  api_ReadFile("font.ttf", ttf_buffer);
+  api_readfile("font.ttf", ttf_buffer);
   printf("Done.\n");
   stbtt_InitFont(&font, ttf_buffer, stbtt_GetFontOffsetForIndex(ttf_buffer, 0));
 
@@ -231,8 +231,8 @@ void main() {
   }
   ascfont = (unsigned char *)malloc(filesize("font.bin"));
   hzkfont = (unsigned char *)malloc(filesize("HZK16"));
-  api_ReadFile("font.bin", ascfont);
-  api_ReadFile("HZK16", hzkfont);
+  api_readfile("font.bin", ascfont);
+  api_readfile("HZK16", hzkfont);
   desktop0 = create_desktop(xsize_input, ysize_input, NowTaskID());
   if (desktop0 == NULL) {
     logkf("GUI failed to create desktop\n");

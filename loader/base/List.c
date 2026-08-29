@@ -16,7 +16,7 @@ void AddVal(uintptr_t val, struct List* Obj) {
   // printk("Address:%08x Val:%08x Start:%08x
   // Count:%d\n",new,val,Obj->ctl->start,GetLastCount(Obj->ctl->start));
 }
-struct List* FindForCount(size_t count, struct List* Obj) {
+struct List* list_get(size_t count, struct List* Obj) {
   int count_last = GetLastCount(Obj);
   struct List *p = Obj, *q = Obj->ctl->end;
   if (count > count_last)
@@ -32,7 +32,7 @@ struct List* FindForCount(size_t count, struct List* Obj) {
   }
 }
 void DeleteVal(size_t count, struct List* Obj) {
-  struct List* Will_Free = FindForCount(count, Obj);
+  struct List* Will_Free = list_get(count, Obj);
   if (Will_Free == NULL) {
     // Not found!
     return;
@@ -42,12 +42,12 @@ void DeleteVal(size_t count, struct List* Obj) {
   }
   if (Will_Free->next == (List*)NULL) {
     // 是尾节点
-    struct List* prev = FindForCount(count - 1, Obj);
+    struct List* prev = list_get(count - 1, Obj);
     prev->next = (List*)NULL;
     prev->ctl->end = prev;
   } else {
-    struct List* prev = FindForCount(count - 1, Obj);
-    struct List* next = FindForCount(count + 1, Obj);
+    struct List* prev = list_get(count - 1, Obj);
+    struct List* next = list_get(count + 1, Obj);
     prev->next = next;
     next->prev = prev;
   }
@@ -67,7 +67,7 @@ struct List* NewList() {
   return Obj;
 }
 void Change(size_t count, struct List* Obj, uintptr_t val) {
-  struct List* Will_Change = FindForCount(count + 1, Obj);
+  struct List* Will_Change = list_get(count + 1, Obj);
   if (Will_Change != NULL) {
     Will_Change->val = val;
   } else {

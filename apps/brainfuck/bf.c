@@ -20,7 +20,7 @@ int main(int argc,char **argv)
     {
         char *filename = malloc(sizeof(char) * 100);
         strcpy(filename,argv[1]);
-        if(api_ReadFile(filename,code)==0)
+        if(api_readfile(filename,code)==0)
         {
             print("file not found\n");
             return 0;

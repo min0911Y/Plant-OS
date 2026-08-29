@@ -403,6 +403,7 @@ static void ahci_vdisk_read(char drive, unsigned char *buffer,
                             unsigned int number, unsigned int lba);
 static void ahci_vdisk_write(char drive, unsigned char *buffer,
                              unsigned int number, unsigned int lba);
+int find_cmdslot(HBA_PORT *port);
 static int check_type(HBA_PORT *port) {
   uint32_t ssts = port->ssts;
 
@@ -781,10 +782,8 @@ void ahci_init() {
     for (j = 0; j < 32; j++) {
       for (k = 0; k < 8; k++) {
         uint32_t p = read_pci(i, j, k, 0x8);
-        uint16_t *reg =
-            &p; // reg[0] ---> P & R, reg[1] ---> Sub Class Class Code
-        uint8_t *codes =
-            &(reg[1]); // codes[0] --> Sub Class Code  codes[1] Class Code
+        uint16_t *reg = (uint16_t *)&p;
+        uint8_t *codes = (uint8_t *)&reg[1];
         if (codes[1] == 0x1 && codes[0] == 0x6) {
           ahci_bus = i;
           ahci_slot = j;
@@ -814,7 +813,8 @@ OK:
 
   ahci_search_ports(hba_mem_address);
 
-  ahci_ports_base_addr = page_malloc(1048576);
+  ahci_ports_base_addr =
+      (uint32_t)(uintptr_t)page_malloc(1048576);
 
   logk("AHCI port base address has been alloced in 0x%08x!\n",
          ahci_ports_base_addr);
@@ -848,7 +848,7 @@ static void ahci_vdisk_read(char drive, unsigned char *buffer,
                             unsigned int number, unsigned int lba) {
           //                    logk("mapping %d\n",drive_mapping[drive]);
   ahci_read(&(hba_mem_address->ports[drive_mapping[drive]]), lba, 0, number,
-            buffer);
+            (uint16_t *)buffer);
 }
 static void ahci_vdisk_write(char drive, unsigned char *buffer,
                              unsigned int number, unsigned int lba) {

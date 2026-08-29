@@ -7,7 +7,7 @@ static bool tty_registered(const struct tty *tty) {
     return false;
   }
   for (size_t index = 1;; index++) {
-    struct List *entry = FindForCount(index, tty_list);
+    struct List *entry = list_get(index, tty_list);
     if (entry == NULL) {
       return false;
     }
@@ -129,8 +129,8 @@ void tty_free(struct tty *res) {
   }
   res->using1 = 0;
   task_close_tty(res, tty_default);
-  for (size_t i = 1; FindForCount(i, tty_list) != NULL; i++) {
-    if (FindForCount(i, tty_list)->val == (uintptr_t)res) {
+  for (size_t i = 1; list_get(i, tty_list) != NULL; i++) {
+    if (list_get(i, tty_list)->val == (uintptr_t)res) {
       DeleteVal(i, tty_list);
       break;
     }

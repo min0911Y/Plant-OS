@@ -380,10 +380,10 @@ bool SwitchToHighTextMode(void) {
 void SwitchShell_HighTextMode(int i) {
   // extern struct List* tty_list;
   // extern struct tty* tty_default;
-  // struct tty* t = (struct tty*)FindForCount(i + 1, tty_list)->val;
+  // struct tty* t = (struct tty*)list_get(i + 1, tty_list)->val;
   // struct tty* n = NULL;
-  // for (int j = 1; FindForCount(j, tty_list) != 0; j++) {
-  //   n = (struct tty*)FindForCount(j, tty_list)->val;
+  // for (int j = 1; list_get(j, tty_list) != 0; j++) {
+  //   n = (struct tty*)list_get(j, tty_list)->val;
   //   struct SHEET* sht = (struct SHEET*)n->vram;
   //   if (sht->height == 0) {
   //     break;

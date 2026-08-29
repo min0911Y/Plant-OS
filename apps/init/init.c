@@ -46,7 +46,7 @@ int main() {
   }
   char *buffer = (char *)malloc((size_t)file_size + 1);
   if (buffer == NULL ||
-      (file_size != 0 && !api_ReadFile("init.mst", buffer))) {
+      (file_size != 0 && !api_readfile("init.mst", buffer))) {
     logk("init: unable to read init.mst\n");
     free(buffer);
     return 1;

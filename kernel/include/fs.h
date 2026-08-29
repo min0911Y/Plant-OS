@@ -49,7 +49,7 @@ bool vfs_delfile(char* filename);
 bool vfs_createfile(char* filename);
 bool vfs_createdict(char* filename);
 void vfs_getPath(char* buffer);
-void vfs_getPath_no_drive(char *buffer);
+void vfs_get_path_without_drive(char *buffer);
 bool vfs_change_disk(uint8_t drive);
 bool vfs_mount_disk(uint8_t disk_number, uint8_t drive);
 bool vfs_mount_all_disks(void);

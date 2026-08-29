@@ -574,7 +574,7 @@ static void syscall_file_operation(x86_interrupt_frame_t *frame) {
       vfs_file *files = (vfs_file *)(uintptr_t)frame->ecx;
       frame->eax = count;
       for (size_t i = 0; i < count; i++) {
-        struct List *entry = FindForCount(i + 1, file_list);
+        struct List *entry = list_get(i + 1, file_list);
         if (entry == NULL || entry->val == 0) {
           frame->eax = LIST_DIRECTORY_ERROR;
           break;
@@ -583,7 +583,7 @@ static void syscall_file_operation(x86_interrupt_frame_t *frame) {
       }
     }
     for (size_t i = 1; i <= count; i++) {
-      struct List *entry = FindForCount(i, file_list);
+      struct List *entry = list_get(i, file_list);
       if (entry != NULL) {
         free((void *)(uintptr_t)entry->val);
       }
@@ -1002,7 +1002,7 @@ static void syscall_read_env(x86_interrupt_frame_t *frame) {
 }
 
 static void syscall_path_without_drive(x86_interrupt_frame_t *frame) {
-  vfs_getPath_no_drive((char *)(uintptr_t)frame->ebx);
+  vfs_get_path_without_drive((char *)(uintptr_t)frame->ebx);
 }
 
 static void syscall_current_drive(x86_interrupt_frame_t *frame) {

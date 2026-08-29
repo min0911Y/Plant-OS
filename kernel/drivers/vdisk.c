@@ -200,7 +200,7 @@ void vdisk_remove_task(unsigned tid) {
 }
 
 #define SECTORS_ONCE 8
-void Disk_Read(unsigned int lba, unsigned int number, void *buffer,
+void disk_read(unsigned int lba, unsigned int number, void *buffer,
                char drive) {
   if (have_vdisk(drive)) {
     unsigned int drive_code = disk_drive_slot(drive);
@@ -227,7 +227,7 @@ unsigned int disk_Size(char drive) {
 }
 bool DiskReady(char drive) { return have_vdisk(drive); }
 int getReadyDisk() { return 0; }
-void Disk_Write(unsigned int lba, unsigned int number, void *buffer,
+void disk_write(unsigned int lba, unsigned int number, void *buffer,
                 char drive) {
 //  printk("%d\n",lba);
   if (have_vdisk(drive)) {

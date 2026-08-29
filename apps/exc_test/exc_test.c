@@ -58,7 +58,7 @@ static int supervisor_write_cow_test(void) {
     return 0;
   }
   if (child == 0) {
-    int read_status = api_ReadFile("sys.cfg", (char *)supervisor_cow_page);
+    int read_status = api_readfile("sys.cfg", (char *)supervisor_cow_page);
     if (!read_status) {
       exit(2);
     }

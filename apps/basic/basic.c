@@ -765,7 +765,7 @@ main(int argc,char **argv)
 	}
 	program = malloc(filesize(argv[1])+1);
 	char *b = malloc(filesize(argv[1])+1);
-	api_ReadFile(argv[1],b);
+	api_readfile(argv[1],b);
 	for(int i = 0,l=0;i<strlen(b);i++) {
 		if(b[i] != '\r') {
 			program[l++] = b[i];
