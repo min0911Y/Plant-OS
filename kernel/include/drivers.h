@@ -164,6 +164,7 @@ bool module_register_kernel_symbol(const char *name, uintptr_t addr);
 // vdisk.c
 int init_vdisk();
 int register_vdisk(vdisk vd);
+int register_vdisk_at(char drive, vdisk vd);
 int logout_vdisk(char drive);
 int rw_vdisk(char drive, unsigned int lba, unsigned char *buffer,
              unsigned int number, int read);

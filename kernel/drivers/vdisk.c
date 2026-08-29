@@ -42,14 +42,22 @@ int init_vdisk() {
   }
   return 0;
 }
+int register_vdisk_at(char drive, vdisk vd) {
+  int index = drive - 'A';
+  if (index < 0 || index >= 26 || vdisk_ctl[index].flag) {
+    return 0;
+  }
+  vdisk_ctl[index] = vd;
+  if (vd.DriveName[0] != 0) {
+    SetDrive((unsigned char *)vdisk_ctl[index].DriveName);
+  }
+  return drive;
+}
 int register_vdisk(vdisk vd) {
   for (int i = 0; i < 26; i++) {
-    if (!vdisk_ctl[i].flag) {
-      vdisk_ctl[i] = vd; // 找到了！
-      if (vd.DriveName[0] != 0) {
-        SetDrive((unsigned char *)vdisk_ctl[i].DriveName);
-      }
-      return i + ('A');  // 注册成功，返回drive
+    int drive = register_vdisk_at('A' + i, vd);
+    if (drive != 0) {
+      return drive;
     }
   }
   printk("[vdisk]not found\n");

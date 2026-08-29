@@ -323,13 +323,12 @@ int main() {
   putSpace(34, 4, 11, 5);
   T_DrawBox(34, 4, 11, 5, 0x1f);
   bool target_was_mounted = vfs_check_mount('C');
-  if (toupper(api_current_drive()) == 'C' ||
-      (target_was_mounted && !vfs_unmount_disk('C'))) {
-    OKMsg("Unable to unmount target disk.");
+  if (toupper(api_current_drive()) == 'C') {
+    OKMsg("The target disk is in use.");
     goto fail;
   }
   if (!format('C', fs_choice)) {
-    if (target_was_mounted) {
+    if (target_was_mounted && !vfs_check_mount('C')) {
       vfs_mount('C', 'C');
     }
     OKMsg("Disk Read Error.");

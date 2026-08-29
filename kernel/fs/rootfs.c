@@ -60,7 +60,7 @@ void init_devfs() {
   vd.size = 114514;
   vd.Write = Write;
   vd.flag = 1;
-  register_vdisk(vd);
+  register_vdisk_at('B', vd);
   vfs_t fs = {0};
   fs.flag = 1;
   fs.cache = NULL;

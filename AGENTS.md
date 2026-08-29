@@ -248,19 +248,21 @@ python3 scripts/kernel-perf.py \
 
 - `Loader/` 与 `kernel/` 各自有 FAT/PFS/VFS 和驱动代码。修改磁盘结构或加载协议时必须检查两边的结构定义和读写逻辑，不能只修一侧。
 - 内核挂载状态显式区分 `INITIALIZING`、`ACTIVE`、`RETIRED`。任务 VFS 实例和显式 `X:` 路径操作都通过挂载引用保持共享缓存存活；卸载先从活动表摘除挂载，并在最后一个引用释放后再销毁缓存。
-- 每个物理盘记录 retired generation 计数和 format reservation。新挂载可与 retired generation 并存，但 format 只能在无 active/initializing 挂载、无 retired 引用时预留并在锁外执行；mount 初始化与 format 必须互斥。retired 计数只能在 `DeleteFs` 完整结束后递减，保证 format 不会与销毁并发。
+- 每个物理盘记录 retired generation 计数和 format reservation。新挂载可与 retired generation 并存；format 遇到零引用的 active 挂载时在同一临界区摘除挂载并取得 reservation，再在锁外依次销毁缓存和格式化，仍被任务引用、正在初始化或存在 retired 引用时必须保持现状并失败。mount 初始化与 format 必须互斥，retired 计数只能在 `DeleteFs` 完整结束后递减，保证 format 不会与销毁并发。
 - 显式盘符路径必须在保存中断状态的短临界区 acquire 活动挂载，文件系统调用在临界区外执行并在结束后 release；相对路径由当前任务实例持有引用。不得让活动挂载中的裸 `vfs_t *` 逃逸。
 - 每个 mount owner 通过 `vfs_t` 内嵌 prev/next 维护动态 instance 链，包含 owner root、任务实例和 clone replay 的临时实例；完整 create 后短 irq 临界区注册，release/abort 在释放 cache 前注销。文件系统需要更新共享 cursor 时遍历 owner instance 链，不得扫描固定任务数组。
 - rename 是双路径操作：源和目标都要独立 acquire/resolve，只允许同一 mount owner，并向文件系统传递去除盘符的两条路径。跨盘 rename 必须失败。
 - 文件系统 `cd` 需要先准备新 cursor/path 状态，malloc 和 `AddVal` 全部成功后才 commit；`..` 必须先验证非空。目录缓存、bitmap 和 ListFile 的 list append 失败必须回滚并释放已分配项。
 - 内核虚拟盘 `Disk_Read` 的物理扇区固定为 512 字节，因此当前 FAT 实现只接受 BPB `BytsPerSec == 512`。多簇目录缓冲区的每簇偏移必须使用 `ClustnoBytes`，数据簇号必须先验证 `>= 2` 且整簇落在磁盘范围内。
+- 虚拟盘可通过 `register_vdisk_at` 预留 ABI 盘符；软盘、DEVFS 和 legacy IDE 分别固定使用 `A:`、`B:` 与 `C:` 起的设备槽，不能退回 first-free 注册导致 IDE 回调访问的设备编号与 `vdisk` 容量元数据错位。ATA IDENTIFY 声明 48-bit LBA 但容量字段为零时必须回退 28-bit 容量。
+- FAT format 根据磁盘容量选择 FAT12/16/32，迭代计算 FAT 长度并只使用 2 的幂次 sectors-per-cluster；FAT 表和根目录必须完整清零、写入标准保留项，并回读 boot sector、两份 FAT 和根目录后才报告成功。不得恢复未初始化格式化缓冲区或任意非 2 次幂簇大小。
 - FAT 表 API 的长度统一表示条目数，循环使用 `i < count`；FAT12 奇数末项、链目标、保留标记和磁盘范围必须在写入缓存前验证，损坏 FAT 使 `InitFs` 失败。新目录只写 `.`、`..` 和标准 `0x00` 终止项，不创建 `NULL` 伪文件或额外占用簇。
 <!-- 过时：FAT 保存长度表示“末项偏移”并使用 `i <= length`，新目录额外创建名为 `NULL` 的占位文件。 -->
 - FAT mkdir 直接持有 parent slot、child cluster 和可选的 parent-extension cluster；所有分配、list append 与 realloc 在提交 parent entry/FAT 前完成并可逆序回滚，提交后直接写标准目录簇，不得恢复 `mkfile -> 再查路径 -> del 回滚` 的间接流程。
 <!-- 过时：FAT mkdir 先创建普通文件，再通过路径重新查找并改写为目录，失败时调用通用 `del` 猜测所有权。 -->
 - `vfs_clone_for_task` 从源实例直接 acquire 挂载（允许源挂载已 retired），在临时实例完整重放工作目录后才替换目标实例。clone 失败必须保持目标原状，任务创建、线程、fork 和执行路径必须检查失败并完整回滚。
 - 内核文件系统 `InitFs`、`CopyCache` 返回成功状态；初始化失败必须清理部分资源和挂载 reservation，不能无条件把挂载发布为 active。新增 clone/free 路径必须同步维护该所有权，不能在仍有引用时直接调用文件系统 `DeleteFs`。
-- PFS format 必须在写盘前完整读取并校验 boot sector 与 `dosldr.bin`，检查长度、保留区容量和分配失败，写后校验并把真实失败传播到 VFS/psh/安装器。安装器格式化活动目标盘前先卸载，成功后重新 mount/change，失败时按逆序尽力恢复源盘。
+- PFS format 必须在写盘前完整读取并校验 boot sector 与 `dosldr.bin`，按 boot sector 每次 92 个扇区的读取粒度动态扩大并清零 loader 保留区，再把 bitmap/root 布置在保留区之后；检查长度、磁盘容量和分配失败，所有区域写后校验并把真实失败传播到 VFS/psh/安装器。VFS 统一负责安全摘除无人使用的活动挂载；psh 格式化成功后重新挂载目标盘，安装器成功后重新 mount/change，失败时按逆序尽力恢复源盘。
 - PFS path resolver 在每个出口都写明 error，复制路径前检查 NULL、长度和 malloc；需要 leaf name 的调用返回 parent block + 原路径 span，需要完整目录的调用解析到最终目录。`pfs_FileInfo` 在分配前验证名称容量，内核 `fopen` 的 FILE/buffer/name/read 任一步失败都逆序释放。
 - 启动系统盘必须同时包含 `init.bin`、`psh.bin`、`sys.cfg`；探测失败必须 panic，不得退回可能是 DEVFS 的 `first_vdisk()`。显式盘符剥离依赖标准重叠 `memmove` 语义，修改基础内存函数后必须做冷启动验证。
 <!-- 过时：系统盘文件探测全部失败后仍退回第一个虚拟盘继续启动。 -->

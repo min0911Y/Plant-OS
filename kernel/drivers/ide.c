@@ -200,14 +200,14 @@ void ide_initialize(unsigned int BAR0, unsigned int BAR1, unsigned int BAR2,
 
       // (VII) Get Size:
       logk("VII\n");
-      if (ide_devices[count].CommandSets & (1 << 26))
-        // Device uses 48-Bit Addressing:
-        ide_devices[count].Size =
-            *((unsigned int *)(ide_buf + ATA_IDENT_MAX_LBA_EXT));
-      else
-        // Device uses CHS or 28-bit Addressing:
-        ide_devices[count].Size =
-            *((unsigned int *)(ide_buf + ATA_IDENT_MAX_LBA));
+      unsigned int lba28 =
+          *((unsigned int *)(ide_buf + ATA_IDENT_MAX_LBA));
+      unsigned int lba48 =
+          *((unsigned int *)(ide_buf + ATA_IDENT_MAX_LBA_EXT));
+      ide_devices[count].Size =
+          (ide_devices[count].CommandSets & (1 << 26)) && lba48 != 0
+              ? lba48
+              : lba28;
 
       // (VIII) String indicates model of device (like Western Digital HDD and
       // SONY DVD-RW...):
@@ -239,7 +239,7 @@ void ide_initialize(unsigned int BAR0, unsigned int BAR1, unsigned int BAR2,
       vd.Read = Read;
       vd.Write = Write;
       vd.size = ide_devices[i].Size * 512;
-      register_vdisk(vd);
+      register_vdisk_at('C' + i, vd);
     }
 }
 unsigned char ide_read(unsigned char channel, unsigned char reg) {

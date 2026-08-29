@@ -634,16 +634,31 @@ bool vfs_format(uint8_t disk_number, char *FSName) {
     irq_restore(interrupt_state);
     return false;
   }
+  struct vfs_mount *unused_mount = NULL;
+  int unused_seat = -1;
   for (int i = 0; i < 26; i++) {
     if (vfs_mounts[i] != NULL &&
         vfs_mounts[i]->filesystem.disk_number == normalized) {
-      irq_restore(interrupt_state);
-      return false;
+      struct vfs_mount *mount = vfs_mounts[i];
+      if (mount->state != VFS_MOUNT_ACTIVE || mount->references != 0 ||
+          unused_mount != NULL) {
+        irq_restore(interrupt_state);
+        return false;
+      }
+      unused_mount = mount;
+      unused_seat = i;
     }
   }
   vfs_disk_states[disk_index].formatting = true;
+  if (unused_mount != NULL) {
+    vfs_mounts[unused_seat] = NULL;
+    unused_mount->state = VFS_MOUNT_RETIRED;
+  }
   irq_restore(interrupt_state);
 
+  if (unused_mount != NULL) {
+    vfs_destroy_mount(unused_mount);
+  }
   bool result = format(normalized);
   interrupt_state = irq_save();
   vfs_disk_states[disk_index].formatting = false;

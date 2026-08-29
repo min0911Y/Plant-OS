@@ -131,7 +131,7 @@ void init_floppy() {
   vd.Write = Write;
   vd.size = 1474560;
   vd.flag = 1;
-  register_vdisk(vd);
+  register_vdisk_at('A', vd);
 }
 void flint(int *esp) {
   /**

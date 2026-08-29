@@ -50,8 +50,7 @@ static bool pfs_write_and_verify(pfs_t *pfs, uint32_t lba, uint32_t sectors,
   @brief 格式化磁盘为pfs
  */
 bool pfs_format(pfs_t p, const char volid[16]) {
-  if (volid == NULL || p.read_block == NULL || p.write_block == NULL ||
-      p.resd_sec_end < p.resd_sec_start) {
+  if (volid == NULL || p.read_block == NULL || p.write_block == NULL) {
     return false;
   }
   uint8_t mbr[512] = {0};
@@ -64,11 +63,30 @@ bool pfs_format(pfs_t p, const char volid[16]) {
     return false;
   }
   fclose(fp);
+  uint32_t loader_size = vfs_filesize("/dosldr.bin");
+  if (loader_size == UINT_MAX || loader_size == 0 ||
+      loader_size > INT_MAX - 511) {
+    return false;
+  }
+  uint32_t loader_sectors = (loader_size + 511) / 512;
+  if (loader_sectors > UINT_MAX - 91) {
+    return false;
+  }
+  uint32_t reserved_loader_sectors = (loader_sectors + 91) / 92 * 92;
+  if (reserved_loader_sectors > USHRT_MAX) {
+    return false;
+  }
+  p.resd_sec_start = 1;
+  p.resd_sec_end = p.resd_sec_start + reserved_loader_sectors;
+  p.sec_bitmap_start = p.resd_sec_end;
+  p.first_sec_of_bitmap = p.sec_bitmap_start + 1;
+  if (p.first_sec_of_bitmap >= disk_Size(p.disk_number) / 512) {
+    return false;
+  }
+
   pfs_mbr *pm = (pfs_mbr *)mbr;
   pm->resd_sector_start = p.resd_sec_start;
   pm->resd_sector_end = p.resd_sec_end;
-  // pm->sec_bitmap_start =
-  //     p.resd_sec_end != 0 ? p.resd_sec_end + 1 : 1 /* 跳过mbr */;
   pm->sec_bitmap_start = p.sec_bitmap_start;
   pm->sign[0] = 'P';
   pm->sign[1] = 'F';
@@ -80,16 +98,7 @@ bool pfs_format(pfs_t p, const char volid[16]) {
   uint8_t bitmap[512] = {0};
   bitmap[0] = 1; // 默认有一个目录区
   uint8_t root_dict[512] = {0};
-  uint32_t loader_size = vfs_filesize("/dosldr.bin");
-  if (loader_size == UINT_MAX || loader_size == 0 ||
-      loader_size > INT_MAX - 511) {
-    return false;
-  }
-  uint32_t loader_sectors = (loader_size + 511) / 512;
-  if (loader_sectors > p.resd_sec_end - p.resd_sec_start + 1) {
-    return false;
-  }
-  uint32_t loader_buffer_size = loader_sectors * 512;
+  uint32_t loader_buffer_size = reserved_loader_sectors * 512;
   char *dosldr = malloc(loader_buffer_size);
   if (dosldr == NULL) {
     return false;
@@ -103,8 +112,8 @@ bool pfs_format(pfs_t p, const char volid[16]) {
                  pfs_write_and_verify(&p, pm->sec_bitmap_start, 1, bitmap) &&
                  pfs_write_and_verify(&p, pm->first_sector_of_bitmap, 1,
                                       root_dict) &&
-                 pfs_write_and_verify(&p, p.resd_sec_start, loader_sectors,
-                                      dosldr);
+                 pfs_write_and_verify(&p, p.resd_sec_start,
+                                      reserved_loader_sectors, dosldr);
   free(dosldr);
   return written;
 }
@@ -1340,14 +1349,10 @@ int pfs_FileSize(struct vfs_t *vfs, char *filename) {
   return r;
 }
 bool pfs_Format(uint8_t disk_number) {
-  if (!DiskReady(disk_number) || disk_Size(disk_number) < 191 * 512) {
+  if (!DiskReady(disk_number)) {
     return false;
   }
-  pfs_t p;
-  p.resd_sec_start = 1;
-  p.resd_sec_end = 189;
-  p.sec_bitmap_start = 189;
-  p.first_sec_of_bitmap = 190;
+  pfs_t p = {0};
   p.read_block = pfs_read_block;
   p.write_block = pfs_write_block;
   p.disk_number = disk_number;

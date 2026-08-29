@@ -1265,158 +1265,151 @@ int rename(char *src_name, char *dst_name, vfs_t *vfs) {
   return 1;
 }
 int format(char drive) {
-  // A,B盘——软盘
-  // C盘——IDE/SATA硬盘主分区
-  // D,E,F...盘——IDE/USB/SATA存储介质/分区/虚拟磁盘
-  FILE *fp = fopen("/boot.bin", "r"); // or \boot.bin
-  FILE *fp_32 = fopen("/boot32.bin", "r");
-  if (fp == 0 || fp_32 == 0) {
+  if (!DiskReady(drive)) {
     return 0;
   }
-  void *read_in = malloc(512);
-  if (!(drive - 'A')) {
-    fread(read_in, fp->fileSize, 1, fp);
-    write_floppy_for_ths(0, 0, 1, read_in, 1);
-    unsigned int *fat = (unsigned int *)malloc(9 * 512);
-    fat[0] = 0x00fffff0;
-    write_floppy_for_ths(0, 0, 2, (unsigned char *)fat, 9);
-    write_floppy_for_ths(0, 0, 11, (unsigned char *)fat, 9);
-    free((void *)fat);
-    void *null_sec = malloc(512);
-    for (int i = 0; i < 224 * 32 / 512; i++) {
-      int t, h, s;
-      block2hts(19 + i, &t, &h, &s);
-      write_floppy_for_ths(t, h, s, null_sec, 1);
+  uint32_t disk_size = disk_Size(drive);
+  uint32_t total_sectors = disk_size / 512;
+  if (total_sectors < 32) {
+    return 0;
+  }
+
+  int type = disk_size <= 2097152U ? 12
+             : disk_size <= 2147483648U ? 16
+                                        : 32;
+  FILE *boot_file = fopen(type == 32 ? "/boot32.bin" : "/boot.bin", "r");
+  uint8_t *boot = malloc(512);
+  if (boot_file == NULL || boot == NULL || boot_file->fileSize < 512 ||
+      fread(boot, 1, 512, boot_file) != 512) {
+    if (boot_file != NULL) {
+      fclose(boot_file);
     }
-    free(null_sec);
-  } else if (drive != 'B') {
-    if (!DiskReady(drive)) {
-      return 0;
+    free(boot);
+    return 0;
+  }
+  fclose(boot_file);
+
+  const uint32_t reserved_sectors = 1;
+  const uint32_t fat_count = 2;
+  const uint32_t root_entries = type == 32 ? 0 : 224;
+  const uint32_t root_sectors = (root_entries * 32 + 511) / 512;
+  uint32_t sectors_per_cluster = type == 32 ? 8 : 1;
+  uint32_t fat_sectors = 0;
+  uint32_t cluster_count = 0;
+  for (; sectors_per_cluster <= 128; sectors_per_cluster <<= 1) {
+    fat_sectors = 1;
+    for (;;) {
+      uint32_t metadata_sectors =
+          reserved_sectors + fat_count * fat_sectors + root_sectors;
+      if (metadata_sectors >= total_sectors) {
+        break;
+      }
+      cluster_count =
+          (total_sectors - metadata_sectors) / sectors_per_cluster;
+      uint32_t fat_bytes =
+          type == 12 ? ((cluster_count + 2) * 3 + 1) / 2
+                     : (cluster_count + 2) * (type / 8);
+      uint32_t required_sectors = (fat_bytes + 511) / 512;
+      if (required_sectors == fat_sectors) {
+        break;
+      }
+      fat_sectors = required_sectors;
     }
-    if (disk_Size(drive) <= 2097152) { // 2MB及以下 fat12
-      fread(read_in, fp->fileSize, 1, fp);
-      *(unsigned char *)(&((unsigned char *)read_in)[BPB_SecPerClus]) = 1;
-      *(unsigned short *)(&((unsigned char *)read_in)[BPB_RootEntCnt]) = 224;
-      *(unsigned short *)(&((unsigned char *)read_in)[BPB_TotSec16]) =
-          disk_Size(drive) / 512;
-      *(unsigned short *)(&((unsigned char *)read_in)[BPB_TotSec32]) = 0;
-      unsigned short fatsz = (disk_Size(drive) - 1) / 512 * 3 / 2 / 512 + 1;
-      *(unsigned short *)(&((unsigned char *)read_in)[BPB_FATSz16]) = fatsz;
-      *(unsigned char *)(&((unsigned char *)read_in)[BS_DrvNum]) =
-          drive - 'C' + 0x80;
-      memcpy((void *)&((unsigned char *)read_in)[BS_FileSysType],
-             (void *)"FAT12   ", 8);
-      srand(time());
-      *(unsigned int *)(&((unsigned char *)read_in)[BS_VolD]) = rand();
-      memcpy((void *)&((unsigned char *)read_in)[BS_VolLab],
-             (void *)"POWERINTDOS", 11);
-      Disk_Write(0, 1, read_in, drive);
-      unsigned int *fat = (unsigned int *)malloc(fatsz * 512);
-      fat[0] = 0x00fffff0;
-      Disk_Write(1, fatsz, (void *)fat, drive);
-      Disk_Write(1 + fatsz, fatsz, (void *)fat, drive);
-      free((void *)fat);
-      void *null_sec = malloc(512);
-      clean((char *)null_sec, 512);
-      for (int i = 0; i != 224 * 32 / 512; i++) {
-        Disk_Write(1 + fatsz * 2 + i, 1, null_sec, drive);
-      }
-      free(null_sec);
-      // page_free((void*)info, 256 * sizeof(short));
-    } else if (disk_Size(drive) > 2097152 &&
-               disk_Size(drive) <= 2147483648) { // 2MB~2GB fat16
-      fread(read_in, fp->fileSize, 1, fp);
-      unsigned int clustno_size =
-          ((disk_Size(drive) - 1) / 65536 + 512) / 512 * 512;
-      *(unsigned char *)(&((unsigned char *)read_in)[BPB_SecPerClus]) =
-          clustno_size / 512;
-      *(unsigned short *)(&((unsigned char *)read_in)[BPB_RootEntCnt]) =
-          14 * clustno_size / 32;
-      if (disk_Size(drive) / 512 > 65535) {
-        *(unsigned short *)(&((unsigned char *)read_in)[BPB_TotSec16]) = 0;
-      } else {
-        *(unsigned short *)(&((unsigned char *)read_in)[BPB_TotSec16]) =
-            disk_Size(drive) / 512;
-      }
-      *(unsigned int *)(&((unsigned char *)read_in)[BPB_TotSec32]) =
-          disk_Size(drive) / 512;
-      unsigned short fatsz =
-          (disk_Size(drive) - 1) / clustno_size * 2 / 512 + 1;
-      *(unsigned short *)(&((unsigned char *)read_in)[BPB_FATSz16]) = fatsz;
-      *(unsigned char *)(&((unsigned char *)read_in)[BS_DrvNum]) =
-          drive - 'C' + 0x80;
-      memcpy((void *)&((unsigned char *)read_in)[BS_FileSysType],
-             (void *)"FAT16   ", 8);
-      srand(time());
-      *(unsigned int *)(&((unsigned char *)read_in)[BS_VolD]) = rand();
-      memcpy((void *)&((unsigned char *)read_in)[BS_VolLab],
-             (void *)"POWERINTDOS", 11);
-      Disk_Write(0, 1, read_in, drive);
-      unsigned short *fat = (unsigned short *)malloc(fatsz * 512);
-      fat[0] = 0xfff0;
-      fat[1] = 0xffff;
-      Disk_Write(1, fatsz, (void *)fat, drive);
-      Disk_Write(1 + fatsz, fatsz, (void *)fat, drive);
-      free((void *)fat);
-      void *null_sec = malloc(512);
-      clean((char *)null_sec, 512);
-      for (unsigned i = 0; i < 14 * clustno_size / 512; i++) {
-        Disk_Write(1 + fatsz * 2 + i, 1, null_sec, drive);
-      }
-      free(null_sec);
-    } else if (disk_Size(drive) > 2147483648) { // 2GB以上 fat32
-      fread(read_in, fp_32->fileSize, 1, fp_32);
-      unsigned int clustno_size =
-          (disk_Size(drive) - 1) / 268435456 * 512 + 512;
-      *(unsigned short *)(&((unsigned char *)read_in)[BPB_RsvdSecCnt]) = 1;
-      *(unsigned char *)(&((unsigned char *)read_in)[BPB_SecPerClus]) =
-          clustno_size / 512;
-      *(unsigned short *)(&((unsigned char *)read_in)[BPB_RootEntCnt]) = 0;
-      *(unsigned short *)(&((unsigned char *)read_in)[BPB_TotSec16]) = 0;
-      *(unsigned int *)(&((unsigned char *)read_in)[BPB_TotSec32]) =
-          disk_Size(drive) / 512;
-      unsigned int fatsz = (disk_Size(drive) - 1) / clustno_size * 4 / 512 + 1;
-      *(unsigned short *)(&((unsigned char *)read_in)[BPB_FATSz16]) = 0;
-      *(unsigned int *)(&((unsigned char *)read_in)[BPB_FATSz32]) = fatsz;
-      *(unsigned short *)(&((unsigned char *)read_in)[BPB_ExtFlags]) = 0;
-      *(unsigned short *)(&((unsigned char *)read_in)[BPB_FSVer]) = 0;
-      *(unsigned int *)(&((unsigned char *)read_in)[BPB_RootClus]) = 2;
-      *(unsigned short *)(&((unsigned char *)read_in)[BPB_FSInfo]) = 0;
-      *(unsigned short *)(&((unsigned char *)read_in)[BPB_BkBootSec]) = 0;
-      *(unsigned long long *)(&((unsigned char *)read_in)[BPB_Reserved]) = 0;
-      *(unsigned char *)(&(
-          (unsigned char *)read_in)[BS_DrvNum + BPB_Fat32ExtByts]) =
-          drive - 'C' + 0x80;
-      *(unsigned char *)(&(
-          (unsigned char *)read_in)[BS_Reserved1 + BPB_Fat32ExtByts]) = 0;
-      *(unsigned char *)(&(
-          (unsigned char *)read_in)[BS_BootSig + BPB_Fat32ExtByts]) = 0x29;
-      memcpy((void *)&(
-                 (unsigned char *)read_in)[BS_FileSysType + BPB_Fat32ExtByts],
-             (void *)"FAT32   ", 8);
-      srand(time());
-      *(unsigned int *)(&(
-          (unsigned char *)read_in)[BS_VolD + BPB_Fat32ExtByts]) = rand();
-      memcpy((void *)&((unsigned char *)read_in)[BS_VolLab + BPB_Fat32ExtByts],
-             (void *)"POWERINTDOS", 11);
-      Disk_Write(0, 1, read_in, drive);
-      unsigned int *fat = (unsigned int *)malloc(fatsz * 512);
-      fat[0] = 0xffffff0;
-      fat[1] = 0xfffffff;
-      fat[2] = 0xfffffff;
-      Disk_Write(1, fatsz, (void *)fat, drive);
-      Disk_Write(1 + fatsz, fatsz, (void *)fat, drive);
-      free((void *)fat);
-      void *null_sec = malloc(512);
-      clean((char *)null_sec, 512);
-      Disk_Write(1 + fatsz * 2, 1, null_sec, drive);
-      free(null_sec);
+    bool valid = type == 12 ? cluster_count < 4085
+                 : type == 16 ? cluster_count >= 4085 && cluster_count < 65525
+                              : cluster_count >= 65525 &&
+                                    cluster_count < 0x0ffffff5;
+    if (valid) {
+      break;
     }
   }
-  free(read_in);
-  fclose(fp);
-  fclose(fp_32);
-  return 1;
+  if (sectors_per_cluster > 128 || fat_sectors == 0 ||
+      (type != 32 && fat_sectors > USHRT_MAX)) {
+    free(boot);
+    return 0;
+  }
+
+  boot[BPB_SecPerClus] = sectors_per_cluster;
+  *(uint16_t *)(boot + BPB_BytsPerSec) = 512;
+  *(uint16_t *)(boot + BPB_RsvdSecCnt) = reserved_sectors;
+  boot[BPB_NumFATs] = fat_count;
+  *(uint16_t *)(boot + BPB_RootEntCnt) = root_entries;
+  *(uint16_t *)(boot + BPB_TotSec16) =
+      total_sectors <= USHRT_MAX ? total_sectors : 0;
+  *(uint32_t *)(boot + BPB_TotSec32) = total_sectors;
+  boot[BPB_Media] = drive < 'C' ? 0xf0 : 0xf8;
+  *(uint16_t *)(boot + BPB_FATSz16) = type == 32 ? 0 : fat_sectors;
+
+  uint32_t extension = type == 32 ? BPB_Fat32ExtByts : 0;
+  if (type == 32) {
+    *(uint32_t *)(boot + BPB_FATSz32) = fat_sectors;
+    *(uint16_t *)(boot + BPB_ExtFlags) = 0;
+    *(uint16_t *)(boot + BPB_FSVer) = 0;
+    *(uint32_t *)(boot + BPB_RootClus) = 2;
+    *(uint16_t *)(boot + BPB_FSInfo) = 0;
+    *(uint16_t *)(boot + BPB_BkBootSec) = 0;
+    memset(boot + BPB_Reserved, 0, 12);
+  }
+  boot[BS_DrvNum + extension] = drive < 'C' ? 0 : drive - 'C' + 0x80;
+  boot[BS_BootSig + extension] = 0x29;
+  srand(time());
+  *(uint32_t *)(boot + BS_VolD + extension) = rand();
+  memcpy(boot + BS_VolLab + extension, "POWERINTDOS", 11);
+  memcpy(boot + BS_FileSysType + extension,
+         type == 12 ? "FAT12   " : type == 16 ? "FAT16   " : "FAT32   ", 8);
+
+  uint32_t fat_bytes = fat_sectors * 512;
+  uint8_t *fat = malloc(fat_bytes);
+  uint32_t directory_sectors = type == 32 ? sectors_per_cluster : root_sectors;
+  uint8_t *directory = malloc(directory_sectors * 512);
+  if (fat == NULL || directory == NULL) {
+    free(directory);
+    free(fat);
+    free(boot);
+    return 0;
+  }
+  memset(fat, 0, fat_bytes);
+  memset(directory, 0, directory_sectors * 512);
+  if (type == 12) {
+    fat[0] = boot[BPB_Media];
+    fat[1] = 0xff;
+    fat[2] = 0xff;
+  } else if (type == 16) {
+    ((uint16_t *)fat)[0] = 0xff00 | boot[BPB_Media];
+    ((uint16_t *)fat)[1] = 0xffff;
+  } else {
+    ((uint32_t *)fat)[0] = 0x0fffff00 | boot[BPB_Media];
+    ((uint32_t *)fat)[1] = 0x0fffffff;
+    ((uint32_t *)fat)[2] = 0x0fffffff;
+  }
+
+  uint32_t fat1_sector = reserved_sectors;
+  uint32_t fat2_sector = fat1_sector + fat_sectors;
+  uint32_t directory_sector = fat2_sector + fat_sectors;
+  Disk_Write(0, 1, boot, drive);
+  Disk_Write(fat1_sector, fat_sectors, fat, drive);
+  Disk_Write(fat2_sector, fat_sectors, fat, drive);
+  Disk_Write(directory_sector, directory_sectors, directory, drive);
+
+  uint8_t verification[512];
+  Disk_Read(0, 1, verification, drive);
+  bool written = memcmp(verification, boot, 512) == 0;
+  if (written) {
+    Disk_Read(fat1_sector, 1, verification, drive);
+    written = memcmp(verification, fat, 512) == 0;
+  }
+  if (written) {
+    Disk_Read(fat2_sector, 1, verification, drive);
+    written = memcmp(verification, fat, 512) == 0;
+  }
+  if (written) {
+    Disk_Read(directory_sector, 1, verification, drive);
+    written = memcmp(verification, directory, 512) == 0;
+  }
+  free(directory);
+  free(fat);
+  free(boot);
+  return written;
 }
 int attrib(char *filename, ftype type, struct vfs_t *vfs) {
   struct FAT_FILEINFO *finfo = Get_File_Address(filename, vfs);

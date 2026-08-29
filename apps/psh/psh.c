@@ -349,8 +349,7 @@ static int run_command(int argc, char **argv) {
   } else if (strcmp("format", argv[0]) == 0) {
     if (argc != 3) {
       printf("format <drive> <fsname>\n"
-             "fsname can be FAT and PFS; the drive must be unmounted and "
-             "have no retired references.\n");
+             "fsname can be FAT and PFS; the drive must not be in use.\n");
       return 1;
     }
     char normalized_drive = toupper((unsigned char)argv[1][0]);
@@ -360,8 +359,19 @@ static int run_command(int argc, char **argv) {
       printf("Invalid drive.\n");
       return 1;
     }
+    bool was_mounted = vfs_check_mount(normalized_drive);
     if (!format(normalized_drive, argv[2])) {
-      printf("Unable to format drive %c:. Ensure it is fully unmounted.\n",
+      if (was_mounted && !vfs_check_mount(normalized_drive)) {
+        vfs_mount(normalized_drive, normalized_drive);
+      }
+      printf("Unable to format drive %c:. Switch away from it and close "
+             "programs using it.\n",
+             normalized_drive);
+      return 1;
+    }
+    if (!vfs_check_mount(normalized_drive) &&
+        !vfs_mount(normalized_drive, normalized_drive)) {
+      printf("Drive %c: was formatted but could not be mounted.\n",
              normalized_drive);
       return 1;
     }
