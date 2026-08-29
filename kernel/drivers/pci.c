@@ -90,12 +90,32 @@ uint32_t pci_get_port_base(uint8_t bus, uint8_t slot, uint8_t func) {
   }
   return io_port;
 }
+bool pci_find_class(uint8_t base_class, uint8_t sub_class, uint8_t *bus,
+                    uint8_t *slot, uint8_t *function) {
+  if (bus == NULL || slot == NULL || function == NULL) {
+    return false;
+  }
+  extern unsigned int PCI_ADDR_BASE;
+  unsigned char *entry = (unsigned char *)(uintptr_t)PCI_ADDR_BASE;
+  while (entry[0] == 0xff) {
+    struct pci_config_space_public *config =
+        (struct pci_config_space_public *)(entry + 0x0c);
+    if (config->BaseClass == base_class && config->SubClass == sub_class) {
+      *bus = entry[1];
+      *slot = entry[2];
+      *function = entry[3];
+      return true;
+    }
+    entry += 0x110 + 4;
+  }
+  return false;
+}
 void PCI_GET_DEVICE(uint16_t vendor_id,
                     uint16_t device_id,
                     uint8_t* bus,
                     uint8_t* slot,
                     uint8_t* func) {
-  extern int PCI_ADDR_BASE;
+  extern unsigned int PCI_ADDR_BASE;
   unsigned char* pci_drive = (unsigned char *)(uintptr_t)PCI_ADDR_BASE;
   for (;; pci_drive += 0x110 + 4) {
     if (pci_drive[0] == 0xff) {

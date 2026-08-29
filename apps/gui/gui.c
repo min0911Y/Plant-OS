@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <syscall.h>
 #include <time.h>
 #include <rpc.h>
@@ -14,6 +15,27 @@
 #define STB_IMAGE_RESIZE_IMPLEMENTATION
 #include "stb_image_resize.h"
 desktop_t *desktop0;
+static void *load_file(const char *path, uint32_t *size) {
+  struct stat status;
+  if (stat(path, &status) != 0) {
+    return NULL;
+  }
+  void *buffer = malloc(status.st_size);
+  FILE *stream = fopen(path, "rb");
+  if (buffer == NULL || stream == NULL ||
+      fread(buffer, 1, status.st_size, stream) != status.st_size) {
+    if (stream != NULL) {
+      fclose(stream);
+    }
+    free(buffer);
+    return NULL;
+  }
+  fclose(stream);
+  if (size != NULL) {
+    *size = status.st_size;
+  }
+  return buffer;
+}
 static void click1(button_t *button) {
   (void)button;
   window_t *a =
@@ -207,16 +229,15 @@ void main() {
   }
   // char *s34 = malloc(64*1024*1024);
   // free(s34);
-  ttf_buffer = malloc(filesize("font.ttf"));
+  ttf_buffer = load_file("font.ttf", NULL);
   printf("Reading font...");
-  api_readfile("font.ttf", ttf_buffer);
+  if (ttf_buffer == NULL) {
+    return;
+  }
   printf("Done.\n");
   stbtt_InitFont(&font, ttf_buffer, stbtt_GetFontOffsetForIndex(ttf_buffer, 0));
 
   set_size(15);
-  if (filesize("font.bin") == -1 || filesize("HZK16") == -1) {
-    print("error\n");
-  }
   printf("\n\n");
   int xsize_input, ysize_input;
   xsize_input = 1024;
@@ -229,10 +250,12 @@ void main() {
     logkf("GUI failed to set %dx%dx32 VBE mode\n", xsize_input, ysize_input);
     return;
   }
-  ascfont = (unsigned char *)malloc(filesize("font.bin"));
-  hzkfont = (unsigned char *)malloc(filesize("HZK16"));
-  api_readfile("font.bin", ascfont);
-  api_readfile("HZK16", hzkfont);
+  ascfont = load_file("font.bin", NULL);
+  hzkfont = load_file("HZK16", NULL);
+  if (ascfont == NULL || hzkfont == NULL) {
+    print("font load error\n");
+    return;
+  }
   desktop0 = create_desktop(xsize_input, ysize_input, NowTaskID());
   if (desktop0 == NULL) {
     logkf("GUI failed to create desktop\n");
@@ -242,7 +265,8 @@ void main() {
   desktop0->draw(desktop0, 0, 0, xsize_input, ysize_input,
                  argb(0, 58, 110, 165));
   vram_t *background = NULL;
-  if (filesize("123.png") != -1) {
+  struct stat background_status;
+  if (stat("123.png", &background_status) == 0) {
     int w, h, bpp;
     stbi_uc *b = stbi_load("123.png", &w, &h, &bpp, 4);
     if (!b) {

@@ -6,6 +6,8 @@ incpath_src := ../include
 
 MODULE_CFLAGS := $(KERNEL_COMMON_CFLAGS) -O0 -Wall -Wno-unused-function
 
+-include $(OUTDIR)/hello.d
+
 default: $(MODDIR)/hello.mod
 
 dirs:

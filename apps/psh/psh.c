@@ -6,9 +6,15 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <syscall.h>
 static char *search_path;
 static MST_Object *environment;
+
+static int file_size(const char *path) {
+  struct stat status;
+  return stat(path, &status) == 0 ? (int)status.st_size : -1;
+}
 
 static char *env_read(char *name) {
   if (MST_get_var(name, MST_get_root_space(environment)) == NULL) {
@@ -22,14 +28,17 @@ static bool env_init(int command_mode) {
   search_path = "";
   environment = NULL;
 
-  int size = filesize("env.cfg");
+  int size = file_size("env.cfg");
   if (size < 0) {
     if (command_mode) {
       return true;
     }
-    mkfile("env.cfg");
-    Edit_File("env.cfg", "# created by psh", 16, 0);
-    size = filesize("env.cfg");
+    FILE *created = fopen("env.cfg", "wb");
+    if (created != NULL) {
+      fwrite("# created by psh", 1, 16, created);
+      fclose(created);
+    }
+    size = file_size("env.cfg");
     if (size < 0) {
       printf("Unable to create env.cfg.\n");
       return false;
@@ -47,11 +56,16 @@ static bool env_init(int command_mode) {
     printf("Unable to load env.cfg.\n");
     return false;
   }
-  if (!api_readfile("env.cfg", buff)) {
+  FILE *stream = fopen("env.cfg", "rb");
+  if (stream == NULL || fread(buff, 1, file_size, stream) != file_size) {
+    if (stream != NULL) {
+      fclose(stream);
+    }
     free(buff);
     printf("Unable to read env.cfg.\n");
     return false;
   }
+  fclose(stream);
   buff[buffer_size - 1] = '\0';
   environment = MST_init(buff);
   free(buff);
@@ -115,7 +129,7 @@ static bool find_in_search_path(const char *file_name, char **result) {
       path[offset++] = '\\';
     }
     memcpy(path + offset, file_name, file_name_length + 1);
-    if (filesize(path) != -1) {
+    if (file_size(path) != -1) {
       *result = path;
       return true;
     }
@@ -202,9 +216,9 @@ static int execute_external_command(int argc, char **argv, int *ok) {
   memcpy(name, argv[0], name_length + 1);
   char *path = NULL;
   char *executable = name;
-  if (filesize(name) == -1 && !find_in_search_path(name, &path)) {
+  if (file_size(name) == -1 && !find_in_search_path(name, &path)) {
     memcpy(name + name_length, ".bin", sizeof(".bin"));
-    if (filesize(name) == -1 && !find_in_search_path(name, &path)) {
+    if (file_size(name) == -1 && !find_in_search_path(name, &path)) {
       free(name);
       *ok = 0;
       return 0;
@@ -286,38 +300,48 @@ static int run_command(int argc, char **argv) {
     }
   }
   if (strcmp("del", argv[0]) == 0) {
-    if (argc != 2 || !vfs_delfile(argv[1])) {
+    if (argc != 2 || remove(argv[1]) != 0) {
       printf("File not found.\n");
       return 1;
     }
   } else if (strcmp("cd", argv[0]) == 0) {
-    if (argc != 2 || !vfs_change_path(argv[1])) {
+    if (argc != 2 || chdir(argv[1]) != 0) {
       printf("Invalid path.\n");
       return 1;
     }
   } else if (strcmp("mkfile", argv[0]) == 0) {
-    if (argc != 2 || !mkfile(argv[1])) {
+    FILE *created = argc == 2 && file_size(argv[1]) < 0
+                        ? fopen(argv[1], "wb")
+                        : NULL;
+    if (created == NULL) {
       printf("Unable to create file.\n");
       return 1;
     }
+    fclose(created);
   } else if (strcmp("type", argv[0]) == 0) {
     if (argc != 2) {
       printf("type <file>\n");
       return 1;
     }
-    int file_size = filesize(argv[1]);
-    if (file_size < 0) {
+    int content_size = file_size(argv[1]);
+    if (content_size < 0) {
       printf("File not found.\n");
       return 1;
     }
-    char *contents = file_size == 0 ? NULL : malloc((size_t)file_size);
-    if ((file_size != 0 && contents == NULL) ||
-        (file_size != 0 && !api_readfile(argv[1], contents))) {
+    char *contents = content_size == 0 ? NULL : malloc((size_t)content_size);
+    FILE *stream = fopen(argv[1], "rb");
+    if ((content_size != 0 && contents == NULL) || stream == NULL ||
+        (content_size != 0 &&
+         fread(contents, 1, content_size, stream) != (size_t)content_size)) {
+      if (stream != NULL) {
+        fclose(stream);
+      }
       free(contents);
       printf("Unable to read file.\n");
       return 1;
     }
-    for (int i = 0; i < file_size; i++) {
+    fclose(stream);
+    for (int i = 0; i < content_size; i++) {
       printf("%c", contents[i]);
     }
     printf("\n");
@@ -332,7 +356,7 @@ static int run_command(int argc, char **argv) {
     T_DrawBox(0, 0, tty_get_xsize(), tty_get_ysize(), c);
     set_cons_color(c);
   } else if (strcmp("mkdir", argv[0]) == 0) {
-    if (argc != 2 || !mkdir(argv[1])) {
+    if (argc != 2 || mkdir(argv[1]) != 0) {
       printf("Unable to create directory.\n");
       return 1;
     }
@@ -461,7 +485,7 @@ static bool run_shell(void) {
   for (;;) {
     char cwd[255];
     char prompt[sizeof(cwd) + sizeof("psh| ~ ")];
-    api_getcwd(cwd);
+    getcwd(cwd, sizeof(cwd));
     size_t cwd_length = strlen(cwd);
     size_t offset = 0;
     memcpy(prompt + offset, "psh|", sizeof("psh|") - 1);

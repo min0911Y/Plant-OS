@@ -314,7 +314,10 @@ static void module_release_memory(module_loaded_t *module) {
 }
 
 static bool module_load_image(module_loaded_t *module, const char *path) {
-  int size = vfs_filesize((char *)path);
+  vfs_stat_t status;
+  int size = vfs_stat(current_task()->fs_context, path, &status) < 0
+                 ? -1
+                 : status.size;
   if (size <= 0) {
     printk("module: %s not found\n", path);
     return false;
@@ -326,10 +329,15 @@ static bool module_load_image(module_loaded_t *module, const char *path) {
     return false;
   }
   module->image_size = size;
-  if (!vfs_readfile((char *)path, module->image)) {
+  FILE *stream = fopen(path, "rb");
+  if (stream == NULL || fread(module->image, 1, size, stream) != (size_t)size) {
+    if (stream != NULL) {
+      fclose(stream);
+    }
     printk("module: failed to read %s\n", path);
     return false;
   }
+  fclose(stream);
 
   Elf32_Ehdr *hdr = (Elf32_Ehdr *)module->image;
   if (!elf32_validate_relocatable(hdr, module->image_size)) {

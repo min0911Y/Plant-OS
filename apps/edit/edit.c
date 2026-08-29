@@ -1,5 +1,7 @@
 /*Edit.c : 文本编辑器（OLD）*/
 #include <string.h>
+#include <stdio.h>
+#include <sys/stat.h>
 #include <syscall.h>
 
 struct List {
@@ -148,11 +150,18 @@ int main(int argc, char** argv) {
   }
   system("cls");
   MainNode = NewList();
-  if (filesize(argv[1]) != -1) {
-    char* buf = (char*)malloc(filesize(argv[1]));
-    api_readfile(argv[1], buf);
-    loadFile(buf, filesize(argv[1]));
-    api_free(buf, filesize(argv[1]));
+  struct stat status;
+  if (stat(argv[1], &status) == 0) {
+    char* buf = (char*)malloc(status.st_size);
+    FILE *stream = fopen(argv[1], "rb");
+    if (buf != NULL && stream != NULL &&
+        fread(buf, 1, status.st_size, stream) == status.st_size) {
+      loadFile(buf, status.st_size);
+    }
+    if (stream != NULL) {
+      fclose(stream);
+    }
+    free(buf);
   }
   // else
   // {
@@ -192,10 +201,11 @@ int main(int argc, char** argv) {
         p[i - 1] = (list_get(i, MainNode)->val);
         len++;
       }
-      if (filesize(argv[1]) == -1) {
-        mkfile(argv[1]);
+      FILE *stream = fopen(argv[1], "wb");
+      if (stream != NULL) {
+        fwrite(p, 1, len, stream);
+        fclose(stream);
       }
-      Edit_File(argv[1], p, len, 0);
       return 0;
     } else {
       AddVal(ch, MainNode);

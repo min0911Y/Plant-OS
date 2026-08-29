@@ -3,28 +3,17 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-#define READ 0x2
-#define WRITE 0x4
-#define APPEND 0x8
-#define BIN 0x0
-#define PLUS 0x10
 #define EOF -1
 #define SEEK_SET 0
 #define SEEK_CUR 1
 #define SEEK_END 2
 #define BUFSIZ (4096*2)
-#include <syscall.h>
+#define FILENAME_MAX 255
+#include <ctypes.h>
+#include <fcntl.h>
+int getch(void);
 #define getchar getch
-typedef struct FILE {
-  unsigned int mode;
-  unsigned int fileSize;
-  unsigned char *buffer;
-  unsigned int bufferSize;
-  unsigned int p;
-  unsigned char eof;
-  unsigned char read_flag; // 0 needn't to read, 1 need to read
-  char *name;
-} FILE;
+typedef struct FILE FILE;
 extern FILE *stdout;
 extern FILE *stdin;
 extern FILE *stderr;
@@ -39,16 +28,17 @@ char *gets(char *str);
 int remove(const char *filename);
 int rename(char *filename1, char *filename2);
 char *tmpnam(char *str);
-FILE *fopen(char *filename,char *mode);
-FILE *fdopen(int fd, char *mode);
+FILE *fopen(const char *filename, const char *mode);
+FILE *fdopen(int fd, const char *mode);
 int fclose(FILE *fp);
-int fseek(FILE *fp, int offset, int whence);
+int fseek(FILE *fp, long offset, int whence);
 long ftell(FILE *stream);
-unsigned int fwrite(const void *ptr, unsigned int size, unsigned int nmemb, FILE *stream);
-unsigned int fread(void *buffer, unsigned int size, unsigned int count, FILE *stream);
+size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream);
+size_t fread(void *buffer, size_t size, size_t count, FILE *stream);
 int fgetc(FILE *stream);
 int ungetc(int c, FILE *fp);
 int fputc(int ch,FILE *stream);
+int putc(int ch, FILE *stream);
 int putchar(int ch);
 int fflush(FILE *stream);
 char *fgets(char *str, int n, FILE *stream);
@@ -61,11 +51,14 @@ int getc(FILE *stream);
 int sscanf(const char * s, const char * fmt, ...);
 int snprintf(char * s, unsigned n, const char *fmt, ...);
 int scanf(const char * fmt, ...);
-uint32_t fileno(FILE *fp);
+int fileno(FILE *fp);
 char *getcwd(char *buf, size_t size);
 int unlink(const char *pathname);
 void rewind(FILE *stream);
 int vprintf(const char *fmt, va_list ap);
+void perror(const char *message);
+void stdio_initialize(void);
+void stdio_shutdown(void);
 #ifdef __cplusplus
 }
 #endif

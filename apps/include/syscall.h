@@ -16,6 +16,103 @@ struct finfo_block {
   unsigned short year, month, day;
   unsigned short hour, minute;
 };
+typedef struct {
+  uint32_t type;
+  uint32_t attributes;
+  uint32_t size;
+  uint32_t modified_time;
+} vfs_file_stat_t;
+
+enum vfs_open_flags {
+  VFS_OPEN_READ = 1u << 0,
+  VFS_OPEN_WRITE = 1u << 1,
+  VFS_OPEN_CREATE = 1u << 2,
+  VFS_OPEN_EXCLUSIVE = 1u << 3,
+  VFS_OPEN_TRUNCATE = 1u << 4,
+  VFS_OPEN_APPEND = 1u << 5,
+};
+
+enum vfs_syscall_operation {
+  VFS_SYSCALL_OPEN,
+  VFS_SYSCALL_CLOSE,
+  VFS_SYSCALL_READ,
+  VFS_SYSCALL_WRITE,
+  VFS_SYSCALL_SEEK,
+  VFS_SYSCALL_SYNC,
+  VFS_SYSCALL_STAT,
+  VFS_SYSCALL_FSTAT,
+  VFS_SYSCALL_LIST_DIRECTORY,
+  VFS_SYSCALL_MKDIR,
+  VFS_SYSCALL_UNLINK,
+  VFS_SYSCALL_RMDIR,
+  VFS_SYSCALL_RENAME,
+  VFS_SYSCALL_CHDIR,
+  VFS_SYSCALL_GETCWD,
+  VFS_SYSCALL_CURRENT_DRIVE,
+  VFS_SYSCALL_MOUNT_CHECK,
+  VFS_SYSCALL_MOUNT,
+  VFS_SYSCALL_UNMOUNT,
+  VFS_SYSCALL_CHANGE_DRIVE,
+  VFS_SYSCALL_FORMAT,
+  VFS_SYSCALL_COUNT,
+};
+
+typedef struct {
+  uint32_t size;
+  union {
+    struct {
+      uint32_t path;
+      uint32_t flags;
+    } open;
+    struct {
+      int32_t descriptor;
+    } descriptor;
+    struct {
+      int32_t descriptor;
+      uint32_t buffer;
+      uint32_t length;
+    } io;
+    struct {
+      int32_t descriptor;
+      int32_t offset;
+      int32_t whence;
+    } seek;
+    struct {
+      uint32_t path;
+      uint32_t status;
+    } stat;
+    struct {
+      int32_t descriptor;
+      uint32_t status;
+    } fstat;
+    struct {
+      uint32_t path;
+      uint32_t entries;
+      uint32_t capacity;
+    } list;
+    struct {
+      uint32_t path;
+    } path;
+    struct {
+      uint32_t source;
+      uint32_t destination;
+    } rename;
+    struct {
+      uint32_t buffer;
+      uint32_t capacity;
+    } cwd;
+    struct {
+      uint32_t disk;
+      uint32_t drive;
+    } mount;
+    struct {
+      uint32_t disk;
+      uint32_t filesystem;
+    } format;
+  } arguments;
+} vfs_syscall_request_t;
+
+int vfs_syscall(uint32_t operation, const vfs_syscall_request_t *request);
 typedef unsigned int tty_t;
 typedef struct module_handle {
   uint32_t id;
@@ -50,8 +147,6 @@ void print(char *str);
 void scan(char *str, int length);
 void api_free(void *ptr, int size);
 int system(char *command);
-int filesize(char *filename);
-int api_readfile(char *filename, char *res);
 void bmpview(char *filename);
 void Draw_Box(int x, int y, int w, int h, int color);
 void Draw_Px(int x, int y, int color);
@@ -61,9 +156,9 @@ int get_command_line(char **line, size_t *length);
 int Get_System_Version();
 int Copy(char *filePath1, char *filePath2);
 int _kbhit();
-int mkfile(char *filename);
-int mkdir(char *filename);
-int Edit_File(char *filename, char *dest, int len, int offset);
+int mkdir(const char *filename, ...);
+int rmdir(const char *filename);
+int chdir(const char *path);
 int list_directory(const char *path, struct finfo_block **entries,
                    size_t *count);
 void SwitchTo320X200X256_BIOS();
@@ -81,7 +176,6 @@ void timer_free();
 int haveMsg();
 void GetMessageAll(void *data);
 char *api_get_env(char *name, char *value);
-char *api_getcwd(char *buffer);
 char PhyMemGetByte(int addr);
 void PhyMemSetByte(int addr, char data);
 int format(unsigned drive, char *fs_name);
@@ -120,7 +214,6 @@ void clear();
 int vfs_check_mount(uint8_t drive);
 int vfs_mount(uint8_t disk_number,uint8_t drive);
 int vfs_change_disk(uint8_t drive);
-int vfs_change_path(char *dictName);
 uint32_t mem_used();
 uint32_t mem_total();
 void tty_start_cur_moving();
@@ -128,8 +221,6 @@ void tty_stop_cur_moving();
 int tty_get_xsize(void);
 int tty_get_ysize(void);
 int vfs_unmount_disk(uint8_t drive);
-int vfs_delfile(char *filename);
-void api_rename(char *f1,char *f2);
 void exit(unsigned status);
 void logk(char *s);
 int logkf(const char *format, ...);

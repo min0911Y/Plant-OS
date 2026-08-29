@@ -205,13 +205,13 @@ int userNewThread(void *handler, void *param) {
  *
  */
 size_t getcwd_(char *a, size_t b) {
-  if (a == NULL || b == 0 || api_getcwd(a) == NULL) {
+  if (a == NULL || b == 0 || getcwd(a, b) == NULL) {
     return 0;
   }
   return strlen(a);
 }
 size_t chdir_(char *dirname) {
-  if (vfs_change_path(dirname) == 0) {
+  if (chdir(dirname) != 0) {
     return (size_t)-1;
   }
   return 0;

@@ -19,11 +19,22 @@ void init_mount_disk() {
 int mount(char *fileName) {
   for (int i = 0; i < 255; i++) {
     if (md[i].flag == 0) {
-      FILE *fp = fopen(fileName, "rw");
+      FILE *fp = fopen(fileName, "r+");
+      if (fp == NULL || fseek(fp, 0, SEEK_END) != 0) {
+        if (fp != NULL) {
+          fclose(fp);
+        }
+        return 0;
+      }
+      long size = ftell(fp);
+      if (size <= 0 || fseek(fp, 0, SEEK_SET) != 0) {
+        fclose(fp);
+        return 0;
+      }
       md[i].vd.flag = 1;
       md[i].vd.Read = MountDiskRead;
       md[i].vd.Write = MountDiskWrite;
-      md[i].vd.size = fp->fileSize;
+      md[i].vd.size = size;
       md[i].flag = 1;
       md[i].fp = fp;
       strcpy(md[i].vd.DriveName,fileName);
@@ -48,7 +59,9 @@ static void MountDiskRead(char drive, unsigned char *buffer,
                           unsigned int number, unsigned int lba) {
   for (int i = 0; i < 255; i++) {
     if (md[i].flag && md[i].drive == drive) {
-      memcpy(buffer, md[i].fp->buffer + lba * 512, number * 512);
+      if (fseek(md[i].fp, lba * 512, SEEK_SET) == 0) {
+        fread(buffer, 512, number, md[i].fp);
+      }
       return;
     }
   }
@@ -57,7 +70,9 @@ static void MountDiskWrite(char drive, unsigned char *buffer,
                            unsigned int number, unsigned int lba) {
   for (int i = 0; i < 255; i++) {
     if (md[i].flag && md[i].drive == drive) {
-      memcpy(md[i].fp->buffer + lba * 512, buffer, number * 512);
+      if (fseek(md[i].fp, lba * 512, SEEK_SET) == 0) {
+        fwrite(buffer, 512, number, md[i].fp);
+      }
       return;
     }
   }

@@ -125,11 +125,12 @@ void init_floppy() {
   }
 
 #endif
-  vdisk vd;
+  vdisk vd = {0};
   strcpy(vd.DriveName, "floppy");
   vd.Read = Read;
   vd.Write = Write;
   vd.size = 1474560;
+  vd.max_transfer_sectors = SECTORS_ONCE;
   vd.flag = 1;
   register_vdisk_at('A', vd);
 }

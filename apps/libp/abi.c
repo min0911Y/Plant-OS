@@ -138,7 +138,6 @@ static void free_unlocked(void *ptr);
 static void *malloc_unlocked(size_t size);
 
 static uintptr_t msbrk(unsigned size) {
-  logkf("msbrk: size=%d, sz_left=%d, sz=%d\n", size, sz_left, sz);
   if ((uintptr_t)sz > UINTPTR_MAX - alloc_start_addr)
     return (uintptr_t)-1;
   uintptr_t result = alloc_start_addr + sz;

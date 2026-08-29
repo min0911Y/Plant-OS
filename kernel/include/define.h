@@ -39,27 +39,10 @@ extern struct TIMERCTL timerctl;
 extern unsigned int memsize;
 extern uint32_t running_mode;
 
-#define FREE_MAX_NUM 4096
-#define ERRNO_NOPE 0
-#define ERRNO_NO_ENOGHT_MEMORY 1
-#define ERRNO_NO_MORE_FREE_MEMBER 2
-#define MEM_MAX(a, b) (a) > (b) ? (a) : (b)
-typedef struct {
-  uintptr_t start;
-  uintptr_t end; // end和start都等于0说明这个free结构没有使用
-} free_member;
-typedef struct freeinfo freeinfo;
-typedef struct freeinfo {
-  free_member *f;
-  freeinfo *next;
-} freeinfo;
-typedef struct {
-  freeinfo *freeinf;
-  int memerrno;
-} memory;
 #define MAX_TIMER 500
 struct mtask;
 typedef struct mtask mtask;
+struct vfs_context;
 struct TIMER {
   struct TIMER *next;
   unsigned int timeout, flags;
@@ -140,20 +123,6 @@ typedef struct { // IPC头（在TASK结构体中的头）
 // struct THREAD {
 //   struct TASK *father;
 // };
-#define _packed __attribute__((packed))
-typedef struct fpu_t {
-  uint16_t control;
-  uint16_t RESERVED1;
-  uint16_t status;
-  uint16_t RESERVED2;
-  uint16_t tag;
-  uint16_t RESERVED3;
-  uint32_t fip0;
-  uint32_t fop0;
-  uint32_t fdp0;
-  uint32_t fdp1;
-  uint8_t regs[80];
-} _packed fpu_t;
 // struct TASK {
 //   int sel, sleep, level;
 //   char name[32];
@@ -163,7 +132,6 @@ typedef struct fpu_t {
 //   int fifosleep;
 //   int cs_base, ds_base;
 //   void *alloc_addr;
-//   memory *mm;
 //   int alloc_size;
 //   struct IPC_Header IPC_header;
 //   struct TIMER *timer;
@@ -183,9 +151,7 @@ typedef struct fpu_t {
 //   int lock; // 被锁住了？
 //   char forever;
 //   int mx, my;
-//   fpu_t *fpu;
 //   struct vfs_t *nfs;
-//   int fpu_flag;
 //   struct FIFO8 *Pkeyfifo, *Ukeyfifo;
 //   uint32_t fpu_use;
 //   uint32_t *gdt_data;
@@ -233,22 +199,19 @@ typedef struct mtask {
   uint8_t on_cpu;
   uint8_t sched_flags;
   char name[32];
-  struct vfs_t *nfs;
+  struct vfs_context *fs_context;
   uint32_t tid;
   uint32_t ptid; /* parent process id; it does not own this task's lifetime */
   uint32_t tgid; /* process/thread-group leader tid */
   uint32_t generation;
   enum TASK_KIND kind;
-  memory *mm;
   uint32_t alloc_addr;
   uint32_t *alloc_size;
   uint32_t alloced;
   struct tty *TTY;
   struct tty *tty_session;
-  fpu_t fpu;
-  int fpu_flag;
-  char drive_number;
-  char drive;
+  x86_fpu_state_t fpu_state;
+  uint8_t fpu_initialized;
   struct FIFO8 *Pkeyfifo, *Ukeyfifo;
   struct FIFO8 *keyfifo, *mousefifo; // 基本输入设备的缓冲区
   char urgent;
@@ -278,7 +241,6 @@ typedef struct mtask {
   unsigned times;
   unsigned signal_disable;
 } mtask;
-#define vfs_now current_task()->nfs
 #define PG_P 1
 #define PG_USU 4
 #define PG_RWW 2
@@ -331,22 +293,9 @@ struct FAT_CACHE {
   unsigned char *FatClustnoFlags;
   int type;
 };
-typedef struct {
-  struct FAT_CACHE dm;
-  struct FAT_FILEINFO *dir;
-  lock_t *lock;
-  mtask **lock_owner;
-  int *lock_depth;
-} fat_cache;
-#define get_dm(vfs) ((fat_cache *)(vfs->cache))->dm
-#define get_now_dir(vfs) ((fat_cache *)(vfs->cache))->dir
-#define get_fat_lock(vfs) ((fat_cache *)(vfs->cache))->lock
-#define get_fat_lock_owner(vfs) ((fat_cache *)(vfs->cache))->lock_owner
-#define get_fat_lock_depth(vfs) ((fat_cache *)(vfs->cache))->lock_depth
 #define get_clustno(high, low)                                                \
   (((uint32_t)(high) << 16) | ((uint32_t)(low) & 0xffffu))
 typedef enum { FLE, DIR, RDO, HID, SYS } ftype;
-struct vfs_mount;
 typedef struct {
   char name[255];
   ftype type;
@@ -354,35 +303,54 @@ typedef struct {
   unsigned short year, month, day;
   unsigned short hour, minute;
 } vfs_file;
-typedef struct vfs_t {
-  List *path;
-  void *cache;
-  char FSName[255];
-  int disk_number;
-  uint8_t drive; // 大写（必须）
-  vfs_file *(*fileinfo)(struct vfs_t *vfs, char *filename);
-  List *(*list_file)(struct vfs_t *vfs, char *dictpath);
-  bool (*read_file)(struct vfs_t *vfs, char *path, char *buffer);
-  bool (*write_file)(struct vfs_t *vfs, char *path, char *buffer, int size);
-  bool (*del_file)(struct vfs_t *vfs, char *path);
-  bool (*del_dict)(struct vfs_t *vfs, char *path);
-  bool (*create_file)(struct vfs_t *vfs, char *filename);
-  bool (*create_dict)(struct vfs_t *vfs, char *filename);
-  bool (*rename_file)(struct vfs_t *vfs, char *filename, char *filename_of_new);
-  bool (*attrib)(struct vfs_t *vfs, char *filename, ftype type);
-  bool (*format)(uint8_t disk_number);
-  bool (*init_fs)(struct vfs_t *vfs, uint8_t disk_number);
-  void (*delete_fs)(struct vfs_t *vfs);
+typedef struct {
+  uint32_t value[4];
+} vfs_node_id_t;
+typedef enum {
+  VFS_NODE_FILE,
+  VFS_NODE_DIRECTORY,
+} vfs_node_type_t;
+typedef struct {
+  vfs_node_id_t id;
+  vfs_node_type_t type;
+  uint32_t size;
+  ftype attributes;
+  uint32_t modified_time;
+} vfs_node_t;
+typedef struct {
+  char name[255];
+  vfs_node_t node;
+} vfs_dir_entry_t;
+struct vfs_mount;
+typedef struct vfs_mount vfs_t;
+typedef struct vfs_filesystem {
+  const char *name;
   bool (*check)(uint8_t disk_number);
-  bool (*cd)(struct vfs_t *vfs, char *dictName);
-  int (*file_size)(struct vfs_t *vfs, char *filename);
-  bool (*copy_cache)(struct vfs_t *dest, struct vfs_t *src);
-  void (*release_cache)(struct vfs_t *vfs);
-  struct vfs_mount *mount_owner;
-  struct vfs_t *mount_prev;
-  struct vfs_t *mount_next;
-  int flag;
-} vfs_t;
+  bool (*format)(uint8_t disk_number);
+  int (*mount)(struct vfs_mount *mount);
+  void (*unmount)(struct vfs_mount *mount);
+  int (*root)(struct vfs_mount *mount, vfs_node_t *node);
+  int (*normalize_name)(const char *name, size_t length, char *normalized,
+                        size_t capacity);
+  int (*lookup)(struct vfs_mount *mount, const vfs_node_t *directory,
+                const char *name, vfs_node_t *node);
+  int (*read)(struct vfs_mount *mount, const vfs_node_t *node,
+              uint32_t offset, void *buffer, uint32_t length);
+  int (*write)(struct vfs_mount *mount, vfs_node_t *node, uint32_t offset,
+               const void *buffer, uint32_t length);
+  int (*truncate)(struct vfs_mount *mount, vfs_node_t *node, uint32_t size);
+  int (*create)(struct vfs_mount *mount, const vfs_node_t *directory,
+                const char *name, vfs_node_type_t type, vfs_node_t *node);
+  int (*remove)(struct vfs_mount *mount, const vfs_node_t *directory,
+                const char *name, vfs_node_type_t type);
+  int (*rename)(struct vfs_mount *mount, const vfs_node_t *source_directory,
+                const char *source_name,
+                const vfs_node_t *destination_directory,
+                const char *destination_name);
+  int (*iterate)(struct vfs_mount *mount, const vfs_node_t *directory,
+                 uint32_t index, vfs_dir_entry_t *entry);
+  int (*sync)(struct vfs_mount *mount);
+} vfs_filesystem_t;
 #define BS_jmpBoot 0
 #define BS_OEMName 3
 #define BPB_BytsPerSec 11
@@ -424,14 +392,6 @@ struct FAT_FILEINFO {
   unsigned int size;
 };
 #define rmfarptr2ptr(x) ((x).seg * 0x10 + (x).offset)
-typedef struct FILE {
-  unsigned int mode;
-  unsigned int fileSize;
-  unsigned char *buffer;
-  unsigned int bufferSize;
-  unsigned int p;
-  char *name;
-} FILE;
 struct DLL_STRPICENV {
   int work[16384];
 };
@@ -847,6 +807,7 @@ typedef struct {
                 unsigned int lba);
   int flag;
   unsigned int size; // 大小
+  unsigned int max_transfer_sectors;
   char DriveName[50];
 } vdisk;
 // signal

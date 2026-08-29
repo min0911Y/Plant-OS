@@ -1,9 +1,9 @@
 NASM = nasm
 OBJS_PACK = ../out/entry.obj ../out/syscall.obj ../out/rand.obj ../out/arg.obj \
-			../out/mouse.obj ../out/math.obj ../out/libc.obj ../out/socket.obj ../out/socket_syscall.obj ../out/time.obj ../out/posix.obj ../out/pow.obj ../out/exit.obj \
+			../out/mouse.obj ../out/math.obj ../out/libc.obj ../out/socket.obj ../out/socket_syscall.obj ../out/vfs_syscall.obj ../out/time.obj ../out/posix.obj ../out/pow.obj ../out/exit.obj \
 			../out/ipc.obj ../out/rpc.obj ../out/runtime_args.obj ../out/task.obj
 OBJS_PACK_CPP = ../out/cppstart.obj ../out/syscall.obj ../out/rand.obj ../out/arg.obj \
-			../out/mouse.obj ../out/math.obj ../out/libc.obj ../out/socket.obj ../out/socket_syscall.obj ../out/time.obj ../out/posix.obj ../out/pow.obj ../out/exit.obj \
+			../out/mouse.obj ../out/math.obj ../out/libc.obj ../out/socket.obj ../out/socket_syscall.obj ../out/vfs_syscall.obj ../out/time.obj ../out/posix.obj ../out/pow.obj ../out/exit.obj \
 			../out/ipc.obj ../out/rpc.obj ../out/runtime_args.obj ../out/task.obj
 OBJS_PACK_GUI = ../out/libp_gui_rpc.obj
 default : $(OBJS_PACK_GUI) $(OBJS_PACK) $(OBJS_GUI) ../out/abi.obj $(OBJS_PACK_CPP)

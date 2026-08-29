@@ -865,7 +865,7 @@ OK:
       continue;
     }
     logk("ports %d: total sector = %d\n", ports[i], buf.lba_capacity);
-    vdisk vd;
+    vdisk vd = {0};
     vd.flag = 1;
     vd.Read = ahci_vdisk_read;
     vd.Write = ahci_vdisk_write;

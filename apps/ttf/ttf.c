@@ -3,6 +3,7 @@
                                     // implementation
 #include "stb_ttf.h"
 #include <stdarg.h>
+#include <sys/stat.h>
 #include <syscall.h>
 
 void roll(int line);
@@ -112,10 +113,19 @@ void set_size(int s1) {
   height = (int)((float)(as - des + lg) * sc);
 }
 int main(int argc, char **argv) {
-  ttf_buffer = malloc(filesize("font.ttf"));
+  struct stat status;
+  if (stat("font.ttf", &status) != 0) {
+    return 1;
+  }
+  ttf_buffer = malloc(status.st_size);
   unsigned char buf[100];
   printf("Reading font...");
-  api_readfile("font.ttf", ttf_buffer);
+  FILE *stream = fopen("font.ttf", "rb");
+  if (ttf_buffer == NULL || stream == NULL ||
+      fread(ttf_buffer, 1, status.st_size, stream) != status.st_size) {
+    return 1;
+  }
+  fclose(stream);
   printf("Done.\n");
   stbtt_InitFont(&font, ttf_buffer, stbtt_GetFontOffsetForIndex(ttf_buffer, 0));
   system("PAUSE");

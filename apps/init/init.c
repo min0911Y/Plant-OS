@@ -4,6 +4,8 @@
 #include <mst.h>
 #include <limits.h>
 #include <stdio.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <string.h>
 #include <syscall.h>
 void convert(char *str) {
@@ -37,7 +39,8 @@ void convert(char *str) {
 }
 int main() {
   logk("init.bin started\n");
-  int file_size = filesize("init.mst");
+  struct stat status;
+  int file_size = stat("init.mst", &status) == 0 ? (int)status.st_size : -1;
   if (file_size < 0 || file_size == INT_MAX) {
     set_cons_color(0x0c);
     printf("ERROR!!! Couldn't find the file \"init.mst\"!");
@@ -45,12 +48,17 @@ int main() {
       ;
   }
   char *buffer = (char *)malloc((size_t)file_size + 1);
-  if (buffer == NULL ||
-      (file_size != 0 && !api_readfile("init.mst", buffer))) {
+  int descriptor = open("init.mst", O_RDONLY);
+  if (buffer == NULL || descriptor < 0 ||
+      (file_size != 0 && read(descriptor, buffer, file_size) != file_size)) {
+    if (descriptor >= 0) {
+      close(descriptor);
+    }
     logk("init: unable to read init.mst\n");
     free(buffer);
     return 1;
   }
+  close(descriptor);
   buffer[file_size] = 0;
   MST_Object *m = MST_init(buffer);
   if (m == NULL || m->err) {

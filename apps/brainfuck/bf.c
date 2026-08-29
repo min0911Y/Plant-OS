@@ -1,6 +1,7 @@
 #include <syscall.h>
 #include <string.h>
 #include <arg.h>
+#include <stdio.h>
 int main(int argc,char **argv)
 {
     char *s = (char *)malloc(sizeof(char) * 30000);
@@ -20,12 +21,16 @@ int main(int argc,char **argv)
     {
         char *filename = malloc(sizeof(char) * 100);
         strcpy(filename,argv[1]);
-        if(api_readfile(filename,code)==0)
+        FILE *stream = fopen(filename, "rb");
+        if(stream == NULL)
         {
             print("file not found\n");
             return 0;
         }
         else{
+            len = fread(code, 1, 4999, stream);
+            fclose(stream);
+            code[len] = '\0';
             len = strlen(code);
         }
     }

@@ -14,32 +14,15 @@ extern "C" void set_rt(unsigned rt);
 extern "C" void Main()
 {
   set_rt((unsigned)return_to_app);
-  // 初始化stdio stderr
   init_mem();
-  stdout = (FILE *)malloc(sizeof(FILE));
-  stdin = (FILE *)malloc(sizeof(FILE));
-  stderr = (FILE *)malloc(sizeof(FILE));
+  stdio_initialize();
   if (stdout == NULL || stdin == NULL || stderr == NULL) {
-    free(stdout);
-    free(stdin);
-    free(stderr);
+    stdio_shutdown();
     exit((unsigned)-1);
   }
-  memset(stdout, 0, sizeof(FILE));
-  memset(stdin, 0, sizeof(FILE));
-  memset(stderr, 0, sizeof(FILE));
-  stdout->buffer = (unsigned char *)NULL;
-  stdout->mode = WRITE;
-  stderr->buffer = (unsigned char *)NULL;
-  stderr->mode = WRITE;
-  stdin->buffer = (unsigned char *)NULL;
-  stdin->fileSize = -1;
-  stdin->mode = READ;
   runtime_arguments_t arguments;
   if (runtime_arguments_load(&arguments) != 0) {
-    free(stdout);
-    free(stdin);
-    free(stderr);
+    stdio_shutdown();
     exit((unsigned)-1);
   }
   init_env();

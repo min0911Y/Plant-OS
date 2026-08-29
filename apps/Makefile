@@ -48,6 +48,7 @@ default : Makefile
 	make -r -C rpctest
 	make -r -C guitest
 	make -r -C exc_test
+	make -r -C fputest
 	make -r -C minizip
 	make -r -C duktape
 	make -r -C mmake

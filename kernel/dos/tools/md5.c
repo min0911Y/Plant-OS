@@ -206,7 +206,18 @@ void md5s(char *hexbuf, int read_len, char *result) {
   return;
 }
 void md5f(char *filename, unsigned char *result) {
-  FILE *fp = fopen(filename, "r");
-  md5s((char *)fp->buffer, fsz(filename), (char *)result);
-  fclose(fp);
+  FILE *stream = fopen(filename, "rb");
+  if (stream == NULL) {
+    memset(result, 0, 16);
+    return;
+  }
+  MD5_CTX context;
+  MD5Init(&context);
+  unsigned char buffer[4096];
+  size_t count;
+  while ((count = fread(buffer, 1, sizeof(buffer), stream)) != 0) {
+    MD5Update(&context, buffer, count);
+  }
+  MD5Final(&context, result);
+  fclose(stream);
 }

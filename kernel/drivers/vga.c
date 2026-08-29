@@ -186,24 +186,6 @@ void set_palette(int start, int end, unsigned char *rgb) {
   irq_restore(state);
   return;
 }
-void Set_Font(char *file) {
-  unsigned rows, cols, ht;
-  FILE *fp = fopen(file, "r");
-  unsigned char *g_8x16_font = fp->buffer;
-  cols = 80;
-  rows = 25;
-  ht = 16;
-  // 设置字库
-  write_font(g_8x16_font, 16);
-  pokew(0x40, 0x4A, cols);            /* 屏幕上的列 */
-  pokew(0x40, 0x4C, cols * rows * 2); /* 帧缓冲器大小 */
-  pokew(0x40, 0x50, 0);               /* 光标位置 */
-  pokeb(0x40, 0x60, ht - 1);          /* 光标形状 */
-  pokeb(0x40, 0x61, ht - 2);
-  pokeb(0x40, 0x84, rows - 1); /* 屏幕上的行数 - 1 */
-  pokeb(0x40, 0x85, ht);       /* 字符高度 */
-                               /* 为所有文本设置黑底白字属性 */
-}
 void SwitchTo320X200X256() {
   write_regs(g_320x200x256);
   init_palette();

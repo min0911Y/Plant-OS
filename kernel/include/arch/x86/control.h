@@ -62,8 +62,4 @@ static inline void x86_cr3_write(uintptr_t value) {
   asm volatile("movl %0, %%cr3" : : "r"(value) : "memory");
 }
 
-static inline void x86_fpu_disable(void) {
-  x86_cr0_write(x86_cr0_read() | X86_CR0_EM | X86_CR0_TS);
-}
-
 #endif

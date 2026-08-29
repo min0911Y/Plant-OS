@@ -16,8 +16,6 @@ extern struct ide_device {
 // struct TASK *shell_task;
 // struct TASK *sr1, *sr2;
 // struct TASK normal;
-memory *public_heap;
-void *heap;
 unsigned int memsize;
 unsigned int PCI_ADDR_BASE;
 struct MOUSE_DEC mdec;
@@ -151,7 +149,7 @@ void sysinit(void) {
   }
   irq_mask_clear(1);  // keyboard
   irq_mask_clear(12); // mouse
-  x86_cr0_write(x86_cr0_read() | X86_CR0_EM | X86_CR0_TS | X86_CR0_NE);
+  x86_fpu_init_cpu();
 
   fifo8_init(&keyfifo, 32, (unsigned char *)keybuf);
   fifo8_init(&mousefifo, 128, (unsigned char *)mousebuf);
@@ -165,19 +163,12 @@ void sysinit(void) {
   mouse_sleep(&mdec);
   logk("sysinit: mouse_sleep done\n");
 
-  logk("sysinit: page_malloc public heap start\n");
-  heap = page_malloc(128 * 1024 * 1024);
-  logk("sysinit: page_malloc public heap done heap=%08x\n",
-       (uint32_t)(uintptr_t)heap);
-  if (heap == NULL) {
-    logk("sysinit: public heap allocation failed\n");
-    for (;;)
-      ;
+  logk("sysinit: kernel heap start\n");
+  if (!kernel_heap_initialize()) {
+    Panic_K("unable to initialize kernel heap");
+    return;
   }
-  logk("sysinit: memory_init public heap start\n");
-  public_heap = memory_init((uintptr_t)heap, 128 * 1024 * 1024);
-  logk("sysinit: memory_init public heap done public_heap=%08x\n",
-       (uint32_t)(uintptr_t)public_heap);
+  logk("sysinit: kernel heap done\n");
   logk("sysinit: init_tty start\n");
   if (!init_tty()) {
     Panic_K("unable to initialize TTY");

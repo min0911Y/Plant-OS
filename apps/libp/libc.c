@@ -1,11 +1,13 @@
 #include <errno.h>
 #include <ctype.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <locale.h>
 #include <math.h>
 #include <rand.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <syscall.h>
 #include <time.h>
 static inline float eval_as_float(float x) {
@@ -23,6 +25,36 @@ FILE *stdout;
 FILE *stdin;
 FILE *stderr;
 int vsnprintf(char *buf, size_t n, const char *fmt, va_list ap);
+
+enum stdio_mode {
+  STDIO_READ = 1u << 0,
+  STDIO_WRITE = 1u << 1,
+  STDIO_APPEND = 1u << 2,
+};
+
+enum stdio_direction {
+  STDIO_DIRECTION_NONE,
+  STDIO_DIRECTION_READ,
+  STDIO_DIRECTION_WRITE,
+};
+
+struct FILE {
+  struct FILE *previous;
+  struct FILE *next;
+  unsigned char *buffer;
+  size_t buffer_length;
+  size_t buffer_position;
+  int descriptor;
+  unsigned int mode;
+  enum stdio_direction direction;
+  int unget_character;
+  unsigned char eof;
+  unsigned char error;
+  unsigned char registered;
+};
+
+static FILE *stdio_streams;
+static FILE *stdio_fdopen_impl(int descriptor, const char *mode);
 
 // strcmp
 int strcmp(const char *s1, const char *s2) {
@@ -151,152 +183,25 @@ int memcmp(const void *vl, const void *vr, size_t n) {
   return n ? *l - *r : 0;
 }
 // memcpy
-void *memcpy(void *dest, const void *src, size_t n) {
-  unsigned char *d = dest;
-  const unsigned char *s = src;
 
-#ifdef __GNUC__
-
-#if __BYTE_ORDER == __LITTLE_ENDIAN
-#define LS >>
-#define RS <<
-#else
-#define LS <<
-#define RS >>
-#endif
-
-  typedef uint32_t __attribute__((__may_alias__)) u32;
-  uint32_t w, x;
-
-  for (; (uintptr_t)s % 4 && n; n--)
-    *d++ = *s++;
-
-  if ((uintptr_t)d % 4 == 0) {
-    for (; n >= 16; s += 16, d += 16, n -= 16) {
-      *(u32 *)(d + 0) = *(u32 *)(s + 0);
-      *(u32 *)(d + 4) = *(u32 *)(s + 4);
-      *(u32 *)(d + 8) = *(u32 *)(s + 8);
-      *(u32 *)(d + 12) = *(u32 *)(s + 12);
-    }
-    if (n & 8) {
-      *(u32 *)(d + 0) = *(u32 *)(s + 0);
-      *(u32 *)(d + 4) = *(u32 *)(s + 4);
-      d += 8;
-      s += 8;
-    }
-    if (n & 4) {
-      *(u32 *)(d + 0) = *(u32 *)(s + 0);
-      d += 4;
-      s += 4;
-    }
-    if (n & 2) {
-      *d++ = *s++;
-      *d++ = *s++;
-    }
-    if (n & 1) {
-      *d = *s;
-    }
-    return dest;
+void *memcpy(void *destination, const void *source, size_t size) {
+  unsigned char *output = destination;
+  const unsigned char *input = source;
+  while (size != 0 &&
+         (((uintptr_t)output | (uintptr_t)input) & 3u) != 0) {
+    *output++ = *input++;
+    size--;
   }
-
-  if (n >= 32)
-    switch ((uintptr_t)d % 4) {
-    case 1:
-      w = *(u32 *)s;
-      *d++ = *s++;
-      *d++ = *s++;
-      *d++ = *s++;
-      n -= 3;
-      for (; n >= 17; s += 16, d += 16, n -= 16) {
-        x = *(u32 *)(s + 1);
-        *(u32 *)(d + 0) = (w LS 24) | (x RS 8);
-        w = *(u32 *)(s + 5);
-        *(u32 *)(d + 4) = (x LS 24) | (w RS 8);
-        x = *(u32 *)(s + 9);
-        *(u32 *)(d + 8) = (w LS 24) | (x RS 8);
-        w = *(u32 *)(s + 13);
-        *(u32 *)(d + 12) = (x LS 24) | (w RS 8);
-      }
-      break;
-    case 2:
-      w = *(u32 *)s;
-      *d++ = *s++;
-      *d++ = *s++;
-      n -= 2;
-      for (; n >= 18; s += 16, d += 16, n -= 16) {
-        x = *(u32 *)(s + 2);
-        *(u32 *)(d + 0) = (w LS 16) | (x RS 16);
-        w = *(u32 *)(s + 6);
-        *(u32 *)(d + 4) = (x LS 16) | (w RS 16);
-        x = *(u32 *)(s + 10);
-        *(u32 *)(d + 8) = (w LS 16) | (x RS 16);
-        w = *(u32 *)(s + 14);
-        *(u32 *)(d + 12) = (x LS 16) | (w RS 16);
-      }
-      break;
-    case 3:
-      w = *(u32 *)s;
-      *d++ = *s++;
-      n -= 1;
-      for (; n >= 19; s += 16, d += 16, n -= 16) {
-        x = *(u32 *)(s + 3);
-        *(u32 *)(d + 0) = (w LS 8) | (x RS 24);
-        w = *(u32 *)(s + 7);
-        *(u32 *)(d + 4) = (x LS 8) | (w RS 24);
-        x = *(u32 *)(s + 11);
-        *(u32 *)(d + 8) = (w LS 8) | (x RS 24);
-        w = *(u32 *)(s + 15);
-        *(u32 *)(d + 12) = (x LS 8) | (w RS 24);
-      }
-      break;
-    }
-  if (n & 16) {
-    *d++ = *s++;
-    *d++ = *s++;
-    *d++ = *s++;
-    *d++ = *s++;
-    *d++ = *s++;
-    *d++ = *s++;
-    *d++ = *s++;
-    *d++ = *s++;
-    *d++ = *s++;
-    *d++ = *s++;
-    *d++ = *s++;
-    *d++ = *s++;
-    *d++ = *s++;
-    *d++ = *s++;
-    *d++ = *s++;
-    *d++ = *s++;
+  while (size >= sizeof(uint32_t)) {
+    *(uint32_t *)output = *(const uint32_t *)input;
+    output += sizeof(uint32_t);
+    input += sizeof(uint32_t);
+    size -= sizeof(uint32_t);
   }
-  if (n & 8) {
-    *d++ = *s++;
-    *d++ = *s++;
-    *d++ = *s++;
-    *d++ = *s++;
-    *d++ = *s++;
-    *d++ = *s++;
-    *d++ = *s++;
-    *d++ = *s++;
+  while (size-- != 0) {
+    *output++ = *input++;
   }
-  if (n & 4) {
-    *d++ = *s++;
-    *d++ = *s++;
-    *d++ = *s++;
-    *d++ = *s++;
-  }
-  if (n & 2) {
-    *d++ = *s++;
-    *d++ = *s++;
-  }
-  if (n & 1) {
-    *d = *s;
-  }
-  return dest;
-#endif
-
-  for (; n; n--)
-    *d++ = *s++;
-  return dest;
+  return destination;
 }
 
 int putc(int ch, FILE *fp) { return fputc(ch, fp); }
@@ -1606,7 +1511,13 @@ double log2(double x) {
 }
 void __dso_handle() {}
 void __cxa_atexit() {}
-uint32_t fileno(FILE *fp) { return (uint32_t)fp; }
+int fileno(FILE *fp) {
+  if (fp == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+  return fp->descriptor;
+}
 char *tmpnam(char *str) {
   static char charset[] =
       "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -1627,12 +1538,27 @@ char *tmpnam(char *str) {
   return str;
 }
 
-int remove(const char *filename) { return vfs_delfile((char *)filename); }
+int remove(const char *filename) {
+  vfs_syscall_request_t request = {0};
+  request.size = sizeof(request);
+  request.arguments.path.path = (uint32_t)(uintptr_t)filename;
+  int result = vfs_syscall(VFS_SYSCALL_UNLINK, &request);
+  if (result < 0) {
+    errno = -result;
+    return -1;
+  }
+  return 0;
+}
 int rename(char *filename1, char *filename2) {
-  // char *s = (char *)malloc(strlen(filename1) + strlen(filename2) + 9);
-  // sprintf(s, "rename %s %s", filename1, filename2);
-  // system(s);
-  api_rename(filename1, filename2);
+  vfs_syscall_request_t request = {0};
+  request.size = sizeof(request);
+  request.arguments.rename.source = (uint32_t)(uintptr_t)filename1;
+  request.arguments.rename.destination = (uint32_t)(uintptr_t)filename2;
+  int result = vfs_syscall(VFS_SYSCALL_RENAME, &request);
+  if (result < 0) {
+    errno = -result;
+    return -1;
+  }
   return 0;
 }
 
@@ -1867,16 +1793,22 @@ int scanf(const char *fmt, ...) {
 char pwd[255];
 
 char *getcwd(char *buf, size_t size) {
-  (void)size;
   if (buf == NULL) {
     buf = pwd;
+    size = sizeof(pwd);
   }
-  return api_getcwd(buf);
+  vfs_syscall_request_t request = {0};
+  request.size = sizeof(request);
+  request.arguments.cwd.buffer = (uint32_t)(uintptr_t)buf;
+  request.arguments.cwd.capacity = size;
+  int result = vfs_syscall(VFS_SYSCALL_GETCWD, &request);
+  if (result < 0) {
+    errno = result == -75 ? ERANGE : -result;
+    return NULL;
+  }
+  return buf;
 }
-int unlink(const char *pathname) {
-  remove(pathname);
-  return 1;
-}
+int unlink(const char *pathname) { return remove(pathname); }
 unsigned long strtoul(const char *s, char **endptr, int base) {
   unsigned long result = 0;
   int sign = 1;
@@ -1931,33 +1863,7 @@ unsigned long strtoul(const char *s, char **endptr, int base) {
 float strtof(const char *nptr, char **endptr) {
   return (float)strtod(nptr, endptr);
 }
-FILE *fdopen(int fd, char *mode) {
-  unsigned int flag = 0;
-  FILE *fp = (FILE *)fd;
-  while (*mode != '\0') {
-    switch (*mode) {
-    case 'a':
-      flag |= APPEND;
-      break;
-    case 'b':
-      break;
-    case 'r':
-      flag |= READ;
-      break;
-    case 'w':
-      flag |= WRITE;
-      break;
-    case '+':
-      flag |= PLUS;
-      break;
-    default:
-      break;
-    }
-    mode++;
-  }
-  fp->mode = flag;
-  return fp;
-}
+FILE *fdopen(int fd, const char *mode) { return stdio_fdopen_impl(fd, mode); }
 
 long long strtoll(const char *nptr, char **endptr, int base) {
   const char *s;
@@ -4867,8 +4773,6 @@ void init_mem() { abi_alloc_init(); }
 //   int size = *(int *)((char *)p - sizeof(int));
 //   mem_free_nb(mm, (char *)p - sizeof(int), size + sizeof(int), 128);
 // }
-int api_list_directory(const char *path, struct finfo_block *entries,
-                       size_t capacity);
 enum {
   API_BUFFER_ERROR = -1,
   API_BUFFER_RETRY = -2,
@@ -4883,7 +4787,10 @@ int list_directory(const char *path, struct finfo_block **entries,
   *count = 0;
   size_t capacity = 0;
   for (;;) {
-    int required = api_list_directory(path, NULL, 0);
+    vfs_syscall_request_t request = {0};
+    request.size = sizeof(request);
+    request.arguments.list.path = (uint32_t)(uintptr_t)path;
+    int required = vfs_syscall(VFS_SYSCALL_LIST_DIRECTORY, &request);
     if (required < 0) {
       free(*entries);
       *entries = NULL;
@@ -4912,7 +4819,9 @@ int list_directory(const char *path, struct finfo_block **entries,
       capacity = (size_t)required;
     }
 
-    int result = api_list_directory(path, *entries, capacity);
+    request.arguments.list.entries = (uint32_t)(uintptr_t)*entries;
+    request.arguments.list.capacity = capacity;
+    int result = vfs_syscall(VFS_SYSCALL_LIST_DIRECTORY, &request);
     if (result >= 0) {
       *count = (size_t)result;
       return 0;
@@ -4952,265 +4861,395 @@ int get_command_line(char **line, size_t *length) {
     }
   }
 }
-int fseek(FILE *fp, int offset, int whence) {
-  if (whence == 0) {
-    fp->p = offset;
-  } else if (whence == 1) {
-    fp->p += offset;
-  } else if (whence == 2) {
-    fp->p = fp->fileSize + offset;
+
+static int stdio_parse_mode(const char *mode, unsigned int *stdio_mode,
+                            int *open_flags) {
+  if (mode == NULL || *mode == '\0') {
+    return -1;
+  }
+  unsigned int stream_mode;
+  int flags;
+  if (*mode == 'r') {
+    stream_mode = STDIO_READ;
+    flags = O_RDONLY;
+  } else if (*mode == 'w') {
+    stream_mode = STDIO_WRITE;
+    flags = O_WRONLY | O_CREAT | O_TRUNC;
+  } else if (*mode == 'a') {
+    stream_mode = STDIO_WRITE | STDIO_APPEND;
+    flags = O_WRONLY | O_CREAT | O_APPEND;
   } else {
     return -1;
   }
+  bool plus = false;
+  for (mode++; *mode != '\0'; mode++) {
+    if (*mode == 'b') {
+      continue;
+    }
+    if (*mode == '+' && !plus) {
+      plus = true;
+      stream_mode |= STDIO_READ | STDIO_WRITE;
+      flags = (flags & ~O_ACCMODE) | O_RDWR;
+      continue;
+    }
+    return -1;
+  }
+  *stdio_mode = stream_mode;
+  *open_flags = flags;
   return 0;
-}
-long ftell(FILE *stream) { return stream->p; }
-#define CANREAD(flag) ((flag) & READ || (flag) & PLUS)
-#define CANWRITE(flag) ((flag) & WRITE || (flag) & PLUS || (flag) & APPEND)
-FILE *fopen(char *filename, char *mode) {
-  unsigned int flag = 0;
-  FILE *fp = (FILE *)malloc(sizeof(FILE));
-  fp->read_flag = 0;
-  while (*mode != '\0') {
-    switch (*mode) {
-    case 'a':
-      flag |= APPEND;
-      break;
-    case 'b':
-      break;
-    case 'r':
-      flag |= READ;
-      break;
-    case 'w':
-      flag |= WRITE;
-      break;
-    case '+':
-      flag |= PLUS;
-      break;
-    default:
-      break;
-    }
-    mode++;
-  }
-  if (filesize(filename) == -1) {
-    if (flag & READ) {
-      free(fp);
-      errno = ENOENT;
-      return NULL; // 找不到
-    }
-    if (flag & WRITE || flag & APPEND) {
-      if (!mkfile(filename)) {
-        free(fp);
-        errno = EFAULT;
-        return NULL;
-      }
-      fp->read_flag = 2;
-    }
-  }
-  if (flag & WRITE) {
-    fp->fileSize = 0;
-  } else {
-    fp->fileSize = filesize(filename);
-  }
-  fp->bufferSize = 0;
-  if (flag & READ || flag & PLUS || flag & APPEND) {
-    fp->bufferSize = filesize(filename);
-    // printf("[Set]BufferSize=%d\n",fp->bufferSize);
-  }
-  if (flag & WRITE || flag & PLUS || flag & APPEND) {
-    fp->bufferSize += 100;
-  }
-  if (fp->bufferSize == 0) {
-    fp->bufferSize = 1;
-  }
-  fp->buffer = malloc(fp->bufferSize);
-  if (flag & PLUS || flag & APPEND || flag & READ) {
-    if (fp->read_flag != 2)
-      fp->read_flag = 1;
-  }
-  fp->p = 0;
-  fp->eof = 0;
-  if (flag & APPEND) {
-    fp->p = fp->fileSize;
-  }
-  fp->name = malloc(strlen(filename) + 1);
-  strcpy(fp->name, filename);
-  fp->mode = flag;
-  //	printf("[fopen]BufferSize=%d\n",fp->bufferSize);
-  return fp;
-}
-int fgetc(FILE *stream) {
-  if (CANREAD(stream->mode)) {
-    if (stream == stdin) {
-      return getch();
-    }
-    if (stream->p >= stream->fileSize || stream->fileSize == -1) {
-      stream->eof = 1;
-      return EOF;
-    } else {
-      if (stream->read_flag == 1) {
-        api_readfile(stream->name, stream->buffer);
-        stream->read_flag = 0;
-      }
-      return stream->buffer[stream->p++];
-    }
-  } else {
-    return EOF;
-  }
-}
-int fputc(int ch, FILE *stream) {
-  if (CANWRITE(stream->mode)) {
-    if (stream == stdout || stream == stderr) {
-      putch(ch);
-      return ch;
-    }
-    if (CANREAD(stream->mode)) {
-      if (stream->read_flag == 1) {
-        api_readfile(stream->name, stream->buffer);
-        stream->read_flag = 0;
-      }
-    }
-    if (stream->p >= stream->bufferSize) {
-      stream->buffer = realloc(stream->buffer, stream->bufferSize + 100);
-      stream->bufferSize += 100;
-    }
-    if (stream->p >= stream->fileSize) {
-      stream->fileSize++;
-    }
-    stream->buffer[stream->p++] = ch;
-    stream->eof = 0;
-    return ch;
-  }
-  return EOF;
-}
-unsigned int fwrite(const void *ptr, unsigned int size, unsigned int nmemb,
-                    FILE *stream) {
-  if (CANWRITE(stream->mode)) {
-    unsigned char *c_ptr = (unsigned char *)ptr;
-    for (int i = 0; i < size * nmemb; i++) {
-      fputc(c_ptr[i], stream);
-    }
-    return nmemb;
-  } else {
-    return 0;
-  }
-}
-unsigned int fread(void *buffer, unsigned int size, unsigned int count,
-                   FILE *stream) {
-  if (CANREAD(stream->mode)) {
-    if (stream == stdin) {
-      scan(buffer, size * count);
-      return count;
-    }
-    unsigned char *c_ptr = (unsigned char *)buffer;
-    for (int i = 0; i < size * count; i++) {
-      unsigned int ch = fgetc(stream);
-      if (ch == EOF) {
-        return i;
-      } else {
-        c_ptr[i] = ch;
-      }
-    }
-    return count;
-  } else {
-    return 0;
-  }
-}
-int fclose(FILE *fp) {
-  if (fp == NULL) {
-    return EOF;
-  }
-  if (CANWRITE(fp->mode)) {
-    //		printf("Save file.....(%s) Size =
-    //%d\n",fp->buffer,fp->fileSize);
-    Edit_File(fp->name, fp->buffer, fp->fileSize, 0);
-  }
-  free(fp->buffer);
-  free(fp->name);
-  free(fp);
-  return 0;
-}
-// does not support
-int fflush(FILE *stream) { return 0; }
-char *fgets(char *str, int n, FILE *stream) {
-  if (CANREAD(stream->mode)) {
-    if (stream == stdin) {
-      scan(str, n);
-      return str;
-    } else {
-      int i;
-      for (i = 0; i < n; i++) {
-        unsigned int ch = fgetc(stream);
-        if (ch == EOF) {
-          if (i == 0) {
-            return NULL;
-          } else {
-            break;
-          }
-        }
-        if (ch == '\n') {
-          str[i] = ch;
-          i++;
-          break;
-        }
-        str[i] = ch;
-      }
-      str[i] = 0;
-      return str;
-    }
-  }
-  return NULL;
-}
-int fputs(const char *str, FILE *stream) {
-  if (CANWRITE(stream->mode)) {
-    if (stream == stdout || stream == stderr) {
-      print(str);
-      return 0;
-    } else {
-      for (int i = 0; i < strlen(str); i++) {
-        fputc(str[i], stream);
-      }
-      return 0;
-    }
-  }
-  return EOF;
-}
-int fprintf(FILE *stream, const char *format, ...) {
-  if (CANWRITE(stream->mode)) {
-    int len;
-    va_list ap;
-    va_start(ap, format);
-    char *buf = malloc(1024);
-    len = vsprintf(buf, format, ap);
-    fputs(buf, stream);
-    free(buf);
-    va_end(ap);
-    return len;
-  } else {
-    // printf("CAN NOT WRITE\n");
-    return EOF;
-  }
 }
 
-int feof(FILE *stream) { return stream->eof ? -1 : 0; }
-int ferror(FILE *stream) { return 0; }
-int getc(FILE *stream) { return fgetc(stream); }
-char *strerror(int errno) {
-  if (errno == ENOENT) {
-    return "No such file.";
-  } else if (errno = EFAULT) {
-    return "Bad Address";
+static void stdio_register(FILE *stream) {
+  stream->registered = 1;
+  stream->next = stdio_streams;
+  if (stdio_streams != NULL) {
+    stdio_streams->previous = stream;
   }
-  return "(null)";
+  stdio_streams = stream;
 }
-int ungetc(int c, FILE *fp) {
-  if (fp->p - 1 < 0) {
-    return EOF;
-  } else {
-    fp->p -= 1;
-    fp->buffer[fp->p] = c;
-    return c;
+
+static void stdio_unregister(FILE *stream) {
+  if (!stream->registered) {
+    return;
   }
+  if (stream->previous != NULL) {
+    stream->previous->next = stream->next;
+  } else {
+    stdio_streams = stream->next;
+  }
+  if (stream->next != NULL) {
+    stream->next->previous = stream->previous;
+  }
+  stream->registered = 0;
+}
+
+static FILE *stdio_stream_create(int descriptor, unsigned int mode) {
+  FILE *stream = malloc(sizeof(*stream));
+  if (stream == NULL) {
+    return NULL;
+  }
+  memset(stream, 0, sizeof(*stream));
+  if (descriptor > 2) {
+    stream->buffer = malloc(BUFSIZ);
+    if (stream->buffer == NULL) {
+      free(stream);
+      return NULL;
+    }
+  }
+  stream->descriptor = descriptor;
+  stream->mode = mode;
+  stream->unget_character = EOF;
+  stdio_register(stream);
+  return stream;
+}
+
+static FILE *stdio_fdopen_impl(int descriptor, const char *mode) {
+  unsigned int stream_mode;
+  int ignored_flags;
+  if (descriptor < 0 ||
+      stdio_parse_mode(mode, &stream_mode, &ignored_flags) != 0) {
+    errno = EINVAL;
+    return NULL;
+  }
+  if (descriptor > 2) {
+    struct stat status;
+    if (fstat(descriptor, &status) != 0) {
+      return NULL;
+    }
+  }
+  return stdio_stream_create(descriptor, stream_mode);
+}
+
+FILE *fopen(const char *filename, const char *mode) {
+  unsigned int stream_mode;
+  int flags;
+  if (filename == NULL || stdio_parse_mode(mode, &stream_mode, &flags) != 0) {
+    errno = EINVAL;
+    return NULL;
+  }
+  int descriptor = open(filename, flags, 0);
+  if (descriptor < 0) {
+    return NULL;
+  }
+  FILE *stream = stdio_stream_create(descriptor, stream_mode);
+  if (stream == NULL) {
+    close(descriptor);
+    errno = ENOMEM;
+  }
+  return stream;
+}
+
+static int stdio_write_all(FILE *stream, const unsigned char *buffer,
+                           size_t length) {
+  size_t completed = 0;
+  while (completed < length) {
+    ssize_t written =
+        write(stream->descriptor, buffer + completed, length - completed);
+    if (written <= 0) {
+      stream->error = 1;
+      return -1;
+    }
+    completed += written;
+  }
+  return 0;
+}
+
+int fflush(FILE *stream) {
+  if (stream == NULL) {
+    int status = 0;
+    for (FILE *current = stdio_streams; current != NULL;
+         current = current->next) {
+      if (fflush(current) != 0) {
+        status = EOF;
+      }
+    }
+    return status;
+  }
+  if (stream->direction == STDIO_DIRECTION_WRITE &&
+      stream->buffer_length != 0) {
+    if (stdio_write_all(stream, stream->buffer, stream->buffer_length) != 0) {
+      return EOF;
+    }
+  } else if (stream->direction == STDIO_DIRECTION_READ) {
+    size_t unread = stream->buffer_length - stream->buffer_position;
+    if (stream->unget_character != EOF) {
+      unread++;
+    }
+    if (unread != 0 && stream->descriptor > 2 &&
+        lseek(stream->descriptor, -(off_t)unread, SEEK_CUR) < 0) {
+      stream->error = 1;
+      return EOF;
+    }
+  }
+  stream->buffer_length = 0;
+  stream->buffer_position = 0;
+  stream->direction = STDIO_DIRECTION_NONE;
+  stream->unget_character = EOF;
+  if (stream->descriptor > 2 && fsync(stream->descriptor) != 0) {
+    stream->error = 1;
+    return EOF;
+  }
+  return 0;
+}
+
+int fclose(FILE *stream) {
+  if (stream == NULL) {
+    return EOF;
+  }
+  int status = fflush(stream);
+  stdio_unregister(stream);
+  if (close(stream->descriptor) != 0) {
+    status = EOF;
+  }
+  free(stream->buffer);
+  free(stream);
+  return status;
+}
+
+static int stdio_prepare(FILE *stream, enum stdio_direction direction) {
+  if (stream->direction != STDIO_DIRECTION_NONE &&
+      stream->direction != direction && fflush(stream) != 0) {
+    return -1;
+  }
+  stream->direction = direction;
+  return 0;
+}
+
+size_t fread(void *buffer, size_t size, size_t count, FILE *stream) {
+  if (stream == NULL || (stream->mode & STDIO_READ) == 0 || size == 0 ||
+      count == 0 || count > UINT_MAX / size ||
+      stdio_prepare(stream, STDIO_DIRECTION_READ) != 0) {
+    return 0;
+  }
+  if (stream->descriptor == 0) {
+    scan(buffer, size * count);
+    return count;
+  }
+  size_t requested = size * count;
+  size_t completed = 0;
+  unsigned char *output = buffer;
+  if (stream->unget_character != EOF && requested != 0) {
+    output[completed++] = stream->unget_character;
+    stream->unget_character = EOF;
+  }
+  while (completed < requested) {
+    if (stream->buffer_position == stream->buffer_length) {
+      ssize_t read_count = read(stream->descriptor, stream->buffer, BUFSIZ);
+      if (read_count < 0) {
+        stream->error = 1;
+        break;
+      }
+      if (read_count == 0) {
+        stream->eof = 1;
+        break;
+      }
+      stream->buffer_length = read_count;
+      stream->buffer_position = 0;
+    }
+    size_t chunk = stream->buffer_length - stream->buffer_position;
+    if (chunk > requested - completed) {
+      chunk = requested - completed;
+    }
+    memcpy(output + completed, stream->buffer + stream->buffer_position,
+           chunk);
+    stream->buffer_position += chunk;
+    completed += chunk;
+  }
+  return completed / size;
+}
+
+size_t fwrite(const void *buffer, size_t size, size_t count, FILE *stream) {
+  if (stream == NULL || (stream->mode & STDIO_WRITE) == 0 || size == 0 ||
+      count == 0 || count > UINT_MAX / size ||
+      stdio_prepare(stream, STDIO_DIRECTION_WRITE) != 0) {
+    return 0;
+  }
+  size_t requested = size * count;
+  if (stream->descriptor == 1 || stream->descriptor == 2) {
+    return stdio_write_all(stream, buffer, requested) == 0 ? count : 0;
+  }
+  size_t completed = 0;
+  const unsigned char *input = buffer;
+  while (completed < requested) {
+    if (stream->buffer_length == BUFSIZ && fflush(stream) != 0) {
+      break;
+    }
+    stream->direction = STDIO_DIRECTION_WRITE;
+    size_t chunk = BUFSIZ - stream->buffer_length;
+    if (chunk > requested - completed) {
+      chunk = requested - completed;
+    }
+    memcpy(stream->buffer + stream->buffer_length, input + completed, chunk);
+    stream->buffer_length += chunk;
+    completed += chunk;
+  }
+  return completed / size;
+}
+
+int fseek(FILE *stream, long offset, int whence) {
+  if (stream == NULL || fflush(stream) != 0 ||
+      lseek(stream->descriptor, offset, whence) < 0) {
+    if (stream != NULL) {
+      stream->error = 1;
+    }
+    return -1;
+  }
+  stream->eof = 0;
+  return 0;
+}
+
+long ftell(FILE *stream) {
+  if (stream == NULL) {
+    return -1;
+  }
+  off_t position = lseek(stream->descriptor, 0, SEEK_CUR);
+  if (position < 0) {
+    stream->error = 1;
+    return -1;
+  }
+  if (stream->direction == STDIO_DIRECTION_READ) {
+    position -= stream->buffer_length - stream->buffer_position;
+    if (stream->unget_character != EOF) {
+      position--;
+    }
+  } else if (stream->direction == STDIO_DIRECTION_WRITE) {
+    position += stream->buffer_length;
+  }
+  return position;
+}
+
+int fgetc(FILE *stream) {
+  unsigned char value;
+  return fread(&value, 1, 1, stream) == 1 ? value : EOF;
+}
+
+int fputc(int value, FILE *stream) {
+  unsigned char byte = value;
+  return fwrite(&byte, 1, 1, stream) == 1 ? byte : EOF;
+}
+
+char *fgets(char *buffer, int capacity, FILE *stream) {
+  if (buffer == NULL || capacity <= 0 || stream == NULL) {
+    return NULL;
+  }
+  int length = 0;
+  while (length + 1 < capacity) {
+    int value = fgetc(stream);
+    if (value == EOF) {
+      break;
+    }
+    buffer[length++] = value;
+    if (value == '\n') {
+      break;
+    }
+  }
+  if (length == 0) {
+    return NULL;
+  }
+  buffer[length] = '\0';
+  return buffer;
+}
+
+int fputs(const char *text, FILE *stream) {
+  size_t length = strlen(text);
+  return fwrite(text, 1, length, stream) == length ? 0 : EOF;
+}
+
+int fprintf(FILE *stream, const char *format, ...) {
+  va_list arguments;
+  va_start(arguments, format);
+  int result = vfprintf(stream, format, arguments);
+  va_end(arguments);
+  return result;
+}
+
+int feof(FILE *stream) { return stream != NULL && stream->eof ? EOF : 0; }
+
+int ferror(FILE *stream) { return stream != NULL && stream->error ? EOF : 0; }
+
+int getc(FILE *stream) { return fgetc(stream); }
+
+int ungetc(int character, FILE *stream) {
+  if (stream == NULL || character == EOF || stream->unget_character != EOF) {
+    return EOF;
+  }
+  stream->unget_character = (unsigned char)character;
+  stream->eof = 0;
+  return stream->unget_character;
+}
+
+char *strerror(int value) {
+  if (value == ENOENT) {
+    return "No such file or directory";
+  }
+  if (value == EBADF) {
+    return "Bad file descriptor";
+  }
+  if (value == EINVAL) {
+    return "Invalid argument";
+  }
+  if (value == ENOSPC) {
+    return "No space left on device";
+  }
+  return "I/O error";
+}
+
+void stdio_initialize(void) {
+  if (stdin != NULL || stdout != NULL || stderr != NULL) {
+    return;
+  }
+  stdin = stdio_fdopen_impl(0, "r");
+  stdout = stdio_fdopen_impl(1, "w");
+  stderr = stdio_fdopen_impl(2, "w");
+}
+
+void stdio_shutdown(void) {
+  while (stdio_streams != NULL) {
+    fclose(stdio_streams);
+  }
+  stdin = NULL;
+  stdout = NULL;
+  stderr = NULL;
 }
 double atof(const char *s) { return strtod(s, 0); }
 int setenv(const char *name, const char *value, int overwrite) {}

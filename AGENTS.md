@@ -117,6 +117,7 @@ make -C kernel MEMTEST=0 MEMSIZE_MB=512
 - IPC/RPC 改动可在系统中运行 `rpctest.bin`；磁盘和任务生命周期相关改动可结合 `dktest.bin`。两者都已由 `kernel/Makefile` 打包进主镜像。
 - GUI RPC 与共享映射改动可运行 `guitest.bin`：它 fork 出 `gui.bin`，验证服务发现、窗口创建、共享 framebuffer、异步刷新、键盘队列控制与关闭回收，并在串口输出 `GUITEST PASS`。自动运行时仍临时修改 `init.mst`，测试后立即恢复。
 - x86 异常入口与用户异常退出可在系统中运行 `exc_test.bin`，它依次验证 `#DE`、`#UD`、`#GP`、`#PF` 的子进程退出状态；该程序同样已打包进主镜像。
+- SMP FPU 保存、恢复、fork 快照与迁移回归使用 `fputest.bin`：它按 CPU 数创建多个独立进程，在 x87 栈保留哨兵值后连续主动让出 CPU，并校验多次切换及 fork 两侧的完整状态；成功时串口输出 `FPUTEST PASS`。
 
 <!-- 过时：旧文档中的 kernel64 构建、运行和 rootfs 流程；当前仓库只有 kernel/ 下的 32 位内核。 -->
 - 性能采样后可运行：
@@ -177,6 +178,7 @@ python3 scripts/kernel-perf.py \
 <!-- 过时：异常入口分散在 `kernel/dos/asm/errors.asm`，通过 FS 猜测用户态、改写 CatchEIP 或在汇编中单独处理/自旋。 -->
 - x86 控制寄存器访问统一使用 `kernel/include/arch/x86/control.h` 的固定宽度 inline 接口和 `X86_CR0_*` 位定义；写 CR0/CR3 必须带 `memory` clobber，页故障地址通过 `x86_cr2_read` 获取。
 <!-- 过时：CR0 位定义放在 `define.h`，并同时保留 `get_cr0/set_cr0` 与 `load_cr0/store_cr0` 多套实现。 -->
+- x87 状态与每 CPU owner 统一由 `kernel/arch/x86/fpu.c` 管理，任务结构只保存 `x86_fpu_state_t` 与状态是否已初始化。任务实际切离 CPU 前必须调用 `x86_fpu_flush_cpu()`：只有当前 CPU 的真实 owner 才执行 `FNSAVE`，随后清空 owner 并置 TS，保证所有 `on_cpu == 0` 的任务状态都已落入任务结构、可直接跨 CPU 迁移。`#NM` 通过 `CLTS` 后恢复或初始化当前任务并登记 owner；CPU 初始化保持 CR0.EM 清零、CR0.MP/NE/TS 置位。fork、显式 reset 和任务回收必须使用该架构接口，不得直接改状态标志或在调度器、异常处理器中散落 `FNSAVE`/`FRSTOR`/CR0 FPU 位操作。
 - x86 port I/O 统一使用 `kernel/include/arch/x86/io.h` 的 `x86_port_read8/16/32` 与 `x86_port_write8/16/32`；动态 port（特别是 PCI BAR）必须先验证是 I/O 空间、整个寄存器窗口不超过 `uint16_t` 范围，然后才显式收窄；数据宽度必须与硬件寄存器一致。这些 inline asm 都是 `volatile`，使用 `Nd` port/累加器约束并带 `memory` clobber；`x86_io_wait()` 只通过向 `0x80` 写入一个 8-bit 零实现，仅用于 PIC 初始化和明确需要该 legacy delay 的软盘控制器轮询。
 <!-- 过时：port I/O、中断开关、EFLAGS 和文本光标通过 `kernel/dos/asm/i386.asm` 的 `io_*`/`ASM_call` 全局 wrapper 访问。 -->
 - 普通临界区必须成对使用 `irq_save()`/`irq_restore()` 保留调用者 IF 状态；等待路径要在关中断时发布等待状态并调用 `task_next()`，切回后才 restore。`irq_enable()` 只用于首次启动、明确允许抢占的 syscall 入口、任务终止后等待调度以及需主动开中断等待硬件 IRQ 的路径；不得用它代替临界区 restore。新内核任务可能由中断内的调度切入，因此确实要允许硬件 IRQ 的 bootstrap 入口（例如 `init()`）必须自己显式 enable，不得依赖下游驱动的等待函数偶然开中断。`x86_eflags_read/write` 只用于 AC 位等必须直接修改 EFLAGS 的 CPU 探测，不用于中断保护。
@@ -191,7 +193,7 @@ python3 scripts/kernel-perf.py \
 - descriptor table 与任务状态的通用入口是 `arch_interrupt_init`、`arch_task_state_init` 和 `arch_task_set_kernel_stack`；GDT/IDT/TSS 的地址、limit、布局、selector、access bits 及 `lgdt`/`lidt`/`ltr` 只能出现在 `kernel/arch/x86/` 私有实现中。首次 GDT/IDT 构造和活动 descriptor 更新必须全程保存并关闭中断；IDT 必须先完整构造全部 256 个有效入口再执行 `lidt`，`0xff` 默认入口必须可直接安全返回且不发送错误 EOI。
 - 驱动通过 `interrupt_register_entry(vector, entry)` 注册函数入口；该 API 只创建 DPL0 interrupt gate，并在保存中断状态的短临界区更新 IDT。DPL3 gate 只允许由架构初始化为既有的 syscall、custom syscall 和 net API 向量创建，驱动不得自行开放用户态调用权限。PCI 驱动取得 `uint8_t` IRQ 后必须先调用 `irq_is_valid`，成功后才能计算 vector、配置路由或解屏蔽；底层 mask/config API 对非法 IRQ 安全返回。
 <!-- 过时：驱动把整数地址传给本地 handler helper，或通过 `ADR_IDT`、`set_gatedesc` 直接改写 IDT 并自行选择 selector/DPL。 -->
-- 内核 BIOS 调用统一使用 `arch/x86/bios.h` 的 `x86_bios_interrupt`；调用方不得准备或清理 GDT 临时项，也不得直接调用底层 raw 汇编入口。
+- 内核 BIOS 调用统一使用 `arch/x86/bios.h` 的 `x86_bios_interrupt`；调用方不得准备或清理 GDT 临时项，也不得直接调用底层 raw 汇编入口。实模式软件中断全程保持硬件中断关闭，禁止在 raw bridge 中执行 `sti`：APIC/IOAPIC 向量没有实模式处理与 Local APIC EOI 路径，提前开中断会在 KVM 下留下 in-service 向量并阻塞同优先级设备 IRQ。
 - 汇编保存顺序与 C 结构布局构成内核内部 ABI。修改任一侧时同步检查任务初始栈、fork、signal、IDT 注册和最终 `iret` 恢复路径。
 - x86 软件任务上下文统一使用 `arch/x86/task.h` 的 `arch_task_context_t`；调度器通过 `arch_task_switch`/`arch_task_start` 显式传入当前 context 槽、下一 context、CR3 和 scheduler current 槽/任务。架构汇编不得读取 `mtask` 字段偏移或全局 `current`；fork 中断帧通过 `arch_task_interrupt_return` 恢复。
 - `task_next()` 在没有其他 runnable 任务或选出的 next 就是 current 时必须直接返回，禁止调用 `arch_task_switch` 自切换；自切换会先覆盖当前 context 槽、再加载调用前取得的旧 context 指针，造成内核栈回退和返回地址损坏。
@@ -227,7 +229,7 @@ python3 scripts/kernel-perf.py \
 - `apps/gui/gui.h` 的 window/console/sheet 布局被多个显式对象共享；修改结构布局后必须删除并重编全部 `apps/gui` 对象。console 原有且未被读取的 `tid` 槽现用于保存 `tty_handle`，不得在结构中间再次插入字段导致新旧对象静默错位。
 - `X86_VECTOR_RESCHEDULE`（`0xf0`）是内核固定重调度 IPI；唤醒远端 CPU 上的任务时发送该 IPI，处理入口发送 Local APIC EOI 后进入本地调度。外部 IOAPIC IRQ 仍路由到 BSP，不能让 AP 重复处理同一设备中断。
 - 用户态任务快照使用 `SYSCALL_TASK_SNAPSHOT`（`0x60`）的 query + capacity ABI，CPU 数量/当前 CPU 使用 `SYSCALL_CPU_INFO`（`0x61`）；`apps/ps` 构建为 `ps.bin`，显示 TID、TGID、状态、运行核心和累计运行时间。修改 `task_info_t` 时必须同步 `kernel/include/task_snapshot.h`、`apps/include/task.h` 与 `apps/libp/task.c`，并保持结构大小断言。
-- `kernel/Makefile` 的 QEMU CPU 数由 `QEMU_CPUS` 控制，默认 4。由于当前 Makefile 不追踪头文件依赖，修改 `mtask` 等共享结构布局后必须重编全部内核 C 对象，不能用旧增量对象做启动验证。
+- `kernel/Makefile` 的 QEMU CPU 数由 `QEMU_CPUS` 控制，默认 4。内核 C/C++ 编译统一生成并由各子 Makefile 加载 `.d` 头文件依赖；修改 `mtask` 等共享结构布局后，受影响对象必须由依赖图自动重编，不能删除依赖跟踪或用不完整的旧增量对象做启动验证。
 
 ### 新增或修改内核源文件
 
@@ -247,12 +249,11 @@ python3 scripts/kernel-perf.py \
 ### 加载器、文件系统和磁盘格式
 
 - `loader/` 与 `kernel/` 各自有 FAT/PFS/VFS 和驱动代码。修改磁盘结构或加载协议时必须检查两边的结构定义和读写逻辑，不能只修一侧。
-- 内核挂载状态显式区分 `INITIALIZING`、`ACTIVE`、`RETIRED`。任务 VFS 实例和显式 `X:` 路径操作都通过挂载引用保持共享缓存存活；卸载先从活动表摘除挂载，并在最后一个引用释放后再销毁缓存。
+- 内核挂载状态显式区分 `INITIALIZING`、`ACTIVE`、`RETIRED`。进程 cwd dentry、打开文件和显式 `X:` 路径解析持有挂载引用；卸载先从活动表摘除挂载，已有引用可继续使用，最后一个引用释放后再销毁驱动状态与页缓存。
 - 每个物理盘记录 retired generation 计数和 format reservation。新挂载可与 retired generation 并存；format 遇到零引用的 active 挂载时在同一临界区摘除挂载并取得 reservation，再在锁外依次销毁缓存和格式化，仍被任务引用、正在初始化或存在 retired 引用时必须保持现状并失败。mount 初始化与 format 必须互斥，retired 计数只能在 `delete_fs` 完整结束后递减，保证 format 不会与销毁并发。
-- 显式盘符路径必须在保存中断状态的短临界区 acquire 活动挂载，文件系统调用在临界区外执行并在结束后 release；相对路径由当前任务实例持有引用。不得让活动挂载中的裸 `vfs_t *` 逃逸。
-- 每个 mount owner 通过 `vfs_t` 内嵌 prev/next 维护动态 instance 链，包含 owner root、任务实例和 clone replay 的临时实例；完整 create 后短 irq 临界区注册，release/abort 在释放 cache 前注销。文件系统需要更新共享 cursor 时遍历 owner instance 链，不得扫描固定任务数组。
-- rename 是双路径操作：源和目标都要独立 acquire/resolve，只允许同一 mount owner，并向文件系统传递去除盘符的两条路径。跨盘 rename 必须失败。
-- 文件系统 `cd` 需要先准备新 cursor/path 状态，malloc 和 `AddVal` 全部成功后才 commit；`..` 必须先验证非空。目录缓存、bitmap 和 list_file 的 list append 失败必须回滚并释放已分配项。
+- 路径解析唯一实现在 VFS：`X:`/`X:/` 从指定盘根开始，`/` 从当前盘根开始，相对路径从 cwd 开始；VFS 统一折叠 `/`、`\\`、重复分隔符、`.` 和 `..`。FAT/PFS/ISO9660 驱动只接收已解析的目录 node 与单个 component，禁止恢复驱动内多组件 path resolver 或 cwd cursor。
+- 文件系统驱动通过 `vfs_filesystem_t` operations 实现 root、normalize-name、lookup、offset read/write、truncate、create/remove/rename、iterate 和 sync。数据 I/O 返回真实字节数或负错误，不得恢复整文件 bool `read_file/write_file`。
+- rename 由 VFS 独立解析两个 parent+leaf，跨挂载必须失败；当前 FAT/PFS 仅支持同目录 rename。仍被打开的文件或作为 cwd/祖先的目录在 unlink/rename 时返回 `EBUSY`。
 - 内核虚拟盘 `disk_read` 的物理扇区固定为 512 字节，因此当前 FAT 实现只接受 BPB `BytsPerSec == 512`。多簇目录缓冲区的每簇偏移必须使用 `ClustnoBytes`，数据簇号必须先验证 `>= 2` 且整簇落在磁盘范围内。
 - 虚拟盘可通过 `register_vdisk_at` 预留 ABI 盘符；软盘、DEVFS 和 legacy IDE 分别固定使用 `A:`、`B:` 与 `C:` 起的设备槽，不能退回 first-free 注册导致 IDE 回调访问的设备编号与 `vdisk` 容量元数据错位。ATA IDENTIFY 声明 48-bit LBA 但容量字段为零时必须回退 28-bit 容量。
 - FAT format 根据磁盘容量选择 FAT12/16/32，迭代计算 FAT 长度并只使用 2 的幂次 sectors-per-cluster；FAT 表和根目录必须完整清零、写入标准保留项，并回读 boot sector、两份 FAT 和根目录后才报告成功。不得恢复未初始化格式化缓冲区或任意非 2 次幂簇大小。
@@ -260,10 +261,16 @@ python3 scripts/kernel-perf.py \
 <!-- 过时：FAT 保存长度表示“末项偏移”并使用 `i <= length`，新目录额外创建名为 `NULL` 的占位文件。 -->
 - FAT mkdir 直接持有 parent slot、child cluster 和可选的 parent-extension cluster；所有分配、list append 与 realloc 在提交 parent entry/FAT 前完成并可逆序回滚，提交后直接写标准目录簇，不得恢复 `mkfile -> 再查路径 -> del 回滚` 的间接流程。
 <!-- 过时：FAT mkdir 先创建普通文件，再通过路径重新查找并改写为目录，失败时调用通用 `del` 猜测所有权。 -->
-- `vfs_clone_for_task` 从源实例直接 acquire 挂载（允许源挂载已 retired），在临时实例完整重放工作目录后才替换目标实例。clone 失败必须保持目标原状，任务创建、线程、fork 和执行路径必须检查失败并完整回滚。
-- 内核文件系统 `init_fs`、`copy_cache` 返回成功状态；初始化失败必须清理部分资源和挂载 reservation，不能无条件把挂载发布为 active。新增 clone/free 路径必须同步维护该所有权，不能在仍有引用时直接调用文件系统 `delete_fs`。
+- 进程文件状态由引用计数 `vfs_context` 封装 cwd 和动态 fd table。线程共享 context；普通新进程只继承 cwd；fork 复制 fd 表但引用同一 open-file description，因而共享 offset/append 状态。任务构造失败与退出必须释放 context 并关闭全部 fd。
+- 用户文件 ABI 唯一入口是 `SYSCALL_VFS` 的语义化 operation 表和带 size 的定长 request。禁止恢复 `filesize/api_readfile/Edit_File/mkfile`、分散挂载 syscall 或把用户 `FILE *` 强转为 fd。
+- libp `FILE` 是公开不透明类型，私有结构持有真实 fd、8 KiB 缓冲、EOF/error 与 ungetc 状态；`fopen/fread/fwrite/fseek/fflush/fclose/fdopen/fileno` 必须遵守当前 VFS offset 和 errno 语义。
+- VFS 使用全局 4 KiB clean-page 读缓存，默认容量为检测内存的 `1/128`（限制在 256 KiB..8 MiB）；哈希桶负责常数复杂度查找，LRU 链只维护淘汰顺序。达到 8 KiB 的读取先检查请求范围是否已全部驻留，未命中时必须一次进入文件系统，并用结果填充完整覆盖的缓存页（到达 EOF 的末页也是完整有效页），禁止重新拆成逐页驱动调用。单次流式读取可缓存页数超过全部容量时不得边插入边淘汰。写入为 write-through：驱动成功后再更新或失效重叠缓存页，不得在没有完整回写/失败语义时引入脏页。
+- FAT 对齐的完整连续簇必须合并为批量磁盘 I/O，只在首尾非对齐或清零写入时分配 bounce buffer；不得恢复逐簇获取磁盘信号量、逐簇分配或无条件二次复制。程序 ELF 加载只解析一次路径并直接使用 VFS handle，段复制完成后立即释放内核临时镜像。
+- `vdisk.max_transfer_sectors` 是块设备单次传输能力，未声明时保守使用 8 个扇区；通用磁盘层按设备能力分批并在每批之间响应已发布的重调度，不得在持有全局 kernel lock 时将长读写变成不可抢占的整段忙等。内核 ATA IDE 数据路径只使用 PCI Bus Master DMA：从 `init_PCI` 已建立的设备表按 class/subclass 查找兼容模式 IDE controller，验证 BAR4 是范围合法的 I/O window 并启用 PCI I/O/bus-master command bits，不得恢复启动时传入零 BAR 或 ATA PIO fallback。每个 channel 持有 page-backed 64 KiB bounce buffer 与 PRDT，PRD 必须在 64 KiB 边界分段，单次最多 128 个 512-byte 扇区；命令通过 IRQ 完成并以 `WAIT_REASON_DISK` 阻塞/唤醒调用者，IRQ 必须停止 bus master、清除 status、读 ATA status 并只发送一次对应 EOI。ATAPI packet read 仍是独立的短 PIO 路径，不得与 ATA DMA 状态机混用。
+- 程序创建、fork、页分配和用户堆扩展的成功热路径不得输出裸地址或逐次分配日志；串口日志只保留可操作的错误、显式诊断模式和必要生命周期状态，避免同步输出成为程序启动延迟。
+- 内核通用堆由 `kernel/dos/mm/heap.c` 统一封装 vendored i686 liballoc/talc；第三方导出在构建副本中统一改名为私有 `liballoc_*`，内核和模块只能使用带 KASAN/元数据校验的标准 `malloc/free/realloc`。heap 从 1 MiB span 起步并按需通过 `page_malloc` 增长，不得恢复 `memory/freeinfo` 排序整理器或启动时预清零固定 128 MiB arena。链接时 liballoc archive 必须紧跟 `heap.o`，使其静态锁状态位于固定 `0x400000` 页表区之前；放到对象列表末尾会在 KASAN 构建中被页表初始化覆盖。
 - PFS format 必须在写盘前完整读取并校验 boot sector 与 `dosldr.bin`，按 boot sector 每次 92 个扇区的读取粒度动态扩大并清零 loader 保留区，再把 bitmap/root 布置在保留区之后；检查长度、磁盘容量和分配失败，所有区域写后校验并把真实失败传播到 VFS/psh/安装器。VFS 统一负责安全摘除无人使用的活动挂载；psh 格式化成功后重新挂载目标盘，安装器成功后重新 mount/change，失败时按逆序尽力恢复源盘。
-- PFS path resolver 在每个出口都写明 error，复制路径前检查 NULL、长度和 malloc；需要 leaf name 的调用返回 parent block + 原路径 span，需要完整目录的调用解析到最终目录。`pfs_fileinfo` 在分配前验证名称容量，内核 `fopen` 的 FILE/buffer/name/read 任一步失败都逆序释放。
+- PFS node 以 directory block + inode index 定位文件，以 directory data block 定位目录；文件数据按 508-byte payload block 进行偏移 I/O。PFS 中不得出现 path resolver、`current_dict_block` 或 `prev_dict_block` cwd 状态。
 - 启动系统盘必须同时包含 `init.bin`、`psh.bin`、`sys.cfg`；探测失败必须 panic，不得退回可能是 DEVFS 的 `first_vdisk()`。显式盘符剥离依赖标准重叠 `memmove` 语义，修改基础内存函数后必须做冷启动验证。
 <!-- 过时：系统盘文件探测全部失败后仍退回第一个虚拟盘继续启动。 -->
 - 启动扇区、加载地址、ELF 入口和分区/文件系统布局属于启动 ABI；任何改动都需要完整构建和冷启动验证。

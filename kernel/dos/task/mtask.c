@@ -59,14 +59,13 @@ static void init_task() {
     m[i].keyboard_press = NULL;
     m[i].keyboard_release = NULL;
     m[i].urgent = 0;
-    m[i].fpu_flag = 0;
+    m[i].fpu_initialized = false;
     m[i].fifosleep = 0;
     m[i].mx = 0;
     m[i].my = 0;
     m[i].line = NULL;
     m[i].timer = NULL;
-    m[i].nfs = NULL;
-    m[i].mm = NULL;
+    m[i].fs_context = NULL;
     m[i].waittid = -1;
     m[i].wait_generation = 0;
     m[i].wait_reason = WAIT_REASON_NONE;
@@ -92,7 +91,6 @@ static void init_task() {
     }
   }
 }
-fpu_t public_fpu;
 extern mtask *mouse_use_task;
 static uint32_t scheduler_load(uint32_t cpu) {
   uint32_t load = 0;
@@ -234,7 +232,7 @@ void scheduler_reschedule_interrupt(void) {
   task_next();
 }
 
-void scheduler_preempt_on_kernel_exit(void) {
+void scheduler_preempt_if_needed(void) {
   if (scheduler_active && kernel_lock_depth() == 1 &&
       scheduler_cpus[smp_current_cpu()].need_resched) {
     task_next();
@@ -282,11 +280,7 @@ void task_next(void) {
   if (next->user_mode == 1) {
     arch_task_set_kernel_stack(next->top);
   }
-  x86_cr0_write(x86_cr0_read() & ~(X86_CR0_EM | X86_CR0_TS));
-  if (current->fpu_flag) {
-    asm volatile("fnsave (%%eax) \n" ::"a"(&current->fpu));
-  }
-  x86_fpu_disable();
+  x86_fpu_flush_cpu();
 
   arch_task_switch(&current->context, next->context, next->pde, &cpu->current,
                    next);
@@ -355,14 +349,19 @@ static mtask *create_task_impl(uintptr_t entry, unsigned weight,
   }
   t->top = esp_alloced; // r0的esp
   t->weight = weight;
-  t->drive = default_drive;
-  t->drive_number = default_drive - 'A';
   extern int init_ok_flag; // init_ok_flag 标记fs等是否初始化完成
   if (init_ok_flag) {
-    bool vfs_ready = scheduler_active && current_task()->nfs != NULL
-                         ? vfs_clone_for_task(current_task(), t)
-                         : vfs_change_disk_for_task(t->drive, t);
-    if (!vfs_ready) {
+    if (scheduler_active && current_task()->fs_context != NULL) {
+      if (share_pde) {
+        t->fs_context = current_task()->fs_context;
+        vfs_context_retain(t->fs_context);
+      } else {
+        t->fs_context = vfs_context_clone_cwd(current_task()->fs_context);
+      }
+    } else {
+      t->fs_context = vfs_context_create(default_drive);
+    }
+    if (t->fs_context == NULL) {
       if (owns_pde) {
         free_pde(t->pde);
       }
@@ -370,8 +369,6 @@ static mtask *create_task_impl(uintptr_t entry, unsigned weight,
       reset_task_slot(t, tid);
       return NULL;
     }
-    t->drive = t->nfs->drive;
-    t->drive_number = t->drive - 'A';
   }
   return t;
 }
@@ -414,7 +411,6 @@ void task_to_user_mode(unsigned eip, unsigned esp) {
     return;
   }
   (void)layout;
-  logk("TTT %d\n", task->tid);
   x86_interrupt_frame_t iframe;
 
   x86_user_frame_init(&iframe, eip, esp);
@@ -500,6 +496,7 @@ static void task_clear_external_refs(mtask *task) {
 static void task_release_resources(mtask *task) {
   unsigned tid = task->tid;
 
+  x86_fpu_reset(task);
   task_clear_external_refs(task);
   if (task == current_task()) {
     x86_cr3_write(PDE_ADDRESS);
@@ -518,9 +515,9 @@ static void task_release_resources(mtask *task) {
     free(task->Ukeyfifo);
     task->Ukeyfifo = NULL;
   }
-  if (task->nfs) {
-    vfs_free_task_instance(task->nfs);
-    task->nfs = NULL;
+  if (task->fs_context) {
+    vfs_context_release(task->fs_context);
+    task->fs_context = NULL;
   }
   if (task->alloced && task->alloc_size) {
     free(task->alloc_size);
@@ -539,13 +536,11 @@ static void task_release_resources(mtask *task) {
   task->alloc_size = NULL;
   task->alloced = 0;
   task->urgent = 0;
-  task->fpu_flag = 0;
   task->fifosleep = 0;
   task->mx = 0;
   task->my = 0;
   task->line = NULL;
   task->timer = NULL;
-  task->mm = NULL;
   task->waittid = TASK_ID_NONE;
   task->wait_generation = 0;
   task->wait_reason = WAIT_REASON_NONE;
@@ -701,10 +696,6 @@ mtask *current_task() {
 }
 int into_mtask() {
   init_task();
-  x86_cr0_write(x86_cr0_read() & ~(X86_CR0_EM | X86_CR0_TS));
-  asm volatile("fninit");
-  asm volatile("fnsave (%%eax) \n" ::"a"(&public_fpu));
-  x86_fpu_disable();
   arch_task_state_init();
   scheduler_cpu_total = smp_cpu_count();
   memset(scheduler_cpus, 0, sizeof(scheduler_cpus));
@@ -739,7 +730,6 @@ int into_mtask() {
     return -1;
   }
   scheduler_active = 1;
-  x86_cr0_write(x86_cr0_read() | X86_CR0_EM | X86_CR0_TS | X86_CR0_NE);
   mtask *idle = scheduler_cpus[0].idle;
   idle->on_cpu = 1;
   arch_task_start(idle->context, idle->pde, &scheduler_cpus[0].current, idle);
@@ -1076,9 +1066,6 @@ void mtask_run_now(mtask *obj) {
   scheduler_cpus[obj->cpu].need_resched = 1;
   smp_send_reschedule(obj->cpu);
 }
-static bool copy_vfs(mtask *src, mtask *dest) {
-  return vfs_clone_for_task(src, dest);
-}
 static void release_task_fifos(mtask *task) {
   if (task->Pkeyfifo) {
     page_free(task->Pkeyfifo->buf, 4096);
@@ -1150,9 +1137,7 @@ mtask *mtask_get_free() {
   mtask *t = NULL;
   for (int i = 1; i < 255; i++) {
     if (m[i].state == EMPTY) {
-      logk("f:%d\n", i);
       t = &(m[i]);
-      logk("%d\n", t->tid);
       break;
     }
   }
@@ -1168,7 +1153,6 @@ static void build_fork_stack(mtask *task) {
   addr -= sizeof(x86_interrupt_frame_t);
   x86_interrupt_frame_t *iframe = (x86_interrupt_frame_t *)addr;
   iframe->eax = 0;
-  logk("iframe = %08x\n", iframe->eip);
   addr -= sizeof(arch_task_context_t);
   task->context = (arch_task_context_t *)addr;
   arch_task_context_init(task->context,
@@ -1182,10 +1166,9 @@ int task_fork() {
     irq_restore(state);
     return -1;
   }
-  logk("get free %08x\n", m);
-  logk("current = %08x\n", get_tid(parent));
   int tid = m->tid;
   uint32_t generation = m->generation + 1;
+  x86_fpu_flush_cpu();
   memcpy(m, parent, sizeof(mtask));
   m->tid = tid;
   m->generation = generation;
@@ -1209,16 +1192,14 @@ int task_fork() {
   uintptr_t old_context = (uintptr_t)m->context;
   uintptr_t context_offset = old_context - old_stack_base;
   memcpy((void *)stack, (void *)old_stack_base, STACK_SIZE);
-  logk("s = %08x \n", old_stack_base);
   m->top = stack + STACK_SIZE;
   m->context = (arch_task_context_t *)(stack + context_offset);
-  m->nfs = NULL;
+  m->fs_context = NULL;
   m->Pkeyfifo = NULL;
   m->Ukeyfifo = NULL;
   m->keyfifo = NULL;
   m->mousefifo = NULL;
   m->timer = NULL;
-  m->mm = NULL;
   m->alloced = 0;
   m->alloc_size = NULL;
   /* 消息队列不继承：父进程队列里的负载归父进程所有 */
@@ -1259,8 +1240,8 @@ int task_fork() {
     irq_restore(state);
     return -1;
   }
-  logk("copy vfs\n");
-  if (!copy_vfs(parent, m)) {
+  m->fs_context = vfs_context_fork(parent->fs_context);
+  if (m->fs_context == NULL) {
     release_task_fifos(m);
     if (m->alloced) {
       free(m->alloc_size);
@@ -1272,8 +1253,8 @@ int task_fork() {
   }
   m->pde = pde_clone(parent->pde);
   if (m->pde == 0) {
-    vfs_free_task_instance(m->nfs);
-    m->nfs = NULL;
+    vfs_context_release(m->fs_context);
+    m->fs_context = NULL;
     release_task_fifos(m);
     if (m->alloced) {
       free(m->alloc_size);
@@ -1288,9 +1269,6 @@ int task_fork() {
   m->tgid = tid;
   m->kind = TASK_PROCESS;
   m->tid = tid;
-  logk("m->tid = %d\n", m->tid);
-  tid = m->tid;
-  logk("BUILD FORK STACK\n");
   build_fork_stack(m);
   if (!task_publish(m)) {
     task_abort_creation(m);

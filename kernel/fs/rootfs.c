@@ -1,10 +1,7 @@
 #include <dos.h>
 
-// do nothing
-static void Read(char drive,
-                 unsigned char* buffer,
-                 unsigned int number,
-                 unsigned int lba) {
+static void dev_read(char drive, unsigned char *buffer, unsigned int number,
+                     unsigned int lba) {
   (void)drive;
   (void)lba;
   if (buffer == NULL || number == 0) {
@@ -12,14 +9,16 @@ static void Read(char drive,
   }
   memset(buffer, 0, number * 512);
   *(uint32_t *)buffer = 1;
-  printk("[dev fs]don't try to read!\n");
 }
-static void Write(char drive,
-                  unsigned char* buffer,
-                  unsigned int number,
-                  unsigned int lba) {
-  printk("[dev fs]don't try to write!\n");
+
+static void dev_write(char drive, unsigned char *buffer, unsigned int number,
+                      unsigned int lba) {
+  (void)drive;
+  (void)buffer;
+  (void)number;
+  (void)lba;
 }
+
 static bool dev_check(uint8_t disk_number) {
   if (!DiskReady(disk_number)) {
     return false;
@@ -30,58 +29,73 @@ static bool dev_check(uint8_t disk_number) {
   }
   *marker = 0;
   disk_read(0, 1, marker, disk_number);
-  bool ok = *marker == 1;
+  bool present = *marker == 1;
   page_free(marker, 512);
-  return ok;
+  return present;
 }
 
-static bool dev_copy_cache(struct vfs_t *dest, struct vfs_t *src) {
-  (void)dest;
-  (void)src;
-  return true;
+static int dev_mount(vfs_t *mount) {
+  (void)mount;
+  return VFS_OK;
 }
-static void dev_release_cache(struct vfs_t *vfs) { (void)vfs; }
-static bool dev_init(struct vfs_t *vfs, uint8_t disk_number) {
-  (void)vfs;
-  (void)disk_number;
-  printk("init dev fs.\n");
-  return true;
+
+static void dev_unmount(vfs_t *mount) { (void)mount; }
+
+static int dev_root(vfs_t *mount, vfs_node_t *node) {
+  (void)mount;
+  memset(node, 0, sizeof(*node));
+  node->id.value[0] = 1;
+  node->type = VFS_NODE_DIRECTORY;
+  node->attributes = DIR;
+  return VFS_OK;
 }
-static int dev_cd(struct vfs_t *vfs, char *dictName) {
-  (void)vfs;
-  (void)dictName;
-  return 1;
+
+static int dev_lookup(vfs_t *mount, const vfs_node_t *directory,
+                      const char *name, vfs_node_t *node) {
+  (void)mount;
+  (void)directory;
+  (void)name;
+  (void)node;
+  return VFS_ERROR_NO_ENTRY;
 }
-// -----
-void init_devfs() {
-  vdisk vd;
-  strcpy(vd.DriveName, "dev");
-  vd.Read = Read;
-  vd.size = 114514;
-  vd.Write = Write;
-  vd.flag = 1;
-  register_vdisk_at('B', vd);
-  vfs_t fs = {0};
-  fs.flag = 1;
-  fs.cache = NULL;
-  strcpy(fs.FSName, "DEVFS");
-  fs.copy_cache = dev_copy_cache;
-  fs.release_cache = dev_release_cache;
-  fs.format = NULL;
-  fs.create_file = NULL;
-  fs.create_dict = NULL;
-  fs.del_dict = NULL;
-  fs.del_file = NULL;
-  fs.read_file = NULL;
-  fs.write_file = NULL;
-  fs.delete_fs = NULL;
-  fs.cd = dev_cd;
-  fs.file_size = NULL;
-  fs.check = dev_check;
-  fs.list_file = NULL;
-  fs.init_fs = dev_init;
-  fs.rename_file = NULL;
-  fs.attrib = NULL;
-  fs.fileinfo = NULL;
-  vfs_register_fs(fs);
+
+static int dev_read_file(vfs_t *mount, const vfs_node_t *node,
+                         uint32_t offset, void *buffer, uint32_t length) {
+  (void)mount;
+  (void)node;
+  (void)offset;
+  (void)buffer;
+  (void)length;
+  return VFS_ERROR_NO_ENTRY;
+}
+
+static int dev_iterate(vfs_t *mount, const vfs_node_t *directory,
+                       uint32_t index, vfs_dir_entry_t *entry) {
+  (void)mount;
+  (void)directory;
+  (void)index;
+  (void)entry;
+  return 0;
+}
+
+void init_devfs(void) {
+  vdisk disk = {0};
+  strcpy(disk.DriveName, "dev");
+  disk.Read = dev_read;
+  disk.Write = dev_write;
+  disk.size = 114514;
+  disk.flag = 1;
+  register_vdisk_at('B', disk);
+
+  static const vfs_filesystem_t filesystem = {
+      .name = "DEVFS",
+      .check = dev_check,
+      .mount = dev_mount,
+      .unmount = dev_unmount,
+      .root = dev_root,
+      .lookup = dev_lookup,
+      .read = dev_read_file,
+      .iterate = dev_iterate,
+  };
+  vfs_register_fs(&filesystem);
 }

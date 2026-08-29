@@ -1,6 +1,7 @@
 #ifndef KERNEL_ARCH_H
 #define KERNEL_ARCH_H
 
+#include <arch/x86/fpu.h>
 #include <arch/x86/task.h>
 #include <stddef.h>
 

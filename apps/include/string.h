@@ -7,9 +7,13 @@ extern "C" {
 #endif
 #include <ctypes.h>
 int strcmp(const char* s1, const char* s2);
+int strcasecmp(const char *s1, const char *s2);
+int strncasecmp(const char *s1, const char *s2, size_t length);
 char* strcpy(char* dest, const char* src);
 char* strncpy(char* dest, const char* src, size_t n);
+size_t strlcpy(char *destination, const char *source, size_t capacity);
 size_t strlen(const char* s);
+size_t strnlen(const char *s, size_t maximum);
 char* strcat(char* dest, const char* src);
 char* strncat(char* dest, const char* src, size_t n);
 long strtol(const char* nptr, char** endptr, int base);
@@ -29,8 +33,10 @@ size_t strspn(const char* s, const char *c);
 void* memchr(const void* s, int c, size_t n);
 void *memset(void *dest, int c, size_t n);
 void *memcpy(void *dest, const void *src, size_t n);
+void *mempcpy(void *dest, const void *src, size_t n);
 void *memmove(void *_d, const void *_s, size_t _n);
 char *strdup(const char *s);
+char *strsep(char **string, const char *separators);
 #ifdef __cplusplus
 }
 #endif

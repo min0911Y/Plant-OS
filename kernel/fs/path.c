@@ -4,11 +4,27 @@
 // env
 MST_Object* env;
 void env_init(void) {
-  if (vfs_filesize("sys.cfg") == -1) {
-    vfs_createfile("sys.cfg");
+  vfs_stat_t status;
+  FILE *stream = fopen("sys.cfg", "rb");
+  if (stream == NULL ||
+      vfs_stat(current_task()->fs_context, "sys.cfg", &status) < 0) {
+    if (stream != NULL) {
+      fclose(stream);
+    }
+    stream = fopen("sys.cfg", "wb+");
+    status.size = 0;
   }
-  char* buff = (char*)malloc(vfs_filesize("sys.cfg") + 1);
-  vfs_readfile("sys.cfg", buff);
+  if (stream == NULL) {
+    Panic_K("unable to open sys.cfg");
+  }
+  char *buff = malloc(status.size + 1);
+  if (buff == NULL || fread(buff, 1, status.size, stream) != status.size) {
+    fclose(stream);
+    free(buff);
+    Panic_K("unable to read sys.cfg");
+  }
+  fclose(stream);
+  buff[status.size] = '\0';
   env = Init_MstObj(buff);
   if (env->err) {
     printk("config parse err:%s\n", MST_strerror(env));
@@ -31,18 +47,19 @@ char* env_read(char* name) {
   if (MST_GetVar(name, MST_GetRootSpace(env)) == NULL) {
     return NULL;
   } else {
-    MST_get_string_in_space(env,name,MST_GetRootSpace(env));
+    return MST_get_string_in_space(env,name,MST_GetRootSpace(env));
   }
 }
 void env_save() {
   extern char default_drive;
   char path[12];
   sprintf(path, "%c:/sys.cfg", default_drive);
-  if (vfs_filesize(path) == -1) {
-    return;
-  }
   char* s = MST_build_to_string(env);
-  vfs_writefile(path, s, strlen(s));
+  FILE *stream = fopen(path, "wb");
+  if (stream != NULL) {
+    fwrite(s, 1, strlen(s), stream);
+    fclose(stream);
+  }
   free(s);
 }
 void env_reload() {
@@ -105,8 +122,8 @@ bool Path_Find_File(char* fileName, char* PATH_ADDR) {
   for (int i = 0; i < Path_GetPathCount(PATH_ADDR); i++) {
     Path_GetPath(i, path_result1, PATH_ADDR);
     GetFullPath(path_result2, fileName, path_result1);
-    int size = vfs_filesize(path_result2);
-    if (size != -1) {
+    vfs_stat_t status;
+    if (vfs_stat(current_task()->fs_context, path_result2, &status) == 0) {
       return true;
     }
   }
@@ -118,8 +135,8 @@ void Path_Find_FileName(char* Result, char* fileName, char* PATH_ADDR) {
   for (int i = 0; i < Path_GetPathCount(PATH_ADDR); i++) {
     Path_GetPath(i, path_result1, PATH_ADDR);
     GetFullPath(path_result2, fileName, path_result1);
-    int size = vfs_filesize(path_result2);
-    if (size != -1) {
+    vfs_stat_t status;
+    if (vfs_stat(current_task()->fs_context, path_result2, &status) == 0) {
       strcpy(Result, path_result2);
     }
   }

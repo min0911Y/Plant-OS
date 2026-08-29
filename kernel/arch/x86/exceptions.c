@@ -19,16 +19,7 @@ typedef struct {
 static bool x86_exception_handle_device_not_available(
     x86_exception_frame_t *frame) {
   (void)frame;
-  mtask *task = current_task();
-  x86_cr0_write(x86_cr0_read() & ~(X86_CR0_EM | X86_CR0_TS));
-  if (!task->fpu_flag) {
-    asm volatile("fnclex\n\tfninit");
-    memset(&task->fpu, 0, sizeof(task->fpu));
-    logk("FPU create state for task 0x%08x\n", task);
-  } else {
-    asm volatile("frstor %0" : : "m"(task->fpu));
-  }
-  task->fpu_flag = 1;
+  x86_fpu_handle_device_not_available(current_task());
   return true;
 }
 

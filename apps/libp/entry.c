@@ -15,28 +15,15 @@ void init_float();
 void Main() {
   set_rt((uintptr_t)return_to_app);
   init_mem();
-  stdout = (FILE *)malloc(sizeof(FILE));
-  stdin = (FILE *)malloc(sizeof(FILE));
-  stderr = (FILE *)malloc(sizeof(FILE));
+  stdio_initialize();
   if (stdout == NULL || stdin == NULL || stderr == NULL) {
-    free(stdout);
-    free(stdin);
-    free(stderr);
+    stdio_shutdown();
     exit((unsigned)-1);
   }
-  memset(stdout, 0, sizeof(FILE));
-  memset(stdin, 0, sizeof(FILE));
-  memset(stderr, 0, sizeof(FILE));
-  stdout->mode = WRITE;
-  stderr->mode = WRITE;
-  stdin->fileSize = -1;
-  stdin->mode = READ;
 
   runtime_arguments_t arguments;
   if (runtime_arguments_load(&arguments) != 0) {
-    free(stdout);
-    free(stdin);
-    free(stderr);
+    stdio_shutdown();
     exit((unsigned)-1);
   }
   init_env();

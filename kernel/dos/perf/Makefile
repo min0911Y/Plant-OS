@@ -4,6 +4,8 @@ incpath_src := ../../include/
 
 obj_perf := $(out_path_src)perf.o
 
+-include $(call kernel_depfiles,$(obj_perf))
+
 default : $(obj_perf)
 
 $(out_path_src)%.o : %.c Makefile

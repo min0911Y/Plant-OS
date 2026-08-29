@@ -36,6 +36,8 @@ lwip_core_objects := \
 obj_net := $(out_path_src)net_stack.o $(out_path_src)socket.o $(out_path_src)lwip_port.o \
 	$(lwip_core_objects)
 
+-include $(call kernel_depfiles,$(obj_net))
+
 default: $(obj_net)
 
 $(out_path_src)net_stack.o: net_stack.c $(lwip_options) Makefile

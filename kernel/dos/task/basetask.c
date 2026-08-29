@@ -15,16 +15,22 @@ static char find_system_drive(void) {
     if (!vfs_check_mount('A' + i)) {
       continue;
     }
+    vfs_context_t *context = vfs_context_create('A' + i);
+    if (context == NULL) {
+      continue;
+    }
     bool complete = true;
     for (unsigned int j = 0; j < sizeof(boot_files) / sizeof(boot_files[0]);
          j++) {
       sprintf(path, "%c:/%s", 'A' + i, boot_files[j]);
-      uint32_t size = vfs_filesize(path);
-      if (size == (uint32_t)-1) {
+      vfs_stat_t status;
+      if (vfs_stat(context, path, &status) < 0 ||
+          status.type != VFS_NODE_FILE) {
         complete = false;
         break;
       }
     }
+    vfs_context_release(context);
     if (complete) {
       return 'A' + i;
     }
@@ -48,19 +54,22 @@ void init() {
   rtc_init();
   init_devfs();
   printk("init ide\n");
-  ide_initialize(0x1F0, 0x3F6, 0x170, 0x376, 0x000);
+  ide_initialize();
   printk("init ahci\n");
   ahci_init();
   // init_palette();
   vfs_mount_all_disks();
   char system_drive = find_system_drive();
-  if (system_drive == 0 || !vfs_check_mount(system_drive) ||
-      !vfs_change_disk(system_drive)) {
+  if (system_drive == 0 || !vfs_check_mount(system_drive)) {
     Panic_K("system disk not found");
   }
+  vfs_context_t *system_context = vfs_context_create(system_drive);
+  if (system_context == NULL) {
+    Panic_K("system VFS context unavailable");
+  }
+  vfs_context_release(current_task()->fs_context);
+  current_task()->fs_context = system_context;
   task_set_default_drive(system_drive);
-  current_task()->drive = system_drive;
-  current_task()->drive_number = system_drive - 'A';
   env_init();
   net_stack_initialize();
 
@@ -86,25 +95,44 @@ void init() {
     running_mode = POWERINTDOS;
   }
 
-  FILE *fp = fopen("font.bin", "r");
-  if (fp != NULL) {
-    ascfont = fp->buffer;
+  vfs_stat_t font_status;
+  FILE *fp = fopen("font.bin", "rb");
+  if (fp != NULL && vfs_stat(current_task()->fs_context, "font.bin",
+                             &font_status) == 0) {
+    ascfont = malloc(font_status.size);
+    if (ascfont == NULL || fread(ascfont, 1, font_status.size, fp) !=
+                               font_status.size) {
+      Panic_K("unable to load font.bin");
+    }
+    fclose(fp);
   }
-  fp = fopen("HZK16", "r");
-  if (fp != NULL) {
-    hzkfont = fp->buffer;
+  fp = fopen("HZK16", "rb");
+  if (fp != NULL &&
+      vfs_stat(current_task()->fs_context, "HZK16", &font_status) == 0) {
+    hzkfont = malloc(font_status.size);
+    if (hzkfont == NULL || fread(hzkfont, 1, font_status.size, fp) !=
+                               font_status.size) {
+      Panic_K("unable to load HZK16");
+    }
+    fclose(fp);
   }
   init_ok_flag = 1;
   extern struct tty *tty_default;
   tty_set(current_task(), tty_default);
   clear();
-  shell_size = vfs_filesize("psh.bin");
-  shell_data = shell_size == (uint32_t)-1 || shell_size == 0
-                   ? NULL
-                   : (char *)page_malloc(shell_size);
-  if (shell_data == NULL || !vfs_readfile("psh.bin", shell_data)) {
+  vfs_stat_t shell_status;
+  fp = fopen("psh.bin", "rb");
+  if (fp == NULL || vfs_stat(current_task()->fs_context, "psh.bin",
+                             &shell_status) < 0 ||
+      shell_status.size == 0) {
+    Panic_K("unable to open psh.bin");
+  }
+  shell_size = shell_status.size;
+  shell_data = (char *)page_malloc(shell_size);
+  if (shell_data == NULL || fread(shell_data, 1, shell_size, fp) != shell_size) {
     Panic_K("unable to load psh.bin");
   }
+  fclose(fp);
   os_execute_no_ret("init.bin", "init.bin");
   task_kill(current_task()->tid);
   for (;;)

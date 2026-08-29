@@ -1,4 +1,5 @@
 #include <syscall.h>
+#include <stdio.h>
 #include <string.h>
 typedef void (*EXIT_CALL)(void);
 static EXIT_CALL *e = NULL;
@@ -18,5 +19,6 @@ void exit(unsigned status) {
   for(int i = 0;i<exit_call_number;i++) {
     ((e[i]))();
   }
+  stdio_shutdown();
   _exit(status);
 }

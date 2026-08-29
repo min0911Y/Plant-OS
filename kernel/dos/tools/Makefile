@@ -4,6 +4,7 @@ incpath_src := ../../include/
 TOOLPATH := ../../../tools/
 MAKE     := $(TOOLPATH)make.exe -r
 obj_dos := $(out_path_src)arg.o $(out_path_src)bit.o $(out_path_src)fifo.o $(out_path_src)list.o $(out_path_src)md5.o $(out_path_src)other.o $(out_path_src)rand.o $(out_path_src)time.o
+-include $(call kernel_depfiles,$(obj_dos))
 default : $(obj_dos)
 	
 $(out_path_src)%.o : %.c Makefile

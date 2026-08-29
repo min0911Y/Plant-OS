@@ -4,6 +4,7 @@ incpath_src := ../../include/
 TOOLPATH := ../../../tools/
 MAKE     := $(TOOLPATH)make.exe -r
 obj_dos := $(out_path_src)syscall.o
+-include $(call kernel_depfiles,$(obj_dos))
 default : $(obj_dos)
 	
 $(out_path_src)%.o : %.c Makefile

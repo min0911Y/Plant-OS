@@ -8,7 +8,6 @@ extern "C" {
 #endif
 #include <ctypes.h>
 #include <rand.h>
-#include <syscall.h>
 #define RAND_MAX 32767
 void *malloc(size_t size);
 void free(void *p);
@@ -26,6 +25,7 @@ double atof(const char *s);
 void atexit(void (*func)(void));
 void *calloc(size_t num, size_t size);
 void abort(void);
+void exit(unsigned status);
 #define EXIT_SUCCESS 0
 #define EXIT_FAILURE 1
 #ifdef __cplusplus

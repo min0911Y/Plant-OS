@@ -32,6 +32,7 @@
  * ----------------------------------------------------------------------- */
 
 #include "file.h"
+#include <sys/stat.h>
 size_t strcspn(const char *s, const char *c);
 void nasm_read(void *ptr, size_t size, FILE *f)
 {
@@ -236,7 +237,15 @@ bool nasm_file_exists(const char *filename)
  */
 off_t nasm_file_size(FILE *f)
 {
-    return f->fileSize;
+    off_t position = ftell(f);
+    if (position < 0 || fseek(f, 0, SEEK_END) != 0) {
+        return -1;
+    }
+    off_t size = ftell(f);
+    if (fseek(f, position, SEEK_SET) != 0) {
+        return -1;
+    }
+    return size;
 }
 
 /*
@@ -245,7 +254,8 @@ off_t nasm_file_size(FILE *f)
 off_t nasm_file_size_by_path(const char *pathname)
 {
 
-    return filesize(pathname);
+    struct stat status;
+    return stat(pathname, &status) == 0 ? status.st_size : -1;
 }
 
 /*

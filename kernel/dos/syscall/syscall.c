@@ -221,9 +221,8 @@ enum syscall_id {
   SYSCALL_MOUSE_SUPPORTED = 0x10,
   SYSCALL_INPUT = 0x16,
   SYSCALL_RUN_COMMAND = 0x19,
-  SYSCALL_FILE_OPERATION = 0x1a,
+  SYSCALL_VFS = 0x1a,
   SYSCALL_COMMAND_LINE = 0x1b,
-  SYSCALL_COPY = 0x1c,
   SYSCALL_KEYBOARD_HIT = 0x1d,
   SYSCALL_EXIT = 0x1e,
   SYSCALL_VBE_CONTROL = 0x20,
@@ -231,7 +230,6 @@ enum syscall_id {
   SYSCALL_TASK_CONTROL = 0x22,
   SYSCALL_TTY_COLOR = 0x23,
   SYSCALL_TIMER_CONTROL = 0x24,
-  SYSCALL_FORMAT = 0x25,
   SYSCALL_RTC = 0x26,
   SYSCALL_DRAW_PIXEL = 0x27,
   SYSCALL_READ_PIXEL = 0x28,
@@ -249,23 +247,14 @@ enum syscall_id {
   SYSCALL_KEY_RELEASE_READ = 0x34,
   SYSCALL_GROW_HEAP = 0x35,
   SYSCALL_READ_ENV = 0x36,
-  SYSCALL_PATH_WITHOUT_DRIVE = 0x37,
-  SYSCALL_CURRENT_DRIVE = 0x38,
   SYSCALL_EXECUTE = 0x39,
   SYSCALL_CLEAR = 0x3a,
-  SYSCALL_MOUNT_CHECK = 0x3b,
-  SYSCALL_MOUNT = 0x3c,
-  SYSCALL_CHANGE_DISK = 0x3d,
   SYSCALL_MEMORY_SIZE = 0x3e,
   SYSCALL_USED_PAGES = 0x3f,
-  SYSCALL_DELETE_FILE = 0x40,
-  SYSCALL_CHANGE_PATH = 0x41,
   SYSCALL_CURSOR_START = 0x42,
   SYSCALL_CURSOR_STOP = 0x43,
-  SYSCALL_UNMOUNT = 0x44,
   SYSCALL_TTY_WIDTH = 0x45,
   SYSCALL_TTY_HEIGHT = 0x46,
-  SYSCALL_RENAME = 0x47,
   SYSCALL_LOG = 0x48,
   SYSCALL_SIGNAL_HANDLER = 0x49,
   SYSCALL_FORK = 0x4a,
@@ -493,105 +482,242 @@ static void syscall_run_shell_command(x86_interrupt_frame_t *frame) {
   free(command);
 }
 
-enum {
-  LIST_DIRECTORY_ERROR = -1,
-  LIST_DIRECTORY_RETRY = -2,
+typedef int (*vfs_syscall_handler_t)(const vfs_syscall_request_t *request);
+
+static char *vfs_syscall_path(uint32_t address) {
+  size_t length;
+  return copy_user_string(address, &length);
+}
+
+static int vfs_syscall_open(const vfs_syscall_request_t *request) {
+  char *path = vfs_syscall_path(request->arguments.open.path);
+  if (path == NULL) {
+    return VFS_ERROR_INVALID;
+  }
+  int descriptor = vfs_fd_open(current_task()->fs_context, path,
+                               request->arguments.open.flags);
+  free(path);
+  return descriptor;
+}
+
+static int vfs_syscall_close(const vfs_syscall_request_t *request) {
+  return vfs_fd_close(current_task()->fs_context,
+                      request->arguments.descriptor.descriptor);
+}
+
+static int vfs_syscall_read(const vfs_syscall_request_t *request) {
+  if (request->arguments.io.length != 0 &&
+      !user_range_ok(request->arguments.io.buffer,
+                     request->arguments.io.length)) {
+    return VFS_ERROR_INVALID;
+  }
+  return vfs_fd_read(current_task()->fs_context,
+                     request->arguments.io.descriptor,
+                     (void *)(uintptr_t)request->arguments.io.buffer,
+                     request->arguments.io.length);
+}
+
+static int vfs_syscall_write(const vfs_syscall_request_t *request) {
+  if (request->arguments.io.length != 0 &&
+      !user_range_ok(request->arguments.io.buffer,
+                     request->arguments.io.length)) {
+    return VFS_ERROR_INVALID;
+  }
+  return vfs_fd_write(current_task()->fs_context,
+                      request->arguments.io.descriptor,
+                      (const void *)(uintptr_t)request->arguments.io.buffer,
+                      request->arguments.io.length);
+}
+
+static int vfs_syscall_seek(const vfs_syscall_request_t *request) {
+  return vfs_fd_seek(current_task()->fs_context,
+                     request->arguments.seek.descriptor,
+                     request->arguments.seek.offset,
+                     request->arguments.seek.whence);
+}
+
+static int vfs_syscall_sync(const vfs_syscall_request_t *request) {
+  return vfs_fd_sync(current_task()->fs_context,
+                     request->arguments.descriptor.descriptor);
+}
+
+static int vfs_syscall_stat(const vfs_syscall_request_t *request) {
+  if (!user_range_ok(request->arguments.stat.status, sizeof(vfs_stat_t))) {
+    return VFS_ERROR_INVALID;
+  }
+  char *path = vfs_syscall_path(request->arguments.stat.path);
+  if (path == NULL) {
+    return VFS_ERROR_INVALID;
+  }
+  int status = vfs_stat(
+      current_task()->fs_context, path,
+      (vfs_stat_t *)(uintptr_t)request->arguments.stat.status);
+  free(path);
+  return status;
+}
+
+static int vfs_syscall_fstat(const vfs_syscall_request_t *request) {
+  if (!user_range_ok(request->arguments.fstat.status, sizeof(vfs_stat_t))) {
+    return VFS_ERROR_INVALID;
+  }
+  return vfs_fd_stat(
+      current_task()->fs_context, request->arguments.fstat.descriptor,
+      (vfs_stat_t *)(uintptr_t)request->arguments.fstat.status);
+}
+
+static int vfs_syscall_list(const vfs_syscall_request_t *request) {
+  if (request->arguments.list.capacity > INT_MAX / sizeof(vfs_file) ||
+      (request->arguments.list.entries == 0 &&
+       request->arguments.list.capacity != 0) ||
+      (request->arguments.list.entries != 0 &&
+       !user_range_ok(request->arguments.list.entries,
+                      request->arguments.list.capacity * sizeof(vfs_file)))) {
+    return VFS_ERROR_INVALID;
+  }
+  char *path = vfs_syscall_path(request->arguments.list.path);
+  if (path == NULL) {
+    return VFS_ERROR_INVALID;
+  }
+  size_t count = 0;
+  int status = vfs_list_directory(
+      current_task()->fs_context, path,
+      (vfs_file *)(uintptr_t)request->arguments.list.entries,
+      request->arguments.list.capacity, &count);
+  free(path);
+  if (status == VFS_ERROR_OVERFLOW) {
+    return -2;
+  }
+  return status < 0 || count > INT_MAX ? status < 0 ? status
+                                                    : VFS_ERROR_OVERFLOW
+                                         : (int)count;
+}
+
+static int vfs_syscall_single_path(const vfs_syscall_request_t *request,
+                                   int (*operation)(vfs_context_t *,
+                                                    const char *)) {
+  char *path = vfs_syscall_path(request->arguments.path.path);
+  if (path == NULL) {
+    return VFS_ERROR_INVALID;
+  }
+  int status = operation(current_task()->fs_context, path);
+  free(path);
+  return status;
+}
+
+static int vfs_syscall_mkdir(const vfs_syscall_request_t *request) {
+  return vfs_syscall_single_path(request, vfs_mkdir);
+}
+
+static int vfs_syscall_unlink(const vfs_syscall_request_t *request) {
+  return vfs_syscall_single_path(request, vfs_unlink);
+}
+
+static int vfs_syscall_rmdir(const vfs_syscall_request_t *request) {
+  return vfs_syscall_single_path(request, vfs_rmdir);
+}
+
+static int vfs_syscall_chdir(const vfs_syscall_request_t *request) {
+  return vfs_syscall_single_path(request, vfs_context_chdir);
+}
+
+static int vfs_syscall_rename(const vfs_syscall_request_t *request) {
+  char *source = vfs_syscall_path(request->arguments.rename.source);
+  char *destination =
+      vfs_syscall_path(request->arguments.rename.destination);
+  if (source == NULL || destination == NULL) {
+    free(source);
+    free(destination);
+    return VFS_ERROR_INVALID;
+  }
+  int status = vfs_rename(current_task()->fs_context, source, destination);
+  free(source);
+  free(destination);
+  return status;
+}
+
+static int vfs_syscall_getcwd(const vfs_syscall_request_t *request) {
+  if (request->arguments.cwd.buffer != 0 &&
+      !user_range_ok(request->arguments.cwd.buffer,
+                     request->arguments.cwd.capacity)) {
+    return VFS_ERROR_INVALID;
+  }
+  return vfs_context_getcwd(
+      current_task()->fs_context,
+      (char *)(uintptr_t)request->arguments.cwd.buffer,
+      request->arguments.cwd.capacity);
+}
+
+static int vfs_syscall_current_drive(const vfs_syscall_request_t *request) {
+  (void)request;
+  return vfs_context_drive(current_task()->fs_context);
+}
+
+static int vfs_syscall_mount_check(const vfs_syscall_request_t *request) {
+  return vfs_check_mount(request->arguments.mount.drive);
+}
+
+static int vfs_syscall_mount(const vfs_syscall_request_t *request) {
+  return vfs_mount_disk(request->arguments.mount.disk,
+                        request->arguments.mount.drive);
+}
+
+static int vfs_syscall_unmount(const vfs_syscall_request_t *request) {
+  return vfs_unmount_disk(request->arguments.mount.drive);
+}
+
+static int vfs_syscall_change_drive(const vfs_syscall_request_t *request) {
+  return vfs_context_change_drive(current_task()->fs_context,
+                                  request->arguments.mount.drive);
+}
+
+static int vfs_syscall_format(const vfs_syscall_request_t *request) {
+  char *name = vfs_syscall_path(request->arguments.format.filesystem);
+  if (name == NULL) {
+    return VFS_ERROR_INVALID;
+  }
+  int status = vfs_format(request->arguments.format.disk, name);
+  free(name);
+  return status;
+}
+
+static const vfs_syscall_handler_t vfs_syscall_handlers[VFS_SYSCALL_COUNT] = {
+    [VFS_SYSCALL_OPEN] = vfs_syscall_open,
+    [VFS_SYSCALL_CLOSE] = vfs_syscall_close,
+    [VFS_SYSCALL_READ] = vfs_syscall_read,
+    [VFS_SYSCALL_WRITE] = vfs_syscall_write,
+    [VFS_SYSCALL_SEEK] = vfs_syscall_seek,
+    [VFS_SYSCALL_SYNC] = vfs_syscall_sync,
+    [VFS_SYSCALL_STAT] = vfs_syscall_stat,
+    [VFS_SYSCALL_FSTAT] = vfs_syscall_fstat,
+    [VFS_SYSCALL_LIST_DIRECTORY] = vfs_syscall_list,
+    [VFS_SYSCALL_MKDIR] = vfs_syscall_mkdir,
+    [VFS_SYSCALL_UNLINK] = vfs_syscall_unlink,
+    [VFS_SYSCALL_RMDIR] = vfs_syscall_rmdir,
+    [VFS_SYSCALL_RENAME] = vfs_syscall_rename,
+    [VFS_SYSCALL_CHDIR] = vfs_syscall_chdir,
+    [VFS_SYSCALL_GETCWD] = vfs_syscall_getcwd,
+    [VFS_SYSCALL_CURRENT_DRIVE] = vfs_syscall_current_drive,
+    [VFS_SYSCALL_MOUNT_CHECK] = vfs_syscall_mount_check,
+    [VFS_SYSCALL_MOUNT] = vfs_syscall_mount,
+    [VFS_SYSCALL_UNMOUNT] = vfs_syscall_unmount,
+    [VFS_SYSCALL_CHANGE_DRIVE] = vfs_syscall_change_drive,
+    [VFS_SYSCALL_FORMAT] = vfs_syscall_format,
 };
 
-static void syscall_file_operation(x86_interrupt_frame_t *frame) {
-  switch (frame->ebx) {
-  case 0x01: {
-    size_t length;
-    char *path = copy_user_string(frame->edx, &length);
-    frame->edx = path == NULL ? (uint32_t)-1 : vfs_filesize(path);
-    free(path);
-    break;
+static void syscall_vfs(x86_interrupt_frame_t *frame) {
+  if (frame->ebx >= VFS_SYSCALL_COUNT ||
+      vfs_syscall_handlers[frame->ebx] == NULL ||
+      !user_range_ok(frame->ecx, sizeof(vfs_syscall_request_t))) {
+    frame->eax = VFS_ERROR_INVALID;
+    return;
   }
-  case 0x02: {
-    size_t length;
-    char *path = copy_user_string(frame->edx, &length);
-    int file_size = path == NULL ? -1 : (int)vfs_filesize(path);
-    if (file_size < 0 ||
-        (file_size != 0 && !user_range_ok(frame->esi, file_size))) {
-      frame->eax = 0;
-    } else {
-      frame->eax = vfs_readfile(path, (char *)(uintptr_t)frame->esi);
-    }
-    free(path);
-    break;
+  vfs_syscall_request_t request;
+  memcpy(&request, (const void *)(uintptr_t)frame->ecx, sizeof(request));
+  if (request.size != sizeof(request)) {
+    frame->eax = VFS_ERROR_INVALID;
+    return;
   }
-  case 0x03: {
-    size_t length;
-    char *path = copy_user_string(frame->edx, &length);
-    frame->eax = path != NULL && vfs_createfile(path);
-    free(path);
-    break;
-  }
-  case 0x04: {
-    size_t length;
-    char *path = copy_user_string(frame->edx, &length);
-    frame->eax = path != NULL && vfs_createdict(path);
-    free(path);
-    break;
-  }
-  case 0x05: {
-    size_t length;
-    char *path = copy_user_string(frame->edx, &length);
-    frame->eax = path != NULL && frame->ecx <= INT_MAX &&
-                 (frame->ecx == 0 || user_range_ok(frame->esi, frame->ecx)) &&
-                 EDIT_FILE(path, (char *)(uintptr_t)frame->esi, frame->ecx,
-                           frame->edi);
-    free(path);
-    break;
-  }
-  case 0x06: {
-    size_t path_length;
-    char *path = copy_user_string(frame->edx, &path_length);
-    if (path == NULL || frame->esi > INT_MAX / sizeof(vfs_file) ||
-        (frame->ecx == 0 && frame->esi != 0) ||
-        (frame->ecx != 0 &&
-         !user_range_ok(frame->ecx, frame->esi * sizeof(vfs_file)))) {
-      free(path);
-      frame->eax = LIST_DIRECTORY_ERROR;
-      break;
-    }
-
-    struct List *file_list = vfs_listfile(path);
-    free(path);
-    if (file_list == NULL) {
-      frame->eax = LIST_DIRECTORY_ERROR;
-      break;
-    }
-
-    size_t count = file_list->ctl->all;
-    if (count > INT_MAX) {
-      frame->eax = LIST_DIRECTORY_ERROR;
-    } else if (frame->ecx == 0) {
-      frame->eax = count;
-    } else if (frame->esi < count) {
-      frame->eax = LIST_DIRECTORY_RETRY;
-    } else {
-      vfs_file *files = (vfs_file *)(uintptr_t)frame->ecx;
-      frame->eax = count;
-      for (size_t i = 0; i < count; i++) {
-        struct List *entry = list_get(i + 1, file_list);
-        if (entry == NULL || entry->val == 0) {
-          frame->eax = LIST_DIRECTORY_ERROR;
-          break;
-        }
-        memcpy(&files[i], (void *)(uintptr_t)entry->val, sizeof(vfs_file));
-      }
-    }
-    for (size_t i = 1; i <= count; i++) {
-      struct List *entry = list_get(i, file_list);
-      if (entry != NULL) {
-        free((void *)(uintptr_t)entry->val);
-      }
-    }
-    DeleteList(file_list);
-    break;
-  }
-  }
+  frame->eax = vfs_syscall_handlers[frame->ebx](&request);
 }
 
 static void syscall_command_line(x86_interrupt_frame_t *frame) {
@@ -619,18 +745,6 @@ static void syscall_command_line(x86_interrupt_frame_t *frame) {
   frame->eax = length;
 }
 
-static void syscall_copy(x86_interrupt_frame_t *frame) {
-  size_t source_length;
-  size_t destination_length;
-  char *source = copy_user_string(frame->edx, &source_length);
-  char *destination = copy_user_string(frame->esi, &destination_length);
-  frame->eax = source == NULL || destination == NULL
-                   ? -1
-                   : Copy(source, destination);
-  free(source);
-  free(destination);
-}
-
 static void syscall_keyboard_hit(x86_interrupt_frame_t *frame) {
   frame->eax = kbhit();
 }
@@ -648,7 +762,7 @@ static void syscall_exit(x86_interrupt_frame_t *frame) {
                         ? NULL
                         : get_task(task->ptid);
     if (parent && parent->kind == TASK_PROCESS && parent->state != DIED) {
-      if (!vfs_clone_for_task(task, parent)) {
+      if (!vfs_context_transfer_cwd(task->fs_context, parent->fs_context)) {
         WARNING_K("failed to transfer child VFS state");
         status = (unsigned)-1;
       }
@@ -835,10 +949,6 @@ static void syscall_timer_control(x86_interrupt_frame_t *frame) {
   }
 }
 
-static void syscall_format(x86_interrupt_frame_t *frame) {
-  frame->eax = vfs_format(frame->ebx, (char *)(uintptr_t)frame->ecx);
-}
-
 static void syscall_rtc(x86_interrupt_frame_t *frame) {
   switch (frame->ebx) {
   case 0x00:
@@ -935,7 +1045,7 @@ static void syscall_monotonic_ns(x86_interrupt_frame_t *frame) {
 
 static void syscall_reset_fpu(x86_interrupt_frame_t *frame) {
   (void)frame;
-  current_task()->fpu_flag = 0;
+  x86_fpu_reset(current_task());
 }
 
 static void syscall_keyboard_setup(x86_interrupt_frame_t *frame) {
@@ -1001,14 +1111,6 @@ static void syscall_read_env(x86_interrupt_frame_t *frame) {
   }
 }
 
-static void syscall_path_without_drive(x86_interrupt_frame_t *frame) {
-  vfs_get_path_without_drive((char *)(uintptr_t)frame->ebx);
-}
-
-static void syscall_current_drive(x86_interrupt_frame_t *frame) {
-  frame->eax = current_task()->nfs->drive;
-}
-
 static void syscall_execute(x86_interrupt_frame_t *frame) {
   frame->eax = os_execute((char *)(uintptr_t)frame->ebx,
                           (char *)(uintptr_t)frame->ecx);
@@ -1019,23 +1121,6 @@ static void syscall_clear(x86_interrupt_frame_t *frame) {
   clear();
 }
 
-static void syscall_mount_operation(x86_interrupt_frame_t *frame) {
-  switch (frame->eax) {
-  case SYSCALL_MOUNT_CHECK:
-    frame->eax = vfs_check_mount(frame->ebx);
-    break;
-  case SYSCALL_MOUNT:
-    frame->eax = vfs_mount_disk(frame->ebx, frame->ecx);
-    break;
-  case SYSCALL_CHANGE_DISK:
-    frame->eax = vfs_change_disk(frame->ebx);
-    break;
-  case SYSCALL_UNMOUNT:
-    frame->eax = vfs_unmount_disk(frame->ebx);
-    break;
-  }
-}
-
 static void syscall_memory_info(x86_interrupt_frame_t *frame) {
   if (frame->eax == SYSCALL_MEMORY_SIZE) {
     frame->eax = memsize;
@@ -1043,14 +1128,6 @@ static void syscall_memory_info(x86_interrupt_frame_t *frame) {
   }
 
   frame->eax = page_used_count(memsize);
-}
-
-static void syscall_delete_file(x86_interrupt_frame_t *frame) {
-  frame->eax = vfs_delfile((char *)(uintptr_t)frame->edx);
-}
-
-static void syscall_change_path(x86_interrupt_frame_t *frame) {
-  frame->eax = vfs_change_path((char *)(uintptr_t)frame->edx);
 }
 
 static void syscall_tty_cursor(x86_interrupt_frame_t *frame) {
@@ -1067,11 +1144,6 @@ static void syscall_tty_size(x86_interrupt_frame_t *frame) {
   } else {
     frame->eax = current_task()->TTY->ysize;
   }
-}
-
-static void syscall_rename(x86_interrupt_frame_t *frame) {
-  vfs_renamefile((char *)(uintptr_t)frame->ebx,
-                 (char *)(uintptr_t)frame->ecx);
 }
 
 static void syscall_log(x86_interrupt_frame_t *frame) {
@@ -1565,9 +1637,8 @@ static const syscall_handler_t syscall_handlers[SYSCALL_COUNT] = {
     [SYSCALL_MOUSE_SUPPORTED] = syscall_mouse_supported,
     [SYSCALL_INPUT] = syscall_input,
     [SYSCALL_RUN_COMMAND] = syscall_run_shell_command,
-    [SYSCALL_FILE_OPERATION] = syscall_file_operation,
+    [SYSCALL_VFS] = syscall_vfs,
     [SYSCALL_COMMAND_LINE] = syscall_command_line,
-    [SYSCALL_COPY] = syscall_copy,
     [SYSCALL_KEYBOARD_HIT] = syscall_keyboard_hit,
     [SYSCALL_EXIT] = syscall_exit,
     [SYSCALL_VBE_CONTROL] = syscall_vbe_control,
@@ -1575,7 +1646,6 @@ static const syscall_handler_t syscall_handlers[SYSCALL_COUNT] = {
     [SYSCALL_TASK_CONTROL] = syscall_task_control,
     [SYSCALL_TTY_COLOR] = syscall_tty_color,
     [SYSCALL_TIMER_CONTROL] = syscall_timer_control,
-    [SYSCALL_FORMAT] = syscall_format,
     [SYSCALL_RTC] = syscall_rtc,
     [SYSCALL_DRAW_PIXEL] = syscall_framebuffer,
     [SYSCALL_READ_PIXEL] = syscall_framebuffer,
@@ -1593,23 +1663,14 @@ static const syscall_handler_t syscall_handlers[SYSCALL_COUNT] = {
     [SYSCALL_KEY_RELEASE_READ] = syscall_keyboard_fifo,
     [SYSCALL_GROW_HEAP] = syscall_grow_heap,
     [SYSCALL_READ_ENV] = syscall_read_env,
-    [SYSCALL_PATH_WITHOUT_DRIVE] = syscall_path_without_drive,
-    [SYSCALL_CURRENT_DRIVE] = syscall_current_drive,
     [SYSCALL_EXECUTE] = syscall_execute,
     [SYSCALL_CLEAR] = syscall_clear,
-    [SYSCALL_MOUNT_CHECK] = syscall_mount_operation,
-    [SYSCALL_MOUNT] = syscall_mount_operation,
-    [SYSCALL_CHANGE_DISK] = syscall_mount_operation,
     [SYSCALL_MEMORY_SIZE] = syscall_memory_info,
     [SYSCALL_USED_PAGES] = syscall_memory_info,
-    [SYSCALL_DELETE_FILE] = syscall_delete_file,
-    [SYSCALL_CHANGE_PATH] = syscall_change_path,
     [SYSCALL_CURSOR_START] = syscall_tty_cursor,
     [SYSCALL_CURSOR_STOP] = syscall_tty_cursor,
-    [SYSCALL_UNMOUNT] = syscall_mount_operation,
     [SYSCALL_TTY_WIDTH] = syscall_tty_size,
     [SYSCALL_TTY_HEIGHT] = syscall_tty_size,
-    [SYSCALL_RENAME] = syscall_rename,
     [SYSCALL_LOG] = syscall_log,
     [SYSCALL_SIGNAL_HANDLER] = syscall_signal_handler,
     [SYSCALL_FORK] = syscall_fork,

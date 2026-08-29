@@ -3,6 +3,7 @@
 #include "mst.h"
 #include "mstr.h"
 #include <assert.h>
+#include <stdlib.h>
 PRIVATE void build_space(mstr* result, SPACE* space, int spaces_no);
 PRIVATE void put_token(char* buf, TOKEN_TYPE t, MST_Object* mst) {
   TOKEN* tok = malloc(sizeof(TOKEN));

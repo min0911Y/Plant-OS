@@ -37,6 +37,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <syscall.h>
+#include <sys/stat.h>
 #include <rand.h>
 /* setup for luaconf.h */
 #define LUA_CORE
@@ -545,9 +546,18 @@ static int Lsrand(lua_State* L) {
 static int lua_ReadFile(lua_State* L) {
   size_t l;
   const char* s = lua_tolstring(L, 1, &l);
-  if(filesize(s) != -1) {
-    char* buf = malloc(filesize(s) + 1);
-    api_readfile(s,buf);
+  struct stat status;
+  if(stat(s, &status) == 0) {
+    char* buf = malloc(status.st_size + 1);
+    FILE *stream = fopen(s, "rb");
+    if (buf == NULL || stream == NULL ||
+        fread(buf, 1, status.st_size, stream) != status.st_size) {
+      free(buf);
+      lua_pushstring(L, "");
+      return 1;
+    }
+    fclose(stream);
+    buf[status.st_size] = '\0';
     lua_pushstring(L, buf);
     free(buf);
   } else {
@@ -629,7 +639,8 @@ static int Leval(lua_State* L) {
   return 1;
 }
 static int Lmod(lua_State* L) {
-  if(filesize(lua_tostring(L,1)) == -1) {
+  struct stat status;
+  if(stat(lua_tostring(L,1), &status) != 0) {
     lua_pushfstring(L,"mod file(%s) not found",lua_tostring(L,1));
     lua_error(L);
     return 1;

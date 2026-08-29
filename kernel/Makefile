@@ -19,6 +19,8 @@ IMGPATH = ./img/
 LOADERPATH = ../loader/out/
 ARCHX86PATH = ./arch/x86/
 QEMU_CPUS ?= 4
+LIBALLOC_RELEASE = $(DOSPATH)mm/third_party/liballoc/liballoc-i686.a
+LIBALLOC_KERNEL = $(OUTPATH)liballoc-kernel.a
 
 MAKE     = make -r
 NASM     = nasm
@@ -27,7 +29,7 @@ COPY     = copy
 DEL      = rm
 
 OBJS_BOOTPACK = $(OUTPATH)kernelc.o $(OUTPATH)screen.o $(OUTPATH)command.o $(OUTPATH)timer.o \
-				$(OUTPATH)mem.o $(OUTPATH)file.o $(OUTPATH)bios_interrupt.obj \
+				$(OUTPATH)mem.o $(OUTPATH)heap.o $(LIBALLOC_KERNEL) $(OUTPATH)file.o $(OUTPATH)bios_interrupt.obj \
 				$(OUTPATH)interrupt_entries.obj $(OUTPATH)exceptions.obj $(OUTPATH)vga.o $(OUTPATH)harddisk.o $(OUTPATH)tm.o  \
 				$(OUTPATH)mouse.o $(OUTPATH)acpi.o $(OUTPATH)is.o $(OUTPATH)descriptor_tables.o $(OUTPATH)arg.o \
 				$(OUTPATH)other.o $(OUTPATH)floppy.o $(OUTPATH)dma.o $(OUTPATH)init.o $(OUTPATH)main.o \
@@ -47,7 +49,7 @@ OBJS_BOOTPACK = $(OUTPATH)kernelc.o $(OUTPATH)screen.o $(OUTPATH)command.o $(OUT
 				$(OUTPATH)mtask.o $(OUTPATH)basetask.o $(OUTPATH)execute.o $(OUTPATH)network.o $(OUTPATH)rtl8139.o \
 				$(OUTPATH)vfs.o $(OUTPATH)build.o $(OUTPATH)mst.o $(OUTPATH)str.o $(OUTPATH)pfs.o $(OUTPATH)signal.o \
 				$(OUTPATH)rtc.o $(OUTPATH)ahci.o $(OUTPATH)farcall.o $(OUTPATH)fartty.o $(OUTPATH)iso9660.o \
-				$(OUTPATH)module.o $(OUTPATH)kasan.o $(OUTPATH)perf.o $(OUTPATH)irq.o $(OUTPATH)exceptions.o \
+				$(OUTPATH)module.o $(OUTPATH)kasan.o $(OUTPATH)perf.o $(OUTPATH)fpu.o $(OUTPATH)irq.o $(OUTPATH)exceptions.o \
 				$(OUTPATH)smp.o $(OUTPATH)task_context.o $(OUTPATH)smp_trampoline.obj \
 				$(OUTPATH)task_context.obj $(OUTPATH)user_return.obj
 
@@ -72,6 +74,20 @@ $(OUTPATH)boot_pfs.bin : $(BOOTPATH)boot_pfs.asm Makefile
 	$(NASM) $(BOOTPATH)boot_pfs.asm -o $(OUTPATH)boot_pfs.bin
 $(OUTPATH)boot32.bin : $(BOOTPATH)boot32.asm Makefile
 	$(NASM) $(BOOTPATH)boot32.asm -o $(OUTPATH)boot32.bin
+
+$(LIBALLOC_KERNEL) : $(LIBALLOC_RELEASE) Makefile
+	objcopy --redefine-sym malloc=liballoc_malloc \
+		--redefine-sym free=liballoc_free \
+		--redefine-sym realloc=liballoc_realloc \
+		--redefine-sym calloc=liballoc_calloc \
+		--redefine-sym aligned_alloc=liballoc_aligned_alloc \
+		--redefine-sym posix_memalign=liballoc_posix_memalign \
+		--redefine-sym usable_size=liballoc_usable_size \
+		--redefine-sym heap_init=liballoc_heap_init \
+		--redefine-sym heap_extend=liballoc_heap_extend \
+		--redefine-sym heap_onerror=liballoc_heap_onerror \
+		--redefine-sym heap_set_oom_handler=liballoc_heap_set_oom_handler \
+		$(LIBALLOC_RELEASE) $(LIBALLOC_KERNEL)
 
 $(OUTPATH)kernel.bin : $(OBJS_BOOTPACK) Makefile
 	ld -m elf_i386 -static -Ttext 0x280000 -e KernelMain $(OBJS_BOOTPACK) ./libubscan.a ../apps/libs/libtcc1.a -o $(OUTPATH)kernel.bin
@@ -140,6 +156,7 @@ Mimg : make_dir $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $
 		mcopy -i ./disk.img $(APPSOUTPATH)rpctest.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)guitest.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)exc_test.bin ::
+		mcopy -i ./disk.img $(APPSOUTPATH)fputest.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)lua.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)ping.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)ps.bin ::
@@ -190,6 +207,7 @@ Mimg : make_dir $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $
 		mcopy -i boot.img $(APPSOUTPATH)rpctest.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)guitest.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)exc_test.bin ::
+		mcopy -i boot.img $(APPSOUTPATH)fputest.bin ::
 		mcopy -i boot.img $(FONTPATH)font.bin ::
 		mcopy -i boot.img $(FONTPATH)HZK16 ::
 		mcopy -i boot.img $(BIDPATH)nasm.zip ::

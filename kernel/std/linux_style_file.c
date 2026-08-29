@@ -1,89 +1,56 @@
-#define NOREAD
 #include <dos.h>
 #include <fcntl.h>
-typedef struct OPEN {
-  unsigned char* buf;
-  unsigned int p;
-  unsigned int size;
-  unsigned char* path;
-  unsigned arrsz;
-  int wg;
-} OPEN;
-int close(int fd) {
-  logk("Close(%08x)\n", fd);
-  OPEN* fp = (OPEN*)fd;
-  logk("size=%d\n", fp->size);
-  if (fp->wg) {
-    EDIT_FILE(fp->path, fp->buf, fp->size, 0);
+
+static uint32_t kernel_open_flags(int flags) {
+  uint32_t result;
+  if ((flags & O_ACCMODE) == O_WRONLY) {
+    result = VFS_OPEN_WRITE;
+  } else if ((flags & O_ACCMODE) == O_RDWR) {
+    result = VFS_OPEN_READ | VFS_OPEN_WRITE;
+  } else {
+    result = VFS_OPEN_READ;
   }
-  free(fp->buf);
-  free(fp->path);
-  free(fp);
-  return 0;
+  if ((flags & O_CREAT) != 0) {
+    result |= VFS_OPEN_CREATE;
+  }
+  if ((flags & O_EXCL) != 0) {
+    result |= VFS_OPEN_EXCLUSIVE;
+  }
+  if ((flags & O_TRUNC) != 0) {
+    result |= VFS_OPEN_TRUNCATE;
+  }
+  if ((flags & O_APPEND) != 0) {
+    result |= VFS_OPEN_APPEND;
+  }
+  return result;
 }
 
-int open(const char* pathname, int flags, unsigned int mode) {
-  printk("OPEN:%s\n", pathname);
-  OPEN* fp;
-  fp = malloc(sizeof(OPEN));
-  FILE* fp1;
-  fp1 = fopen(pathname, "wb");
-  fp->size = fp1->fileSize;
-  fp->buf = malloc(fp->size);
-  fp->path = malloc(strlen(fp1->name) + 1);
-  fp->arrsz = fp->size;
-  strcpy(fp->path, pathname);
-  memcpy(fp->buf, fp1->buffer , fp->size);
-  fclose(fp1);
-  fp->p = 0;
-  fp->wg = 0;
-  return (int)fp;
-}
-
-unsigned int read(int fd, void* buf, unsigned int count) {
-  OPEN* fp = (OPEN*)fd;
-  int i;
-  for (i = 0; i < count; i++) {
-    if (fp->p >= fp->size) {
-      break;
-    }
-    ((unsigned char*)buf)[i] = fp->buf[fp->p++];
-  }
-  return i;
-}
-void rc(int fd, unsigned char c) {
-  OPEN* fp = (OPEN*)fd;
-  if (fp->size < fp->arrsz) {
-    fp->buf[fp->p++] = c;
-  } else {
-    fp->arrsz += 4096;
-    unsigned char* re = malloc(fp->arrsz);
-    memcpy(re, fp->buf, fp->size);
-    free(fp->buf);
-    fp->buf = re;
-    fp->buf[fp->p++] = c;
-  }
-  fp->size++;
-  fp->wg = 1;
-}
-unsigned int write(int fd, const void* buf, unsigned int nbyte) {
-  OPEN* fp = (OPEN*)fd;
-  logk("fp=%08x\n", fp);
-  for (int i = 0; i < nbyte; i++) {
-    rc(fd, ((unsigned char*)buf)[i]);
-  }
-  return nbyte;
-}
-unsigned int lseek(int fd, unsigned int offset, int whence) {
-  OPEN* fp = (OPEN*)fd;
-  if (whence == 0) {
-    fp->p = offset;
-  } else if (whence == 1) {
-    fp->p += offset;
-  } else if (whence == 2) {
-    fp->p = fp->size + offset;
-  } else {
+int open(const char *pathname, int flags, unsigned int mode) {
+  (void)mode;
+  if (current_task() == NULL || current_task()->fs_context == NULL) {
     return -1;
   }
-  return 0;
+  int descriptor = vfs_fd_open(current_task()->fs_context, pathname,
+                               kernel_open_flags(flags));
+  return descriptor < 0 ? -1 : descriptor;
+}
+
+int close(int descriptor) {
+  return vfs_fd_close(current_task()->fs_context, descriptor) < 0 ? -1 : 0;
+}
+
+unsigned int read(int descriptor, void *buffer, unsigned int count) {
+  int result =
+      vfs_fd_read(current_task()->fs_context, descriptor, buffer, count);
+  return result < 0 ? (unsigned int)-1 : (unsigned int)result;
+}
+
+unsigned int write(int descriptor, const void *buffer, unsigned int count) {
+  int result =
+      vfs_fd_write(current_task()->fs_context, descriptor, buffer, count);
+  return result < 0 ? (unsigned int)-1 : (unsigned int)result;
+}
+
+int lseek(int descriptor, int offset, int whence) {
+  return vfs_fd_seek(current_task()->fs_context, descriptor, offset, whence);
 }

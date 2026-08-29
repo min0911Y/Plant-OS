@@ -91,6 +91,7 @@ int tokenizer_finished(void);
 void tokenizer_error_print(void);
 
 #include <stdio.h> /* printf() */
+#include <sys/stat.h>
 #include <syscall.h> /* exit() */
 #include <string.h>
 
@@ -759,13 +760,20 @@ main(int argc,char **argv)
 		printf("no input file.");
 		return 0;
 	}
-	if(filesize(argv[1]) == -1) {
+	struct stat status;
+	if(stat(argv[1], &status) != 0) {
 		printf("file not found.");
 		return 0;
 	}
-	program = malloc(filesize(argv[1])+1);
-	char *b = malloc(filesize(argv[1])+1);
-	api_readfile(argv[1],b);
+	program = malloc(status.st_size + 1);
+	char *b = malloc(status.st_size + 1);
+	FILE *stream = fopen(argv[1], "rb");
+	if (program == NULL || b == NULL || stream == NULL ||
+	    fread(b, 1, status.st_size, stream) != status.st_size) {
+		return 1;
+	}
+	fclose(stream);
+	b[status.st_size] = '\0';
 	for(int i = 0,l=0;i<strlen(b);i++) {
 		if(b[i] != '\r') {
 			program[l++] = b[i];

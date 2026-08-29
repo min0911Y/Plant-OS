@@ -25,7 +25,7 @@ endif
 KERNEL_COMMON_CFLAGS = \
 	-m32 -I$(incpath_src) -nostdinc -nolibc -nostdlib -fno-builtin \
 	-ffreestanding -fno-stack-protector -Qn -fno-pic -fno-pie \
-	-fno-asynchronous-unwind-tables $(KERNEL_FRAME_POINTER_FLAGS) \
+	-fno-asynchronous-unwind-tables -MMD -MP $(KERNEL_FRAME_POINTER_FLAGS) \
 	-finput-charset=UTF-8 -fexec-charset=GB2312 \
 	-mno-mmx -mno-sse -mfpmath=387 \
 	$(KERNEL_UBSAN_FLAGS) $(KERNEL_KASAN_FLAGS) $(CDEFS)
@@ -39,3 +39,5 @@ KERNEL_COMMON_CXXFLAGS = \
 	-fno-use-cxa-atexit -fno-exceptions -fno-rtti
 
 KERNEL_PACKED_BITFIELD_FLAGS = -Wno-packed-bitfield-compat
+
+kernel_depfiles = $(patsubst %.o,%.d,$(filter %.o,$1))

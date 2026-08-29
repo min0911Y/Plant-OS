@@ -30,7 +30,7 @@ static bool directory_exists(const char *path) {
 static bool copy_directory_recursive(const char *source_directory,
                                      char *destination,
                                      size_t destination_size) {
-  if (!vfs_change_path((char *)source_directory)) {
+  if (chdir(source_directory) != 0) {
     printf("Unable to enter source directory %s.\n", source_directory);
     return false;
   }
@@ -88,7 +88,7 @@ static bool copy_directory_recursive(const char *source_directory,
   free(files);
 
 restore_directory:
-  if (!vfs_change_path("..")) {
+  if (chdir("..") != 0) {
     printf("Unable to restore the source directory.\n");
     success = false;
   }

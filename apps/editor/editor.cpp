@@ -5,7 +5,13 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <syscall.h>
+
+static int editor_file_size(const char *path) {
+  struct stat status;
+  return stat(path, &status) == 0 ? (int)status.st_size : -1;
+}
 #define VIEW_LINE 0 // 有bug，暂时不开启
 int mLine(char *buffer, int len);
 #define T_DrawBox(x, y, w, h, c) Text_Draw_Box((y), (x), (h) + y, (w) + x, (c))
@@ -1131,9 +1137,12 @@ public:
   char *Main(char *filename) {
     system("cls");
     c = (Camera *)malloc(sizeof(Camera));
-    c->buffer = (char *)malloc(filesize(filename) + 1000);
-    char *bf2 = (char *)malloc(filesize(filename) + 1000);
-    c->array_len = filesize(filename) + 1000;
+    int source_size = editor_file_size(filename);
+    c->array_len = (source_size < 0 ? 0 : source_size) + 1000;
+    c->buffer = (char *)malloc(c->array_len);
+    char *bf2 = (char *)malloc(c->array_len);
+    memset(c->buffer, 0, c->array_len);
+    memset(bf2, 0, c->array_len);
     c->len = 0;
 #if VIEW_LINE
     c->ml = 0;
@@ -1143,16 +1152,22 @@ public:
     c->curser_pos_y = 0;
     c->index = 0;
 
-    if (filesize(filename) != -1) {
-      api_readfile(filename, bf2);
-      int fsz = filesize(filename);
-      for (int i = 0, j = 0; i < fsz + 1000; i++) {
+    if (source_size >= 0) {
+      FILE *stream = fopen(filename, "rb");
+      if (stream != NULL) {
+        fread(bf2, 1, source_size, stream);
+        fclose(stream);
+      }
+      for (int i = 0, j = 0; i < source_size; i++) {
         if (bf2[i] != '\r') {
           c->buffer[j++] = bf2[i];
         }
       }
     } else {
-      mkfile(filename);
+      FILE *stream = fopen(filename, "wb");
+      if (stream != NULL) {
+        fclose(stream);
+      }
     }
     free(bf2);
     c->len = strlen(c->buffer);
@@ -1292,7 +1307,7 @@ int main(int argc, char **argv) {
   }
   strcpy(ext_str, argv[1] + q);
   strtoupper(ext_str);
-  if (filesize("/editor.mst") == -1) {
+  if (editor_file_size("/editor.mst") == -1) {
     printf("Warning: Couldn't find `editor.mst`.\n");
   } else {
   }
@@ -1315,6 +1330,10 @@ int main(int argc, char **argv) {
   }
 
   clear();
-  Edit_File(argv[1], bb, strlen(c) + mLine(c, l), 0);
+  FILE *stream = fopen(argv[1], "wb");
+  if (stream != NULL) {
+    fwrite(bb, 1, strlen(c) + mLine(c, l), stream);
+    fclose(stream);
+  }
   return 0;
 }

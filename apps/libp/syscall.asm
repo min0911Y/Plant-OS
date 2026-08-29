@@ -3,18 +3,18 @@ GLOBAL tty_alloc,tty_free,tty_set,tty_notify_input
 GLOBAL putch,putstr,getch,get_mouse,get_xy,goto_xy
 GLOBAL SwitchTo320X200X256,SwitchToText8025,Draw_Char,sleep
 GLOBAL PrintChineseChar,PrintChineseStr,Draw_Str,api_malloc,api_free
-GLOBAL print,scan,system,filesize,api_readfile,api_get_env
+GLOBAL print,scan,system,api_get_env
 GLOBAL Draw_Box,Draw_Px,Text_Draw_Box,mem_used,mem_total
-GLOBAL input_char_inSM,api_beep,RAND,api_get_command_line,Get_System_Version,Copy,_kbhit
-GLOBAL mkdir,mkfile,Edit_File,SwitchTo320X200X256_BIOS,SwitchToText8025_BIOS
+GLOBAL input_char_inSM,api_beep,RAND,api_get_command_line,Get_System_Version,_kbhit
+GLOBAL SwitchTo320X200X256_BIOS,SwitchToText8025_BIOS
 GLOBAL TaskForever,SendMessage,GetMessage,MessageLength,NowTaskID,exec
-GLOBAL _exit,key_press_status,key_up_status,get_key_press,get_key_up,sbrk,api_getcwd
+GLOBAL _exit,key_press_status,key_up_status,get_key_press,get_key_up,sbrk
 GLOBAL timer_alloc,timer_settime,timer_out,timer_free,clock,monotonic_ns,start_keyboard_message,clear
-GLOBAL haveMsg,PhyMemGetByte,GetMessageAll,PhyMemSetByte,format,api_heapsize,api_current_drive
+GLOBAL haveMsg,PhyMemGetByte,GetMessageAll,PhyMemSetByte,api_heapsize
 GLOBAL get_hour_hex,get_min_hex,get_sec_hex,get_day_of_month,get_day_of_week,get_mon_hex,get_year,AddThread,init_float
-GLOBAL TaskLock,TaskUnlock,SubThread,set_mode,VBEDraw_Px,VBEGet_Px,VBEGetBuffer,VBESetBuffer,roll,VBEDraw_Box,api_list_directory
-GLOBAL vfs_check_mount,vfs_mount,vfs_change_disk,vfs_delfile,vfs_change_path,tty_start_cur_moving,tty_stop_cur_moving,vfs_unmount_disk,logk
-GLOBAL tty_get_xsize,tty_get_ysize,api_rename,mouse_support,signal,fork,waittid,do_test,mouse_enable,mouse_dat_status,mouse_dat_get,api_yield,return_to_app,set_rt,shared_memory_map_to,shared_memory_unmap,task_set_level_higher,task_set_level_normal,use_keyboard
+GLOBAL TaskLock,TaskUnlock,SubThread,set_mode,VBEDraw_Px,VBEGet_Px,VBEGetBuffer,VBESetBuffer,roll,VBEDraw_Box
+GLOBAL tty_start_cur_moving,tty_stop_cur_moving,logk
+GLOBAL tty_get_xsize,tty_get_ysize,mouse_support,signal,fork,waittid,do_test,mouse_enable,mouse_dat_status,mouse_dat_get,api_yield,return_to_app,set_rt,shared_memory_map_to,shared_memory_unmap,task_set_level_higher,task_set_level_normal,use_keyboard
 GLOBAL module_load,module_unload,module_list
 GLOBAL api_task_snapshot,cpu_count,cpu_current
 [SECTION .text]
@@ -271,32 +271,6 @@ int 36h
 pop edx
 ret
 
-filesize:
-push	ebx
-push	edx
-mov	eax,0x1a
-mov	ebx,0x01
-mov	edx,[ss:esp+12]
-int	36h
-mov	eax,edx
-pop	edx
-pop	ebx
-ret
-
-api_readfile:
-push	ebx
-push	edx
-push	esi
-mov	eax,0x1a
-mov	ebx,0x02
-mov	edx,[ss:esp+16]
-mov	esi,[ss:esp+20]
-int	36h
-pop	esi
-pop	edx
-pop	ebx
-ret
-
 Draw_Box:
 push	eax
 push	ebx
@@ -424,59 +398,9 @@ Get_System_Version:
     mov eax,edx
     pop edx
     ret
-Copy:
-    push    edx
-    push    esi
-    mov eax,0x1c
-    mov edx,[ss:esp+4+8]
-    mov esi,[ss:esp+8+8]
-    int 36h
-    pop esi
-    pop edx
-    ret
 _kbhit:
     mov eax,0x1d
     int 36h
-    ret
-
-mkfile:
-    push    ebx   ;4
-    push    edx   ;8
-    mov eax,0x1a ;文件系统API
-    mov ebx,0x03 ;创建文件API
-    mov edx,[ss:esp+4+8]
-    int 36h
-    pop edx
-    pop ebx
-    ret
-mkdir:
-    push    ebx   ;4
-    push    edx   ;8
-    mov eax,0x1a ;文件系统API
-    mov ebx,0x04 ;创建文件API
-    mov edx,[ss:esp+4+8]
-    int 36h
-    pop edx
-    pop ebx
-    ret
-Edit_File:
-    push ebx
-    push edx
-    push esi
-    push ecx
-    push edi
-    mov eax,0x1a ;文件系统API
-    mov ebx,0x05 ;编辑文件API
-    mov edx,[ss:esp+4+20] ;文件名
-    mov esi,[ss:esp+8+20] ;编辑内容
-    mov ecx,[ss:esp+12+20] ;编辑内容长度
-	mov	edi,[ss:esp+16+20] ;编辑偏移地址
-    int 36h
-    pop edi
-    pop ecx
-    pop esi
-    pop edx
-    pop ebx
     ret
 
 SwitchTo320X200X256_BIOS:
@@ -648,17 +572,6 @@ PhyMemSetByte:
 	pop   ebx
 	pop   ds
 	ret
-format:
-	push ebx
-	push ecx
-	mov eax,0x25
-	mov ebx,[esp+4+8]
-	mov ecx,[esp+8+8]
-	int 36h
-	pop ecx
-	pop ebx
-	ret
-
 get_hour_hex:
 	push ebx
 	mov eax,0x26
@@ -964,22 +877,6 @@ sbrk:
 	int 0x36
 	pop ebx
 	ret
-api_list_directory:
-    push ebx
-    push ecx
-    push edx
-    push esi
-    mov eax,0x1a
-    mov ebx,0x06
-    mov edx,[ss:esp+4+16]
-    mov ecx,[ss:esp+8+16]
-    mov esi,[ss:esp+12+16]
-    int 36h
-    pop esi
-    pop edx
-    pop ecx
-    pop ebx
-    ret
 api_get_env:
 	push ebx
 	push ecx
@@ -989,19 +886,6 @@ api_get_env:
 	int 0x36
 	pop ecx
 	pop ebx
-	ret
-api_getcwd:
-	push eax
-	push ebx
-	mov eax,0x37
-	mov ebx,[esp + 4 + 8]
-	int 0x36
-	pop ebx
-	pop eax
-	ret
-api_current_drive:
-	mov eax,0x38
-	int 0x36
 	ret
 exec:
 	push ebx
@@ -1023,30 +907,6 @@ use_keyboard:
 	mov eax,0x55
 	int 0x36
 	ret
-vfs_check_mount:
-	push ebx
-	mov eax,0x3b
-	mov ebx,[esp+4 + 4]
-	int 0x36
-	pop ebx
-	ret
-vfs_mount:
-	push ebx
-	push ecx
-mov eax,0x3c
-mov ebx,[esp+4+8]
-mov ecx,[esp+8+8]
-	int 0x36
-	pop ecx
-	pop ebx
-	ret
-vfs_change_disk:
-	push ebx
-	mov eax,0x3d
-	mov ebx,[esp+4+4]
-	int 0x36
-	pop ebx
-	ret
 mem_used:
 	mov eax,0x3f
 	int 0x36
@@ -1054,20 +914,6 @@ mem_used:
 mem_total:
 	mov eax,0x3e
 	int 0x36
-	ret
-vfs_delfile:
-	push edx
-	mov eax,0x40
-	mov edx,[esp+4+4]
-	int 0x36
-	pop edx
-	ret
-vfs_change_path:
-	push edx
-	mov eax,0x41
-	mov edx,[esp+4+4]
-	int 0x36
-	pop edx
 	ret
 tty_start_cur_moving:
 	push eax
@@ -1081,13 +927,6 @@ tty_stop_cur_moving:
 	int 0x36
 	pop eax
 	ret
-vfs_unmount_disk:
-push ebx
-mov eax,0x44
-mov ebx,[esp+4+4]
-int 0x36
-pop ebx
-ret
 tty_get_xsize:
   mov eax,0x45
 	int 0x36
@@ -1095,18 +934,6 @@ tty_get_xsize:
 tty_get_ysize:
 	mov eax,0x46
 	int 0x36
-	ret
-api_rename:
-	push eax
-	push ebx
-	push ecx
-	mov ebx,[esp+12+4]
-	mov ecx,[esp+12+8]
-	mov eax,0x47
-	int 0x36
-	pop ecx
-	pop ebx
-	pop eax
 	ret
 logk:
 	push eax

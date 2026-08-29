@@ -1,17 +1,23 @@
 // 利用HZK字库编码制成的汉字拼音输入法
 #include <stdio.h>
+#include <sys/stat.h>
 #include <string.h>
 #include <syscall.h>
 
 static char pinyin[100] = {0};
 int main(int argc, char **argv) {
-  if (filesize("hanzi.txt") == 0) {
+  struct stat status;
+  if (stat("hanzi.txt", &status) != 0 || status.st_size == 0) {
     print("Cannot find hanzi.txt.");
     return 0;
   }
-  unsigned char *hanzi =
-      (unsigned char *)malloc(filesize("hanzi.txt"));
-  api_readfile("hanzi.txt", hanzi);
+  unsigned char *hanzi = (unsigned char *)malloc(status.st_size);
+  FILE *stream = fopen("hanzi.txt", "rb");
+  if (hanzi == NULL || stream == NULL ||
+      fread(hanzi, 1, status.st_size, stream) != status.st_size) {
+    return 1;
+  }
+  fclose(stream);
   printf("请输入拼音：");
   scan(pinyin, 100);
   printf(pinyin);

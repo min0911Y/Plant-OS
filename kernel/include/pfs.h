@@ -50,7 +50,6 @@ typedef struct {
 #pragma pack()
 typedef struct pfs pfs_t;
 typedef struct pfs {
-  List* file_list;
   List* bitmap;
   List* bitmap_buffer;
   uint32_t resd_sec_start;
@@ -61,18 +60,9 @@ typedef struct pfs {
   void (*read_block)(pfs_t* pfs, uint32_t lba, uint32_t numbers, void* buff);
   void (*write_block)(pfs_t* pfs, uint32_t lba, uint32_t numbers, void* buff);
   uint8_t disk_number;
-  uint32_t current_dict_block;
   int64_t current_bitmap_block;
   uint8_t *bitmap_buff;
-  List * prev_dict_block;
 } pfs_t;
-typedef struct {
-  char* name;
-  uint32_t size;
-  uint32_t block;
-  uint32_t time;
-  pfs_attr attr;
-} pfs_file_list;
 #define total_bits_of_one_sec ((512 - 4) * 8)
 #define used(bitmap, index) bitmap[index / 8] |= (1 << (index % 8))
 #define unused(bitmap, index) bitmap[index / 8] &= ~(1 << (index % 8))
@@ -81,31 +71,4 @@ typedef struct {
 #define get_next(bitmap) (*((uint32_t*)((uintptr_t)bitmap + 508)))
 #define block2sector(block, _pfs) ((block) + ((_pfs)->first_sec_of_bitmap))
 uint32_t pfs_create_inode(vfs_t *vfs,uint32_t dict_block);
-// void pfs_format(pfs_t p, char* volid);
-// void init_pfs(pfs_t p);
-// uint32_t pfs_create_inode(uint32_t dict_block);
-// void pfs_ls(uint32_t dict_block);
-// uint32_t pfs_get_filesize(char* filename, uint32_t dict_block, uint32_t* err);
-// void pfs_read_file(char* filename, void* buff, uint32_t dict_block);
-// void pfs_create_file(char* filename, uint32_t dict_block);
-// void pfs_create_dict(char* name, uint32_t dict_block);
-// uint32_t pfs_get_dict_block_by_name(char* name,
-//                                     uint32_t dict_block,
-//                                     uint32_t* err);
-// uint32_t pfs_get_idx_of_inode_by_name(char* name,
-//                                       uint32_t dict_block,
-//                                       uint32_t* err);
-// void pfs_write_file(char* filename,
-//                     uint32_t size,
-//                     void* buff,
-//                     uint32_t dict_block);
-// uint32_t pfs_get_dict_block_by_path(char* path,
-//                                     char** end,
-//                                     uint32_t start_block,
-//                                     uint32_t* err);
-// void pfs_get_file_index_by_path(char* path,
-//                                 uint32_t start_block,
-//                                 uint32_t* err,
-//                                 uint32_t* idx,
-//                                 uint32_t* dict_block);
 #endif

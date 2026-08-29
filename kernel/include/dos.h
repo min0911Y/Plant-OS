@@ -4,6 +4,7 @@
 #include <define.h>
 #include <drivers.h>
 #include <fs.h>
+#include <heap.h>
 #include <interrupts.h>
 #include <io.h>
 #include <kasan.h>
@@ -61,7 +62,7 @@ unsigned task_address_space_owner(unsigned pde);
 void task_next(void);
 void scheduler_tick(void);
 void scheduler_reschedule_interrupt(void);
-void scheduler_preempt_on_kernel_exit(void);
+void scheduler_preempt_if_needed(void);
 __attribute__((noreturn)) void scheduler_start_secondary(uint32_t cpu);
 void task_set_name(mtask *task, const char *name);
 int task_snapshot(task_info_t *entries, uint32_t capacity, uint32_t *count);
@@ -119,7 +120,6 @@ char num2ascii(char c);
 void strtoupper(char *str);
 int GetCHorEN(unsigned char *str);
 void clean(char *s, int len);
-void *krealloc(void *ptr, uint32_t size);
 // fifo.c
 void fifo8_init(struct FIFO8 *fifo, int size, unsigned char *buf);
 int fifo8_put(struct FIFO8 *fifo, unsigned char data);
@@ -156,26 +156,9 @@ void tty_stop_cursor_moving(struct tty *t);
 void tty_start_curor_moving(struct tty *t);
 // mem.c
 unsigned int memtest(unsigned int start, unsigned int end);
-freeinfo *make_next_freeinfo(memory *mem);
-free_member *mem_insert(int pos, freeinfo *finf);
-free_member *mem_add(freeinfo *finf);
-void mem_delete(int pos, freeinfo *finf);
-uint32_t mem_get_all_finf(freeinfo *finf);
-void mem_defragmenter(freeinfo *finf);
-uint32_t mem_partition(freeinfo *finf, uint32_t start, uint32_t end,
-                       uint32_t index);
-int mem_free_finf(memory *mem, freeinfo *finf, void *p, uint32_t size);
-void *mem_alloc_finf(memory *mem, freeinfo *finf, uint32_t size,
-                     freeinfo *if_nomore);
-void *mem_alloc(memory *mem, uint32_t size);
-void mem_free(memory *mem, void *p, uint32_t size);
-memory *memory_init(uintptr_t start, uint32_t size);
 void init_iso9660(void);
 void reg_pfs(void);
 int into_mtask(void);
-void *malloc(int size);
-void free(void *p);
-void *realloc(void *ptr, uint32_t size);
 // ipc.c
 void ipc_header_init(IPC_Header *ipc);
 void ipc_task_init(mtask *task);

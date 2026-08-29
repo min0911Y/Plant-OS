@@ -124,7 +124,9 @@ r_mode16:
 		pop  fs
 		pop  es
 		pop  ds
-		sti                                    ; 开中断
+		; Keep hardware interrupts disabled. The protected-mode caller already
+		; saved and cleared IF, and APIC/IOAPIC vectors have no valid real-mode
+		; handlers or EOI path. The software INT below does not depend on IF.
 		db 0xCD                                ; INT的机器码
 	ib: db 0x00
 		cli                                    ; 关中断

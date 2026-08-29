@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <syscall.h>
 #define All_Kernel_files_count 10
 #define All_App_files_count 30
@@ -17,21 +18,7 @@
 #define T_DrawBox(x, y, w, h, c) Text_Draw_Box((y), (x), (h) + y, (w) + x, (c))
 
 static bool copy_file(char *source, char *destination) {
-  int size = filesize(source);
-  if (size < 0) {
-    return false;
-  }
-  char *buffer = size == 0 ? NULL : malloc((size_t)size);
-  if (size != 0 && buffer == NULL) {
-    return false;
-  }
-  if ((size != 0 && !api_readfile(source, buffer)) ||
-      !Edit_File(destination, buffer, size, 0)) {
-    free(buffer);
-    return false;
-  }
-  free(buffer);
-  return true;
+  return Copy(source, destination) == 0;
 }
 
 void Box(int x, int y, int w, int h) {
@@ -246,7 +233,8 @@ int main() {
   if (source_drive < 'A' || source_drive > 'Z') {
     return 1;
   }
-  int len = filesize("setup.mst");
+  struct stat status;
+  int len = stat("setup.mst", &status) == 0 ? (int)status.st_size : -1;
   if (len < 0 || len == INT_MAX) {
     int c = get_cons_color();
     set_cons_color(0x0c);
@@ -255,11 +243,17 @@ int main() {
     return 1;
   }
   char *config = (char *)malloc(len + 1);
-  if (config == NULL || (len != 0 && !api_readfile("setup.mst", config))) {
+  FILE *stream = fopen("setup.mst", "rb");
+  if (config == NULL || stream == NULL ||
+      (len != 0 && fread(config, 1, len, stream) != (size_t)len)) {
+    if (stream != NULL) {
+      fclose(stream);
+    }
     free(config);
     printf("Unable to read setup.mst.\n");
     return 1;
   }
+  fclose(stream);
   config[len] = 0;
   MST_Object *m = MST_init(config);
   if (m == NULL || m->err) {
@@ -358,25 +352,31 @@ int main() {
   }
   Set_Loading(0);
   setState("Config --- Create env.cfg");
-  if (!mkfile("env.cfg")) {
+  FILE *config_file = fopen("env.cfg", "wb");
+  if (config_file == NULL) {
     goto fail;
   }
   Set_Loading(25);
   setState("Config --- Write env.cfg");
   static char env_config[] = "\"path\" = \"C:\\bin;C:;\"";
-  if (!Edit_File("env.cfg", env_config, sizeof(env_config) - 1, 0)) {
+  if (fwrite(env_config, 1, sizeof(env_config) - 1, config_file) !=
+          sizeof(env_config) - 1 ||
+      fclose(config_file) != 0) {
     goto fail;
   }
   Set_Loading(50);
   setState("Config --- Create sys.cfg");
-  if (!mkfile("sys.cfg")) {
+  config_file = fopen("sys.cfg", "wb");
+  if (config_file == NULL) {
     goto fail;
   }
   Set_Loading(75);
   setState("Config --- Write sys.cfg");
   static char system_config[] =
       "\"network\" = \"enable\"\n\"video_mode\" = \"HIGHTEXTMODE\"";
-  if (!Edit_File("sys.cfg", system_config, sizeof(system_config) - 1, 0)) {
+  if (fwrite(system_config, 1, sizeof(system_config) - 1, config_file) !=
+          sizeof(system_config) - 1 ||
+      fclose(config_file) != 0) {
     goto fail;
   }
   Set_Loading(100);

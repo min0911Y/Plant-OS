@@ -90,6 +90,8 @@ void pci_write_command_status(uint8_t bus, uint8_t slot, uint8_t func,
                               uint32_t value);
 uint8_t pci_get_drive_irq(uint8_t bus, uint8_t slot, uint8_t func);
 uint32_t pci_get_port_base(uint8_t bus, uint8_t slot, uint8_t func);
+bool pci_find_class(uint8_t base_class, uint8_t sub_class, uint8_t *bus,
+                    uint8_t *slot, uint8_t *function);
 void PCI_GET_DEVICE(uint16_t vendor_id, uint16_t device_id, uint8_t *bus,
                     uint8_t *slot, uint8_t *func);
 void pci_config(unsigned int Bus, unsigned int f, unsigned int equipment,
@@ -141,7 +143,6 @@ unsigned set_mode(int width, int height, int bpp);
 void write_regs(unsigned char *regs);
 void SwitchTo320X200X256();
 void SwitchToText8025();
-void Set_Font(char *file);
 void pokew(int setmentaddr, int offset, short value);
 void pokeb(int setmentaddr, int offset, char value);
 void set_palette(int start, int end, unsigned char *rgb);
@@ -178,6 +179,5 @@ void ide_read_sectors(unsigned char drive, unsigned char numsects,
                       unsigned int lba, unsigned short es, void *buffer);
 void ide_write_sectors(unsigned char drive, unsigned char numsects,
                        unsigned int lba, unsigned short es, void *buffer);
-void ide_initialize(unsigned int BAR0, unsigned int BAR1, unsigned int BAR2,
-                    unsigned int BAR3, unsigned int BAR4);
+void ide_initialize(void);
 #endif

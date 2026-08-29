@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <syscall.h>
 
 static bool remount_drive(char drive) {
@@ -13,7 +14,8 @@ static bool remount_drive(char drive) {
 }
 
 static bool read_file(const char *path, char **buffer, int *size) {
-  int file_size = filesize((char *)path);
+  struct stat status;
+  int file_size = stat(path, &status) == 0 ? (int)status.st_size : -1;
   if (file_size < 0) {
     return false;
   }
@@ -21,10 +23,17 @@ static bool read_file(const char *path, char **buffer, int *size) {
   if (file_size != 0 && data == NULL) {
     return false;
   }
-  if (file_size != 0 && !api_readfile((char *)path, data)) {
+  FILE *stream = fopen(path, "rb");
+  if (stream == NULL ||
+      (file_size != 0 &&
+       fread(data, 1, file_size, stream) != (size_t)file_size)) {
+    if (stream != NULL) {
+      fclose(stream);
+    }
     free(data);
     return false;
   }
+  fclose(stream);
   *buffer = data;
   *size = file_size;
   return true;
@@ -73,7 +82,9 @@ int main() {
       goto cleanup;
     }
 
-    int second_size = filesize("002doom.bin");
+    struct stat status;
+    int second_size =
+        stat("002doom.bin", &status) == 0 ? (int)status.st_size : -1;
     if (second_size < 0) {
       printf("Insert a wrong disk, retry...\n");
       continue;
@@ -92,14 +103,23 @@ int main() {
       memcpy(whole_file, first, first_size);
     }
     printf("Reading 002doom.bin file...");
-    if (second_size != 0 &&
-        !api_readfile("002doom.bin", whole_file + first_size)) {
+    FILE *stream = fopen("002doom.bin", "rb");
+    if (stream == NULL ||
+        (second_size != 0 &&
+         fread(whole_file + first_size, 1, second_size, stream) !=
+             (size_t)second_size)) {
+      if (stream != NULL) {
+        fclose(stream);
+      }
       printf("failed.\n");
       goto cleanup;
     }
+    fclose(stream);
     printf("done.\nMerging and copying doom.zip...");
-    if (!remount_drive(destination_drive) ||
-        !Edit_File("doom.zip", whole_file, whole_size, 0)) {
+    stream = remount_drive(destination_drive) ? fopen("doom.zip", "wb") : NULL;
+    if (stream == NULL ||
+        fwrite(whole_file, 1, whole_size, stream) != (size_t)whole_size ||
+        fclose(stream) != 0) {
       printf("failed.\n");
       goto cleanup;
     }

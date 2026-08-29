@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <sys/stat.h>
 #include <syscall.h>
 
 typedef void (*exception_trigger_t)(void);
@@ -42,7 +43,9 @@ static void trigger_page_fault(void) {
 }
 
 static int supervisor_write_cow_test(void) {
-  int file_size = filesize("sys.cfg");
+  struct stat file_status;
+  int file_size =
+      stat("sys.cfg", &file_status) == 0 ? (int)file_status.st_size : -1;
   if (file_size <= 0 || file_size > COW_PAGE_SIZE) {
     logkf("EXCEPTION_TEST supervisor COW invalid size=%d\n", file_size);
     return 0;
@@ -58,10 +61,13 @@ static int supervisor_write_cow_test(void) {
     return 0;
   }
   if (child == 0) {
-    int read_status = api_readfile("sys.cfg", (char *)supervisor_cow_page);
-    if (!read_status) {
+    FILE *stream = fopen("sys.cfg", "rb");
+    if (stream == NULL ||
+        fread((char *)supervisor_cow_page, 1, file_size, stream) !=
+            (size_t)file_size) {
       exit(2);
     }
+    fclose(stream);
     for (int i = 0; i < file_size; i++) {
       if (supervisor_cow_page[i] != COW_SENTINEL) {
         exit(0);

@@ -125,8 +125,7 @@ static __attribute__((noreturn)) void x86_smp_secondary_entry(uint32_t cpu) {
   arch_interrupt_init_secondary();
   apic_init_secondary();
   arch_task_state_init();
-  x86_cr0_write(x86_cr0_read() | X86_CR0_EM | X86_CR0_TS | X86_CR0_NE |
-                X86_CR0_WP);
+  x86_fpu_init_cpu();
 
   if (__sync_bool_compare_and_swap(&smp_cpus[cpu].online, 0, 1)) {
     __sync_fetch_and_add(&smp_online_total, 1);
@@ -194,7 +193,7 @@ void kernel_lock_leave(void) {
     }
   }
   if (kernel_lock_nesting[cpu] == 1) {
-    scheduler_preempt_on_kernel_exit();
+    scheduler_preempt_if_needed();
   }
   cpu = smp_current_cpu();
   if (kernel_lock_owner != cpu + 1 || kernel_lock_nesting[cpu] == 0) {

@@ -2,13 +2,19 @@
 #include <dos.h>
 #include <fs.h>
 #include <limits.h>
-void fat_delete_fs(struct vfs_t *vfs);
-void *kmalloc(int size);
-void kfree(void *p);
+typedef struct {
+  struct FAT_CACHE dm;
+  struct FAT_FILEINFO *operation_directory;
+} fat_state_t;
+
+#define fat_state(vfs) ((fat_state_t *)vfs_mount_data(vfs))
+#define get_dm(vfs) (fat_state(vfs)->dm)
+#define get_now_dir(vfs) (fat_state(vfs)->operation_directory)
+
+static void fat_delete_fs(struct vfs_mount *vfs);
 void file_savefat(int *fat, int clustno, int length, vfs_t *vfs);
-int mkfile(char *name, vfs_t *vfs);
+static int fat_create_file_entry(char *name, vfs_t *vfs);
 int del(char *cmdline, vfs_t *vfs);
-bool fat_write_file(struct vfs_t *vfs, char *path, char *buffer, int size);
 static uint32_t fat_eoc_marker(int type) {
   if (type == 12) {
     return 0x0fffu;
@@ -76,51 +82,6 @@ static bool fat_chain_last(vfs_t *vfs, int start, int *last) {
     current = get_dm(vfs).fat[current];
   }
   return false;
-}
-static lock_t *fat_alloc_lock(void) {
-  lock_t *l = malloc(sizeof(lock_t));
-  if (l != NULL) {
-    lock_init(l);
-  }
-  return l;
-}
-static mtask **fat_alloc_lock_owner(void) {
-  mtask **owner = malloc(sizeof(mtask *));
-  if (owner != NULL) {
-    *owner = NULL;
-  }
-  return owner;
-}
-static int *fat_alloc_lock_depth(void) {
-  int *depth = malloc(sizeof(int));
-  if (depth != NULL) {
-    *depth = 0;
-  }
-  return depth;
-}
-static void fat_op_lock(vfs_t *vfs) {
-  if (get_fat_lock(vfs) == NULL || get_fat_lock_owner(vfs) == NULL ||
-      get_fat_lock_depth(vfs) == NULL) {
-    return;
-  }
-  if (*(get_fat_lock_owner(vfs)) == current_task()) {
-    ++(*get_fat_lock_depth(vfs));
-    return;
-  }
-  lock(get_fat_lock(vfs));
-  *(get_fat_lock_owner(vfs)) = current_task();
-  *get_fat_lock_depth(vfs) = 1;
-}
-static void fat_op_unlock(vfs_t *vfs) {
-  if (get_fat_lock(vfs) == NULL || get_fat_lock_owner(vfs) == NULL ||
-      get_fat_lock_depth(vfs) == NULL ||
-      *(get_fat_lock_owner(vfs)) != current_task()) {
-    return;
-  }
-  if (--(*get_fat_lock_depth(vfs)) == 0) {
-    *(get_fat_lock_owner(vfs)) = NULL;
-    unlock(get_fat_lock(vfs));
-  }
 }
 static inline int get_fat_date(unsigned short year, unsigned short month,
                                unsigned short day) {
@@ -255,7 +216,8 @@ bool file_loadfile(int clustno, int size, char *buf, int *fat, vfs_t *vfs) {
         num++;
       } else {
         disk_read(a, num * get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes,
-                  img + sec_start * get_dm(vfs).ClustnoBytes, vfs->disk_number);
+                  img + sec_start * get_dm(vfs).ClustnoBytes,
+                  vfs_mount_disk_number(vfs));
         sec_start += num;
         a = sec;
         num = 1;
@@ -270,7 +232,8 @@ bool file_loadfile(int clustno, int size, char *buf, int *fat, vfs_t *vfs) {
   }
   if (num) {
     disk_read(a, num * get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes,
-              img + sec_start * get_dm(vfs).ClustnoBytes, vfs->disk_number);
+              img + sec_start * get_dm(vfs).ClustnoBytes,
+              vfs_mount_disk_number(vfs));
   }
   memcpy((void *)buf, img, size);
   kfree(img);
@@ -370,7 +333,7 @@ bool file_savefile(int clustno, int size, char *buf, int *fat,
       } else {
         disk_write(a, num * get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes,
                    img + sec_start * get_dm(vfs).ClustnoBytes,
-                   vfs->disk_number);
+                   vfs_mount_disk_number(vfs));
         sec_start += num;
         a = sec;
         num = 1;
@@ -385,7 +348,8 @@ bool file_savefile(int clustno, int size, char *buf, int *fat,
   }
   if (num) {
     disk_write(a, num * get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes,
-               img + sec_start * get_dm(vfs).ClustnoBytes, vfs->disk_number);
+               img + sec_start * get_dm(vfs).ClustnoBytes,
+               vfs_mount_disk_number(vfs));
   }
   kfree(img);
   if ((uint64_t)(uint32_t)size <
@@ -413,7 +377,7 @@ void file_saveinfo(struct FAT_FILEINFO *directory, vfs_t *vfs) {
   if (directory == get_dm(vfs).root_directory) {
     disk_write(get_dm(vfs).RootDictAddress / get_dm(vfs).SectorBytes,
                get_dm(vfs).RootMaxFiles * 32 / get_dm(vfs).SectorBytes,
-               (void *)directory, vfs->disk_number);
+               (void *)directory, vfs_mount_disk_number(vfs));
   } else {
     for (int i = 1; list_get(i, get_dm(vfs).directory_list) != NULL; i++) {
       struct List *list = list_get(i, get_dm(vfs).directory_list);
@@ -430,7 +394,7 @@ void file_saveinfo(struct FAT_FILEINFO *directory, vfs_t *vfs) {
                          get_dm(vfs).SectorBytes,
                      get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes,
                      (char *)directory + l * get_dm(vfs).ClustnoBytes,
-                     vfs->disk_number);
+                     vfs_mount_disk_number(vfs));
           j = get_dm(vfs).fat[j];
         }
         break;
@@ -490,9 +454,9 @@ void file_savefat(int *fat, int clustno, int count, vfs_t *vfs) {
       first_sector;
   void *source = img + first_sector * get_dm(vfs).SectorBytes;
   disk_write(get_dm(vfs).Fat1Address / get_dm(vfs).SectorBytes + first_sector,
-             sector_count, source, vfs->disk_number);
+             sector_count, source, vfs_mount_disk_number(vfs));
   disk_write(get_dm(vfs).Fat2Address / get_dm(vfs).SectorBytes + first_sector,
-             sector_count, source, vfs->disk_number);
+             sector_count, source, vfs_mount_disk_number(vfs));
 }
 static struct FAT_FILEINFO *file_search(const char *name,
                                         struct FAT_FILEINFO *finfo, int max) {
@@ -563,152 +527,31 @@ static struct FAT_FILEINFO *dict_search(const char *name,
   }
   return 0; /*没有找到*/
 }
-enum fat_path_target {
-  FAT_PATH_FILE,
-  FAT_PATH_PARENT_OR_DIRECTORY,
-  FAT_PATH_DIRECTORY,
-};
-
-static struct FAT_FILEINFO *fat_directory_for_entry(
-    vfs_t *vfs, const struct FAT_FILEINFO *entry) {
-  if (vfs == NULL || entry == NULL) {
-    return NULL;
-  }
-  uint32_t cluster = get_clustno(entry->clustno_high, entry->clustno_low);
-  if (cluster == 0) {
-    return get_dm(vfs).root_directory;
-  }
-  if (get_dm(vfs).directory_clustno_list == NULL ||
-      get_dm(vfs).directory_list == NULL) {
-    return NULL;
-  }
-  for (int index = 1;; index++) {
-    struct List *cluster_entry =
-        list_get(index, get_dm(vfs).directory_clustno_list);
-    if (cluster_entry == NULL) {
-      return NULL;
-    }
-    if (cluster_entry->val == cluster) {
-      struct List *directory_entry =
-          list_get(index, get_dm(vfs).directory_list);
-      return directory_entry == NULL
-                 ? NULL
-                 : (struct FAT_FILEINFO *)(uintptr_t)directory_entry->val;
-    }
-  }
-}
-
-static struct FAT_FILEINFO *fat_directory_child(vfs_t *vfs,
-                                                 struct FAT_FILEINFO *directory,
-                                                 const char *name) {
-  if (directory == NULL || name == NULL) {
-    return NULL;
-  }
-  if (strcmp(name, ".") == 0) {
-    return directory;
-  }
-  if (strcmp(name, "..") == 0 && directory == get_dm(vfs).root_directory) {
-    return directory;
-  }
-  struct FAT_FILEINFO *entry =
-      dict_search(name, directory, get_directory_max(directory, vfs));
-  return entry == NULL ? NULL : fat_directory_for_entry(vfs, entry);
-}
-
-static struct FAT_FILEINFO *fat_resolve_path(vfs_t *vfs, const char *path,
-                                              enum fat_path_target target) {
-  if (vfs == NULL || path == NULL) {
-    return NULL;
-  }
-
+static struct FAT_FILEINFO *Get_File_Address(const char *name, vfs_t *vfs) {
   struct FAT_FILEINFO *directory = get_now_dir(vfs);
-  if (directory == NULL) {
+  if (name == NULL || directory == NULL || strchr(name, '/') != NULL ||
+      strchr(name, '\\') != NULL) {
     return NULL;
   }
-  const char *cursor = path;
-  if (*cursor == '/' || *cursor == '\\') {
-    directory = get_dm(vfs).root_directory;
-    while (*cursor == '/' || *cursor == '\\') {
-      cursor++;
-    }
-  }
-
-  while (*cursor != '\0') {
-    const char *component_start = cursor;
-    while (*cursor != '\0' && *cursor != '/' && *cursor != '\\') {
-      cursor++;
-    }
-    size_t component_length = (size_t)(cursor - component_start);
-    if (component_length == 0 || component_length >= 13) {
-      return NULL;
-    }
-    char component[13];
-    memcpy(component, component_start, component_length);
-    component[component_length] = '\0';
-
-    while (*cursor == '/' || *cursor == '\\') {
-      cursor++;
-    }
-    if (*cursor != '\0') {
-      directory = fat_directory_child(vfs, directory, component);
-      if (directory == NULL) {
-        return NULL;
-      }
-      continue;
-    }
-
-    if (target == FAT_PATH_FILE) {
-      return file_search(component, directory,
-                         get_directory_max(directory, vfs));
-    }
-    struct FAT_FILEINFO *child = fat_directory_child(vfs, directory, component);
-    return target == FAT_PATH_DIRECTORY ? child
-                                        : child == NULL ? directory : child;
-  }
-  return target == FAT_PATH_FILE ? NULL : directory;
+  return file_search(name, directory, get_directory_max(directory, vfs));
 }
 
-static struct FAT_FILEINFO *Get_File_Address(const char *path, vfs_t *vfs) {
-  return fat_resolve_path(vfs, path, FAT_PATH_FILE);
-}
-
-static struct FAT_FILEINFO *Get_dictaddr(const char *path, vfs_t *vfs) {
-  return fat_resolve_path(vfs, path, FAT_PATH_PARENT_OR_DIRECTORY);
-}
-struct fat_cursor_update {
-  List *directory_list;
-  uintptr_t old_directory;
-  struct FAT_FILEINFO *new_directory;
-};
-
-static void fat_update_directory_cursor(vfs_t *instance, void *context) {
-  struct fat_cursor_update *update = context;
-  if (instance->cache != NULL &&
-      get_dm(instance).directory_list == update->directory_list &&
-      (uintptr_t)get_now_dir(instance) == update->old_directory) {
-    get_now_dir(instance) = update->new_directory;
-  }
+static struct FAT_FILEINFO *Get_dictaddr(const char *name, vfs_t *vfs) {
+  (void)name;
+  return get_now_dir(vfs);
 }
 
 static void fat_replace_directory_cursor(vfs_t *vfs,
                                          uintptr_t old_directory,
                                          struct FAT_FILEINFO *new_directory) {
-  struct fat_cursor_update update = {
-      .directory_list = get_dm(vfs).directory_list,
-      .old_directory = old_directory,
-      .new_directory = new_directory,
-  };
-  vfs_visit_mount_instances(vfs, fat_update_directory_cursor, &update);
+  if ((uintptr_t)get_now_dir(vfs) == old_directory) {
+    get_now_dir(vfs) = new_directory;
+  }
 }
 
-static bool fat_make_short_name(const char *path, char result[11]) {
-  const char *name = path;
-  for (const char *cursor = path; *cursor != '\0'; cursor++) {
-    if (*cursor == '/' || *cursor == '\\') {
-      name = cursor + 1;
-    }
-  }
-  if (*name == '\0') {
+static bool fat_make_short_name(const char *name, char result[11]) {
+  if (name == NULL || *name == '\0' || strchr(name, '/') != NULL ||
+      strchr(name, '\\') != NULL) {
     return false;
   }
   memset(result, ' ', 11);
@@ -883,7 +726,7 @@ int mkdir(char *dictname, vfs_t *vfs) {
               (directory_cluster - 2) * get_dm(vfs).ClustnoBytes) /
                  get_dm(vfs).SectorBytes,
              get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes,
-             directory_buffer, vfs->disk_number);
+             directory_buffer, vfs_mount_disk_number(vfs));
   file_saveinfo(parent, vfs);
   file_savefat(get_dm(vfs).fat, directory_cluster, 1, vfs);
   if (extension_cluster >= 0) {
@@ -926,99 +769,14 @@ int del(char *cmdline, vfs_t *vfs) {
                get_clustno(finfo->clustno_high, finfo->clustno_low), 1, vfs);
   return 1;
 }
-int deldir(char *path, vfs_t *vfs) {
-  struct FAT_FILEINFO *finfo = Get_dictaddr(path, vfs);
-  if (finfo == Get_dictaddr(".", vfs)) {
-    return 0;
-  }
-  struct FAT_FILEINFO *f = get_now_dir(vfs);
-  get_now_dir(vfs) = finfo;
-  for (int i = 2; finfo[i].name[0] != '\0'; i++) {
-    if (finfo[i].type == 0x10 && finfo[i].name[0] != 0xe5) {
-      char s[30];
-      int j = 0;
-      for (; finfo[i].name[j] != ' '; j++) {
-        s[j] = finfo[i].name[j];
-      }
-      s[j] = '\0';
-      // printk("(CALL)DEL DIR:%s\n", s);
-      if (deldir(s, vfs) == -1) {
-        return 0;
-      }
-      // return -1;
-    }
-  }
-  for (int i = 2; finfo[i].name[0] != '\0'; i++) {
-    if (finfo[i].name[0] != 0xe5 && finfo[i].type != 0x10) {
-      char s[30];
-      int p = 0;
-      for (int j = 0; finfo[i].name[j] != ' '; j++, p++) {
-        s[p] = finfo[i].name[j];
-      }
-      if (finfo[i].ext[0] != ' ') {
-        s[p++] = '.';
-        for (int j = 0; finfo[i].ext[j] != ' ' || j != 3; j++, p++) {
-          s[p] = finfo[i].ext[j];
-        }
-      }
-      s[p] = '\0';
-      // printk("(IN)DEL FILE:%s\n", s);
-      if (del(s, vfs) == -1) {
-        return 0;
-      }
-    }
-  }
-  get_now_dir(vfs) = f;
-  // printk("(IN)DEL SELF\n");
-  struct FAT_FILEINFO *root_finfo;
-  if (finfo[1].clustno_low == 0) {
-    root_finfo = get_dm(vfs).root_directory;
-  } else {
-    for (int i = 1; list_get(i, get_dm(vfs).directory_clustno_list) != NULL;
-         i++) {
-      if (list_get(i, get_dm(vfs).directory_clustno_list)->val ==
-          finfo[1].clustno_low) {
-        root_finfo =
-            (struct FAT_FILEINFO *)list_get(i, get_dm(vfs).directory_list)
-                ->val;
-        // printk("FIND ROOT %08x\n", root_finfo);
-      }
-    }
-  }
-  for (int i = 0; root_finfo[i].name[0] != '\0'; i++) {
-    // printk("ROOT FILE:%s\n", root_finfo[i].name);
-    if (root_finfo[i].clustno_low == finfo[0].clustno_low) {
-      root_finfo[i].name[0] = 0xe5;
-      break;
-    }
-  }
-  get_dm(vfs).fat[get_clustno(finfo->clustno_high, finfo->clustno_low)] = 0;
-  get_dm(vfs)
-      .FatClustnoFlags[get_clustno(finfo->clustno_high, finfo->clustno_low)] =
-      false;
-  file_saveinfo(Get_dictaddr(path, vfs), vfs);
-  file_savefat(get_dm(vfs).fat,
-               get_clustno(finfo->clustno_high, finfo->clustno_low), 1, vfs);
-  return 1;
-}
-int mkfile(char *name, vfs_t *vfs) {
-  logk("mkfile : %s\n", name);
+static int fat_create_file_entry(char *name, vfs_t *vfs) {
   char s[12];
   int i, j;
   struct FAT_FILEINFO *finfo = Get_dictaddr(name, vfs);
-  logk("finfo = %08x\n", finfo);
   if (finfo == NULL) {
     return 0;
   }
   int max = get_directory_max(finfo, vfs);
-
-  char *path = name;
-  for (i = strlen(name); i >= 0; i--) {
-    if (name[i] == '/' || name[i] == '\\') {
-      name += i + 1;
-      break;
-    }
-  }
 
   for (j = 0; j != 12; j++) {
     s[j] = ' ';
@@ -1113,119 +871,22 @@ int mkfile(char *name, vfs_t *vfs) {
   finfo->update_date =
       get_fat_date(get_year(), get_mon_hex(), get_day_of_month());
   finfo->size = 0;
-  file_saveinfo(Get_dictaddr(path, vfs), vfs);
+  file_saveinfo(Get_dictaddr(name, vfs), vfs);
   file_savefat(get_dm(vfs).fat,
                get_clustno(finfo->clustno_high, finfo->clustno_low), 1, vfs);
   return 1;
 }
-int changedict(char *dictname, vfs_t *vfs) {
-  if (dictname == NULL || vfs == NULL || vfs->path == NULL) {
-    return 0;
-  }
-  strtoupper(dictname);
-
-  if (strcmp(dictname, "/") == 0) {
-    while (vfs->path->ctl->all != 0) {
-      free((void *)(uintptr_t)list_get(vfs->path->ctl->all, vfs->path)
-               ->val);
-      DeleteVal(vfs->path->ctl->all, vfs->path);
-    }
-    get_now_dir(vfs) = get_dm(vfs).root_directory;
-    return 1;
-  }
-  if (strcmp(dictname, ".") == 0) {
-    return 1;
-  }
-  if (strcmp(dictname, "..") == 0 && vfs->path->ctl->all == 0) {
-    return 0;
-  }
-
-  struct FAT_FILEINFO *finfo = dict_search(
-      dictname, get_now_dir(vfs), get_directory_max(get_now_dir(vfs), vfs));
-  if (finfo == NULL) {
-    return 0;
-  }
-  unsigned int cluster =
-      get_clustno(finfo->clustno_high, finfo->clustno_low);
-  if (cluster == 0) {
-    while (vfs->path->ctl->all != 0) {
-      free((void *)(uintptr_t)list_get(vfs->path->ctl->all, vfs->path)
-               ->val);
-      DeleteVal(vfs->path->ctl->all, vfs->path);
-    }
-    get_now_dir(vfs) = get_dm(vfs).root_directory;
-    return 1;
-  }
-
-  struct FAT_FILEINFO *next_directory = NULL;
-  for (int count = 1;
-       list_get(count, get_dm(vfs).directory_clustno_list) != NULL;
-       count++) {
-    struct List *cluster_entry =
-        list_get(count, get_dm(vfs).directory_clustno_list);
-    if (cluster == cluster_entry->val) {
-      struct List *directory_entry =
-          list_get(count, get_dm(vfs).directory_list);
-      if (directory_entry != NULL) {
-        next_directory = (struct FAT_FILEINFO *)(uintptr_t)directory_entry->val;
-      }
-      break;
-    }
-  }
-  if (next_directory == NULL) {
-    return 0;
-  }
-
-  if (strcmp(dictname, "..") == 0) {
-    struct List *path_entry =
-        list_get(vfs->path->ctl->all, vfs->path);
-    if (path_entry == NULL) {
-      return 0;
-    }
-    free((void *)(uintptr_t)path_entry->val);
-    DeleteVal(vfs->path->ctl->all, vfs->path);
-  } else {
-    size_t length = strlen(dictname);
-    if (length >= (size_t)INT_MAX) {
-      return 0;
-    }
-    char *path_entry = malloc((int)length + 1);
-    if (path_entry == NULL) {
-      return 0;
-    }
-    memcpy(path_entry, dictname, length + 1);
-    if (!AddVal((uintptr_t)path_entry, vfs->path)) {
-      free(path_entry);
-      return 0;
-    }
-  }
-  get_now_dir(vfs) = next_directory;
-  return 1;
-}
-int rename(char *src_name, char *dst_name, vfs_t *vfs) {
+static int fat_rename_entry(char *src_name, char *dst_name, vfs_t *vfs) {
   strtoupper(src_name);
   strtoupper(dst_name);
   if (strcmp(src_name, dst_name) == 0) {
     return 1;
   }
 
-  char *src_base = src_name;
-  char *dst_base = dst_name;
-  for (char *cursor = src_name; *cursor != '\0'; cursor++) {
-    if (*cursor == '/' || *cursor == '\\') {
-      src_base = cursor + 1;
-    }
-  }
-  for (char *cursor = dst_name; *cursor != '\0'; cursor++) {
-    if (*cursor == '/' || *cursor == '\\') {
-      dst_base = cursor + 1;
-    }
-  }
-  size_t src_parent_length = (size_t)(src_base - src_name);
-  size_t dst_parent_length = (size_t)(dst_base - dst_name);
-  if (src_parent_length != dst_parent_length ||
-      memcmp(src_name, dst_name, src_parent_length) != 0 || *dst_base == '\0' ||
-      strcmp(dst_base, ".") == 0 || strcmp(dst_base, "..") == 0) {
+  if (*dst_name == '\0' || strchr(src_name, '/') != NULL ||
+      strchr(src_name, '\\') != NULL || strchr(dst_name, '/') != NULL ||
+      strchr(dst_name, '\\') != NULL || strcmp(dst_name, ".") == 0 ||
+      strcmp(dst_name, "..") == 0) {
     return 0;
   }
 
@@ -1234,7 +895,7 @@ int rename(char *src_name, char *dst_name, vfs_t *vfs) {
   size_t name_length = 0;
   size_t extension_length = 0;
   bool extension = false;
-  for (const char *cursor = dst_base; *cursor != '\0'; cursor++) {
+  for (const char *cursor = dst_name; *cursor != '\0'; cursor++) {
     if (*cursor == '.') {
       if (extension || name_length == 0) {
         return 0;
@@ -1279,7 +940,7 @@ int format(char drive) {
                                         : 32;
   FILE *boot_file = fopen(type == 32 ? "/boot32.bin" : "/boot.bin", "r");
   uint8_t *boot = malloc(512);
-  if (boot_file == NULL || boot == NULL || boot_file->fileSize < 512 ||
+  if (boot_file == NULL || boot == NULL ||
       fread(boot, 1, 512, boot_file) != 512) {
     if (boot_file != NULL) {
       fclose(boot_file);
@@ -1411,7 +1072,7 @@ int format(char drive) {
   free(boot);
   return written;
 }
-int attrib(char *filename, ftype type, struct vfs_t *vfs) {
+int attrib(char *filename, ftype type, vfs_t *vfs) {
   struct FAT_FILEINFO *finfo = Get_File_Address(filename, vfs);
   if (finfo == 0) {
     return 0;
@@ -1429,20 +1090,14 @@ int attrib(char *filename, ftype type, struct vfs_t *vfs) {
   file_saveinfo(Get_dictaddr(filename, vfs), vfs);
   return 1;
 }
-bool fat_init_fs(struct vfs_t *vfs, uint8_t disk_number) {
+bool fat_init_fs(vfs_t *vfs, uint8_t disk_number) {
   void *boot_sector = NULL;
-  vfs->cache = malloc(sizeof(fat_cache));
-  if (vfs->cache == NULL) {
+  fat_state_t *state = malloc(sizeof(*state));
+  if (state == NULL) {
     return false;
   }
-  memset(vfs->cache, 0, sizeof(fat_cache));
-  get_fat_lock(vfs) = fat_alloc_lock();
-  get_fat_lock_owner(vfs) = fat_alloc_lock_owner();
-  get_fat_lock_depth(vfs) = fat_alloc_lock_depth();
-  if (get_fat_lock(vfs) == NULL || get_fat_lock_owner(vfs) == NULL ||
-      get_fat_lock_depth(vfs) == NULL) {
-    goto fail;
-  }
+  memset(state, 0, sizeof(*state));
+  vfs_mount_set_data(vfs, state);
   boot_sector = malloc(512);
   if (boot_sector == NULL) {
     goto fail;
@@ -1688,163 +1343,577 @@ fail:
   fat_delete_fs(vfs);
   return false;
 }
-bool fat_copy_cache(struct vfs_t *dest, struct vfs_t *src) {
-  dest->cache = malloc(sizeof(fat_cache));
-  if (dest->cache == NULL) {
+static uint32_t fat_directory_cluster(vfs_t *vfs,
+                                      struct FAT_FILEINFO *directory) {
+  if (directory == get_dm(vfs).root_directory) {
+    return 0;
+  }
+  for (int index = 1;; index++) {
+    struct List *entry = list_get(index, get_dm(vfs).directory_list);
+    if (entry == NULL) {
+      return UINT_MAX;
+    }
+    if ((struct FAT_FILEINFO *)(uintptr_t)entry->val == directory) {
+      return list_get(index, get_dm(vfs).directory_clustno_list)->val;
+    }
+  }
+}
+
+static struct FAT_FILEINFO *fat_directory_by_cluster(vfs_t *vfs,
+                                                      uint32_t cluster) {
+  if (cluster == 0) {
+    return get_dm(vfs).root_directory;
+  }
+  for (int index = 1;; index++) {
+    struct List *entry =
+        list_get(index, get_dm(vfs).directory_clustno_list);
+    if (entry == NULL) {
+      return NULL;
+    }
+    if (entry->val == cluster) {
+      return (struct FAT_FILEINFO *)(uintptr_t)
+          list_get(index, get_dm(vfs).directory_list)->val;
+    }
+  }
+}
+
+static struct FAT_FILEINFO *fat_node_directory(vfs_t *vfs,
+                                                const vfs_node_t *node) {
+  return node != NULL && node->type == VFS_NODE_DIRECTORY &&
+                 node->id.value[0] == 1
+             ? fat_directory_by_cluster(vfs, node->id.value[1])
+             : NULL;
+}
+
+static struct FAT_FILEINFO *fat_node_entry(vfs_t *vfs,
+                                            const vfs_node_t *node,
+                                            struct FAT_FILEINFO **parent) {
+  if (node == NULL || node->type != VFS_NODE_FILE || node->id.value[0] != 2) {
+    return NULL;
+  }
+  struct FAT_FILEINFO *directory =
+      fat_directory_by_cluster(vfs, node->id.value[1]);
+  uint32_t slot = node->id.value[2];
+  if (directory == NULL || slot >= (uint32_t)get_directory_max(directory, vfs) ||
+      directory[slot].name[0] == 0 || directory[slot].name[0] == 0xe5) {
+    return NULL;
+  }
+  if (parent != NULL) {
+    *parent = directory;
+  }
+  return &directory[slot];
+}
+
+static ftype fat_entry_attribute(const struct FAT_FILEINFO *entry) {
+  if (entry->type == 0x01) {
+    return RDO;
+  }
+  if (entry->type == 0x02) {
+    return HID;
+  }
+  if (entry->type == 0x04) {
+    return SYS;
+  }
+  return FLE;
+}
+
+static void fat_make_node(vfs_t *vfs, struct FAT_FILEINFO *parent,
+                          uint32_t slot, vfs_node_t *node) {
+  struct FAT_FILEINFO *entry = &parent[slot];
+  memset(node, 0, sizeof(*node));
+  if (entry->type == 0x10) {
+    node->type = VFS_NODE_DIRECTORY;
+    node->id.value[0] = 1;
+    node->id.value[1] =
+        get_clustno(entry->clustno_high, entry->clustno_low);
+    node->attributes = DIR;
+  } else {
+    node->type = VFS_NODE_FILE;
+    node->id.value[0] = 2;
+    node->id.value[1] = fat_directory_cluster(vfs, parent);
+    node->id.value[2] = slot;
+    node->size = entry->size;
+    node->attributes = fat_entry_attribute(entry);
+  }
+}
+
+static int fat_normalize_name(const char *name, size_t length,
+                              char *normalized, size_t capacity) {
+  if (name == NULL || normalized == NULL || length == 0 || length >= 13 ||
+      capacity < length + 1) {
+    return VFS_ERROR_INVALID;
+  }
+  char input[13];
+  memcpy(input, name, length);
+  input[length] = '\0';
+  char short_name[11];
+  if (!fat_make_short_name(input, short_name)) {
+    return VFS_ERROR_INVALID;
+  }
+  for (size_t index = 0; index < length; index++) {
+    char ch = input[index];
+    normalized[index] = ch >= 'a' && ch <= 'z' ? ch - ('a' - 'A') : ch;
+  }
+  normalized[length] = '\0';
+  return VFS_OK;
+}
+
+static int fat_root(vfs_t *vfs, vfs_node_t *node) {
+  (void)vfs;
+  memset(node, 0, sizeof(*node));
+  node->id.value[0] = 1;
+  node->type = VFS_NODE_DIRECTORY;
+  node->attributes = DIR;
+  return VFS_OK;
+}
+
+static int fat_lookup(vfs_t *vfs, const vfs_node_t *directory_node,
+                      const char *name, vfs_node_t *node) {
+  struct FAT_FILEINFO *directory = fat_node_directory(vfs, directory_node);
+  if (directory == NULL) {
+    return VFS_ERROR_NOT_DIRECTORY;
+  }
+  struct FAT_FILEINFO *entry =
+      file_search(name, directory, get_directory_max(directory, vfs));
+  if (entry == NULL) {
+    entry = dict_search(name, directory, get_directory_max(directory, vfs));
+  }
+  if (entry == NULL) {
+    return VFS_ERROR_NO_ENTRY;
+  }
+  fat_make_node(vfs, directory, entry - directory, node);
+  return VFS_OK;
+}
+
+static bool fat_cluster_at(vfs_t *vfs, int start, uint32_t index,
+                           int *cluster) {
+  int current = start;
+  for (uint32_t position = 0; position < index; position++) {
+    if (!fat_data_cluster_valid(vfs, current) ||
+        fat_is_eoc(get_dm(vfs).type, get_dm(vfs).fat[current])) {
+      return false;
+    }
+    current = get_dm(vfs).fat[current];
+  }
+  if (!fat_data_cluster_valid(vfs, current)) {
     return false;
   }
-  memcpy(dest->cache, src->cache, sizeof(fat_cache));
-  get_fat_lock(dest) = get_fat_lock(src);
-  get_fat_lock_owner(dest) = get_fat_lock_owner(src);
-  get_fat_lock_depth(dest) = get_fat_lock_depth(src);
+  *cluster = current;
   return true;
 }
-static void fat_release_cache(struct vfs_t *vfs) {
-  free(vfs->cache);
-  vfs->cache = NULL;
+
+static void fat_write_cluster(vfs_t *vfs, int cluster, const void *buffer) {
+  disk_write((get_dm(vfs).FileDataAddress +
+              (cluster - 2) * get_dm(vfs).ClustnoBytes) /
+                 get_dm(vfs).SectorBytes,
+             get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes,
+             (void *)buffer, vfs_mount_disk_number(vfs));
 }
-bool fat_cd(struct vfs_t *vfs, char *dictName) {
-  bool result;
-  fat_op_lock(vfs);
-  result = changedict(dictName, vfs);
-  fat_op_unlock(vfs);
-  return result;
+
+static void fat_read_cluster(vfs_t *vfs, int cluster, void *buffer) {
+  disk_read((get_dm(vfs).FileDataAddress +
+             (cluster - 2) * get_dm(vfs).ClustnoBytes) /
+                get_dm(vfs).SectorBytes,
+            get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes, buffer,
+            vfs_mount_disk_number(vfs));
 }
-bool fat_read_file(struct vfs_t *vfs, char *path, char *buffer) {
-  bool result = false;
-  fat_op_lock(vfs);
-  struct FAT_FILEINFO *finfo;
-  finfo = Get_File_Address(path, vfs);
-  if (finfo == 0) {
-    result = false;
-  } else {
-    result = finfo->size <= INT_MAX &&
-             file_loadfile(
-                 get_clustno(finfo->clustno_high, finfo->clustno_low),
-                 finfo->size, buffer, get_dm(vfs).fat, vfs);
+
+static bool fat_ensure_clusters(vfs_t *vfs, int start, uint32_t required) {
+  int existing;
+  if (!fat_chain_length(vfs, start, &existing)) {
+    return false;
   }
-  fat_op_unlock(vfs);
-  return result;
-}
-bool fat_write_file(struct vfs_t *vfs, char *path, char *buffer, int size) {
-  fat_op_lock(vfs);
-  struct FAT_FILEINFO *finfo = Get_File_Address(path, vfs);
-  bool result = finfo != NULL && size >= 0 && (size == 0 || buffer != NULL) &&
-                file_savefile(
-                    get_clustno(finfo->clustno_high, finfo->clustno_low), size,
-                    buffer, get_dm(vfs).fat, get_dm(vfs).FatClustnoFlags, vfs);
-  if (result) {
-    finfo->size = size;
-    file_saveinfo(Get_dictaddr(path, vfs), vfs);
+  if ((uint32_t)existing >= required) {
+    return true;
   }
-  fat_op_unlock(vfs);
-  return result;
-}
-static void fat_free_file_list(List *files) {
-  if (files == NULL) {
-    return;
+  uint32_t additional = required - existing;
+  if (additional > (uint32_t)INT_MAX / sizeof(int)) {
+    return false;
   }
-  for (int i = 1; list_get(i, files) != NULL; i++) {
-    free((void *)(uintptr_t)list_get(i, files)->val);
+  int *allocated = malloc(additional * sizeof(int));
+  if (allocated == NULL) {
+    return false;
   }
-  DeleteList(files);
-}
-List *fat_list_file(struct vfs_t *vfs, char *dictpath) {
-  fat_op_lock(vfs);
-  struct FAT_FILEINFO *finfo =
-      fat_resolve_path(vfs, dictpath, FAT_PATH_DIRECTORY);
-  if (finfo == NULL) {
-    fat_op_unlock(vfs);
-    return NULL;
-  }
-  List *result = NewList();
-  if (result == NULL) {
-    fat_op_unlock(vfs);
-    return NULL;
-  }
-  char s[30];
-  for (int i = 0; i != 30; i++) {
-    s[i] = 0;
-  }
-  for (int i = 0; i < get_directory_max(finfo, vfs); i++) {
-    if (finfo[i].name[0] == 0x00) {
-      break;
+  uint32_t found = 0;
+  for (int cluster = 2;
+       cluster < get_dm(vfs).FatMaxTerms && found < additional; cluster++) {
+    if (get_dm(vfs).fat[cluster] == 0 && fat_data_cluster_valid(vfs, cluster)) {
+      allocated[found++] = cluster;
     }
-    if (finfo[i].name[0] != 0xe5) {
-      if ((finfo[i].type & 0x18) == 0 || finfo[i].type == 0x10) {
-        for (int j = 0; j < 8; j++) {
-          s[j] = finfo[i].name[j];
+  }
+  if (found != additional) {
+    free(allocated);
+    return false;
+  }
+  uint8_t *zero = malloc(get_dm(vfs).ClustnoBytes);
+  if (zero == NULL) {
+    free(allocated);
+    return false;
+  }
+  memset(zero, 0, get_dm(vfs).ClustnoBytes);
+  int last;
+  fat_chain_last(vfs, start, &last);
+  for (uint32_t index = 0; index < additional; index++) {
+    get_dm(vfs).fat[last] = allocated[index];
+    last = allocated[index];
+    get_dm(vfs).fat[last] = fat_eoc_marker(get_dm(vfs).type);
+    get_dm(vfs).FatClustnoFlags[last] = true;
+    fat_write_cluster(vfs, last, zero);
+  }
+  file_savefat(get_dm(vfs).fat, 0, get_dm(vfs).FatMaxTerms, vfs);
+  free(zero);
+  free(allocated);
+  return true;
+}
+
+static bool fat_transfer(vfs_t *vfs, int start, uint32_t offset, void *buffer,
+                         uint32_t length, bool write, bool zero) {
+  if (length == 0) {
+    return true;
+  }
+  struct FAT_CACHE *disk = &get_dm(vfs);
+  uint32_t cluster_size = disk->ClustnoBytes;
+  uint32_t cluster_index = offset / cluster_size;
+  uint32_t cluster_offset = offset % cluster_size;
+  int cluster;
+  if (!fat_cluster_at(vfs, start, cluster_index, &cluster)) {
+    return false;
+  }
+  uint8_t *bounce = NULL;
+  uint32_t completed = 0;
+  while (completed < length) {
+    uint32_t chunk = cluster_size - cluster_offset;
+    if (chunk > length - completed) {
+      chunk = length - completed;
+    }
+    if (cluster_offset == 0 && chunk == cluster_size && !zero) {
+      uint32_t run = 1;
+      int last = cluster;
+      uint32_t full_clusters = (length - completed) / cluster_size;
+      while (run < full_clusters) {
+        int next = disk->fat[last];
+        if (next != last + 1 || !fat_data_cluster_valid(vfs, next)) {
+          break;
         }
-        s[8] = '.';
-        if (finfo[i].ext[0] == ' ') {
-          s[8] = 0;
-        } else {
-          s[9] = finfo[i].ext[0];
-          s[10] = finfo[i].ext[1];
-          s[11] = finfo[i].ext[2];
-        }
-        if (s[0] != '+') {
-          vfs_file *d = malloc(sizeof(vfs_file));
-          if (d == NULL) {
-            fat_free_file_list(result);
-            fat_op_unlock(vfs);
-            return NULL;
-          }
-          if (finfo[i].type == 0x10) {
-            d->type = DIR;
-          } else if (finfo[i].type == 0x20) {
-            d->type = FLE;
-          } else if (finfo[i].type == 0x01) {
-            d->type = RDO;
-          } else if (finfo[i].type == 0x02) {
-            d->type = HID;
-          } else if (finfo[i].type == 0x04) {
-            d->type = SYS;
-          }
-          d->year = (finfo[i].update_date & 65024) >> 9;
-          d->year += 1980;
-          d->month = (finfo[i].update_date & 480) >> 5;
-          d->day = finfo[i].update_date & 31;
-          d->hour = (finfo[i].update_time & 63488) >> 11;
-          d->minute = (finfo[i].update_time & 2016) >> 5;
-          d->size = finfo[i].size;
-          int q = 0;
-          for (int k = 0; k < 12 && s[k] != 0; ++k) {
-            if (s[k] != ' ') {
-              d->name[q++] = s[k];
-            }
-          }
-          d->name[q] = 0;
-          // printk("d->name = %s\n", d->name);
-          if (!AddVal((uintptr_t)d, result)) {
-            free(d);
-            fat_free_file_list(result);
-            fat_op_unlock(vfs);
-            return NULL;
-          }
+        last = next;
+        run++;
+      }
+      uint32_t sector =
+          (disk->FileDataAddress + (cluster - 2) * cluster_size) /
+          disk->SectorBytes;
+      uint32_t sectors = run * cluster_size / disk->SectorBytes;
+      if (write) {
+        disk_write(sector, sectors, (uint8_t *)buffer + completed,
+                   vfs_mount_disk_number(vfs));
+      } else {
+        disk_read(sector, sectors, (uint8_t *)buffer + completed,
+                  vfs_mount_disk_number(vfs));
+      }
+      completed += run * cluster_size;
+      cluster = last;
+    } else {
+      if (bounce == NULL) {
+        bounce = malloc(cluster_size);
+        if (bounce == NULL) {
+          return false;
         }
       }
+      if (!write) {
+        fat_read_cluster(vfs, cluster, bounce);
+        memcpy((uint8_t *)buffer + completed, bounce + cluster_offset, chunk);
+      } else if (cluster_offset == 0 && chunk == cluster_size) {
+        memset(bounce, 0, cluster_size);
+        fat_write_cluster(vfs, cluster, bounce);
+      } else {
+        fat_read_cluster(vfs, cluster, bounce);
+        if (zero) {
+          memset(bounce + cluster_offset, 0, chunk);
+        } else {
+          memcpy(bounce + cluster_offset, (uint8_t *)buffer + completed,
+                 chunk);
+        }
+        fat_write_cluster(vfs, cluster, bounce);
+      }
+      completed += chunk;
+    }
+    cluster_offset = 0;
+    if (completed < length) {
+      int next = disk->fat[cluster];
+      if (fat_is_eoc(disk->type, next) ||
+          !fat_data_cluster_valid(vfs, next)) {
+        free(bounce);
+        return false;
+      }
+      cluster = next;
     }
   }
-  fat_op_unlock(vfs);
-  return result;
+  free(bounce);
+  return true;
 }
-bool fat_rename_file(struct vfs_t *vfs, char *filename, char *filename_of_new) {
-  bool result;
-  fat_op_lock(vfs);
-  result = rename(filename, filename_of_new, vfs);
-  fat_op_unlock(vfs);
-  return result;
+
+static int fat_read(vfs_t *vfs, const vfs_node_t *node, uint32_t offset,
+                    void *buffer, uint32_t length) {
+  struct FAT_FILEINFO *entry = fat_node_entry(vfs, node, NULL);
+  if (entry == NULL || offset > entry->size) {
+    return VFS_ERROR_NO_ENTRY;
+  }
+  if (length > entry->size - offset) {
+    length = entry->size - offset;
+  }
+  int start = get_clustno(entry->clustno_high, entry->clustno_low);
+  return fat_transfer(vfs, start, offset, buffer, length, false, false)
+             ? (int)length
+             : VFS_ERROR_IO;
 }
-bool fat_create_file(struct vfs_t *vfs, char *filename) {
-  bool result;
-  fat_op_lock(vfs);
-  result = mkfile(filename, vfs);
-  fat_op_unlock(vfs);
-  return result;
+
+static int fat_resize(vfs_t *vfs, vfs_node_t *node, uint32_t size) {
+  struct FAT_FILEINFO *parent;
+  struct FAT_FILEINFO *entry = fat_node_entry(vfs, node, &parent);
+  if (entry == NULL) {
+    return VFS_ERROR_NO_ENTRY;
+  }
+  uint32_t cluster_size = get_dm(vfs).ClustnoBytes;
+  uint32_t required = size == 0 ? 1 : (size - 1) / cluster_size + 1;
+  int start = get_clustno(entry->clustno_high, entry->clustno_low);
+  int existing;
+  if (!fat_chain_length(vfs, start, &existing)) {
+    return VFS_ERROR_IO;
+  }
+  if ((uint32_t)existing < required &&
+      !fat_ensure_clusters(vfs, start, required)) {
+    return VFS_ERROR_NO_SPACE;
+  }
+  if ((uint32_t)existing > required) {
+    int last;
+    if (!fat_cluster_at(vfs, start, required - 1, &last)) {
+      return VFS_ERROR_IO;
+    }
+    int current = get_dm(vfs).fat[last];
+    get_dm(vfs).fat[last] = fat_eoc_marker(get_dm(vfs).type);
+    while (!fat_is_eoc(get_dm(vfs).type, current)) {
+      int next = get_dm(vfs).fat[current];
+      get_dm(vfs).fat[current] = 0;
+      get_dm(vfs).FatClustnoFlags[current] = false;
+      current = next;
+    }
+    if (fat_data_cluster_valid(vfs, current)) {
+      get_dm(vfs).fat[current] = 0;
+      get_dm(vfs).FatClustnoFlags[current] = false;
+    }
+    file_savefat(get_dm(vfs).fat, 0, get_dm(vfs).FatMaxTerms, vfs);
+  }
+  if (size > entry->size &&
+      !fat_transfer(vfs, start, entry->size, NULL, size - entry->size, true,
+                    true)) {
+    return VFS_ERROR_IO;
+  }
+  if (size < entry->size && size % cluster_size != 0 &&
+      !fat_transfer(vfs, start, size, NULL, cluster_size - size % cluster_size,
+                    true, true)) {
+    return VFS_ERROR_IO;
+  }
+  entry->size = size;
+  entry->update_time = get_fat_time(get_hour_hex(), get_min_hex());
+  entry->update_date =
+      get_fat_date(get_year(), get_mon_hex(), get_day_of_month());
+  file_saveinfo(parent, vfs);
+  node->size = size;
+  return VFS_OK;
 }
-void fat_delete_fs(struct vfs_t *vfs) {
-  if (vfs->cache == NULL) {
+
+static int fat_write(vfs_t *vfs, vfs_node_t *node, uint32_t offset,
+                     const void *buffer, uint32_t length) {
+  struct FAT_FILEINFO *entry = fat_node_entry(vfs, node, NULL);
+  if (entry == NULL) {
+    return VFS_ERROR_NO_ENTRY;
+  }
+  if (offset > UINT_MAX - length) {
+    return VFS_ERROR_OVERFLOW;
+  }
+  uint32_t end = offset + length;
+  uint32_t previous = entry->size;
+  if (end > previous) {
+    int status = fat_resize(vfs, node, end);
+    if (status < 0) {
+      return status;
+    }
+    entry = fat_node_entry(vfs, node, NULL);
+  }
+  int start = get_clustno(entry->clustno_high, entry->clustno_low);
+  if (!fat_transfer(vfs, start, offset, (void *)buffer, length, true, false)) {
+    if (end > previous) {
+      fat_resize(vfs, node, previous);
+    }
+    return VFS_ERROR_IO;
+  }
+  return length;
+}
+
+static int fat_truncate(vfs_t *vfs, vfs_node_t *node, uint32_t size) {
+  return fat_resize(vfs, node, size);
+}
+
+static int fat_create(vfs_t *vfs, const vfs_node_t *directory_node,
+                      const char *name, vfs_node_type_t type,
+                      vfs_node_t *node) {
+  struct FAT_FILEINFO *directory = fat_node_directory(vfs, directory_node);
+  if (directory == NULL) {
+    return VFS_ERROR_NOT_DIRECTORY;
+  }
+  get_now_dir(vfs) = directory;
+  if (file_search(name, directory, get_directory_max(directory, vfs)) != NULL ||
+      dict_search(name, directory, get_directory_max(directory, vfs)) != NULL) {
+    return VFS_ERROR_EXISTS;
+  }
+  if ((type == VFS_NODE_FILE ? fat_create_file_entry((char *)name, vfs)
+                             : mkdir((char *)name, vfs)) == 0) {
+    return Get_File_Address(name, vfs) != NULL ? VFS_ERROR_EXISTS
+                                               : VFS_ERROR_NO_SPACE;
+  }
+  directory = get_now_dir(vfs);
+  struct FAT_FILEINFO *entry =
+      type == VFS_NODE_FILE
+          ? file_search(name, directory, get_directory_max(directory, vfs))
+          : dict_search(name, directory, get_directory_max(directory, vfs));
+  if (entry == NULL) {
+    return VFS_ERROR_IO;
+  }
+  fat_make_node(vfs, directory, entry - directory, node);
+  return VFS_OK;
+}
+
+static int fat_remove_directory(vfs_t *vfs, struct FAT_FILEINFO *parent,
+                                const char *name) {
+  struct FAT_FILEINFO *entry =
+      dict_search(name, parent, get_directory_max(parent, vfs));
+  if (entry == NULL) {
+    return VFS_ERROR_NO_ENTRY;
+  }
+  uint32_t cluster = get_clustno(entry->clustno_high, entry->clustno_low);
+  struct FAT_FILEINFO *directory = fat_directory_by_cluster(vfs, cluster);
+  if (directory == NULL) {
+    return VFS_ERROR_IO;
+  }
+  int maximum = get_directory_max(directory, vfs);
+  for (int index = 2; index < maximum && directory[index].name[0] != 0;
+       index++) {
+    if (directory[index].name[0] != 0xe5) {
+      return VFS_ERROR_NOT_EMPTY;
+    }
+  }
+  int current = cluster;
+  while (fat_data_cluster_valid(vfs, current)) {
+    int next = get_dm(vfs).fat[current];
+    get_dm(vfs).fat[current] = 0;
+    get_dm(vfs).FatClustnoFlags[current] = false;
+    if (fat_is_eoc(get_dm(vfs).type, next)) {
+      break;
+    }
+    current = next;
+  }
+  entry->name[0] = 0xe5;
+  file_saveinfo(parent, vfs);
+  file_savefat(get_dm(vfs).fat, 0, get_dm(vfs).FatMaxTerms, vfs);
+  for (int index = 1;; index++) {
+    struct List *cluster_entry =
+        list_get(index, get_dm(vfs).directory_clustno_list);
+    if (cluster_entry == NULL) {
+      break;
+    }
+    if (cluster_entry->val == cluster) {
+      free((void *)(uintptr_t)list_get(index, get_dm(vfs).directory_list)->val);
+      DeleteVal(index, get_dm(vfs).directory_list);
+      DeleteVal(index, get_dm(vfs).directory_clustno_list);
+      DeleteVal(index, get_dm(vfs).directory_max_list);
+      break;
+    }
+  }
+  return VFS_OK;
+}
+
+static int fat_remove(vfs_t *vfs, const vfs_node_t *directory_node,
+                      const char *name, vfs_node_type_t type) {
+  struct FAT_FILEINFO *directory = fat_node_directory(vfs, directory_node);
+  if (directory == NULL) {
+    return VFS_ERROR_NOT_DIRECTORY;
+  }
+  if (type == VFS_NODE_DIRECTORY) {
+    return fat_remove_directory(vfs, directory, name);
+  }
+  get_now_dir(vfs) = directory;
+  return del((char *)name, vfs) ? VFS_OK : VFS_ERROR_NO_ENTRY;
+}
+
+static int fat_rename(vfs_t *vfs, const vfs_node_t *source_directory,
+                      const char *source_name,
+                      const vfs_node_t *destination_directory,
+                      const char *destination_name) {
+  if (memcmp(&source_directory->id, &destination_directory->id,
+             sizeof(source_directory->id)) != 0) {
+    return VFS_ERROR_NOT_SUPPORTED;
+  }
+  struct FAT_FILEINFO *directory = fat_node_directory(vfs, source_directory);
+  if (directory == NULL) {
+    return VFS_ERROR_NOT_DIRECTORY;
+  }
+  get_now_dir(vfs) = directory;
+  return fat_rename_entry((char *)source_name, (char *)destination_name, vfs)
+             ? VFS_OK
+             : VFS_ERROR_EXISTS;
+}
+
+static void fat_entry_name(const struct FAT_FILEINFO *entry, char name[255]) {
+  uint32_t length = 0;
+  for (uint32_t index = 0; index < 8 && entry->name[index] != ' '; index++) {
+    name[length++] = entry->name[index];
+  }
+  if (entry->ext[0] != ' ') {
+    name[length++] = '.';
+    for (uint32_t index = 0; index < 3 && entry->ext[index] != ' '; index++) {
+      name[length++] = entry->ext[index];
+    }
+  }
+  name[length] = '\0';
+}
+
+static int fat_iterate(vfs_t *vfs, const vfs_node_t *directory_node,
+                       uint32_t wanted, vfs_dir_entry_t *result) {
+  struct FAT_FILEINFO *directory = fat_node_directory(vfs, directory_node);
+  if (directory == NULL) {
+    return VFS_ERROR_NOT_DIRECTORY;
+  }
+  uint32_t visible = 0;
+  int maximum = get_directory_max(directory, vfs);
+  for (int index = 0; index < maximum; index++) {
+    struct FAT_FILEINFO *entry = &directory[index];
+    if (entry->name[0] == 0) {
+      return 0;
+    }
+    if (entry->name[0] == 0xe5 || entry->name[0] == '+' ||
+        ((entry->type & 0x18) != 0 && entry->type != 0x10)) {
+      continue;
+    }
+    char name[255];
+    fat_entry_name(entry, name);
+    if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
+      continue;
+    }
+    if (visible++ == wanted) {
+      strcpy(result->name, name);
+      fat_make_node(vfs, directory, index, &result->node);
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int fat_sync(vfs_t *vfs) {
+  file_savefat(get_dm(vfs).fat, 0, get_dm(vfs).FatMaxTerms, vfs);
+  return VFS_OK;
+}
+
+static void fat_delete_fs(struct vfs_mount *vfs) {
+  if (fat_state(vfs) == NULL) {
     return;
   }
   free((void *)get_dm(vfs).ADR_DISKIMG);
@@ -1863,20 +1932,8 @@ void fat_delete_fs(struct vfs_t *vfs) {
     }
     DeleteList(get_dm(vfs).directory_list);
   }
-  if (get_fat_lock(vfs) != NULL) {
-    free(get_fat_lock(vfs));
-    get_fat_lock(vfs) = NULL;
-  }
-  if (get_fat_lock_owner(vfs) != NULL) {
-    free(get_fat_lock_owner(vfs));
-    get_fat_lock_owner(vfs) = NULL;
-  }
-  if (get_fat_lock_depth(vfs) != NULL) {
-    free(get_fat_lock_depth(vfs));
-    get_fat_lock_depth(vfs) = NULL;
-  }
-  free(vfs->cache);
-  vfs->cache = NULL;
+  free(fat_state(vfs));
+  vfs_mount_set_data(vfs, NULL);
 }
 bool fat_check(uint8_t disk_number) {
   if (!DiskReady(disk_number)) {
@@ -1899,117 +1956,30 @@ bool fat_check(uint8_t disk_number) {
   free(boot_sec);
   return false;
 }
-bool fat_del_file(struct vfs_t *vfs, char *path) {
-  bool result;
-  fat_op_lock(vfs);
-  result = del(path, vfs);
-  fat_op_unlock(vfs);
-  return result;
-}
-bool fat_del_dict(struct vfs_t *vfs, char *path) {
-  bool result;
-  fat_op_lock(vfs);
-  result = deldir(path, vfs);
-  fat_op_unlock(vfs);
-  return result;
-}
-int fat_file_size(struct vfs_t *vfs, char *filename) {
-  int result = -1;
-  fat_op_lock(vfs);
-  struct FAT_FILEINFO *finfo = Get_File_Address(filename, vfs);
-  if (finfo != NULL) {
-    result = finfo->size;
-  }
-  fat_op_unlock(vfs);
-  return result;
-}
 bool fat_format(uint8_t disk_number) { return format(disk_number); }
-bool fat_create_dict(struct vfs_t *vfs, char *filename) {
-  fat_op_lock(vfs);
-  bool result = mkdir(filename, vfs);
-  fat_op_unlock(vfs);
-  return result;
+static int fat_mount(vfs_t *vfs) {
+  return fat_init_fs(vfs, vfs_mount_disk_number(vfs)) ? VFS_OK
+                                                       : VFS_ERROR_IO;
 }
-bool fat_attrib(struct vfs_t *vfs, char *filename, ftype type) {
-  bool result;
-  fat_op_lock(vfs);
-  result = attrib(filename, type, vfs);
-  fat_op_unlock(vfs);
-  return result;
-}
-vfs_file *fat_fileinfo(struct vfs_t *vfs, char *filename) {
-  fat_op_lock(vfs);
-  struct FAT_FILEINFO *finfo = Get_File_Address(filename, vfs);
-  if (finfo == NULL) {
-    fat_op_unlock(vfs);
-    return (vfs_file *)NULL;
-  }
-  vfs_file *result = (vfs_file *)malloc(sizeof(vfs_file));
-  char s[30];
-  for (int i = 0; i != 30; i++) {
-    s[i] = 0;
-  }
-  for (int i = 0; i < 8; i++) {
-    s[i] = finfo->name[i];
-  }
-  s[8] = '.';
-  if (finfo->ext[0] == ' ') {
-    s[8] = 0;
-  } else {
-    s[9] = finfo->ext[0];
-    s[10] = finfo->ext[1];
-    s[11] = finfo->ext[2];
-  }
-  int i = 0;
-  for (int j = 0; i < 12 && s[i] != 0; i++) {
-    if (s[i] != ' ') {
-      result->name[j++] = s[i];
-    }
-  }
-  s[i] = '\0';
-  if (finfo->type == 0x10) {
-    result->type = DIR;
-  } else if (finfo->type == 0x20) {
-    result->type = FLE;
-  } else if (finfo->type == 0x01) {
-    result->type = RDO;
-  } else if (finfo->type == 0x02) {
-    result->type = HID;
-  } else if (finfo->type == 0x04) {
-    result->type = SYS;
-  }
-  result->year = (finfo->update_date & 65024) >> 9;
-  result->year += 1980;
-  result->month = (finfo->update_date & 480) >> 5;
-  result->day = finfo->update_date & 31;
-  result->hour = (finfo->update_time & 63488) >> 11;
-  result->minute = (finfo->update_time & 2016) >> 5;
-  result->size = finfo->size;
-  fat_op_unlock(vfs);
-  return result;
-}
-void Register_fat_fileSys() {
-  vfs_t fs = {0};
-  fs.flag = 1;
-  fs.cache = NULL;
-  strcpy(fs.FSName, "FAT");
-  fs.copy_cache = fat_copy_cache;
-  fs.release_cache = fat_release_cache;
-  fs.format = fat_format;
-  fs.create_file = fat_create_file;
-  fs.create_dict = fat_create_dict;
-  fs.del_dict = fat_del_dict;
-  fs.del_file = fat_del_file;
-  fs.read_file = fat_read_file;
-  fs.write_file = fat_write_file;
-  fs.delete_fs = fat_delete_fs;
-  fs.cd = fat_cd;
-  fs.file_size = fat_file_size;
-  fs.check = fat_check;
-  fs.list_file = fat_list_file;
-  fs.init_fs = fat_init_fs;
-  fs.rename_file = fat_rename_file;
-  fs.attrib = fat_attrib;
-  fs.fileinfo = fat_fileinfo;
-  vfs_register_fs(fs);
+
+void Register_fat_fileSys(void) {
+  static const vfs_filesystem_t filesystem = {
+      .name = "FAT",
+      .check = fat_check,
+      .format = fat_format,
+      .mount = fat_mount,
+      .unmount = fat_delete_fs,
+      .root = fat_root,
+      .normalize_name = fat_normalize_name,
+      .lookup = fat_lookup,
+      .read = fat_read,
+      .write = fat_write,
+      .truncate = fat_truncate,
+      .create = fat_create,
+      .remove = fat_remove,
+      .rename = fat_rename,
+      .iterate = fat_iterate,
+      .sync = fat_sync,
+  };
+  vfs_register_fs(&filesystem);
 }

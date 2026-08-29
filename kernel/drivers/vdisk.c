@@ -65,7 +65,7 @@ int register_vdisk(vdisk vd) {
 }
 int logout_vdisk(char drive) {
   int indx = drive - ('A');
-  if (indx > 26) {
+  if (indx < 0 || indx >= 26) {
     return 0; // 失败
   }
   if (vdisk_ctl[indx].flag) {
@@ -78,7 +78,7 @@ int logout_vdisk(char drive) {
 int rw_vdisk(char drive, unsigned int lba, unsigned char *buffer,
              unsigned int number, int read) {
   int indx = drive - ('A');
-  if (indx > 26) {
+  if (indx < 0 || indx >= 26) {
     return 0; // 失败
   }
   if (vdisk_ctl[indx].flag) {
@@ -95,7 +95,7 @@ int rw_vdisk(char drive, unsigned int lba, unsigned char *buffer,
 bool have_vdisk(char drive) {
   int indx = drive - 'A';
   // printk("drive=%c\n",drive);
-  if (indx > 26) {
+  if (indx < 0 || indx >= 26) {
     return 0; // 失败
   }
   if (vdisk_ctl[indx].flag) {
@@ -123,6 +123,12 @@ char next_vdisk(char drive) {
 }
 // 基于vdisk的通用读写
 bool SetDrive(unsigned char *name) {
+  for (int i = 0; i != 16; i++) {
+    if (drive_name[i] != NULL &&
+        strcmp((char *)drive_name[i], (char *)name) == 0) {
+      return true;
+    }
+  }
   for (int i = 0; i != 16; i++) {
     if (drive_name[i] == NULL) {
       drive_name[i] = name;
@@ -199,15 +205,29 @@ void vdisk_remove_task(unsigned tid) {
   }
 }
 
-#define SECTORS_ONCE 8
+#define VDISK_DEFAULT_TRANSFER_SECTORS 8u
+
+static unsigned int disk_transfer_sectors(char drive) {
+  int index = drive - 'A';
+  if (index < 0 || index >= 26 ||
+      vdisk_ctl[index].max_transfer_sectors == 0) {
+    return VDISK_DEFAULT_TRANSFER_SECTORS;
+  }
+  return vdisk_ctl[index].max_transfer_sectors;
+}
+
 void disk_read(unsigned int lba, unsigned int number, void *buffer,
                char drive) {
   if (have_vdisk(drive)) {
     unsigned int drive_code = disk_drive_slot(drive);
     if (DriveSemaphoreTake(drive_code)) {
-    for (int i = 0; i < number; i += SECTORS_ONCE) {
-      int sectors = ((number - i) >= SECTORS_ONCE) ? SECTORS_ONCE : (number - i);
-        rw_vdisk(drive, lba + i, buffer + i * 512, sectors, 1);
+      unsigned int limit = disk_transfer_sectors(drive);
+      for (unsigned int i = 0; i < number;) {
+        unsigned int sectors = number - i < limit ? number - i : limit;
+        rw_vdisk(drive, lba + i, (unsigned char *)buffer + i * 512, sectors,
+                 1);
+        i += sectors;
+        scheduler_preempt_if_needed();
       }
       DriveSemaphoreGive(drive_code);
     }
@@ -233,10 +253,13 @@ void disk_write(unsigned int lba, unsigned int number, void *buffer,
   if (have_vdisk(drive)) {
     unsigned int drive_code = disk_drive_slot(drive);
     if (DriveSemaphoreTake(drive_code)) {
-     // printk("*buffer(%d %d) = %02x\n",lba,number,*(unsigned char *)buffer);
-    for (int i = 0; i < number; i += SECTORS_ONCE) {
-      int sectors = ((number - i) >= SECTORS_ONCE) ? SECTORS_ONCE : (number - i);
-        rw_vdisk(drive, lba + i, buffer + i * 512, sectors, 0);
+      unsigned int limit = disk_transfer_sectors(drive);
+      for (unsigned int i = 0; i < number;) {
+        unsigned int sectors = number - i < limit ? number - i : limit;
+        rw_vdisk(drive, lba + i, (unsigned char *)buffer + i * 512, sectors,
+                 0);
+        i += sectors;
+        scheduler_preempt_if_needed();
       }
       DriveSemaphoreGive(drive_code);
     }
@@ -251,9 +274,13 @@ bool CDROM_Read(unsigned int lba, unsigned int number, void *buffer,
     }
     unsigned int drive_code = disk_drive_slot(drive);
     if (DriveSemaphoreTake(drive_code)) {
-      for (int i = 0; i < number; i += SECTORS_ONCE) {
-        int sectors = ((number - i) >= SECTORS_ONCE) ? SECTORS_ONCE : (number - i);
-        rw_vdisk(drive, lba + i, buffer + i * 2048, sectors, 1);
+      unsigned int limit = disk_transfer_sectors(drive);
+      for (unsigned int i = 0; i < number;) {
+        unsigned int sectors = number - i < limit ? number - i : limit;
+        rw_vdisk(drive, lba + i, (unsigned char *)buffer + i * 2048, sectors,
+                 1);
+        i += sectors;
+        scheduler_preempt_if_needed();
       }
       DriveSemaphoreGive(drive_code);
     }

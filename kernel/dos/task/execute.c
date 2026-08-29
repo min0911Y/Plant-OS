@@ -158,7 +158,6 @@ static __attribute__((optimize("O0"))) char *task_app_take_launch_request(void) 
   current_task()->line = (char *)r[1];
   irq_restore(state);
   page_free_one(r);
-  logk("%08x\n", current_task()->top);
   return filename;
 }
 
@@ -199,7 +198,6 @@ static __attribute__((noinline)) unsigned task_app_get_pde(void) {
 static bool task_app_clone_user_space(unsigned pde) {
   irq_state_t state = irq_save();
   x86_cr3_write(PDE_ADDRESS);
-  logk("P1 %08x\n", current_task()->pde);
   bool cloned = task_clone_user_page_tables(pde);
   x86_cr3_write(pde);
   irq_restore(state);
@@ -295,15 +293,30 @@ void task_to_user_mode_shell() {
 }
 void task_to_user_mode_elf(char *filename) {
   mtask *task = current_task();
-  int executable_size = vfs_filesize(filename);
-  char *p = executable_size <= 0 ? NULL : page_malloc(executable_size);
+  vfs_handle_t *stream = NULL;
+  vfs_stat_t status;
+  if (vfs_open(task->fs_context, filename, VFS_OPEN_READ, &stream) < 0 ||
+      vfs_fstat(stream, &status) < 0 || status.type != VFS_NODE_FILE ||
+      status.size == 0 || status.size > INT_MAX) {
+    if (stream != NULL) {
+      vfs_close(stream);
+    }
+    task_exit(-1);
+    for (;;) {
+    }
+  }
+  int executable_size = status.size;
+  char *p = page_malloc(executable_size);
   if (p == NULL) {
+    vfs_close(stream);
     task_exit(-1);
     for (;;) {
     }
   }
   change_page_task_id(task->tid, p, executable_size);
-  if (!vfs_readfile(filename, p)) {
+  int read = vfs_read(stream, p, executable_size);
+  vfs_close(stream);
+  if (read != executable_size) {
     task_exit(-1);
     for (;;) {
     }
@@ -345,6 +358,7 @@ void task_to_user_mode_elf(char *filename) {
     task_exit(-1);
     return;
   }
+  page_free(p, executable_size);
   if (uses_status_page) {
     *(unsigned char *)(USER_HEAP_END) = 0;
   }

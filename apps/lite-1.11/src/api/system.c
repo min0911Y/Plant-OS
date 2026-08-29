@@ -4,6 +4,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <stdbool.h>
+#include <sys/stat.h>
 #include <syscall.h>
 #ifdef _WIN32
 #include <windows.h>
@@ -219,8 +220,8 @@ static int f_chdir(lua_State *L) {
   const char *path = luaL_checkstring(L, 1);
   if (strcmp(path, "") == 0)
     return 0;
-  int err = vfs_change_path(path);
-  if (!err) {
+  int err = chdir(path);
+  if (err != 0) {
     luaL_error(L, "chdir() failed");
   }
   return 0;
@@ -264,7 +265,7 @@ static int f_absolute_path(lua_State *L) {
   }
   char cwd[255];
   char result[255];
-  api_getcwd(cwd);
+  getcwd(cwd, sizeof(cwd));
   if (cwd[strlen(cwd) - 1] == '/') {
     sprintf(result, "/%s", path);
   } else {
@@ -276,8 +277,8 @@ static int f_absolute_path(lua_State *L) {
 
 static int f_get_file_info(lua_State *L) {
   const char *path = luaL_checkstring(L, 1);
-  struct finfo_block *f;
-  if (filesize(path) == -1) {
+  struct stat status;
+  if (stat(path, &status) != 0) {
     lua_newtable(L);
     lua_pushnumber(L, 0);
     lua_setfield(L, -2, "modified");
@@ -294,9 +295,9 @@ static int f_get_file_info(lua_State *L) {
     lua_pushnumber(L, 0);
     lua_setfield(L, -2, "modified");
 
-    lua_pushnumber(L, filesize(path));
+    lua_pushnumber(L, status.st_size);
     lua_setfield(L, -2, "size");
-    lua_pushstring(L, "file");
+    lua_pushstring(L, S_ISDIR(status.st_mode) ? "dir" : "file");
 
     lua_setfield(L, -2, "type");
   }

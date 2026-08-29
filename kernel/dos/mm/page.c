@@ -982,41 +982,16 @@ int find_kpage(int line, int n) {
   return start;
 }
 void *page_malloc(int size) {
-  int trace = size >= 1024 * 1024;
   int n = ((size - 1) / (4 * 1024)) + 1;
-  if (trace) {
-    logk("page_malloc: request size=%08x pages=%d\n", size, n);
-  }
   int i = find_kpage(0, n);
   if (i < 0) {
-    if (trace) {
-      logk("page_malloc: find_kpage failed size=%08x pages=%d\n", size, n);
-    }
     return NULL;
-  }
-  if (trace) {
-    logk("page_malloc: found start_page=%08x addr=%08x\n", i,
-         get_line_address(i / 1024, i % 1024, 0));
   }
   int t, p;
   page2tpo(i, &t, &p);
-  if (trace) {
-    logk("page_malloc: clear start addr=%08x bytes=%08x\n",
-         get_line_address(t, p, 0), n * 4 * 1024);
-  }
   memset((void *)get_line_address(t, p, 0), 0, n * 4 * 1024);
-  if (trace) {
-    logk("page_malloc: clear done addr=%08x\n", get_line_address(t, p, 0));
-  }
   unsigned addr = get_line_address(t, p, 0);
-  if (trace) {
-    logk("page_malloc: kasan_page_alloc start addr=%08x total=%08x req=%08x\n",
-         addr, n * 4 * 1024, size);
-  }
   kasan_page_alloc((void *)addr, n * 4 * 1024, (uint32_t)size);
-  if (trace) {
-    logk("page_malloc: kasan_page_alloc done addr=%08x\n", addr);
-  }
   return (void *)addr;
 }
 void page_free(void *p, int size) {

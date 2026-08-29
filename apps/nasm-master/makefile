@@ -19,7 +19,7 @@ mandir		= ${datarootdir}/man
 datarootdir	= ${prefix}/share
 
 CC		= gcc
-CFLAGS		= -fwrapv -ftrivial-auto-var-init=zero -U__STRICT_ANSI__ -fno-common -Werror=attributes -ffunction-sections -fdata-sections -fvisibility=hidden -m32 -I./include -nostdinc -nolibc -nostdlib -ffreestanding -fno-stack-protector -Qn -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fomit-frame-pointer -finput-charset=UTF-8 -fexec-charset=GB2312 -Qn -O2 -mno-mmx -mno-sse -mno-sse2 -mno-sse3 -mno-3dnow -mfpmath=387 -w
+CFLAGS		= -fwrapv -ftrivial-auto-var-init=zero -U__STRICT_ANSI__ -fno-common -Werror=attributes -ffunction-sections -fdata-sections -fvisibility=hidden -m32 -I../include -I./include -nostdinc -nolibc -nostdlib -ffreestanding -fno-stack-protector -Qn -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fomit-frame-pointer -finput-charset=UTF-8 -fexec-charset=GB2312 -Qn -O2 -mno-mmx -mno-sse -mno-sse2 -mno-sse3 -mno-3dnow -mfpmath=387 -w
 CPPFLAGS	=
 BUILD_CFLAGS	= $(CPPFLAGS) $(CFLAGS) -DHAVE_CONFIG_H
 INTERNAL_CFLAGS = -I$(srcdir) -I$(objdir) \
@@ -103,7 +103,7 @@ NASM    = asm/nasm.$(O)
 NDISASM = disasm/ndisasm.$(O)
 
 PROGOBJ = $(NASM) $(NDISASM)
-PROGS   = nasm$(X) ndisasm$(X)
+PROGS   = ../out/nasm$(X) ../out/ndisasm$(X)
 
 LIBOBJ_NW = stdlib/snprintf.$(O) stdlib/vsnprintf.$(O) stdlib/strlcpy.$(O) \
 	stdlib/strnlen.$(O) stdlib/strrchrnul.$(O) \
@@ -176,11 +176,11 @@ $(NASMLIB): $(LIBOBJ)
 	$(AR) cq $(NASMLIB) $(LIBOBJ)
 	$(RANLIB) $(NASMLIB)
 
-nasm$(X): $(NASM) $(NASMLIB)
-	ld $(ALL_LDFLAGS) -o ../out/nasm$(X) $(NASM) $(NASMLIB) $(LIBS) ../libs/libp.a ../libs/libtcc1.a ../libs/libabi.a
+../out/nasm$(X): $(NASM) $(NASMLIB)
+	ld $(ALL_LDFLAGS) -o $@ $(NASM) $(NASMLIB) $(LIBS) ../libs/libp.a ../libs/libtcc1.a ../libs/libabi.a
 
-ndisasm$(X): $(NDISASM) $(NASMLIB)
-	ld $(ALL_LDFLAGS) -o ../out/ndisasm$(X) $(NDISASM) $(NASMLIB) $(LIBS) ../libs/libp.a ../libs/libtcc1.a ../libs/libabi.a
+../out/ndisasm$(X): $(NDISASM) $(NASMLIB)
+	ld $(ALL_LDFLAGS) -o $@ $(NDISASM) $(NASMLIB) $(LIBS) ../libs/libp.a ../libs/libtcc1.a ../libs/libabi.a
 
 #-- Begin Generated File Rules --#
 
@@ -486,7 +486,7 @@ Makefile: config.status Makefile.in doc/Makefile.in
 
 doc/Makefile: Makefile
 
-config/config.h: config.status
+config/config.h:
 
 #
 # Dummy rules that changes make behavior
@@ -508,7 +508,7 @@ EXTERNAL_DEPENDENCIES = 1
 # the dependency information will remain external, so it doesn't
 # pollute the git logs.
 #
-Makefile.dep: $(PERLREQ) $(tools)/mkdep.pl config.status
+Makefile.dep: $(PERLREQ) $(tools)/mkdep.pl
 	$(RUNPERL) $(tools)/mkdep.pl -M Makefile.in -- $(DEPDIRS)
 
 dep: Makefile.dep

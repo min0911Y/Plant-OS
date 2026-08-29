@@ -495,8 +495,7 @@ static int read_number (lua_State *L, FILE *f) {
     test2(&rn, "-+");  /* exponent sign */
     readdigits(&rn, 0);  /* exponent digits */
   }
-  //ungetc(rn.c, rn.f);  /* unread look-ahead char */
-  rn.f->p--;
+  ungetc(rn.c, rn.f);  /* unread look-ahead char */
   l_unlockfile(rn.f);
   rn.buff[rn.n] = '\0';  /* finish string */
   if (l_likely(lua_stringtonumber(L, rn.buff)))
@@ -510,7 +509,7 @@ static int read_number (lua_State *L, FILE *f) {
 
 static int test_eof (lua_State *L, FILE *f) {
   int c = getc(f);
-  f->p--;
+  if (c != EOF) ungetc(c, f);
   lua_pushliteral(L, "");
   return (c != EOF);
 }
