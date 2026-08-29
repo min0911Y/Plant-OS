@@ -6,41 +6,63 @@
 void putfonts_asc(vram_t *vram, int xsize, int x, int y, color_t c,
                   unsigned char *s);
 
-void display_window(window_t *window, int x, int y, int pos) {
+static void desktop_focus_top_window(desktop_t *desktop) {
+  desktop->focused_window = NULL;
+  for (int height = desktop->shtctl->top; height >= 0; height--) {
+    window_t *window = desktop->shtctl->sheets[height]->wnd;
+    if (window != NULL && window->using1) {
+      desktop->focused_window = window;
+      return;
+    }
+  }
+}
+
+void window_focus(window_t *window) {
+  if (window == NULL || !window->using1 || window->sht == NULL) {
+    return;
+  }
+  int top_window = window->desktop->sht->height;
+  for (int height = top_window + 1; height <= window->sht->ctl->top; height++) {
+    if (window->sht->ctl->sheets[height]->wnd != NULL) {
+      top_window = height;
+    }
+  }
+  sheet_updown(window->sht,
+               window->sht->height < 0 ? top_window + 1 : top_window);
+  window->desktop->focused_window = window;
+}
+
+void display_window(window_t *window, int x, int y) {
   window->x = x;
   window->y = y;
   window->using1 = true;
   sheet_slide(window->sht, x, y);
-  if (window->sht->height != pos) {
-    sheet_updown(window->sht, pos);
-  }
-  // sheet_refresh(window->sht, 0, 0, window->xsize, window->ysize);
+  window_focus(window);
 }
 
 void hide_window(window_t *window) {
-  // window->using1 = false;
-  // sheet_updown(window->sht, -1);
+  if (window == NULL || !window->using1) {
+    return;
+  }
+  bool focused = window->desktop->focused_window == window;
+  window->using1 = false;
+  sheet_updown(window->sht, -1);
+  if (focused) {
+    desktop_focus_top_window(window->desktop);
+  }
 }
 
 void close_window(window_t *window) {
-  // if (window->console != NULL) {
-  //   window->console->close(window->console);
-  // } else if (window->super_window != NULL) {
-  //   window->super_window->close(window->super_window);
-  // }
-  // // if (window->task != get_task(3)) {
-  // //   task_delete(window->task);
-  // // }
-  // int count = 1;
-  // for (; list_search_by_count(count, window->desktop->window_list)->val !=
-  //        (uintptr_t)window;
-  //      count++)
-  //   ;
-  // list_delete_by_count(count, window->desktop->window_list);
-  // sheet_free(window->sht);
-  // free((void *)window->vram);
-  // free((void *)window->title);
-  // free((void *)window);
+  if (window == NULL) {
+    return;
+  }
+  if (window->console != NULL) {
+    window->console->close(window->console);
+  }
+  if (window->super_window != NULL) {
+    window->super_window->close(window->super_window);
+  }
+  destroy_window(window);
 }
 
 void draw_window(window_t *window, int x, int y, int x1, int y1,
@@ -64,8 +86,8 @@ void w_drop() {
     oldx = backup_w->x;
     backup_w->x += mdec.x;
     backup_w->y += mdec.y;
-    backup_w->display(backup_w, (backup_w->x + 2) & ~3, backup_w->y,
-                      backup_w->sht->ctl->top - 1);
+    backup_w->x = (backup_w->x + 2) & ~3;
+    sheet_slide(backup_w->sht, backup_w->x, backup_w->y);
     int x = (backup_w->x + 2) & ~3;
     x -= oldx;
     mdec.x = x;
@@ -76,6 +98,7 @@ void w_drop() {
 void handle_left_window(window_t *window, gmouse_t *gmouse) {
   if (!window->using1)
     return;
+  window_focus(window);
   if (Collision(window->x + 3, window->y + 3, window->xsize - 37, 20, gmouse->x,
                 gmouse->y)) {
     // 移动
@@ -97,8 +120,6 @@ void handle_left_window(window_t *window, gmouse_t *gmouse) {
     // printk("You hide a window.\n");
     return;
   }
-  if (window->sht->height != window->sht->ctl->top - 1)
-    window->display(window, window->x, window->y, window->sht->ctl->top - 1);
   if (window->console != NULL) {
     if (window->console->handle_left != NULL) {
       window->console->handle_left(window->console, gmouse);
@@ -122,6 +143,7 @@ window_t *create_window(desktop_t *desktop, const char *title, int xsize,
   if (res == NULL) {
     return NULL;
   }
+  memset(res, 0, sizeof(*res));
   res->desktop = desktop;
   res->owns_vram = vram == NULL;
   res->vram = vram == NULL ? (vram_t *)malloc(xsize * ysize * sizeof(vram_t))
@@ -168,7 +190,16 @@ window_t *create_window(desktop_t *desktop, const char *title, int xsize,
   res->shared = NULL;
   res->keyboard_events = false;
   res->sht->wnd = res;
-  list_add_val((uintptr_t)res, desktop->window_list);
+  if (list_add_val((uintptr_t)res, desktop->window_list) == NULL) {
+    res->sht->wnd = NULL;
+    sheet_free(res->sht);
+    free(res->title);
+    if (res->owns_vram) {
+      free(res->vram);
+    }
+    free(res);
+    return NULL;
+  }
 
   sheet_setbuf(res->sht, res->vram, xsize, ysize, -1);
 
@@ -245,6 +276,12 @@ void destroy_window(window_t *window) {
   if (window == NULL) {
     return;
   }
+  bool focused = window->desktop->focused_window == window;
+  if (backup_w == window) {
+    drop = NULL;
+    backup_w = NULL;
+    backup_gmouse = NULL;
+  }
   for (List *entry = window->desktop->window_list->next; entry != NULL;
        entry = entry->next) {
     if (entry->val == (uintptr_t)window) {
@@ -255,6 +292,9 @@ void destroy_window(window_t *window) {
   if (window->sht != NULL) {
     window->sht->wnd = NULL;
     sheet_free(window->sht);
+  }
+  if (focused) {
+    desktop_focus_top_window(window->desktop);
   }
   if (window->owns_vram) {
     free(window->vram);

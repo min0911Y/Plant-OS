@@ -4,10 +4,14 @@
 #define page_kmalloc malloc
 #define page_kfree(p, sz) free((p))
 List *list_add_val(uintptr_t val, struct List* Obj) {
-  while (Obj->next != NULL)
-    Obj = Obj->next;
+  if (Obj == NULL || Obj->ctl == NULL) {
+    return NULL;
+  }
   Obj = Obj->ctl->end;
   struct List* new = (struct List*)page_kmalloc(sizeof(struct List));
+  if (new == NULL) {
+    return NULL;
+  }
   Obj->next = new;
   Obj->ctl->end = new;
   new->prev = Obj;
@@ -18,6 +22,9 @@ List *list_add_val(uintptr_t val, struct List* Obj) {
   return new;
 }
 struct List* list_search_by_count(size_t count, struct List* Obj) {
+  if (Obj == NULL || Obj->ctl == NULL) {
+    return NULL;
+  }
   int count_last = list_get_last_count(Obj);
   struct List *p = Obj, *q = Obj->ctl->end;
   if (count > count_last)
@@ -80,7 +87,14 @@ void list_delete_child(struct List* need_to_free, struct List* Obj) {
 }
 struct List* list_new() {
   struct List* Obj = (struct List*)page_kmalloc(sizeof(struct List));
+  if (Obj == NULL) {
+    return NULL;
+  }
   struct ListCtl* ctl = (struct ListCtl*)page_kmalloc(sizeof(struct ListCtl));
+  if (ctl == NULL) {
+    page_kfree(Obj, sizeof(struct List));
+    return NULL;
+  }
   Obj->ctl = ctl;
   Obj->ctl->start = Obj;
   Obj->ctl->end = Obj;
@@ -104,6 +118,9 @@ size_t list_get_last_count(struct List* Obj) {
   return Obj->ctl->all;
 }
 void list_delete(struct List* Obj) {
+  if (Obj == NULL || Obj->ctl == NULL) {
+    return;
+  }
   Obj = Obj->ctl->start;
   page_kfree((void *)Obj->ctl, sizeof(struct ListCtl));
   for (; Obj != (struct List*)NULL;) {

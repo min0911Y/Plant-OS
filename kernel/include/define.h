@@ -202,6 +202,10 @@ enum STATE {
   DIED
 };
 enum TASK_KIND { TASK_PROCESS, TASK_THREAD };
+enum TASK_SCHED_FLAGS {
+  TASK_SCHED_IDLE = 1u << 0,
+  TASK_SCHED_PINNED = 1u << 1,
+};
 enum WAIT_REASON {
   WAIT_REASON_NONE,
   WAIT_REASON_GENERIC,
@@ -211,19 +215,24 @@ enum WAIT_REASON {
   WAIT_REASON_TIMER,
   WAIT_REASON_TASK_GROUP_LOCK,
   WAIT_REASON_IPC,
-  WAIT_REASON_SOCKET
+  WAIT_REASON_SOCKET,
+  WAIT_REASON_KEYBOARD
 };
 typedef struct mtask {
   arch_task_context_t *context;
+  uintptr_t entry;
   unsigned pde;
   unsigned user_mode;
   unsigned top;
-  unsigned running; // 已经占用了多少时间片
-  unsigned timeout; // 需要占用多少时间片
-  int floor;
+  unsigned weight;
   enum STATE state; // 此项为1（RUNNING） 即正常调度，为 2（WAITING） 3
                     // （SLEEPING）的时候不执行 ，0 EMPTY 空闲格子
-  uint64_t jiffies;
+  uint64_t vruntime;
+  uint64_t runtime_ticks;
+  uint16_t cpu;
+  uint8_t on_cpu;
+  uint8_t sched_flags;
+  char name[32];
   struct vfs_t *nfs;
   uint32_t tid;
   uint32_t ptid; /* parent process id; it does not own this task's lifetime */
@@ -235,6 +244,7 @@ typedef struct mtask {
   uint32_t *alloc_size;
   uint32_t alloced;
   struct tty *TTY;
+  struct tty *tty_session;
   fpu_t fpu;
   int fpu_flag;
   char drive_number;
@@ -259,8 +269,9 @@ typedef struct mtask {
   uint32_t group_lock_depth;
   int ready; // 如果为waiting 则无视wating
   int sigint_up;
-  uint8_t train; // 轮询
   unsigned status;
+  unsigned terminate_status;
+  unsigned terminate_pending;
   unsigned signal;
   unsigned handler[30];
   unsigned ret_to_app;

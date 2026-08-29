@@ -108,9 +108,9 @@ void x86_exception_dispatch(x86_exception_frame_t *frame) {
   }
   if (descriptor->policy == X86_EXCEPTION_USER_TERMINATE &&
       (frame->cs & 3u) == 3u) {
-    logk("exception: vector=%d name=%s error=%08x eip=%08x tid=%d\n",
+    logk("exception: vector=%d name=%s error=%08x eip=%08x cr2=%08x tid=%d\n",
          frame->vector, descriptor->name, frame->error, frame->eip,
-         current_task()->tid);
+         frame->vector == 14 ? x86_cr2_read() : 0, current_task()->tid);
     task_exit((unsigned)-1);
   }
   x86_exception_fail_stop(frame, descriptor);

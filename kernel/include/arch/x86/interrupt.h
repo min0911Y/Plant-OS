@@ -4,7 +4,10 @@
 #include <ctypes.h>
 #include <stddef.h>
 
-enum { X86_EXCEPTION_COUNT = 32 };
+enum {
+  X86_EXCEPTION_COUNT = 32,
+  X86_VECTOR_RESCHEDULE = 0xf0,
+};
 
 typedef struct {
   uint32_t edi;
@@ -80,6 +83,7 @@ void RTL8139_ASM_INTHANDLER(void);
 void asm_rtc_handler(void);
 void asm_sb16_handler(void);
 void x86_syscall_entry(void);
+void x86_reschedule_entry(void);
 __attribute__((noreturn)) void
 x86_return_to_user(const x86_interrupt_frame_t *frame);
 void x86_syscall_dispatch(x86_interrupt_frame_t *frame);

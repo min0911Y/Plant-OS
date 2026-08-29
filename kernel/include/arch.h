@@ -8,6 +8,7 @@ struct mtask;
 
 void arch_boot_verify(void);
 void arch_interrupt_init(void);
+void arch_interrupt_init_secondary(void);
 void arch_task_state_init(void);
 void arch_task_set_kernel_stack(uintptr_t stack_top);
 void arch_task_context_init(arch_task_context_t *context, uintptr_t entry);

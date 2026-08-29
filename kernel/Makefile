@@ -18,6 +18,7 @@ OUTPATH = ./obj/
 IMGPATH = ./img/
 LOADERPATH = ../Loader/out/
 ARCHX86PATH = ./arch/x86/
+QEMU_CPUS ?= 4
 
 MAKE     = make -r
 NASM     = nasm
@@ -47,7 +48,8 @@ OBJS_BOOTPACK = $(OUTPATH)kernelc.o $(OUTPATH)screen.o $(OUTPATH)command.o $(OUT
 				$(OUTPATH)vfs.o $(OUTPATH)build.o $(OUTPATH)mst.o $(OUTPATH)str.o $(OUTPATH)pfs.o $(OUTPATH)signal.o \
 				$(OUTPATH)rtc.o $(OUTPATH)ahci.o $(OUTPATH)farcall.o $(OUTPATH)fartty.o $(OUTPATH)iso9660.o \
 				$(OUTPATH)module.o $(OUTPATH)kasan.o $(OUTPATH)perf.o $(OUTPATH)irq.o $(OUTPATH)exceptions.o \
-				$(OUTPATH)task_context.o $(OUTPATH)task_context.obj $(OUTPATH)user_return.obj
+				$(OUTPATH)smp.o $(OUTPATH)task_context.o $(OUTPATH)smp_trampoline.obj \
+				$(OUTPATH)task_context.obj $(OUTPATH)user_return.obj
 
 # 默认动作
 default : make_dir
@@ -140,6 +142,7 @@ Mimg : make_dir $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $
 		mcopy -i ./disk.img $(APPSOUTPATH)exc_test.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)lua.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)ping.bin ::
+		mcopy -i ./disk.img $(APPSOUTPATH)ps.bin ::
 
 		mcopy -i ./disk.img $(RESPATH)init.mst ::
 
@@ -178,6 +181,7 @@ Mimg : make_dir $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $
 		mcopy -i boot.img $(APPSOUTPATH)setup1.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)init.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)psh.bin ::
+		mcopy -i boot.img $(APPSOUTPATH)ps.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)my_basic.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)copydir.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)nettest.bin ::
@@ -288,6 +292,7 @@ Mimg : make_dir $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $
 		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/string.h ::/tcc/include
 		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/syscall.h ::/tcc/include
 		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/time.h ::/tcc/include
+		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/task.h ::/tcc/include
 
 		mcopy -i $(IMGPATH)nasm.img $(BIDPATH)nasm.zip ::
 		mcopy -i $(IMGPATH)doom1.img $(RESPATH)001doom.bin ::
@@ -307,7 +312,7 @@ img_run :
 	$(MAKE) -C $(MSTPATH)
 	$(MAKE) -C modules
 	$(MAKE) Mimg
-	qemu-system-i386 -enable-kvm -cpu host -netdev user,id=net0 -device pcnet,netdev=net0 -serial stdio -device sb16 -device floppy -hda ./boot.img  \
+	qemu-system-i386 -enable-kvm -cpu host -smp $(QEMU_CPUS) -netdev user,id=net0 -device pcnet,netdev=net0 -serial stdio -device sb16 -device floppy -hda ./boot.img  \
 	 -hdb disk.img \
 	 -boot c -m 4096
 full : make_dir
@@ -323,7 +328,7 @@ full : make_dir
 	$(MAKE) -C $(MSTPATH)
 	$(MAKE) Mimg
 run:
-	qemu-system-i386 -d in_asm -no-reboot -netdev user,id=net0 -device pcnet,netdev=net0 -serial stdio -device sb16 -device floppy -fda ./img/Powerint_DOS_386.img -drive id=disk,file=disk.img,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -hdb ./img/Disk2.img -hdc ./img/Disk3.img -hdd ./img/res.img -boot a -m 512
+	qemu-system-i386 -d in_asm -no-reboot -smp $(QEMU_CPUS) -netdev user,id=net0 -device pcnet,netdev=net0 -serial stdio -device sb16 -device floppy -fda ./img/Powerint_DOS_386.img -drive id=disk,file=disk.img,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -hdb ./img/Disk2.img -hdc ./img/Disk3.img -hdd ./img/res.img -boot a -m 512
 full_run:
 	$(MAKE) -C $(ARCHX86PATH)
 	$(MAKE) -C $(DOSPATH)
@@ -335,7 +340,7 @@ full_run:
 	$(MAKE) -C $(NETPATH)
 	$(MAKE) -C $(APPSPATH)
 	$(MAKE) Mimg
-	qemu-system-i386 -netdev user,id=net0 -device pcnet,netdev=net0 -serial stdio -device sb16 -device floppy -fda ./img/Powerint_DOS_386.img -drive id=disk,file=disk.img,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -hdb ./img/Disk2.img -hdc ./img/Disk3.img -hdd ./img/res.img -boot a -m 512 -enable-kvm -cpu host
+	qemu-system-i386 -smp $(QEMU_CPUS) -netdev user,id=net0 -device pcnet,netdev=net0 -serial stdio -device sb16 -device floppy -fda ./img/Powerint_DOS_386.img -drive id=disk,file=disk.img,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -hdb ./img/Disk2.img -hdc ./img/Disk3.img -hdd ./img/res.img -boot a -m 512 -enable-kvm -cpu host
 clean :
 	rm -r ./obj
 	rm -r ./img

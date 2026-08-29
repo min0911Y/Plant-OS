@@ -290,6 +290,7 @@ void task_to_user_mode_shell() {
 
   x86_interrupt_frame_t iframe;
   x86_user_frame_init(&iframe, user_eip, layout.stack_top);
+  kernel_lock_leave();
   x86_return_to_user(&iframe);
 }
 void task_to_user_mode_elf(char *filename) {
@@ -357,6 +358,7 @@ void task_to_user_mode_elf(char *filename) {
 
   x86_interrupt_frame_t iframe;
   x86_user_frame_init(&iframe, user_eip, layout.stack_top);
+  kernel_lock_leave();
   x86_return_to_user(&iframe);
 }
 int os_execute(char *filename, char *line) {
@@ -381,20 +383,20 @@ int os_execute(char *filename, char *line) {
   r[0] = (uintptr_t)fm;
   r[1] = (uintptr_t)p1;
 
-  mtask *t = create_task((uintptr_t)task_app, 0, 1, 1);
+  mtask *t = create_task((uintptr_t)task_app, 1);
   if (t == NULL) {
     free(fm);
     free(p1);
     page_free_one(r);
     return -1;
   }
-  // 轮询
-  t->train = 0;
   t->ptid = current_task()->tgid;
   int old = current_task()->sigint_up;
   t->sigint_up = 1;
+  task_set_name(t, filename);
   struct tty *tty_backup = current_task()->TTY;
   t->TTY = current_task()->TTY;
+  t->tty_session = current_task()->tty_session;
   int o = current_task()->fifosleep;
   t->line = (char *)r;
   if (!task_publish(t)) {
@@ -413,7 +415,9 @@ int os_execute(char *filename, char *line) {
 
   free(p1);
   free(fm);
-  current_task()->TTY = tty_backup;
+  current_task()->TTY = current_task()->tty_session == tty_backup
+                            ? tty_backup
+                            : current_task()->tty_session;
   if (backup) {
     mouse_ready(&mdec);
     mouse_use_task = backup;
@@ -436,17 +440,18 @@ int os_execute_shell(const char *line, size_t line_length) {
   memcpy(line_copy, line, line_length);
   line_copy[line_length] = '\0';
 
-  mtask *t = create_task((uintptr_t)task_shell, 0, 1, 1);
+  mtask *t = create_task((uintptr_t)task_shell, 1);
   if (t == NULL) {
     free(line_copy);
     return -1;
   }
-  t->train = 1;
+  task_set_name(t, "psh.bin");
   int old = current_task()->sigint_up;
   t->sigint_up = 1;
   t->ptid = current_task()->tgid;
   struct tty *tty_backup = current_task()->TTY;
   t->TTY = current_task()->TTY;
+  t->tty_session = current_task()->tty_session;
   int o = current_task()->fifosleep;
   t->line = line_copy;
   if (!task_publish(t)) {
@@ -460,7 +465,9 @@ int os_execute_shell(const char *line, size_t line_length) {
   unsigned status = waittid(t->tid);
   current_task()->fifosleep = o;
   free(line_copy);
-  current_task()->TTY = tty_backup;
+  current_task()->TTY = current_task()->tty_session == tty_backup
+                            ? tty_backup
+                            : current_task()->tty_session;
   current_task()->sigint_up = old;
   return status;
 }
@@ -471,13 +478,15 @@ void os_execute_no_ret(char *filename, char *line) {
   }
   r[0] = (uintptr_t)filename;
   r[1] = (uintptr_t)line;
-  mtask *t = create_task((uintptr_t)task_app, 0, 1, 1);
+  mtask *t = create_task((uintptr_t)task_app, 1);
   if (t == NULL) {
     page_free_one(r);
     return;
   }
   t->ptid = 0; /* detached tasks are adopted by the idle reaper */
+  task_set_name(t, filename);
   t->TTY = current_task()->TTY;
+  t->tty_session = current_task()->tty_session;
   t->line = (char *)r;
   if (!task_publish(t)) {
     task_abort_creation(t);

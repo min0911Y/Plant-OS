@@ -88,22 +88,15 @@ int tty_fifo_get() {
   return tty->fifo_get(tty);
 }
 int input_char_inSM() {
-  int i;
-  while (1) {
-    if ((tty_fifo_status() == 0)) {
-      // 不返回扫描码的情况
-      // 1.没有输入
-      // 2.窗口未处于顶端
-      // 3.正在运行的控制台并不是函数发起的控制台（TTY）
-    } else {
-      // 返回扫描码
-      i = tty_fifo_get(); // 从FIFO缓冲区中取出扫描码
-      if (i != -1) {
-        break;
+  for (;;) {
+    if (tty_fifo_status() != 0) {
+      int input = tty_fifo_get();
+      if (input != -1) {
+        return input;
       }
     }
+    task_fall_blocked_reason(WAITING, WAIT_REASON_KEYBOARD);
   }
-  return i;
 }
 int kbhit() {
   return tty_fifo_status() != 0; // 进程的键盘FIFO缓冲区是否为空
@@ -138,6 +131,47 @@ int sc2a(int sc) {
 }
 int disable_flag = 0;
 mtask *keyboard_use_task = NULL;
+
+static void keyboard_wake_task(mtask *task) {
+  if (task == NULL) {
+    return;
+  }
+  task->weight = 5;
+  task_run(task);
+  if (task == current_task()) {
+    return;
+  }
+  mtask_run_now(task);
+  task_next();
+}
+
+static mtask *keyboard_foreground_task(void) {
+  struct tty *foreground = now_tty();
+  if (foreground == NULL) {
+    return NULL;
+  }
+
+  mtask *process = NULL;
+  mtask *fallback = NULL;
+  for (unsigned tid = 0; tid < 255; tid++) {
+    mtask *task = get_task(tid);
+    if (task == NULL || task->TTY != foreground || task->keyfifo == NULL ||
+        task->state == DIED || task->terminate_pending) {
+      continue;
+    }
+    if (task == current_task()) {
+      return task;
+    }
+    if (process == NULL && task->kind == TASK_PROCESS) {
+      process = task;
+    }
+    if (fallback == NULL) {
+      fallback = task;
+    }
+  }
+  return process != NULL ? process : fallback;
+}
+
 void inthandler21(int *esp) {
   // 键盘中断处理函数
   unsigned char data;
@@ -198,16 +232,7 @@ void inthandler21(int *esp) {
         keyboard_use_task->keyboard_release(
             data, keyboard_use_task->tid); // 处理按下键
       }
-      if (current_task() != keyboard_use_task) {
-        keyboard_use_task->timeout = 5;
-        keyboard_use_task->ready = 1;
-        keyboard_use_task->urgent = 1;
-        keyboard_use_task->running = 0;
-        mtask_run_now(keyboard_use_task);
-        task_next();
-      } else {
-        keyboard_use_task->running = 0;
-      }
+      keyboard_wake_task(keyboard_use_task);
     } else
       for (int i = 0; i < 255; i++) {
         if (!get_task(i)) {
@@ -237,17 +262,7 @@ void inthandler21(int *esp) {
       keyboard_use_task->keyboard_press(data,
                                         keyboard_use_task->tid); // 处理按下键
     }
-    if (current_task() != keyboard_use_task) {
-      //   logk("SET 1\n");
-      keyboard_use_task->timeout = 5;
-      keyboard_use_task->ready = 1;
-      keyboard_use_task->urgent = 1;
-      keyboard_use_task->running = 0;
-      mtask_run_now(keyboard_use_task);
-      task_next();
-    } else {
-      keyboard_use_task->running = 0;
-    }
+    keyboard_wake_task(keyboard_use_task);
   } else
     for (int i = 0; i < 255; i++) {
       // printk("up\n");
@@ -262,29 +277,16 @@ void inthandler21(int *esp) {
         get_task(i)->keyboard_press(data, i); // 处理按下键
       }
     }
-  if (disable_flag == 0)
-    for (int i = 0; i < 255; i++) {
-      if (!get_task(i)) {
-        continue;
-      }
-      // 按下键通常处理
-      mtask *task = get_task(i); // 每个进程都处理一遍
-      if (task->state != RUNNING || task->fifosleep) {
-        if (task->state == WAITING &&
-            task->wait_reason == WAIT_REASON_GENERIC) {
-          goto THROUGH;
-        }
-        // 如果进程正在休眠或被锁了
-        continue;
-      }
-      // 一般进程
-    THROUGH:
-      //    logk("send\n");
+  if (disable_flag == 0) {
+    mtask *task = keyboard_foreground_task();
+    if (task != NULL) {
       if (e0_flag) {
         fifo8_put(task_get_key_fifo(task), 0xe0);
       }
       fifo8_put(task_get_key_fifo(task), data);
+      keyboard_wake_task(task);
     }
+  }
   if (e0_flag == 1)
     e0_flag = 0;
   return;

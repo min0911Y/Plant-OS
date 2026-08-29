@@ -1,9 +1,21 @@
 #include <dos.h>
 struct List *tty_list;
 struct tty *tty_default;
-void mtask_stop();
-void mtask_start();
 void t_putchar(struct tty *res,char ch);
+static bool tty_registered(const struct tty *tty) {
+  if (tty == NULL || tty_list == NULL) {
+    return false;
+  }
+  for (size_t index = 1;; index++) {
+    struct List *entry = FindForCount(index, tty_list);
+    if (entry == NULL) {
+      return false;
+    }
+    if ((struct tty *)(uintptr_t)entry->val == tty) {
+      return true;
+    }
+  }
+}
 static void tty_print(struct tty *res, const char *string) {
   for (int i = 0; i < strlen(string); i++) {
     if (res->y == res->ysize && res->x >= res->xsize) {
@@ -18,18 +30,14 @@ static void tty_gotoxy(struct tty *res, int x, int y) {
     int x2 = x;
     int y2 = y;
     if (x <= res->xsize - 1 && y <= res->ysize - 1) {
-      mtask_stop();
       res->MoveCursor(res, x, y);
-      mtask_start();
       return;
     }
     if (x <= res->xsize - 1) {
-      mtask_stop();
       for (int i = 0; i < y - res->ysize + 1; i++) {
         res->screen_ne(res);
       }
       res->MoveCursor(res, x, res->ysize - 1);
-      mtask_start();
       return;
     }
     if (x > res->xsize - 1) {
@@ -116,9 +124,11 @@ struct tty *tty_alloc(void *vram, int xsize, int ysize,
   return res;
 }
 void tty_free(struct tty *res) {
-  if (res == NULL || tty_list == NULL) {
+  if (!tty_registered(res) || res == tty_default) {
     return;
   }
+  res->using1 = 0;
+  task_close_tty(res, tty_default);
   for (size_t i = 1; FindForCount(i, tty_list) != NULL; i++) {
     if (FindForCount(i, tty_list)->val == (uintptr_t)res) {
       DeleteVal(i, tty_list);
@@ -129,12 +139,16 @@ void tty_free(struct tty *res) {
   return;
 }
 struct tty *tty_set(mtask *task, struct tty *res) {
-  if (res->using1 == 1) {
+  if (task != NULL && tty_registered(res) && res->using1 == 1) {
     struct tty *old = task->TTY;
     task->TTY = res;
+    task->tty_session = res;
     return old;
   }
   return NULL;
+}
+bool tty_notify_input(struct tty *tty) {
+  return tty_registered(tty) && task_wake_tty(tty) != 0;
 }
 struct tty *tty_set_default(struct tty *res) {
   if (res->using1 == 1) {

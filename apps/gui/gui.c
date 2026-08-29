@@ -15,11 +15,17 @@
 #include "stb_image_resize.h"
 desktop_t *desktop0;
 static void click1(button_t *button) {
+  (void)button;
   window_t *a =
       create_window(desktop0, "console", 80 * 8 + 8, 25 * 16 + 28,
                     NowTaskID(), NULL);
-  a->display(a, 0, 0, 3);
-  create_console(a, 80 * 8, 25 * 16, 4, 24);
+  if (a == NULL) {
+    return;
+  }
+  a->display(a, 0, 0);
+  if (create_console(a, 80 * 8, 25 * 16, 4, 24) == NULL) {
+    close_window(a);
+  }
 }
 
 unsigned char *ascfont, *hzkfont;
@@ -194,6 +200,11 @@ void convert_ABGR_to_ARGB(uint32_t *bitmap, size_t num_pixels) {
   }
 }
 void main() {
+  int rpc_status = gui_rpc_service_start();
+  if (rpc_status != RPC_OK) {
+    logkf("GUI RPC service failed: %d\n", rpc_status);
+    return;
+  }
   // char *s34 = malloc(64*1024*1024);
   // free(s34);
   ttf_buffer = malloc(filesize("font.ttf"));
@@ -214,12 +225,22 @@ void main() {
   vram = set_mode(xsize_input, ysize_input);
 
   logkf("vram = %08x\n", vram);
+  if (vram == (uintptr_t)-1) {
+    logkf("GUI failed to set %dx%dx32 VBE mode\n", xsize_input, ysize_input);
+    return;
+  }
   ascfont = (unsigned char *)malloc(filesize("font.bin"));
   hzkfont = (unsigned char *)malloc(filesize("HZK16"));
   api_ReadFile("font.bin", ascfont);
   api_ReadFile("HZK16", hzkfont);
   desktop0 = create_desktop(xsize_input, ysize_input, NowTaskID());
+  if (desktop0 == NULL) {
+    logkf("GUI failed to create desktop\n");
+    return;
+  }
   desktop0->display(desktop0, (vram_t *)vram);
+  desktop0->draw(desktop0, 0, 0, xsize_input, ysize_input,
+                 argb(0, 58, 110, 165));
   vram_t *background = NULL;
   if (filesize("123.png") != -1) {
     int w, h, bpp;
@@ -290,19 +311,40 @@ void main() {
   window_t *window2 =
       create_window(desktop0, "console", 80 * 8 + 8, 25 * 16 + 28,
                     NowTaskID(), NULL);
-
-  window2->display(window2, 250, 250, 3);
+  if (window2 == NULL) {
+    logkf("GUI failed to create initial console window\n");
+    return;
+  }
+  window2->display(window2, 250, 250);
   gmouse_t *gmouse0 =
       create_gmouse(desktop0, desktop0->xsize / 2, desktop0->ysize / 2, 5);
   console_t *console0 = create_console(window2, 80 * 8, 25 * 16, 4, 24);
+  if (gmouse0 == NULL || console0 == NULL) {
+    logkf("GUI failed to create input or console\n");
+    return;
+  }
   // console_t *console1 = create_console(window3, 40 * 8, 20 * 16, 4, 24);
 
   window_t *window1 =
       create_window(desktop0, "ToolBox", 200, 200, NowTaskID(), NULL);
+  if (window1 == NULL) {
+    logkf("GUI failed to create toolbox window\n");
+    return;
+  }
   super_window_t *super_window0 = create_super_window(window1);
-  window1->display(window1, 200, 200, 2);
+  if (super_window0 == NULL) {
+    close_window(window1);
+    logkf("GUI failed to create toolbox\n");
+    return;
+  }
+  window1->display(window1, 200, 200);
   button_t *button0 =
       create_button(super_window0, "NewConsole", 100, 20, 50, 50, click1);
+  if (button0 == NULL) {
+    close_window(window1);
+    logkf("GUI failed to create toolbox button\n");
+    return;
+  }
   // textbox_t *textbox0 = create_textbox(super_window0, 15 * 8, 16, 4, 110);
   unsigned clock1 = clock();
   time_t rawtime;
@@ -320,11 +362,6 @@ void main() {
                 argb(0, 58, 110, 165), 512 - 200, 0, desktop0->xsize,
                 background);
   TaskUnlock();
-  int rpc_status = gui_rpc_service_start();
-  if (rpc_status != RPC_OK) {
-    logkf("GUI RPC service failed: %d\n", rpc_status);
-    return;
-  }
   for (;;) {
     unsigned elapsed = clock() - clock1;
     if (elapsed >= 1000) {

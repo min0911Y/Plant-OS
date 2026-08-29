@@ -40,6 +40,7 @@
 <!-- 过时：`psh -c` 只接受一个不含空格的命令参数。 -->
 <!-- 过时：`psh -c` 把 `argv[2..]` 用裸空格拼接成字符串，再交给 shell 的第二套解析器。 -->
 - `apps/psh` 的交互行编辑统一使用其 MIT vendored 的 `third_party/pl_readline`；适配层必须把 `KEY_INPUT_*` 方向键及 Enter、Backspace、Tab 映射为库按键，只丢弃 `getch()` 返回的 `0` 与其他无字符控制值，不能再把它们写进命令行或恢复另一套本地编辑器。补全词表只含 psh 内建命令，首词统一用 `PL_COLOR_CYAN` 染色，文件路径暂不参与补全。该移植版将内部 `pl_list_*` 名称空间化以避开 MST 的链表 API，并依赖文本与高文本 TTY 保持标准 CR 和 `CSI K` 语义。
+- 标准 PS/2 键盘扫描码只投递给当前前台 TTY 上拥有有效 key FIFO 的进程；TTY 所有权是唯一前台判据，不再额外依赖容易滞后的 `state` 或 `fifosleep`。同步前台子进程运行时父 shell 通过清空 TTY 明确交出前台，子进程退出后恢复 TTY 即恢复输入。`getch()`/`input_char_inSM()` 必须使用 `WAIT_REASON_KEYBOARD` 阻塞并由 IRQ 唤醒，禁止在持有 kernel lock 时忙等；ready 握手必须覆盖扫描码在发布等待前到达的竞态。不得重新广播给所有 `RUNNING` 任务，尤其不能向每 CPU idle task 的空 FIFO 写入。
 - `kernel/mst/`、`kernel/std/`、`kernel/modules/`：MST 脚本、基础运行库和可加载模块。
 - `kernel/include/`：内核公共声明；很多模块通过 `dos.h`、`define.h` 等大头文件耦合。
 - `kernel/include/arch/x86/`：x86 专属的中断帧、入口和其他架构 ABI 声明；通用内核头文件不应重新定义这些布局。
@@ -207,6 +208,26 @@ python3 scripts/kernel-perf.py \
 - 用户态 ELF loader 接收真实 image size，完整验证 Ehdr/phdr/PT_LOAD、文件范围、用户虚拟范围、对齐、溢出和 executable entry。装载严格分两阶段：全部 segment 页映射成功后才复制文件数据和清零 BSS；共享物理页的相邻 segment 不重复 `page_link`。不得恢复无 size 的 `elf32_get_max_vaddr/load_elf` 接口。
 - 用户程序保持 `.text`/公开链接基址 `0x70000000`。通用链接参数使用 `-N -Ttext 0x70000000`，避免 GNU ld 额外生成低于用户边界的 header PT_LOAD；因此现阶段会出现 RWX LOAD 警告，而 loader 仍要求所有 segment/page 均不低于 `USER_SPACE_START`，entry 必须落在带 `PF_X` 的 load segment 内。
 - 继续拆分架构代码时只处理 `kernel/`；`Loader/` 保持当前实现，除非任务明确要求修改。
+
+### SMP 与多核调度
+
+- x86 SMP 拓扑来自 ACPI MADT；`kernel/arch/x86/smp_trampoline.asm` 的实模式 trampoline 固定复制到物理地址 `0x6000`，AP 通过 INIT-SIPI-SIPI 进入共享分页内核。BSP 必须排在逻辑 CPU 0，APIC ID 与逻辑 CPU 编号不得混用；xAPIC ICR 使用 8-bit destination field，x2APIC ICR 使用高 32 位完整 destination ID。
+- 每个在线 CPU 拥有独立 TSS、ring0 栈指针、当前任务、idle 任务、最小虚拟运行时间和重调度状态；共享 GDT 为每 CPU 使用不同 TSS descriptor。AP 在启用自己的 Local APIC/x2APIC 后才能读取当前 CPU ID，随后加载 TSS 并等待调度器发布 idle 任务。
+- 调度器采用每 CPU 运行队列语义、CFS 风格加权虚拟运行时间和周期负载均衡：普通任务权重为 1，交互/高优先级任务提高权重，唤醒任务获得有界的 wakeup boost；CPU 0 每 100ms 在最忙和最空闲 CPU 间迁移一个未运行且未固定的任务。不得恢复按 TID 全局轮转、全局 `current` 或单个全局 idle task。
+- CPU 本地时钟均为 100Hz：BSP 继续负责全局 timer、网络 timeout 与 IPC timeout；AP 使用 TSC-deadline，缺失时校准 Local APIC periodic timer。每个 CPU 的时钟只累计本 CPU 当前任务的运行时间并触发本地调度，AP 不得重复推进全局时间和全局 timer 链。
+- 调度启动后的 `sleep()` 必须通过内核 timer 和 `WAIT_REASON_TIMER` 阻塞；禁止在持有 kernel lock 时轮询 BSP 的 `timerctl.count`，否则迁移到 AP 的任务会阻塞 BSP 时钟 IRQ。只有 `current_task()->tid == NULL_TID` 的调度前引导路径可保留 tick 忙等。
+- 当前遗留内核子系统仍以可调度的 kernel lock 串行进入；系统调用、异常和已注册硬件 IRQ 的汇编入口必须成对进入/离开该锁。锁所有权按 CPU 记录并可在同一 CPU 的上下文切换中直接交接；`kernel_lock_leave()` 可能触发调度，因此恢复后必须重新读取当前 CPU，不能使用切换前缓存的 CPU 编号。用户态在不同 CPU 上并行运行，idle 在释放 kernel lock 后使用 `sti; hlt`。
+- 在实现跨 CPU TLB shootdown 之前，共享同一 PDE 的线程固定在同一 CPU；跨进程共享映射只允许修改当前未在 CPU 上运行的目标任务。修改这一限制时必须先实现同步 TLB shootdown，保证目标 CPU 在旧映射物理页释放前完成失效。
+- BIOS/VBE 实模式调用只能在 BSP（逻辑 CPU 0）执行；用户任务首次请求 VBE/BIOS video 时固定并迁移到 BSP，后续由其他用户进程继续占用 AP。`set_mode` 返回失败、framebuffer 未页对齐、尺寸溢出或物理范围回绕时必须停止映射并向用户返回失败，不能从 `0xffffffff` 建立页表。
+- GUI terminal 的输入 FIFO 位于 GUI 用户地址空间；`gmouse` 写入 console FIFO 后必须调用 `tty_notify_input(tty_t)`。内核只接受仍注册在 `tty_list` 中的句柄，并按 TTY 唤醒 `WAIT_REASON_KEYBOARD` 任务；仅写用户 FIFO而不通知内核会使 terminal 永久睡眠。
+- GUI 桌面显式维护唯一 `focused_window`：窗口首次显示以及任意鼠标按下（包括标题栏和右键）都必须经统一焦点入口置于普通窗口最上层、鼠标等 overlay 下方；键盘只投递给该焦点窗口，禁止再用 `sheet->height == top - 1` 猜测焦点。隐藏或销毁焦点窗口时必须从剩余可见窗口中重新选择焦点。
+- `gui.bin` 是严格单例：必须在读取大资源、切换 VBE 或创建 `gmouse` 输入线程之前先注册 `gui` RPC 服务，服务名冲突时立即退出，禁止第二实例先覆盖显示模式或输入 owner。内核的 `mouse_enable()`/`use_keyboard()` 采用不可抢占的独占获取，已有其他任务持有时返回失败；GUI 输入线程必须检查返回值，不能静默抢占全局 PS/2 所有权。
+- 任务的活动 `TTY` 与稳定 `tty_session` 语义分离：同步执行子程序时可临时交出活动 TTY，但会话归属必须继承并保持。释放注册 TTY 时先把整个会话切换到安全 fallback，再终止其进程/线程并回收僵尸，禁止留下指向已释放 TTY 的等待父任务；TTY 输入通知只唤醒正在 `WAIT_REASON_KEYBOARD` 上等待的前台任务。
+- GUI console 关闭必须完整释放其 TTY 会话、console 线程栈、键盘 FIFO、内部 sheet/控制器/VRAM、窗口和链表节点；不得保留空的 `close_console` 或忽略 `AddThread`/分配失败，否则每个已关闭终端仍会遗留 `thread + psh.bin` 并最终耗尽任务槽。ToolBox/super-window 的子 sheet、按钮和 textbox 同样由窗口关闭路径统一回收。
+- `apps/gui/gui.h` 的 window/console/sheet 布局被多个显式对象共享；修改结构布局后必须删除并重编全部 `apps/gui` 对象。console 原有且未被读取的 `tid` 槽现用于保存 `tty_handle`，不得在结构中间再次插入字段导致新旧对象静默错位。
+- `X86_VECTOR_RESCHEDULE`（`0xf0`）是内核固定重调度 IPI；唤醒远端 CPU 上的任务时发送该 IPI，处理入口发送 Local APIC EOI 后进入本地调度。外部 IOAPIC IRQ 仍路由到 BSP，不能让 AP 重复处理同一设备中断。
+- 用户态任务快照使用 `SYSCALL_TASK_SNAPSHOT`（`0x60`）的 query + capacity ABI，CPU 数量/当前 CPU 使用 `SYSCALL_CPU_INFO`（`0x61`）；`apps/ps` 构建为 `ps.bin`，显示 TID、TGID、状态、运行核心和累计运行时间。修改 `task_info_t` 时必须同步 `kernel/include/task_snapshot.h`、`apps/include/task.h` 与 `apps/libp/task.c`，并保持结构大小断言。
+- `kernel/Makefile` 的 QEMU CPU 数由 `QEMU_CPUS` 控制，默认 4。由于当前 Makefile 不追踪头文件依赖，修改 `mtask` 等共享结构布局后必须重编全部内核 C 对象，不能用旧增量对象做启动验证。
 
 ### 新增或修改内核源文件
 

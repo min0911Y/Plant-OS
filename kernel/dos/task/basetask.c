@@ -4,8 +4,6 @@ int init_ok_flag = 0;
 extern unsigned int PCI_ADDR_BASE;
 char *shell_data;
 unsigned shell_size;
-extern unsigned base_count;
-float f_cpu_usage;
 int rtc_init(void);
 void init_devfs(void);
 void ahci_init(void);
@@ -35,18 +33,9 @@ static char find_system_drive(void) {
   return 0;
 }
 void idle() {
-  while (1) {
-    unsigned c = timerctl.count;
-    unsigned count = 0;
-    while (timerctl.count - c < 100) {
-      count++;
-    }
-    if (base_count == 0 || count >= base_count) {
-      f_cpu_usage = 0.0f;
-      continue;
-    }
-    f_cpu_usage = (float)(base_count - count) / (float)base_count;
-    f_cpu_usage *= 100.0f;
+  kernel_lock_leave();
+  for (;;) {
+    asm volatile("sti; hlt" ::: "memory");
   }
 }
 void init() {

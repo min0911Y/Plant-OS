@@ -136,6 +136,7 @@ void sysinit(void) {
   init_pit();
   init_acpi();
   apic_init();
+  smp_topology_init();
 
   IVT = page_malloc(0x400);
   memcpy(IVT, 0x0, 0x400);
@@ -233,7 +234,7 @@ void sysinit(void) {
   logk("sysinit: pf_set done\n");
   printk("acpi\n");
   printk("smp cpus=%d bsp apic=%d ctl=%s\n", smp_cpu_count(),
-         smp_bsp_lapic_id(),
+         smp_cpu_lapic_id(0),
          interrupt_controller_uses_apic() ? "apic" : "pic");
   printk("sb16\n");
   logk("sysinit: disable_sb16 start\n");
@@ -269,6 +270,8 @@ void sysinit(void) {
 #endif
   printk("base count is %08x (%s)\n", base_count,
          apic_timer_uses_tsc_deadline() ? "tsc-deadline" : "pit");
+  smp_start_aps();
+  printk("smp online=%d/%d\n", smp_online_cpu_count(), smp_cpu_count());
   logk("sysinit: into_mtask start\n");
   if (into_mtask() != 0) {
     Panic_K("unable to start multitasking");

@@ -329,8 +329,7 @@ bool SwitchToHighTextMode(void) {
   t1 = AddTask("t1", 1, 2 * 8, (int)Gar_Test_Task, 1 * 8, 1 * 8,
                stack + 64 * 1024);*/
 
-  cursor = create_task((uintptr_t)cur_service, (unsigned)0,
-                       1, 1);
+  cursor = create_task((uintptr_t)cur_service, 1);
   if (cursor == NULL) {
     WARNING_K("unable to create high-text cursor task");
     sheet_free(sht_cur);
@@ -342,6 +341,9 @@ bool SwitchToHighTextMode(void) {
     sht_cur = NULL;
     return false;
   }
+  cursor->sched_flags = TASK_SCHED_PINNED;
+  cursor->cpu = 0;
+  task_set_name(cursor, "cursor");
   struct tty *tty_h = tty_alloc((void *)sht_scr, vinfo->xsize / 8,
                                 vinfo->ysize / 16, putchar_HighTextMode,
                                 MoveCursor_HighTextMode, clear_HighTextMode,

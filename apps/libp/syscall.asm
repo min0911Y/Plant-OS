@@ -1,5 +1,5 @@
 [BITS 32]				
-GLOBAL tty_alloc,tty_free,tty_set
+GLOBAL tty_alloc,tty_free,tty_set,tty_notify_input
 GLOBAL putch,putstr,getch,get_mouse,get_xy,goto_xy
 GLOBAL SwitchTo320X200X256,SwitchToText8025,Draw_Char,sleep
 GLOBAL PrintChineseChar,PrintChineseStr,Draw_Str,api_malloc,api_free
@@ -16,6 +16,7 @@ GLOBAL TaskLock,TaskUnlock,SubThread,set_mode,VBEDraw_Px,VBEGet_Px,VBEGetBuffer,
 GLOBAL vfs_check_mount,vfs_mount,vfs_change_disk,vfs_delfile,vfs_change_path,tty_start_cur_moving,tty_stop_cur_moving,vfs_unmount_disk,logk
 GLOBAL tty_get_xsize,tty_get_ysize,api_rename,mouse_support,signal,fork,waittid,do_test,mouse_enable,mouse_dat_status,mouse_dat_get,api_yield,return_to_app,set_rt,shared_memory_map_to,shared_memory_unmap,task_set_level_higher,task_set_level_normal,use_keyboard
 GLOBAL module_load,module_unload,module_list
+GLOBAL api_task_snapshot,cpu_count,cpu_current
 [SECTION .text]
 return_to_app:
   popa
@@ -1019,10 +1020,8 @@ clear:
 	pop eax
 	ret
 use_keyboard:
-	push eax
 	mov eax,0x55
 	int 0x36
-	pop eax
 	ret
 vfs_check_mount:
 	push ebx
@@ -1147,10 +1146,8 @@ do_test:
 	pop ebx
 	ret
 mouse_enable:
-	push eax
 	mov eax,0x4d
 	int 0x36
-	pop eax
 	ret
 mouse_dat_status:
 	mov eax,0x4e
@@ -1200,6 +1197,14 @@ tty_free:
 	int 0x36
 	pop ebx
 	pop eax
+	ret
+
+tty_notify_input:
+	push ebx
+	mov ebx,[esp + 4 + 4]
+	mov eax,0x62
+	int 0x36
+	pop ebx
 	ret
 set_rt:
 	push eax
@@ -1282,4 +1287,29 @@ module_list:
 	int 0x36
 	pop ecx
 	pop ebx
+	ret
+
+api_task_snapshot:
+	push ebx
+	push ecx
+	push edx
+	mov eax,0x60
+	mov ebx,[esp + 4 + 12]
+	mov ecx,[esp + 8 + 12]
+	mov edx,[esp + 12 + 12]
+	int 0x36
+	pop edx
+	pop ecx
+	pop ebx
+	ret
+
+cpu_count:
+	mov eax,0x61
+	int 0x36
+	ret
+
+cpu_current:
+	mov eax,0x61
+	int 0x36
+	mov eax,edx
 	ret

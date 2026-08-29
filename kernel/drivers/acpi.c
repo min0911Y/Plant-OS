@@ -467,6 +467,11 @@ uint32_t acpi_cpu_lapic_id(uint32_t index) {
   return acpi_cpus[index].id;
 }
 
+int acpi_cpu_usable(uint32_t index) {
+  return index < acpi_cpu_total &&
+         (acpi_cpus[index].enabled || acpi_cpus[index].online_capable);
+}
+
 uint32_t acpi_ioapic_count(void) { return acpi_ioapic_total; }
 
 uint32_t acpi_ioapic_address(uint32_t index) {

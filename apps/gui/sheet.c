@@ -31,12 +31,12 @@ struct SHTCTL* shtctl_init(vram_t* vram, int xsize, int ysize) {
   int i;
   ctl = (struct SHTCTL*)malloc(sizeof(struct SHTCTL));
   if (ctl == 0) {
-    goto err;
+    return NULL;
   }
   ctl->map = (unsigned char*)malloc(xsize * ysize);
   if (ctl->map == 0) {
     free((void *)ctl);
-    goto err;
+    return NULL;
   }
   ctl->vram = vram;
   ctl->xsize = xsize;
@@ -47,7 +47,6 @@ struct SHTCTL* shtctl_init(vram_t* vram, int xsize, int ysize) {
     ctl->sheets0[i].ctl = ctl; /* 记录所属*/
     // printk("ctl->sheets0[%d].ctl = %d\n", i, ctl->sheets0[i].ctl->top);
   }
-err:
   return ctl;
 }
 void ctl_free(struct SHTCTL* ctl) {

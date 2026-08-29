@@ -1,6 +1,7 @@
 #include <arch/x86/io.h>
 #include <dos.h>
 #include <irq.h>
+#include <limits.h>
 #define PIT_CTRL 0x0043
 #define PIT_CNT0 0x0040
 
@@ -147,10 +148,35 @@ void timer_settime(struct TIMER *timer, unsigned int timeout) {
   }
 }
 void usleep(uint64_t nano);
-void sleep(unsigned long long s) {
-  s /= 10;
-  uint32_t n = timerctl.count;
-  while(timerctl.count - n < s);
+void sleep(unsigned long long milliseconds) {
+  uint64_t ticks64 = milliseconds / 10 + (milliseconds % 10 != 0);
+  uint32_t ticks = ticks64 > UINT_MAX ? UINT_MAX : (uint32_t)ticks64;
+  if (ticks == 0) {
+    return;
+  }
+
+  mtask *task = current_task();
+  if (task->tid == NULL_TID) {
+    uint32_t started = timerctl.count;
+    while (timerctl.count - started < ticks) {
+    }
+    return;
+  }
+
+  struct TIMER *timer = timer_alloc();
+  if (timer == NULL) {
+    WARNING_K("unable to allocate blocking sleep timer");
+    return;
+  }
+  unsigned char value;
+  struct FIFO8 fifo;
+  fifo8_init(&fifo, 1, &value);
+  timer_init(timer, &fifo, 1);
+  timer->waiter = task;
+  timer_settime(timer, ticks);
+  task_fall_blocked_reason(WAITING, WAIT_REASON_TIMER);
+  timer->waiter = NULL;
+  timer_free(timer);
 }
 
 uint32_t mt2flag = 0;
@@ -167,14 +193,10 @@ void inthandler20(int cs, perf_irq_frame_t *frame) {
   // printk("CS:EIP=%04x:%08x\n",current_task()->tss.cs,esp[-10]);
   send_eoi(0);
   apic_timer_on_interrupt();
-  extern mtask *current;
-  if(global_time + 1 == 0) {
-    logk("reset\n");
-    extern mtask m[255];
-    for (int i = 0; i < 255; i++) {
-      m[i].jiffies = 0;
-    }
-    global_time = 0;
+  if (smp_current_cpu() != 0) {
+    scheduler_tick();
+    task_next();
+    return;
   }
   global_time++;
   struct TIMER *timer;
@@ -187,9 +209,8 @@ void inthandler20(int cs, perf_irq_frame_t *frame) {
   timer = timerctl.t0; /* 首先把最前面的地址赋给timer */
   if (timer == NULL) {
     timerctl.next = 0xffffffff;
-    if (current) {
-      task_next();
-    }
+    scheduler_tick();
+    task_next();
     return;
   }
   for (;;) {
@@ -206,9 +227,8 @@ void inthandler20(int cs, perf_irq_frame_t *frame) {
   timerctl.t0 = timer;
   timerctl.next = timer->timeout;
 
-  if (current) {
-    task_next();
-  }
+  scheduler_tick();
+  task_next();
   // extern struct TIMER *mt_timer1, *mt_timer2, *mt_timer3;
   // extern int tasknum;
   // struct TIMER* timer;

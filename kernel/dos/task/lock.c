@@ -5,9 +5,6 @@
  */
 #include <dos.h>
 #include <irq.h>
-void mtask_stop();
-void mtask_start();
-extern char mtask_stop_flag;
 static mtask *lock_get_owner(lock_t *l) {
   mtask *owner;
   memcpy(&owner, &l->owner, sizeof(owner));
@@ -32,15 +29,6 @@ static mtask *lock_get_waiter(lock_t *l) {
 static void lock_set_waiter(lock_t *l, mtask *waiter) {
   memcpy(&l->waiter, &waiter, sizeof(waiter));
 }
-bool cas(int *ptr, int old, int New) {
-  int old_value = *ptr;
-  if (old_value == old) {
-    *ptr = New;
-    return true;
-  }
-  return false;
-}
-// FIXME:!!!!
 void lock_init(lock_t *l) {
   lock_set_owner(l, NULL);
   lock_set_value(l, LOCK_UNLOCKED);

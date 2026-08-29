@@ -10,7 +10,9 @@
 #include <module.h>
 #include <net.h>
 #include <perf.h>
+#include <smp.h>
 #include <stddef.h>
+#include <task_snapshot.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -27,11 +29,10 @@ void inthandler20(int cs, perf_irq_frame_t *frame);
 // mtask.c
 mtask *current_task();
 mtask *get_task(unsigned tid);
-mtask *create_task(uintptr_t eip, unsigned esp, unsigned ticks, unsigned floor);
+mtask *create_task(uintptr_t entry, unsigned weight);
 bool task_publish(mtask *task);
 void task_abort_creation(mtask *task);
-mtask *create_thread_task(uintptr_t eip, unsigned esp, unsigned ticks,
-                          unsigned floor);
+mtask *create_thread_task(uintptr_t entry, unsigned weight);
 void task_set_default_drive(char drive);
 void task_to_user_mode_elf(char *filename);
 void task_kill(unsigned tid);
@@ -58,6 +59,15 @@ void mtask_run_now(mtask *obj);
 int task_fork();
 unsigned task_address_space_owner(unsigned pde);
 void task_next(void);
+void scheduler_tick(void);
+void scheduler_reschedule_interrupt(void);
+void scheduler_preempt_on_kernel_exit(void);
+__attribute__((noreturn)) void scheduler_start_secondary(uint32_t cpu);
+void task_set_name(mtask *task, const char *name);
+int task_snapshot(task_info_t *entries, uint32_t capacity, uint32_t *count);
+bool task_pin_current(uint32_t cpu);
+unsigned task_wake_tty(struct tty *tty);
+void task_close_tty(struct tty *tty, struct tty *fallback);
 void signal_deal(void);
 // page.c
 void init_page(void);
@@ -203,7 +213,6 @@ void srand(unsigned long seed);
 void md5s(char *hexbuf, int read_len, char *result);
 void md5f(char *filename, unsigned char *result);
 // lock.c
-bool cas(int *ptr, int old, int New);
 void lock(lock_t *key);
 void unlock(lock_t *key);
 void lock_init(lock_t *l);

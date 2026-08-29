@@ -137,14 +137,12 @@ void inthandler2c(int *esp) {
 
       if (current_task() != mouse_use_task) {
       //   logk("SET 1\n");
-        mouse_use_task->timeout = 5;
+        mouse_use_task->weight = 5;
         mouse_use_task->ready = 1;
         mouse_use_task->urgent = 1;
-        mouse_use_task->running = 0;
         mtask_run_now(mouse_use_task);
         task_next();
       } else {
-        mouse_use_task->running = 0;
       }
     }
   } else {

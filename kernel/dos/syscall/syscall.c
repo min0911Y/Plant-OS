@@ -290,6 +290,9 @@ enum syscall_id {
   SYSCALL_IPC = 0x5d,
   SYSCALL_SOCKET = 0x5e,
   SYSCALL_MONOTONIC_NS = 0x5f,
+  SYSCALL_TASK_SNAPSHOT = 0x60,
+  SYSCALL_CPU_INFO = 0x61,
+  SYSCALL_TTY_INPUT_NOTIFY = 0x62,
   SYSCALL_COUNT,
 };
 
@@ -657,7 +660,7 @@ static void syscall_exit(x86_interrupt_frame_t *frame) {
 }
 
 static void syscall_vbe_control(x86_interrupt_frame_t *frame) {
-  if (running_mode != POWERINTDOS) {
+  if (running_mode != POWERINTDOS || !task_pin_current(0)) {
     return;
   }
 
@@ -668,7 +671,14 @@ static void syscall_vbe_control(x86_interrupt_frame_t *frame) {
   } else if (frame->ebx == 0x05) {
     unsigned framebuffer = set_mode(frame->ecx, frame->edx, 32);
     frame->eax = framebuffer;
-    unsigned count = div_round_up(frame->ecx * frame->edx * 4, 0x1000);
+    uint64_t framebuffer_bytes = (uint64_t)frame->ecx * frame->edx * 4;
+    if (framebuffer == UINT_MAX || (framebuffer & 0xfffu) != 0 ||
+        framebuffer_bytes == 0 || framebuffer_bytes > UINT_MAX ||
+        framebuffer > UINT_MAX - (unsigned)framebuffer_bytes) {
+      frame->eax = UINT_MAX;
+      return;
+    }
+    unsigned count = div_round_up((unsigned)framebuffer_bytes, 0x1000);
     for (unsigned i = 0; i < count; i++) {
       unsigned address = framebuffer + i * 0x1000;
       page_set_physics_attr(address, (void *)(uintptr_t)address,
@@ -678,7 +688,7 @@ static void syscall_vbe_control(x86_interrupt_frame_t *frame) {
 }
 
 static void syscall_bios_video(x86_interrupt_frame_t *frame) {
-  if (running_mode != POWERINTDOS) {
+  if (running_mode != POWERINTDOS || !task_pin_current(0)) {
     return;
   }
   if (frame->ebx == 0x01) {
@@ -712,7 +722,7 @@ static void syscall_task_control(x86_interrupt_frame_t *frame) {
     get_msg_all((void *)(uintptr_t)frame->edx);
     break;
   case 0x0a: {
-    mtask *thread = create_thread_task((uintptr_t)user_thread_entry, 0, 1, 1);
+    mtask *thread = create_thread_task((uintptr_t)user_thread_entry, 1);
     if (thread == NULL) {
       frame->eax = -1;
       return;
@@ -720,9 +730,11 @@ static void syscall_task_control(x86_interrupt_frame_t *frame) {
     thread->alloc_addr = task->alloc_addr;
     thread->alloc_size = task->alloc_size;
     thread->TTY = task->TTY;
+    thread->tty_session = task->tty_session;
     thread->ptid = task->ptid;
     thread->tgid = task->tgid;
     thread->kind = TASK_THREAD;
+    task_set_name(thread, "thread");
     thread->mx = 0;
     thread->my = 0;
     unsigned *request = page_malloc_one_no_mark();
@@ -1092,8 +1104,13 @@ static void syscall_set_rt(x86_interrupt_frame_t *frame) {
 }
 
 static void syscall_mouse_enable(x86_interrupt_frame_t *frame) {
-  (void)frame;
+  extern mtask *mouse_use_task;
+  if (mouse_use_task != NULL && mouse_use_task != current_task()) {
+    frame->eax = -1;
+    return;
+  }
   mouse_ready(&mdec);
+  frame->eax = 0;
 }
 
 static void syscall_mouse_data(x86_interrupt_frame_t *frame) {
@@ -1136,11 +1153,15 @@ static void syscall_return_to_app(x86_interrupt_frame_t *frame) {
 }
 
 static void syscall_use_keyboard(x86_interrupt_frame_t *frame) {
-  (void)frame;
   extern int disable_flag;
   extern mtask *keyboard_use_task;
+  if (keyboard_use_task != NULL && keyboard_use_task != current_task()) {
+    frame->eax = -1;
+    return;
+  }
   disable_flag = 1;
   keyboard_use_task = current_task();
+  frame->eax = 0;
 }
 
 enum shared_memory_operation {
@@ -1170,7 +1191,7 @@ static void syscall_shared_memory(x86_interrupt_frame_t *frame) {
 
     irq_state_t state = irq_save();
     mtask *target = get_task(frame->ecx);
-    if (target != NULL && target->state != DIED &&
+    if (target != NULL && target->state != DIED && !target->on_cpu &&
         target->generation == frame->edx && target->pde != 0) {
       success = page_share_range_pde(frame->edi, frame->esi, frame->ebp,
                                      current_task()->pde, target->pde);
@@ -1204,12 +1225,11 @@ static void syscall_task_level(x86_interrupt_frame_t *frame) {
       return;
     }
     task->urgent = 1;
-    task->timeout = 5;
+    task->weight = 5;
   } else {
     task->urgent = 0;
-    task->timeout = 1;
+    task->weight = 1;
   }
-  task->running = 0;
   irq_restore(state);
 }
 
@@ -1508,6 +1528,27 @@ static void syscall_socket(x86_interrupt_frame_t *frame) {
                                                     request);
 }
 
+static void syscall_task_snapshot(x86_interrupt_frame_t *frame) {
+  if (!user_range_ok(frame->edx, sizeof(uint32_t)) ||
+      (frame->ecx != 0 &&
+       (frame->ecx > UINT_MAX / sizeof(task_info_t) ||
+        !user_range_ok(frame->ebx, frame->ecx * sizeof(task_info_t))))) {
+    frame->eax = -1;
+    return;
+  }
+  frame->eax = task_snapshot((task_info_t *)(uintptr_t)frame->ebx, frame->ecx,
+                             (uint32_t *)(uintptr_t)frame->edx);
+}
+
+static void syscall_cpu_info(x86_interrupt_frame_t *frame) {
+  frame->eax = smp_online_cpu_count();
+  frame->edx = smp_current_cpu();
+}
+
+static void syscall_tty_input_notify(x86_interrupt_frame_t *frame) {
+  frame->eax = tty_notify_input((struct tty *)(uintptr_t)frame->ebx) ? 0 : -1;
+}
+
 static const syscall_handler_t syscall_handlers[SYSCALL_COUNT] = {
     [SYSCALL_VERSION] = syscall_version,
     [SYSCALL_PRINT_CHARACTER] = syscall_print_character,
@@ -1592,6 +1633,9 @@ static const syscall_handler_t syscall_handlers[SYSCALL_COUNT] = {
     [SYSCALL_IPC] = syscall_ipc,
     [SYSCALL_SOCKET] = syscall_socket,
     [SYSCALL_MONOTONIC_NS] = syscall_monotonic_ns,
+    [SYSCALL_TASK_SNAPSHOT] = syscall_task_snapshot,
+    [SYSCALL_CPU_INFO] = syscall_cpu_info,
+    [SYSCALL_TTY_INPUT_NOTIFY] = syscall_tty_input_notify,
 };
 
 void x86_syscall_dispatch(x86_interrupt_frame_t *frame) {

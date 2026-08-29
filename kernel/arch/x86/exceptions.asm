@@ -3,6 +3,8 @@
 section .text
 
 extern x86_exception_dispatch
+extern kernel_lock_enter
+extern kernel_lock_leave
 
 %macro X86_EXCEPTION_ENTRY 2
 x86_exception_entry_%1:
@@ -58,6 +60,7 @@ x86_exception_common:
   mov ax, 0x08
   mov ds, ax
   mov es, ax
+  call kernel_lock_enter
 
   mov ebx, esp
   and esp, -16
@@ -65,6 +68,7 @@ x86_exception_common:
   push ebx
   call x86_exception_dispatch
   mov esp, ebx
+  call kernel_lock_leave
 
   popad
   pop gs

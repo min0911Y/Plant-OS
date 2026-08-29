@@ -63,16 +63,31 @@ void handle_left_button(button_t *button) {
 button_t *create_button(super_window_t *super_window, char *text, int xsize,
                         int ysize, int x, int y,
                         void (*click)(button_t *button)) {
+  if (super_window == NULL || text == NULL) {
+    return NULL;
+  }
   button_t *res = malloc(sizeof(button_t));
+  if (res == NULL) {
+    return NULL;
+  }
   res->text = malloc(strlen(text) + 1);
+  if (res->text == NULL) {
+    free(res);
+    return NULL;
+  }
   strcpy(res->text, text);
   res->super_window = super_window;
   res->handle_left = handle_left_button;
   res->click = click;
   res->close = NULL;
   res->sht = super_window->create_sheet(super_window, xsize, ysize, x, y, 1);
+  if (res->sht == NULL ||
+      list_add_val((uintptr_t)res, super_window->button_list) == NULL) {
+    free(res->text);
+    free(res);
+    return NULL;
+  }
   res->vram = res->sht->buf;
-  list_add_val((uintptr_t)res, super_window->button_list);
   button_draw(res);
   return res;
 }

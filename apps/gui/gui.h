@@ -77,6 +77,7 @@ struct desktop {
   unsigned tid;
   int xsize, ysize;
   struct List *window_list;
+  window_t *focused_window;
   void (*display)(desktop_t *desktop, vram_t *vram);
   void (*hide)(desktop_t *desktop);
   void (*draw)(desktop_t *desktop, int x, int y, int x1, int y1, color_t color);
@@ -107,7 +108,7 @@ struct window {
   struct FIFO8 *fifo_keyup;
   gui_window_shared_t *shared;
   bool keyboard_events;
-  void (*display)(window_t *window, int x, int y, int pos);
+  void (*display)(window_t *window, int x, int y);
   void (*hide)(window_t *window);
   void (*draw)(window_t *window, int x, int y, int x1, int y1, color_t color);
   void (*puts)(window_t *window, char *s, int x, int y, color_t color);
@@ -145,6 +146,8 @@ struct super_window {
 
 window_t *create_window(desktop_t *desktop, const char *title, int xsize,
                         int ysize, unsigned tid, vram_t *vram);
+void window_focus(window_t *window);
+void close_window(window_t *window);
 void destroy_window(window_t *window);
 super_window_t *create_super_window(window_t *window);
 
@@ -167,11 +170,12 @@ gmouse_t *create_gmouse(desktop_t *desktop, int x, int y, int pos);
 struct console {
   window_t *window;
   struct tty *tty;
-  unsigned tid;
+  unsigned tty_handle;
   int xsize, ysize, x, y;
   struct SHTCTL *shtctl;
   vram_t *vram_copy, *vram_cur;
   struct SHEET *sht_copy, *sht_cur;
+  void *task_stack;
   void (*handle_left)(console_t *console, gmouse_t *gmouse);
   void (*handle_right)(console_t *console, gmouse_t *gmouse);
   void (*handle_stay)(console_t *console, gmouse_t *gmouse);

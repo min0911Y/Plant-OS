@@ -5,6 +5,7 @@
 #include <dos.h>
 #include <interrupts.h>
 #include <irq.h>
+#include <smp.h>
 
 #define X86_IDT_ADDRESS ((uintptr_t)0x0026f800u)
 #define X86_GDT_ADDRESS ((uintptr_t)0x00270000u)
@@ -101,7 +102,7 @@ _Static_assert(sizeof(regs16_t) == 26, "x86 BIOS register frame size");
 _Static_assert(X86_VECTOR_APIC_SPURIOUS + 1 == X86_IDT_ENTRY_COUNT,
                "x86 IDT includes the APIC spurious vector");
 
-static x86_tss32_t task_state;
+static x86_tss32_t task_states[SMP_MAX_CPUS];
 extern unsigned char *IVT;
 void x86_bios_interrupt_raw(uint8_t interrupt_number, regs16_t *registers);
 
@@ -237,11 +238,29 @@ void arch_interrupt_init(void) {
   x86_interrupt_entry_set(0x2f, asm_ide_irq, X86_ACCESS_INTERRUPT_GATE);
   x86_interrupt_entry_set(0x36, x86_syscall_entry,
                           X86_USER_ACCESS(X86_ACCESS_INTERRUPT_GATE));
+  x86_interrupt_entry_set(X86_VECTOR_RESCHEDULE, x86_reschedule_entry,
+                          X86_ACCESS_INTERRUPT_GATE);
 
   x86_descriptor_table_pointer_t idt_pointer = {
       .limit = X86_IDT_LIMIT,
       .base = X86_IDT_ADDRESS,
   };
+  x86_idt_load(&idt_pointer);
+  irq_restore(state);
+}
+
+void arch_interrupt_init_secondary(void) {
+  irq_state_t state = irq_save();
+  x86_descriptor_table_pointer_t gdt_pointer = {
+      .limit = X86_GDT_LIMIT,
+      .base = X86_GDT_ADDRESS,
+  };
+  x86_descriptor_table_pointer_t idt_pointer = {
+      .limit = X86_IDT_LIMIT,
+      .base = X86_IDT_ADDRESS,
+  };
+  x86_gdt_load(&gdt_pointer);
+  x86_data_segments_load(X86_SELECTOR(X86_GDT_KERNEL_DATA_INDEX));
   x86_idt_load(&idt_pointer);
   irq_restore(state);
 }
@@ -257,16 +276,18 @@ bool interrupt_register_entry(unsigned vector, interrupt_entry_t entry) {
 }
 
 void arch_task_state_init(void) {
-  memset(&task_state, 0, sizeof(task_state));
-  task_state.ss0 = X86_SELECTOR(X86_GDT_KERNEL_DATA_INDEX);
-  x86_segment_descriptor_set(&x86_gdt()[X86_GDT_TSS_INDEX],
-                             sizeof(task_state) - 1,
-                             (uintptr_t)&task_state, X86_ACCESS_TSS32);
-  x86_task_register_load(X86_SELECTOR(X86_GDT_TSS_INDEX));
+  uint32_t cpu = smp_current_cpu();
+  x86_tss32_t *task_state = &task_states[cpu];
+  memset(task_state, 0, sizeof(*task_state));
+  task_state->ss0 = X86_SELECTOR(X86_GDT_KERNEL_DATA_INDEX);
+  x86_segment_descriptor_set(&x86_gdt()[X86_GDT_TSS_INDEX + cpu],
+                             sizeof(*task_state) - 1,
+                             (uintptr_t)task_state, X86_ACCESS_TSS32);
+  x86_task_register_load(X86_SELECTOR(X86_GDT_TSS_INDEX + cpu));
 }
 
 void arch_task_set_kernel_stack(uintptr_t stack_top) {
-  task_state.esp0 = stack_top;
+  task_states[smp_current_cpu()].esp0 = stack_top;
 }
 
 void x86_user_frame_init(x86_interrupt_frame_t *frame, uint32_t eip,

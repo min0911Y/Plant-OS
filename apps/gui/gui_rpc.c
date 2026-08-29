@@ -14,8 +14,6 @@ typedef struct gui_remote_window {
 } gui_remote_window_t;
 
 extern desktop_t *desktop0;
-extern void (*drop)();
-extern window_t *backup_w;
 
 static gui_remote_window_t *gui_remote_windows;
 static uint32_t gui_next_window_id = 1;
@@ -78,10 +76,6 @@ static gui_remote_window_t *gui_remote_find(const rpc_call_t *call,
 }
 
 static void gui_remote_destroy(gui_remote_window_t *remote) {
-  if (backup_w == remote->window) {
-    drop = NULL;
-    backup_w = NULL;
-  }
   destroy_window(remote->window);
   free(remote->allocation);
   free(remote);
@@ -151,8 +145,7 @@ static int gui_create_window(rpc_call_t *call) {
   window->handle_right = gui_event_right;
   window->handle_mouse_wheel = gui_event_wheel;
   window->close = gui_event_close;
-  window->display(window, request->x, request->y,
-                  desktop0->shtctl->top - 1);
+  window->display(window, request->x, request->y);
 
   if (shared_memory_map_to(call->caller_tid, call->caller_generation, shared,
                            (void *)(uintptr_t)request->client_mapping,

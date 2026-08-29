@@ -519,14 +519,15 @@ unsigned char ide_ata_access(unsigned char direction, unsigned char drive,
   // DMA Write.
   else if (direction == 0) {
     // PIO Read.
-    int bmp_ticks = current_task()->timeout;
-    current_task()->timeout = 50;
-    current_task()->running = 0;
+    int io_weight = current_task()->weight;
+    current_task()->weight = 50;
     uint16_t *word_ = (uint16_t *)buffer;
     for (i = 0; i < numsects; i++) {
       logk("read %d\n", i);
-      if ((err = ide_polling(channel, 1)) != 0)
+      if ((err = ide_polling(channel, 1)) != 0) {
+        current_task()->weight = io_weight;
         return err; // Polling, set error and exit if there is.
+      }
 
       logk("words=%d bus=%d\n", words, bus);
       // for (int h = 0; h < words; h++) {
@@ -535,12 +536,11 @@ unsigned char ide_ata_access(unsigned char direction, unsigned char drive,
       // }
       insl(bus, (uint32_t *)(void *)(word_ + i * words), words / 2);
     }
-    current_task()->timeout = bmp_ticks;
+    current_task()->weight = io_weight;
   } else {
     // PIO Write.
-    int bmp_ticks = current_task()->timeout;
-    current_task()->timeout = 50;
-    current_task()->running = 0;
+    int io_weight = current_task()->weight;
+    current_task()->weight = 50;
     uint16_t *word_ = (uint16_t *)buffer;
     for (i = 0; i < numsects; i++) {
       logk("write %d\n", i);
@@ -557,7 +557,7 @@ unsigned char ide_ata_access(unsigned char direction, unsigned char drive,
               (char[]){ATA_CMD_CACHE_FLUSH, ATA_CMD_CACHE_FLUSH,
                        ATA_CMD_CACHE_FLUSH_EXT}[lba_mode]);
     ide_polling(channel, 0); // Polling.
-    current_task()->timeout = bmp_ticks;
+    current_task()->weight = io_weight;
   }
 
   return 0; // Easy, isn't it?

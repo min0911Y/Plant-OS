@@ -1,5 +1,8 @@
+#include <arch/x86/cpuid.h>
 #include <arch/x86/io.h>
 #include <dos.h>
+#include <limits.h>
+#include <smp.h>
 
 #define IA32_APIC_BASE_MSR 0x1B
 #define IA32_TSC_DEADLINE_MSR 0x6E0
@@ -15,12 +18,15 @@
 #define LAPIC_REG_EOI 0x0B0
 #define LAPIC_REG_SVR 0x0F0
 #define LAPIC_REG_LVT_TIMER 0x320
+#define LAPIC_REG_TIMER_INITIAL 0x380
+#define LAPIC_REG_TIMER_CURRENT 0x390
 #define LAPIC_REG_TIMER_DIVIDE 0x3E0
 #define LAPIC_REG_ICR_LOW 0x300
 #define LAPIC_REG_ICR_HIGH 0x310
 
 #define APIC_SVR_ENABLE 0x100
 #define APIC_LVT_MASKED 0x00010000u
+#define APIC_LVT_TIMER_PERIODIC (1u << 17)
 #define APIC_LVT_TIMER_TSC_DEADLINE (2u << 17)
 
 #define IOAPIC_REG_ID 0x00
@@ -35,8 +41,6 @@
 
 #define MAX_IOAPICS 8
 #define MAX_IRQS 24
-#define SMP_MAX_CPUS 32
-#define SMP_TRAMPOLINE_PHYS 0x6000u
 
 typedef struct {
   uint32_t phys;
@@ -45,16 +49,11 @@ typedef struct {
   uint32_t gsi_count;
 } IoApicState;
 
-typedef struct {
-  uint32_t lapic_id;
-  volatile uint32_t started;
-} SmpCpuState;
-
 static uint8_t pic_irq_masks[2] = {0xfb, 0xff};
 static int apic_enabled;
 static int x2apic_enabled;
 static int apic_tsc_deadline_supported;
-static int apic_tsc_deadline_enabled;
+static uint8_t apic_tsc_deadline_enabled[SMP_MAX_CPUS];
 static uint32_t lapic_base_phys = 0xfee00000u;
 static volatile uint32_t* lapic_mmio = (volatile uint32_t*)(uintptr_t)0xfee00000u;
 static IoApicState ioapics[MAX_IOAPICS];
@@ -64,19 +63,9 @@ static uint8_t irq_trigger[MAX_IRQS];
 static uint8_t irq_polarity[MAX_IRQS];
 static uint8_t irq_masked[MAX_IRQS];
 static uint32_t bsp_lapic_id;
-static uint32_t smp_cpu_total;
-static SmpCpuState smp_cpu_states[SMP_MAX_CPUS];
-static uint8_t* smp_trampoline_ptr = (uint8_t*)(uintptr_t)SMP_TRAMPOLINE_PHYS;
 static uint64_t tsc_khz;
 static uint64_t apic_timer_deadline_interval_tsc;
-static uint64_t apic_timer_next_deadline_tsc;
-
-static inline void cpuid_full(uint32_t leaf, uint32_t subleaf, uint32_t* eax,
-                              uint32_t* ebx, uint32_t* ecx, uint32_t* edx) {
-  asm volatile("cpuid"
-               : "=a"(*eax), "=b"(*ebx), "=c"(*ecx), "=d"(*edx)
-               : "a"(leaf), "c"(subleaf));
-}
+static uint64_t apic_timer_next_deadline_tsc[SMP_MAX_CPUS];
 
 static inline uint64_t rdmsr64(uint32_t msr) {
   uint32_t lo, hi;
@@ -111,12 +100,12 @@ static inline void lapic_write(uint32_t reg, uint32_t value) {
   (void)lapic_mmio[LAPIC_REG_ID >> 2];
 }
 
-static inline void lapic_write_icr(uint32_t high, uint32_t low) {
+static inline void lapic_send_ipi(uint32_t apic_id, uint32_t low) {
   if (x2apic_enabled) {
-    wrmsr64(IA32_X2APIC_ICR, ((uint64_t)high << 32) | low);
+    wrmsr64(IA32_X2APIC_ICR, ((uint64_t)apic_id << 32) | low);
     return;
   }
-  lapic_write(LAPIC_REG_ICR_HIGH, high);
+  lapic_write(LAPIC_REG_ICR_HIGH, apic_id << 24);
   lapic_write(LAPIC_REG_ICR_LOW, low);
 }
 
@@ -306,41 +295,32 @@ void irq_configure(unsigned irq, int trigger_mode, int polarity) {
 int interrupt_controller_uses_apic(void) { return apic_enabled; }
 
 static int cpu_has_apic(void) {
-  uint32_t eax, ebx, ecx, edx;
-  cpuid_full(1, 0, &eax, &ebx, &ecx, &edx);
-  return (edx & (1u << 9)) != 0;
+  return (x86_cpuid(1, 0).edx & (1u << 9)) != 0;
 }
 
 static int cpu_has_x2apic(void) {
-  uint32_t eax, ebx, ecx, edx;
-  cpuid_full(1, 0, &eax, &ebx, &ecx, &edx);
-  return (ecx & (1u << 21)) != 0;
+  return (x86_cpuid(1, 0).ecx & (1u << 21)) != 0;
 }
 
 static int cpu_has_tsc_deadline(void) {
-  uint32_t eax, ebx, ecx, edx;
-  cpuid_full(1, 0, &eax, &ebx, &ecx, &edx);
-  return (ecx & (1u << 24)) != 0;
+  return (x86_cpuid(1, 0).ecx & (1u << 24)) != 0;
 }
 
 static uint64_t cpu_tsc_khz_from_cpuid(void) {
-  uint32_t eax, ebx, ecx, edx;
-  cpuid_full(0, 0, &eax, &ebx, &ecx, &edx);
-  if (eax >= 0x15u) {
-    uint32_t denom, numer, crystal_hz;
-    cpuid_full(0x15u, 0, &denom, &numer, &crystal_hz, &edx);
-    if (denom && numer && crystal_hz) {
-      uint64_t hz = ((uint64_t)crystal_hz * numer) / denom;
+  x86_cpuid_t maximum = x86_cpuid(0, 0);
+  if (maximum.eax >= 0x15u) {
+    x86_cpuid_t frequency = x86_cpuid(0x15u, 0);
+    if (frequency.eax && frequency.ebx && frequency.ecx) {
+      uint64_t hz = ((uint64_t)frequency.ecx * frequency.ebx) / frequency.eax;
       if (hz) {
         return hz / 1000ull;
       }
     }
   }
-  if (eax >= 0x16u) {
-    uint32_t base_mhz;
-    cpuid_full(0x16u, 0, &base_mhz, &ebx, &ecx, &edx);
-    if (base_mhz) {
-      return (uint64_t)base_mhz * 1000ull;
+  if (maximum.eax >= 0x16u) {
+    x86_cpuid_t frequency = x86_cpuid(0x16u, 0);
+    if (frequency.eax) {
+      return (uint64_t)frequency.eax * 1000ull;
     }
   }
   return 0;
@@ -372,12 +352,14 @@ static uint64_t cpu_detect_tsc_khz(void) {
 }
 
 static void apic_timer_arm_next_deadline(void) {
-  if (!apic_tsc_deadline_enabled || !apic_timer_deadline_interval_tsc) {
+  uint32_t cpu = smp_current_cpu();
+  if (!apic_tsc_deadline_enabled[cpu] ||
+      !apic_timer_deadline_interval_tsc) {
     return;
   }
 
   uint64_t now = rdtsc64();
-  uint64_t next = apic_timer_next_deadline_tsc;
+  uint64_t next = apic_timer_next_deadline_tsc[cpu];
   if (!next || next <= now) {
     next = now + apic_timer_deadline_interval_tsc;
   } else {
@@ -386,30 +368,34 @@ static void apic_timer_arm_next_deadline(void) {
       next = now + apic_timer_deadline_interval_tsc;
     }
   }
-  apic_timer_next_deadline_tsc = next;
+  apic_timer_next_deadline_tsc[cpu] = next;
   wrmsr64(IA32_TSC_DEADLINE_MSR, next);
 }
 
 static void apic_timer_disable_tsc_deadline(void) {
-  if (!apic_tsc_deadline_enabled) {
+  uint32_t cpu = smp_current_cpu();
+  if (!apic_tsc_deadline_enabled[cpu]) {
     return;
   }
 
   wrmsr64(IA32_TSC_DEADLINE_MSR, 0);
   lapic_write(LAPIC_REG_LVT_TIMER, APIC_TIMER_VECTOR | APIC_LVT_MASKED);
-  apic_tsc_deadline_enabled = 0;
-  apic_timer_next_deadline_tsc = 0;
+  apic_tsc_deadline_enabled[cpu] = 0;
+  apic_timer_next_deadline_tsc[cpu] = 0;
 }
 
 static void apic_timer_init_tsc_deadline(void) {
-  apic_tsc_deadline_enabled = 0;
-  apic_timer_next_deadline_tsc = 0;
+  uint32_t cpu = smp_current_cpu();
+  apic_tsc_deadline_enabled[cpu] = 0;
+  apic_timer_next_deadline_tsc[cpu] = 0;
 
   if (!apic_enabled || !apic_tsc_deadline_supported) {
     return;
   }
 
-  tsc_khz = cpu_detect_tsc_khz();
+  if (!tsc_khz) {
+    tsc_khz = cpu_detect_tsc_khz();
+  }
   if (!tsc_khz) {
     logk("apic: TSC frequency unavailable, keep PIT timer\n");
     return;
@@ -426,26 +412,25 @@ static void apic_timer_init_tsc_deadline(void) {
   lapic_write(LAPIC_REG_TIMER_DIVIDE, 0);
   lapic_write(LAPIC_REG_LVT_TIMER,
               APIC_TIMER_VECTOR | APIC_LVT_TIMER_TSC_DEADLINE);
-  apic_tsc_deadline_enabled = 1;
+  apic_tsc_deadline_enabled[cpu] = 1;
   apic_timer_arm_next_deadline();
   logk("apic: timer=tsc-deadline tsc_khz=%d tick_tsc=%d\n", (uint32_t)tsc_khz,
        (uint32_t)apic_timer_deadline_interval_tsc);
 }
 
 static uint32_t cpu_initial_apic_id(void) {
-  uint32_t eax, ebx, ecx, edx;
-  cpuid_full(1, 0, &eax, &ebx, &ecx, &edx);
-  return (ebx >> 24) & 0xff;
+  return (x86_cpuid(1, 0).ebx >> 24) & 0xff;
 }
 
 void apic_init(void) {
   apic_enabled = 0;
   x2apic_enabled = 0;
   apic_tsc_deadline_supported = 0;
-  apic_tsc_deadline_enabled = 0;
+  memset(apic_tsc_deadline_enabled, 0, sizeof(apic_tsc_deadline_enabled));
   tsc_khz = 0;
   apic_timer_deadline_interval_tsc = 0;
-  apic_timer_next_deadline_tsc = 0;
+  memset(apic_timer_next_deadline_tsc, 0,
+         sizeof(apic_timer_next_deadline_tsc));
 
   if (!cpu_has_apic()) {
     logk("apic: CPU does not support APIC, falling back to PIC\n");
@@ -476,34 +461,17 @@ void apic_init(void) {
     bsp_lapic_id = cpu_initial_apic_id();
   }
 
-  smp_cpu_total = acpi_cpu_count();
-  if (smp_cpu_total > SMP_MAX_CPUS) {
-    smp_cpu_total = SMP_MAX_CPUS;
-  }
-  for (uint32_t i = 0; i < smp_cpu_total; i++) {
-    smp_cpu_states[i].lapic_id = acpi_cpu_lapic_id(i);
-    smp_cpu_states[i].started = smp_cpu_states[i].lapic_id == bsp_lapic_id;
-  }
-  if (smp_cpu_total == 0) {
-    smp_cpu_total = 1;
-    smp_cpu_states[0].lapic_id = bsp_lapic_id;
-    smp_cpu_states[0].started = 1;
-  }
-
-  smp_trampoline_ptr = (uint8_t*)(uintptr_t)SMP_TRAMPOLINE_PHYS;
-  memset(smp_trampoline_ptr, 0, 0x1000);
-
   if (acpi_have_madt() && acpi_ioapic_count() > 0) {
     ioapic_init_from_acpi();
     apic_enabled = 1;
     pic_disable();
     apic_timer_init_tsc_deadline();
-    if (!apic_tsc_deadline_enabled) {
+    if (!apic_tsc_deadline_enabled[0]) {
       irq_mask_clear(APIC_TIMER_IRQ);
     }
     logk("apic: enabled %s lapic=%08x bsp=%d cpus=%d ioapics=%d\n",
          x2apic_enabled ? "x2apic" : "xapic", lapic_base_phys, bsp_lapic_id,
-         smp_cpu_total, ioapic_total);
+         acpi_cpu_count(), ioapic_total);
   } else {
     logk("apic: MADT/IOAPIC unavailable, using PIC\n");
   }
@@ -513,7 +481,9 @@ int apic_ready(void) { return apic_enabled; }
 
 int apic_x2apic_enabled(void) { return x2apic_enabled; }
 
-int apic_timer_uses_tsc_deadline(void) { return apic_tsc_deadline_enabled; }
+int apic_timer_uses_tsc_deadline(void) {
+  return apic_tsc_deadline_enabled[smp_current_cpu()] != 0;
+}
 
 int apic_timer_tsc_deadline_available(void) {
   return apic_enabled && apic_tsc_deadline_supported &&
@@ -539,7 +509,7 @@ void apic_send_eoi(void) {
 }
 
 void apic_timer_on_interrupt(void) {
-  if (apic_tsc_deadline_enabled) {
+  if (apic_tsc_deadline_enabled[smp_current_cpu()]) {
     apic_timer_arm_next_deadline();
   }
 }
@@ -554,8 +524,9 @@ int apic_timer_use_tsc_deadline(void) {
   lapic_write(LAPIC_REG_TIMER_DIVIDE, 0);
   lapic_write(LAPIC_REG_LVT_TIMER,
               APIC_TIMER_VECTOR | APIC_LVT_TIMER_TSC_DEADLINE);
-  apic_tsc_deadline_enabled = 1;
-  apic_timer_next_deadline_tsc = 0;
+  uint32_t cpu = smp_current_cpu();
+  apic_tsc_deadline_enabled[cpu] = 1;
+  apic_timer_next_deadline_tsc[cpu] = 0;
   apic_timer_arm_next_deadline();
   return 1;
 }
@@ -625,7 +596,7 @@ void apic_send_init_ipi(uint32_t apic_id) {
     return;
   }
   apic_wait_icr_idle();
-  lapic_write_icr(apic_id << 24, 0x00004500u);
+  lapic_send_ipi(apic_id, 0x0000c500u);
 }
 
 void apic_send_startup_ipi(uint32_t apic_id, uint32_t vector) {
@@ -633,27 +604,63 @@ void apic_send_startup_ipi(uint32_t apic_id, uint32_t vector) {
     return;
   }
   apic_wait_icr_idle();
-  lapic_write_icr(apic_id << 24, 0x00004600u | (vector & 0xff));
+  lapic_send_ipi(apic_id, 0x00004600u | (vector & 0xff));
 }
 
-uint8_t* smp_trampoline_base(void) { return smp_trampoline_ptr; }
-
-uint32_t smp_trampoline_phys(void) { return SMP_TRAMPOLINE_PHYS; }
-
-uint32_t smp_cpu_count(void) { return smp_cpu_total; }
-
-uint32_t smp_bsp_lapic_id(void) { return bsp_lapic_id; }
-
-uint32_t smp_cpu_lapic_id(uint32_t index) {
-  if (index >= smp_cpu_total) {
-    return 0;
+void apic_send_fixed_ipi(uint32_t apic_id, uint8_t vector) {
+  if (!apic_enabled || vector < 0x20) {
+    return;
   }
-  return smp_cpu_states[index].lapic_id;
+  apic_wait_icr_idle();
+  lapic_send_ipi(apic_id, vector);
 }
 
-int smp_cpu_started(uint32_t index) {
-  if (index >= smp_cpu_total) {
-    return 0;
+static void apic_timer_init_periodic(void) {
+  lapic_write(LAPIC_REG_TIMER_DIVIDE, 0x3);
+  lapic_write(LAPIC_REG_LVT_TIMER, APIC_TIMER_VECTOR | APIC_LVT_MASKED);
+  lapic_write(LAPIC_REG_TIMER_INITIAL, UINT_MAX);
+
+  if (tsc_khz) {
+    uint64_t start = rdtsc64();
+    while (rdtsc64() - start < tsc_khz) {
+      asm volatile("pause");
+    }
+  } else if (hpet_available()) {
+    uint64_t deadline = monotonic_time_ns() + 1000000ull;
+    while (monotonic_time_ns() < deadline) {
+      asm volatile("pause");
+    }
+  } else {
+    lapic_write(LAPIC_REG_LVT_TIMER,
+                APIC_TIMER_VECTOR | APIC_LVT_TIMER_PERIODIC);
+    lapic_write(LAPIC_REG_TIMER_INITIAL, 1000000u);
+    return;
   }
-  return smp_cpu_states[index].started != 0;
+  uint32_t elapsed = UINT_MAX - lapic_read(LAPIC_REG_TIMER_CURRENT);
+  uint64_t initial = (uint64_t)elapsed * 10;
+  if (!initial || initial > UINT_MAX) {
+    initial = 1000000u;
+  }
+  lapic_write(LAPIC_REG_LVT_TIMER,
+              APIC_TIMER_VECTOR | APIC_LVT_TIMER_PERIODIC);
+  lapic_write(LAPIC_REG_TIMER_INITIAL, (uint32_t)initial);
+}
+
+void apic_init_secondary(void) {
+  uint64_t apic_base = rdmsr64(IA32_APIC_BASE_MSR) | APIC_BASE_MSR_ENABLE;
+  if (x2apic_enabled) {
+    apic_base |= APIC_BASE_MSR_X2APIC;
+  }
+  wrmsr64(IA32_APIC_BASE_MSR, apic_base);
+  lapic_write(LAPIC_REG_SVR, APIC_SVR_ENABLE | APIC_SPURIOUS_VECTOR);
+  apic_send_eoi();
+
+  if (apic_tsc_deadline_supported && apic_timer_deadline_interval_tsc) {
+    apic_timer_init_tsc_deadline();
+  } else {
+    if (!tsc_khz) {
+      tsc_khz = cpu_detect_tsc_khz();
+    }
+    apic_timer_init_periodic();
+  }
 }

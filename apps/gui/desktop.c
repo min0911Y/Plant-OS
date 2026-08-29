@@ -50,17 +50,47 @@ desktop_t *get_now_desktop() {
 }
 
 desktop_t *create_desktop(int xsize, int ysize, unsigned tid) {
+  if (xsize <= 0 || ysize <= 0) {
+    return NULL;
+  }
   if (desktop_list == NULL) {
     desktop_list = list_new();
+    if (desktop_list == NULL) {
+      return NULL;
+    }
   }
   desktop_t *res = (desktop_t *)malloc(sizeof(desktop_t));
-  res->shtctl = shtctl_init((vram_t *)malloc(xsize * ysize * sizeof(vram_t)),
-                            xsize, ysize);
+  vram_t *screen = (vram_t *)malloc(xsize * ysize * sizeof(vram_t));
+  if (res == NULL || screen == NULL) {
+    free(res);
+    free(screen);
+    return NULL;
+  }
+  memset(res, 0, sizeof(*res));
+  res->shtctl = shtctl_init(screen, xsize, ysize);
+  if (res->shtctl == NULL) {
+    free(screen);
+    free(res);
+    return NULL;
+  }
   res->sht = sheet_alloc(res->shtctl);
   res->vram = (vram_t *)malloc(xsize * ysize * sizeof(vram_t));
+  res->window_list = list_new();
+  if (res->sht == NULL || res->vram == NULL || res->window_list == NULL ||
+      list_add_val((uintptr_t)res, desktop_list) == NULL) {
+    if (res->sht != NULL) {
+      sheet_free(res->sht);
+    }
+    list_delete(res->window_list);
+    free(res->vram);
+    ctl_free(res->shtctl);
+    free(screen);
+    free(res);
+    return NULL;
+  }
   res->xsize = xsize;
   res->ysize = ysize;
-  res->window_list = list_new();
+  res->focused_window = NULL;
   res->display = display_desktop;
   res->hide = hide_desktop;
   res->draw = draw_desktop;
@@ -71,6 +101,5 @@ desktop_t *create_desktop(int xsize, int ysize, unsigned tid) {
   sheet_slide(res->sht, 0, 0);
   sheet_updown(res->sht, 0);
   sheet_refresh(res->sht, 0, 0, res->xsize, res->ysize);
-  list_add_val((uintptr_t)res, desktop_list);
   return res;
 }

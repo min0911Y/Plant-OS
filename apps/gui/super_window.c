@@ -1,30 +1,48 @@
 #include "gui.h"
 #include <string.h>
 #include <syscall.h>
-void draw_window(window_t *window, int x, int y, int x1, int y1, color_t color);
-void puts_window(window_t *window, char *s, int x, int y, color_t color);
 void close_super_window(super_window_t *super_window) {
-  sheet_free(super_window->sht_copy);
-  free(super_window->vram_copy);
-  for (int i = 1; (i, super_window->sht_list) != NULL; i++) {
-    struct SHEET *sht =
-        (struct SHEET *)list_search_by_count(i, super_window->sht_list)->val;
+  if (super_window == NULL) {
+    return;
+  }
+  for (List *entry = super_window->button_list->next; entry != NULL;
+       entry = entry->next) {
+    button_t *button = (button_t *)entry->val;
+    free(button->text);
+    free(button);
+  }
+  for (List *entry = super_window->textbox_list->next; entry != NULL;
+       entry = entry->next) {
+    free((textbox_t *)entry->val);
+  }
+  for (List *entry = super_window->sht_list->next; entry != NULL;
+       entry = entry->next) {
+    struct SHEET *sht = (struct SHEET *)entry->val;
     free(sht->buf);
     sheet_free(sht);
   }
+  sheet_free(super_window->sht_copy);
+  free(super_window->vram_copy);
   list_delete(super_window->sht_list);
   list_delete(super_window->button_list);
   list_delete(super_window->textbox_list);
+  ctl_free(super_window->shtctl);
   super_window->window->super_window = NULL;
-  super_window->window->draw = draw_window;
-  super_window->window->puts = puts_window;
-  free((void *)super_window);
+  free(super_window);
 }
 struct SHEET *create_sheet_super_window(super_window_t *super_window, int xsize,
                                         int ysize, int x, int y, int pos) {
   struct SHEET *res = sheet_alloc(super_window->shtctl);
-  list_add_val((uintptr_t)res, super_window->sht_list);
+  if (res == NULL) {
+    return NULL;
+  }
   vram_t *vram = malloc(xsize * ysize * sizeof(vram_t));
+  if (vram == NULL ||
+      list_add_val((uintptr_t)res, super_window->sht_list) == NULL) {
+    free(vram);
+    sheet_free(res);
+    return NULL;
+  }
   SDraw_Box(vram, 0, 0, xsize, ysize, COL_000000, xsize);
   sheet_setbuf(res, vram, xsize, ysize, COL_TRANSPARENT);
   sheet_slide(res, x, y);
@@ -99,11 +117,14 @@ void handle_left_super_window(window_t *window, gmouse_t *gmouse) {
   }
 }
 super_window_t *create_super_window(window_t *window) {
-  if (window->console != NULL)
+  if (window == NULL || window->console != NULL || window->super_window != NULL)
     return NULL;
   super_window_t *res = malloc(sizeof(super_window_t));
+  if (res == NULL) {
+    return NULL;
+  }
+  memset(res, 0, sizeof(*res));
   res->window = window;
-  window->super_window = res;
   res->handle_left = handle_left_super_window;
   res->handle_right = NULL;
   res->handle_stay = NULL;
@@ -116,10 +137,28 @@ super_window_t *create_super_window(window_t *window) {
   res->sht_list = list_new();
   res->button_list = list_new();
   res->textbox_list = list_new();
-
   res->shtctl = shtctl_init(window->vram, window->xsize, window->ysize);
-  res->sht_copy = sheet_alloc(res->shtctl);
+  if (res->shtctl != NULL) {
+    res->sht_copy = sheet_alloc(res->shtctl);
+  }
   res->vram_copy = malloc(window->xsize * window->ysize * sizeof(vram_t));
+  if (res->sht_list == NULL || res->button_list == NULL ||
+      res->textbox_list == NULL || res->shtctl == NULL ||
+      res->sht_copy == NULL || res->vram_copy == NULL) {
+    if (res->sht_copy != NULL) {
+      sheet_free(res->sht_copy);
+    }
+    free(res->vram_copy);
+    if (res->shtctl != NULL) {
+      ctl_free(res->shtctl);
+    }
+    list_delete(res->sht_list);
+    list_delete(res->button_list);
+    list_delete(res->textbox_list);
+    free(res);
+    return NULL;
+  }
+  window->super_window = res;
   memcpy((void *)res->vram_copy, (void *)window->vram,
          window->xsize * window->ysize * sizeof(vram_t));
   sheet_setbuf(res->sht_copy, res->vram_copy, window->xsize, window->ysize, -1);

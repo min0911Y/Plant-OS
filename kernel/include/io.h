@@ -38,6 +38,7 @@ struct tty *tty_alloc(void *vram, int xsize, int ysize,
 void tty_free(struct tty *res);
 void high_text_cursor_task_exited(mtask *task);
 struct tty *tty_set(mtask *task, struct tty *res);
+bool tty_notify_input(struct tty *tty);
 struct tty *tty_set_default(struct tty *res);
 void tty_set_reserved(struct tty *res, unsigned int reserved1,
                       unsigned int reserved2, unsigned int reserved3,

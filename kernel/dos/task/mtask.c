@@ -4,6 +4,8 @@
 #include <arch/x86/interrupt.h>
 #include <dos.h>
 #include <irq.h>
+#include <limits.h>
+#include <smp.h>
 #include <user_space.h>
 #define STACK_SIZE 1024 * 1024
 #define REAPER_TID 0u
@@ -13,11 +15,21 @@ void free_pde(unsigned addr);
 unsigned pde_clone(unsigned addr);
 void gc(unsigned tid);
 static void reset_task_slot(mtask *task, int tid);
+static void task_bootstrap(void);
+static void task_finish_pending(mtask *task);
 char default_drive = 'A';
 mtask m[255];
-mtask *idle_task;
-mtask *current = NULL;
-char mtask_stop_flag = 0;
+typedef struct {
+  mtask *current;
+  mtask *idle;
+  mtask *next;
+  uint64_t min_vruntime;
+  uint32_t need_resched;
+} scheduler_cpu_t;
+
+static scheduler_cpu_t scheduler_cpus[SMP_MAX_CPUS];
+static uint32_t scheduler_cpu_total = 1;
+static uint32_t scheduler_active;
 void task_set_default_drive(char drive) {
   if (drive >= 'a' && drive <= 'z') {
     drive -= 'a' - 'A';
@@ -27,14 +39,16 @@ void task_set_default_drive(char drive) {
   }
   default_drive = drive;
 }
-mtask *next_set = NULL;
 mtask null_task;
 static void init_task() {
   for (int i = 0; i < 255; i++) {
-    m[i].jiffies = 0;   // 最后一次执行的全局时间片
+    m[i].vruntime = 0;
+    m[i].runtime_ticks = 0;
+    m[i].cpu = 0;
+    m[i].on_cpu = 0;
+    m[i].sched_flags = 0;
     m[i].user_mode = 0; // 此项暂时废除
-    m[i].running = 0;
-    m[i].timeout = 0;
+    m[i].weight = 0;
     m[i].state = EMPTY; // EMPTY
     m[i].tid = i;       // task id
     m[i].ptid = -1;     // parent task id
@@ -61,12 +75,13 @@ static void init_task() {
     m[i].alloc_addr = 0;
     m[i].alloc_size = 0;
     m[i].alloced = 0;
+    m[i].TTY = NULL;
+    m[i].tty_session = NULL;
     m[i].ready = 0;
     m[i].pde = 0;
     m[i].Pkeyfifo = NULL;
     m[i].Ukeyfifo = NULL;
     m[i].sigint_up = 0;
-    m[i].train = 0;
     m[i].signal_disable = 0;
     m[i].times = 0;
     m[i].keyboard_press = NULL;
@@ -78,103 +93,210 @@ static void init_task() {
   }
 }
 fpu_t public_fpu;
-bool task_check_train(mtask *task) {
-  if (!task) {
-    return false;
-  }
-  if (task->train == 1 && timerctl.count - task->jiffies >= 5) {
-    return true;
-  }
-  return false;
-}
 extern mtask *mouse_use_task;
-void task_next() {
-  if (current->running < current->timeout - 1 && current->state == RUNNING &&
-      next_set == NULL) {
-    current->running++;
-    return; // 不需要调度，当前时间片仍然属于你
+static uint32_t scheduler_load(uint32_t cpu) {
+  uint32_t load = 0;
+  for (uint32_t i = 0; i < 255; i++) {
+    mtask *task = &m[i];
+    if (task->state == RUNNING && task->cpu == cpu &&
+        !(task->sched_flags & TASK_SCHED_IDLE)) {
+      load += task->weight ? task->weight : 1;
+    }
   }
-  if (!next_set)
-    current->running = 0;
-  mtask *next = NULL;
-  int i;
-  if (next_set) {
-    i = next_set->tid;
-    next_set = NULL;
-  } else {
-    i = 0;
-  }
-  for (; i < 255; i++) {
-    mtask *p = (&(m[i]));
-    if (p == current) {
+  return load;
+}
+
+static uint32_t scheduler_least_loaded_cpu(void) {
+  uint32_t selected = 0;
+  uint32_t selected_load = UINT_MAX;
+  for (uint32_t cpu = 0; cpu < scheduler_cpu_total; cpu++) {
+    if (!smp_cpu_online(cpu)) {
       continue;
     }
-    if (p->state != RUNNING) // RUNNING
-    {
-      if (p->state == READY) {
-        p->state = EMPTY;
-      }
-      if (p->state == WAITING) {
-        if (p->ready) {
-          p->ready = 0;
-          p->state = RUNNING;
-          p->wait_reason = WAIT_REASON_NONE;
-          goto OK;
-        }
-      }
+    uint32_t load = scheduler_load(cpu);
+    if (load < selected_load) {
+      selected = cpu;
+      selected_load = load;
+    }
+  }
+  return selected;
+}
+
+static void scheduler_place_task(mtask *task, uint32_t cpu) {
+  scheduler_cpu_t *source = &scheduler_cpus[task->cpu];
+  scheduler_cpu_t *target = &scheduler_cpus[cpu];
+  uint64_t lag = task->vruntime > source->min_vruntime
+                     ? task->vruntime - source->min_vruntime
+                     : 0;
+  task->cpu = cpu;
+  task->vruntime =
+      (target->min_vruntime > 1 ? target->min_vruntime - 1 : 0) + lag;
+  target->need_resched = 1;
+  smp_send_reschedule(cpu);
+}
+
+static int scheduler_task_eligible(const mtask *task, uint32_t cpu,
+                                   const mtask *current) {
+  return task->state == RUNNING && task->cpu == cpu &&
+         !(task->sched_flags & TASK_SCHED_IDLE) &&
+         (!task->on_cpu || task == current);
+}
+
+static mtask *scheduler_pick_next(scheduler_cpu_t *cpu, uint32_t cpu_index) {
+  mtask *current = cpu->current;
+  mtask *next = cpu->next;
+  cpu->next = NULL;
+  if (!scheduler_task_eligible(next, cpu_index, current)) {
+    next = NULL;
+  }
+
+  for (uint32_t i = 0; i < 255; i++) {
+    mtask *candidate = &m[i];
+    if (candidate->state == READY && !candidate->on_cpu &&
+        candidate != current) {
+      reset_task_slot(candidate, candidate->tid);
       continue;
     }
-  OK:
-    if (p->urgent) {
-      next = p;
-      break;
+    if (!scheduler_task_eligible(candidate, cpu_index, current)) {
+      continue;
     }
-    if (!next || p->jiffies < next->jiffies || p->running)
-      if (!next || !task_check_train(next) ||
-          (task_check_train(next) && task_check_train(p))) {
-        next = p;
-      }
-  }
-  if (next == NULL) {
-    if (current->state == RUNNING) {
-      current->running = 0;
-      return;
+    if (next == NULL || candidate->urgent > next->urgent ||
+        (candidate->urgent == next->urgent &&
+         candidate->vruntime < next->vruntime)) {
+      next = candidate;
     }
-    next = idle_task;
   }
-  if (next == current) {
-    current->running = 0;
+  return next != NULL ? next : cpu->idle;
+}
+
+static void scheduler_balance(void) {
+  uint32_t busiest = 0;
+  uint32_t least = 0;
+  uint32_t busiest_load = 0;
+  uint32_t least_load = UINT_MAX;
+  for (uint32_t cpu = 0; cpu < scheduler_cpu_total; cpu++) {
+    if (!smp_cpu_online(cpu)) {
+      continue;
+    }
+    uint32_t load = scheduler_load(cpu);
+    if (load > busiest_load) {
+      busiest = cpu;
+      busiest_load = load;
+    }
+    if (load < least_load) {
+      least = cpu;
+      least_load = load;
+    }
+  }
+  if (busiest == least || busiest_load <= least_load + 1) {
     return;
   }
+
+  mtask *selected = NULL;
+  for (uint32_t i = 0; i < 255; i++) {
+    mtask *task = &m[i];
+    if (task->state != RUNNING || task->cpu != busiest || task->on_cpu ||
+        (task->sched_flags & (TASK_SCHED_IDLE | TASK_SCHED_PINNED))) {
+      continue;
+    }
+    if (selected == NULL || task->vruntime < selected->vruntime) {
+      selected = task;
+    }
+  }
+  if (selected != NULL) {
+    scheduler_place_task(selected, least);
+  }
+}
+
+void scheduler_tick(void) {
+  if (!scheduler_active) {
+    return;
+  }
+  uint32_t cpu_index = smp_current_cpu();
+  scheduler_cpu_t *cpu = &scheduler_cpus[cpu_index];
+  mtask *current = cpu->current;
+  if (current != NULL) {
+    current->runtime_ticks++;
+    if (!(current->sched_flags & TASK_SCHED_IDLE)) {
+      uint32_t weight = current->weight ? current->weight : 1;
+      current->vruntime += 1024u / weight;
+    }
+  }
+  cpu->need_resched = 1;
+  if (cpu_index == 0 && global_time % 10 == 0) {
+    scheduler_balance();
+  }
+}
+
+void scheduler_reschedule_interrupt(void) {
+  send_eoi(0);
+  scheduler_cpus[smp_current_cpu()].need_resched = 1;
+  task_next();
+}
+
+void scheduler_preempt_on_kernel_exit(void) {
+  if (scheduler_active && kernel_lock_depth() == 1 &&
+      scheduler_cpus[smp_current_cpu()].need_resched) {
+    task_next();
+  }
+}
+
+void task_next(void) {
+  if (!scheduler_active) {
+    return;
+  }
+  uint32_t cpu_index = smp_current_cpu();
+  scheduler_cpu_t *cpu = &scheduler_cpus[cpu_index];
+  if (kernel_lock_depth() != 1) {
+    cpu->need_resched = 1;
+    return;
+  }
+
+  mtask *current = cpu->current;
+  if (current == NULL) {
+    return;
+  }
+  current->on_cpu = 0;
+  if (current->terminate_pending) {
+    task_finish_pending(current);
+  }
+  if (current->state == WILL_EMPTY) {
+    current->state = READY;
+  }
+  mtask *next = scheduler_pick_next(cpu, cpu_index);
+  if (next == NULL) {
+    current->on_cpu = 1;
+    return;
+  }
+  next->on_cpu = 1;
+  next->urgent = 0;
+  next->ready = 0;
+  cpu->need_resched = 0;
+  if (next->vruntime > cpu->min_vruntime) {
+    cpu->min_vruntime = next->vruntime;
+  }
+  if (next == current) {
+    return;
+  }
+
   if (next->user_mode == 1) {
     arch_task_set_kernel_stack(next->top);
   }
-  if (next->urgent) {
-    next->urgent = 0;
-  }
-  if (next->ready) {
-    next->ready = 0;
-  }
-  int current_fpu_flag = current->fpu_flag;
-  fpu_t *current_fpu = &(current->fpu);
   x86_cr0_write(x86_cr0_read() & ~(X86_CR0_EM | X86_CR0_TS));
-  if (current_fpu && current_fpu_flag)
-    asm volatile("fnsave (%%eax) \n" ::"a"(current_fpu));
-  next->jiffies = global_time;
-  x86_fpu_disable();
-  if (current_task()->state == WILL_EMPTY) {
-    current_task()->state = READY;
+  if (current->fpu_flag) {
+    asm volatile("fnsave (%%eax) \n" ::"a"(&current->fpu));
   }
-  
-  arch_task_switch(&current->context, next->context, next->pde, &current, next);
+  x86_fpu_disable();
+
+  arch_task_switch(&current->context, next->context, next->pde, &cpu->current,
+                   next);
 }
 
-static mtask *create_task_impl(uintptr_t eip, unsigned esp, unsigned ticks,
-                               unsigned floor, bool share_pde) {
-  (void)esp;
+static mtask *create_task_impl(uintptr_t entry, unsigned weight,
+                               bool share_pde) {
   mtask *t = NULL;
   irq_state_t interrupt_state = irq_save();
-  int first = (current == NULL && m[0].state == EMPTY) ? 0 : 1;
+  int first = m[0].state == EMPTY ? 0 : 1;
   for (int i = first; i < 255; i++) {
     if (m[i].state == EMPTY) {
       t = &(m[i]);
@@ -190,9 +312,15 @@ static mtask *create_task_impl(uintptr_t eip, unsigned esp, unsigned ticks,
   reset_task_slot(t, tid);
   t->generation = generation;
   t->kind = share_pde ? TASK_THREAD : TASK_PROCESS;
-  t->tgid = share_pde && current != NULL ? current_task()->tgid : (uint32_t)tid;
-  t->ptid = share_pde && current != NULL ? current_task()->ptid : TASK_ID_NONE;
+  t->tgid = share_pde && scheduler_active ? current_task()->tgid
+                                          : (uint32_t)tid;
+  t->ptid = share_pde && scheduler_active ? current_task()->ptid
+                                          : TASK_ID_NONE;
   t->state = ALLOCATING;
+  if (share_pde && scheduler_active) {
+    t->cpu = smp_current_cpu();
+    t->sched_flags = TASK_SCHED_PINNED;
+  }
   irq_restore(interrupt_state);
   void *stack_base = page_malloc(STACK_SIZE);
   if (stack_base == NULL) {
@@ -203,10 +331,11 @@ static mtask *create_task_impl(uintptr_t eip, unsigned esp, unsigned ticks,
   change_page_task_id(t->tid, (void *)(esp_alloced - STACK_SIZE), STACK_SIZE);
   t->context =
       (arch_task_context_t *)(esp_alloced - sizeof(arch_task_context_t));
-  arch_task_context_init(t->context, eip);
+  t->entry = entry;
+  arch_task_context_init(t->context, (uintptr_t)task_bootstrap);
   t->user_mode = 0;                           // 设置是否是user_mode
   bool owns_pde = false;
-  if (current == NULL) {                      // 还没启用多任务
+  if (!scheduler_active) {                    // 还没启用多任务
     t->pde = PDE_ADDRESS;                     // 所以先用预设好的页表
     t->times = PDE_ADDRESS;
   } else if (share_pde) {
@@ -225,15 +354,12 @@ static mtask *create_task_impl(uintptr_t eip, unsigned esp, unsigned ticks,
     owns_pde = true;
   }
   t->top = esp_alloced; // r0的esp
-  t->floor = floor;
-  t->running = 0;
-  t->timeout = ticks;
+  t->weight = weight;
   t->drive = default_drive;
   t->drive_number = default_drive - 'A';
-  t->jiffies = 0;
   extern int init_ok_flag; // init_ok_flag 标记fs等是否初始化完成
   if (init_ok_flag) {
-    bool vfs_ready = current != NULL && current_task()->nfs != NULL
+    bool vfs_ready = scheduler_active && current_task()->nfs != NULL
                          ? vfs_clone_for_task(current_task(), t)
                          : vfs_change_disk_for_task(t->drive, t);
     if (!vfs_ready) {
@@ -249,17 +375,20 @@ static mtask *create_task_impl(uintptr_t eip, unsigned esp, unsigned ticks,
   }
   return t;
 }
-mtask *create_task(uintptr_t eip, unsigned esp, unsigned ticks, unsigned floor) {
-  return create_task_impl(eip, esp, ticks, floor, false);
+mtask *create_task(uintptr_t entry, unsigned weight) {
+  return create_task_impl(entry, weight, false);
 }
-mtask *create_thread_task(uintptr_t eip, unsigned esp, unsigned ticks,
-                          unsigned floor) {
-  return create_task_impl(eip, esp, ticks, floor, true);
+mtask *create_thread_task(uintptr_t entry, unsigned weight) {
+  return create_task_impl(entry, weight, true);
 }
 bool task_publish(mtask *task) {
   irq_state_t state = irq_save();
   bool published = task != NULL && task->state == ALLOCATING;
   if (published) {
+    uint32_t cpu = task->sched_flags & TASK_SCHED_PINNED
+                       ? task->cpu
+                       : scheduler_least_loaded_cpu();
+    scheduler_place_task(task, cpu);
     task->state = RUNNING;
   }
   irq_restore(state);
@@ -276,7 +405,7 @@ mtask *get_task(unsigned tid) {
   return &(m[tid]);
 }
 void task_to_user_mode(unsigned eip, unsigned esp) {
-  mtask *task = current;
+  mtask *task = current_task();
   struct user_runtime_layout layout;
   if (!user_runtime_layout_calculate(USER_SPACE_START, 0, 0, false, eip,
                                      &layout) ||
@@ -295,6 +424,7 @@ void task_to_user_mode(unsigned eip, unsigned esp) {
   // task_exit(0);
   // change_page_task_id(current_task()->tid, iframe->esp - 64 * 1024, 64 *
   // 1024);
+  kernel_lock_leave();
   x86_return_to_user(&iframe);
 }
 
@@ -344,8 +474,10 @@ static void task_clear_external_refs(mtask *task) {
     }
   }
 
-  if (next_set == task) {
-    next_set = NULL;
+  for (uint32_t cpu = 0; cpu < scheduler_cpu_total; cpu++) {
+    if (scheduler_cpus[cpu].next == task) {
+      scheduler_cpus[cpu].next = NULL;
+    }
   }
   if (mouse_use_task == task) {
     mouse_sleep(&mdec);
@@ -412,17 +544,14 @@ static void task_release_resources(mtask *task) {
   task->mx = 0;
   task->my = 0;
   task->line = NULL;
-  task->jiffies = 0;
   task->timer = NULL;
   task->mm = NULL;
   task->waittid = TASK_ID_NONE;
   task->wait_generation = 0;
   task->wait_reason = WAIT_REASON_NONE;
-  task->running = 0;
   task->ready = 0;
   task->pde = 0;
   task->sigint_up = 0;
-  task->train = 0;
   task->times = 0;
   task->signal = 0;
   task->signal_disable = 0;
@@ -495,6 +624,19 @@ static void finish_task(mtask *task, unsigned status, bool waitable) {
   }
 }
 
+static void request_task_termination(mtask *task, unsigned status) {
+  if (task->on_cpu && task != current_task()) {
+    task->terminate_status = status;
+    task->terminate_pending = 1;
+    scheduler_cpus[task->cpu].need_resched = 1;
+    smp_send_reschedule(task->cpu);
+    return;
+  }
+  finish_task(task, status,
+              task->kind == TASK_PROCESS && task->ptid != TASK_ID_NONE &&
+                  task->ptid != REAPER_TID);
+}
+
 static void terminate_thread_group(uint32_t tgid, mtask *except) {
   for (int i = 0; i < 255; i++) {
     mtask *thread = &m[i];
@@ -502,8 +644,20 @@ static void terminate_thread_group(uint32_t tgid, mtask *except) {
         thread->kind != TASK_THREAD || thread->tgid != tgid) {
       continue;
     }
-    finish_task(thread, TASK_KILLED_STATUS, false);
+    request_task_termination(thread, TASK_KILLED_STATUS);
   }
+}
+
+static void task_finish_pending(mtask *task) {
+  unsigned status = task->terminate_status;
+  task->terminate_pending = 0;
+  if (task->kind == TASK_PROCESS) {
+    terminate_thread_group(task->tgid, task);
+    reparent_children(task->tgid, REAPER_TID);
+  }
+  bool waitable = task->kind == TASK_PROCESS && task->ptid != TASK_ID_NONE &&
+                  task->ptid != REAPER_TID;
+  finish_task(task, status, waitable);
 }
 
 void task_kill(unsigned tid) {
@@ -513,6 +667,14 @@ void task_kill(unsigned tid) {
   }
   irq_state_t interrupt_state = irq_save();
   bool is_current = task == current_task();
+  if (task->on_cpu && !is_current) {
+    task->terminate_status = TASK_KILLED_STATUS;
+    task->terminate_pending = 1;
+    scheduler_cpus[task->cpu].need_resched = 1;
+    smp_send_reschedule(task->cpu);
+    irq_restore(interrupt_state);
+    return;
+  }
   if (task->kind == TASK_PROCESS) {
     terminate_thread_group(task->tgid, task);
     reparent_children(task->tgid, REAPER_TID);
@@ -521,14 +683,16 @@ void task_kill(unsigned tid) {
                   task->ptid != REAPER_TID;
   finish_task(task, TASK_KILLED_STATUS, waitable);
   if (is_current) {
-    irq_enable();
-    for (;;)
-      ;
+    task_next();
+    for (;;) {
+      asm volatile("cli; hlt");
+    }
   }
   irq_restore(interrupt_state);
 }
 
 mtask *current_task() {
+  mtask *current = scheduler_cpus[smp_current_cpu()].current;
   if (current == NULL) {
     null_task.tid = NULL_TID;
     return &null_task;
@@ -542,24 +706,203 @@ int into_mtask() {
   asm volatile("fnsave (%%eax) \n" ::"a"(&public_fpu));
   x86_fpu_disable();
   arch_task_state_init();
-  idle_task = create_task((uintptr_t)idle, 0, 1, 3);
-  if (idle_task == NULL) {
-    Panic_K("unable to create bootstrap tasks");
-    return -1;
+  scheduler_cpu_total = smp_cpu_count();
+  memset(scheduler_cpus, 0, sizeof(scheduler_cpus));
+  for (uint32_t cpu = 0; cpu < scheduler_cpu_total; cpu++) {
+    if (!smp_cpu_online(cpu)) {
+      continue;
+    }
+    mtask *idle_task = create_task((uintptr_t)idle, 1);
+    if (idle_task == NULL) {
+      Panic_K("unable to create CPU idle task");
+      return -1;
+    }
+    idle_task->cpu = cpu;
+    idle_task->sched_flags = TASK_SCHED_IDLE | TASK_SCHED_PINNED;
+    sprintf(idle_task->name, "idle/%d", cpu);
+    scheduler_cpus[cpu].idle = idle_task;
+    if (!task_publish(idle_task)) {
+      Panic_K("unable to publish CPU idle task");
+      return -1;
+    }
   }
-  mtask *init_task = create_task((uintptr_t)init, 0, 5, 1);
+  mtask *init_task = create_task((uintptr_t)init, 5);
   if (init_task == NULL) {
-    task_abort_creation(idle_task);
-    idle_task = NULL;
     Panic_K("unable to create bootstrap tasks");
     return -1;
   }
-  if (!task_publish(idle_task) || !task_publish(init_task)) {
+  init_task->cpu = 0;
+  init_task->sched_flags = TASK_SCHED_PINNED;
+  task_set_name(init_task, "kinit");
+  if (!task_publish(init_task)) {
     Panic_K("unable to publish bootstrap tasks");
     return -1;
   }
+  scheduler_active = 1;
   x86_cr0_write(x86_cr0_read() | X86_CR0_EM | X86_CR0_TS | X86_CR0_NE);
-  arch_task_start(m[0].context, m[0].pde, &current, &m[0]);
+  mtask *idle = scheduler_cpus[0].idle;
+  idle->on_cpu = 1;
+  arch_task_start(idle->context, idle->pde, &scheduler_cpus[0].current, idle);
+}
+
+__attribute__((noreturn)) void scheduler_start_secondary(uint32_t cpu) {
+  mtask *idle = scheduler_cpus[cpu].idle;
+  if (!scheduler_active || idle == NULL) {
+    for (;;) {
+      asm volatile("cli; hlt");
+    }
+  }
+  idle->on_cpu = 1;
+  arch_task_start(idle->context, idle->pde, &scheduler_cpus[cpu].current,
+                  idle);
+}
+
+static void task_bootstrap(void) {
+  if (kernel_lock_depth() == 0) {
+    kernel_lock_enter();
+  }
+  if (smp_current_cpu() == 0) {
+    smp_release_secondary_cpus();
+  }
+  mtask *task = current_task();
+  void (*entry)(void) = (void (*)(void))task->entry;
+  entry();
+  task_exit(0);
+}
+
+void task_set_name(mtask *task, const char *name) {
+  if (task == NULL || name == NULL) {
+    return;
+  }
+  size_t length = strlen(name);
+  if (length >= sizeof(task->name)) {
+    length = sizeof(task->name) - 1;
+  }
+  memcpy(task->name, name, length);
+  task->name[length] = '\0';
+}
+
+bool task_pin_current(uint32_t cpu) {
+  if (cpu >= scheduler_cpu_total || !smp_cpu_online(cpu)) {
+    return false;
+  }
+  mtask *task = current_task();
+  task->sched_flags |= TASK_SCHED_PINNED;
+  task->cpu = cpu;
+  if (cpu != smp_current_cpu()) {
+    scheduler_cpus[cpu].need_resched = 1;
+    smp_send_reschedule(cpu);
+    task_next();
+  }
+  return smp_current_cpu() == cpu;
+}
+
+unsigned task_wake_tty(struct tty *tty) {
+  unsigned woken = 0;
+  for (unsigned tid = 0; tid < 255; tid++) {
+    mtask *task = get_task(tid);
+    if (task == NULL || task->state != WAITING ||
+        task->wait_reason != WAIT_REASON_KEYBOARD || task->terminate_pending ||
+        task->TTY != tty) {
+      continue;
+    }
+    task_run(task);
+    woken++;
+  }
+  return woken;
+}
+
+void task_close_tty(struct tty *tty, struct tty *fallback) {
+  if (tty == NULL) {
+    return;
+  }
+
+  mtask *self = current_task();
+  bool kill_self = false;
+  for (enum TASK_KIND kind = TASK_PROCESS; kind <= TASK_THREAD; kind++) {
+    for (unsigned tid = 0; tid < 255; tid++) {
+      mtask *task = &m[tid];
+      if (!task_slot_in_use(task) || task->kind != kind ||
+          task->tty_session != tty) {
+        continue;
+      }
+      task->tty_session = fallback;
+      if (task->TTY == tty) {
+        task->TTY = fallback;
+      }
+      if (task->state == DIED) {
+        reset_task_slot(task, tid);
+        continue;
+      }
+      if (task == self) {
+        kill_self = true;
+        continue;
+      }
+      if (task->kind == TASK_PROCESS) {
+        task->ptid = REAPER_TID;
+      }
+      task_kill(tid);
+    }
+  }
+  if (kill_self) {
+    if (self->kind == TASK_PROCESS) {
+      self->ptid = REAPER_TID;
+    }
+    task_kill(self->tid);
+  }
+}
+
+int task_snapshot(task_info_t *entries, uint32_t capacity, uint32_t *count) {
+  uint32_t required = 0;
+  for (uint32_t i = 0; i < 255; i++) {
+    enum STATE state = m[i].state;
+    if (state != EMPTY && state != ALLOCATING && state != WILL_EMPTY &&
+        state != READY) {
+      required++;
+    }
+  }
+  *count = required;
+  if (entries == NULL) {
+    return 0;
+  }
+  if (capacity < required) {
+    return TASK_SNAPSHOT_CAPACITY;
+  }
+
+  uint32_t output = 0;
+  for (uint32_t i = 0; i < 255; i++) {
+    mtask *task = &m[i];
+    if (task->state == EMPTY || task->state == ALLOCATING ||
+        task->state == WILL_EMPTY || task->state == READY) {
+      continue;
+    }
+    task_info_t *info = &entries[output++];
+    info->tid = task->tid;
+    info->tgid = task->tgid;
+    info->ptid = task->ptid;
+    info->generation = task->generation;
+    info->cpu = task->cpu;
+    info->kind = task->kind;
+    info->flags = task->on_cpu ? TASK_INFO_FLAG_ON_CPU : 0;
+    info->runtime_ms = task->runtime_ticks * 10ull;
+    switch (task->state) {
+    case RUNNING:
+      info->state = TASK_INFO_RUNNING;
+      break;
+    case WAITING:
+      info->state = TASK_INFO_WAITING;
+      break;
+    case SLEEPING:
+      info->state = TASK_INFO_SLEEPING;
+      break;
+    default:
+      info->state = TASK_INFO_ZOMBIE;
+      break;
+    }
+    memcpy(info->name, task->name, sizeof(info->name));
+    info->name[sizeof(info->name) - 1] = '\0';
+  }
+  return 0;
 }
 void task_set_fifo(mtask *task, struct FIFO8 *kfifo, struct FIFO8 *mfifo) {
   task->keyfifo = kfifo;
@@ -572,19 +915,30 @@ void task_sleep(mtask *task) {
   task->fifosleep = 1;
 }
 void task_wake_up(mtask *task) {
-  task->state = RUNNING;
-  task->wait_reason = WAIT_REASON_NONE;
-  task->fifosleep = 0;
+  task_run(task);
 }
 void task_run(mtask *task) {
   if (!task || task->state == EMPTY || task->state == WILL_EMPTY ||
       task->state == READY || task->state == ALLOCATING || task->state == DIED) {
     return;
   }
-  // 加急一下
   task->urgent = 1;
-  task->ready = 1;
-  task->running = 0;
+  if (task->state == WAITING || task->state == SLEEPING) {
+    task->state = RUNNING;
+    task->wait_reason = WAIT_REASON_NONE;
+    task->ready = 0;
+    if (!(task->sched_flags & TASK_SCHED_PINNED) && !task->on_cpu) {
+      scheduler_place_task(task, scheduler_least_loaded_cpu());
+    } else {
+      scheduler_cpus[task->cpu].need_resched = 1;
+      smp_send_reschedule(task->cpu);
+    }
+  } else {
+    task->ready = 1;
+    scheduler_cpus[task->cpu].need_resched = 1;
+    smp_send_reschedule(task->cpu);
+  }
+  task->fifosleep = 0;
 }
 void task_fifo_sleep(mtask *task) { task->fifosleep = 1; }
 struct FIFO8 *task_get_mouse_fifo(mtask *task) { return task->mousefifo; }
@@ -664,16 +1018,12 @@ void task_fall_blocked(enum STATE state) {
 void task_exit(unsigned status) {
   mtask *task = current_task();
   (void)irq_save();
-  if (task->kind == TASK_PROCESS) {
-    terminate_thread_group(task->tgid, task);
-    reparent_children(task->tgid, REAPER_TID);
+  task->terminate_status = status;
+  task_finish_pending(task);
+  task_next();
+  for (;;) {
+    asm volatile("cli; hlt");
   }
-  bool waitable = task->kind == TASK_PROCESS && task->ptid != TASK_ID_NONE &&
-                  task->ptid != REAPER_TID;
-  finish_task(task, status, waitable);
-  irq_enable();
-  for (;;)
-    ;
 }
 int waittid(uint32_t tid) {
   mtask *self = current_task();
@@ -718,9 +1068,14 @@ int waittid(uint32_t tid) {
     irq_restore(interrupt_state);
   }
 }
-void mtask_stop() { mtask_stop_flag = 1; }
-void mtask_start() { mtask_stop_flag = 0; }
-void mtask_run_now(mtask *obj) { next_set = obj; }
+void mtask_run_now(mtask *obj) {
+  if (obj == NULL || obj->cpu >= scheduler_cpu_total) {
+    return;
+  }
+  scheduler_cpus[obj->cpu].next = obj;
+  scheduler_cpus[obj->cpu].need_resched = 1;
+  smp_send_reschedule(obj->cpu);
+}
 static bool copy_vfs(mtask *src, mtask *dest) {
   return vfs_clone_for_task(src, dest);
 }
@@ -838,6 +1193,11 @@ int task_fork() {
   m->tgid = tid;
   m->ptid = parent->tgid;
   m->state = ALLOCATING;
+  m->on_cpu = 0;
+  m->sched_flags = 0;
+  m->runtime_ticks = 0;
+  m->terminate_pending = 0;
+  m->terminate_status = 0;
   uintptr_t stack = (uintptr_t)page_malloc(STACK_SIZE);
   if (stack == 0) {
     reset_task_slot(m, tid);
@@ -923,9 +1283,7 @@ int task_fork() {
     irq_restore(state);
     return -1;
   }
-  m->running = 0;
-  m->jiffies = 0;
-  m->timeout = 1;
+  m->weight = 1;
   m->ptid = parent->tgid;
   m->tgid = tid;
   m->kind = TASK_PROCESS;

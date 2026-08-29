@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <syscall.h>
+void draw_window(window_t *window, int x, int y, int x1, int y1, color_t color);
+void puts_window(window_t *window, char *s, int x, int y, color_t color);
 void console_task(tty_t tty) {
   tty_set(NowTaskID(), tty);
   exec("psh.bin", "");
@@ -10,10 +12,7 @@ void console_task(tty_t tty) {
 }
 bool now_tty_GraphicMode(struct tty *res) {
   console_t *console = (console_t *)res->vram;
-  if (console->window->sht->height == console->window->sht->ctl->top - 1) {
-    return true;
-  }
-  return false;
+  return console->window->desktop->focused_window == console->window;
 }
 color_t text_color_to_real_color(unsigned char text_color, bool back_or_font) {
   unsigned char c;
@@ -199,8 +198,6 @@ void puts_console_window(window_t *window, char *s, int x, int y,
   sheet_refresh(window->console->sht_copy, x, y, x + strlen(s) * 8, y + 16);
   sheet_refresh(window->sht, x, y, x + strlen(s) * 8, y + 16);
 }
-void draw_window(window_t *window, int x, int y, int x1, int y1, color_t color);
-void puts_window(window_t *window, char *s, int x, int y, color_t color);
 struct tty *mtty_alloc(void *vram, int xsize, int ysize,
                        void (*putchar)(struct tty *res, int c),
                        void (*MoveCursor)(struct tty *res, int x, int y),
@@ -209,6 +206,9 @@ struct tty *mtty_alloc(void *vram, int xsize, int ysize,
                        void (*Draw_Box)(struct tty *res, int x, int y, int x1,
                                         int y1, unsigned char color)) {
   struct tty *res = (struct tty *)malloc(sizeof(struct tty));
+  if (res == NULL) {
+    return NULL;
+  }
   res->using1 = 1;
   res->x = 0;
   res->y = 0;
@@ -261,33 +261,50 @@ void mtty_handle(uint32_t *a) {
   a[9] = tty->color;
 }
 void close_console(console_t *console) {
-  // sheet_free(console->sht_cur);
-  // sheet_free(console->sht_copy);
-  // free(console->vram_cur);
-  // free(console->vram_copy);
-  // ctl_free(console->shtctl);
-  // tty_free(console->tty);
-  // io_sti();
-  // for (int i = 3; get_task(i) != NULL; i++) {
-  //   struct TASK *task = get_task(i);
-  //   if (task->thread.father == console->task) {
-  //     task_delete(task);
-  //   }
-  // }
-  // task_delete(console->task);
-  // console->window->console = NULL;
-  // console->window->draw = draw_window;
-  // console->window->puts = puts_window;
-  // free((void *)console);
+  if (console == NULL) {
+    return;
+  }
+  window_t *window = console->window;
+  if (console->tty_handle != 0) {
+    tty_free(console->tty_handle);
+  }
+  if (console->task_stack != NULL) {
+    free(console->task_stack);
+  }
+  if (window->fifo_keypress != NULL) {
+    free(window->fifo_keypress->buf);
+    free(window->fifo_keypress);
+    window->fifo_keypress = NULL;
+  }
+  if (console->sht_cur != NULL) {
+    sheet_free(console->sht_cur);
+  }
+  if (console->sht_copy != NULL) {
+    sheet_free(console->sht_copy);
+  }
+  free(console->vram_cur);
+  free(console->vram_copy);
+  if (console->shtctl != NULL) {
+    ctl_free(console->shtctl);
+  }
+  free(console->tty);
+  window->console = NULL;
+  window->draw = draw_window;
+  window->puts = puts_window;
+  free(console);
 }
 console_t *create_console(window_t *window, int xsize, int ysize, int x,
                           int y) {
-  if (window->super_window != NULL) {
-    return (console_t *)NULL;
+  if (window == NULL || window->super_window != NULL || xsize <= 0 ||
+      ysize <= 0) {
+    return NULL;
   }
   console_t *res = malloc(sizeof(console_t));
+  if (res == NULL) {
+    return NULL;
+  }
+  memset(res, 0, sizeof(*res));
   res->window = window;
-  window->console = res;
   res->xsize = xsize;
   res->ysize = ysize;
   res->x = x;
@@ -296,13 +313,22 @@ console_t *create_console(window_t *window, int xsize, int ysize, int x,
   res->handle_right = NULL;
   res->handle_stay = NULL;
   res->close = close_console;
-  window->draw(window, x, y, x + xsize, y + ysize, COL_000000);
-
+  res->tty = mtty_alloc((void *)res, xsize / 8, ysize / 16, putchar_console,
+                        MoveCursor_console, clear_console, screen_ne_console,
+                        Draw_Box_console);
   res->shtctl = shtctl_init(window->vram, window->xsize, window->ysize);
-  res->sht_cur = sheet_alloc(res->shtctl);
+  if (res->tty == NULL || res->shtctl == NULL) {
+    goto fail;
+  }
   res->sht_copy = sheet_alloc(res->shtctl);
+  res->sht_cur = sheet_alloc(res->shtctl);
   res->vram_cur = malloc(8 * 16 * sizeof(vram_t));
   res->vram_copy = malloc(window->xsize * window->ysize * sizeof(vram_t));
+  if (res->sht_copy == NULL || res->sht_cur == NULL ||
+      res->vram_cur == NULL || res->vram_copy == NULL) {
+    goto fail;
+  }
+  window->draw(window, x, y, x + xsize, y + ysize, COL_000000);
   SDraw_Box(res->vram_cur, 0, 0, 8, 16, COL_FFFFFF, 8);
   memcpy((void *)res->vram_copy, (void *)window->vram,
          window->xsize * window->ysize * sizeof(vram_t));
@@ -314,20 +340,57 @@ console_t *create_console(window_t *window, int xsize, int ysize, int x,
   sheet_updown(res->sht_cur, 1);
   sheet_refresh(res->sht_copy, 0, 0, window->xsize, window->ysize);
   sheet_refresh(res->sht_cur, 0, 0, 8, 16);
+  res->tty_handle =
+      tty_alloc(res->tty, (uintptr_t)mtty_handle, xsize / 8, ysize / 16);
+  struct FIFO8 *fifo_keypress = malloc(sizeof(struct FIFO8));
+  uint8_t *buf = malloc(128);
+  res->task_stack = malloc(32 * 1024);
+  if (res->tty_handle == 0 || fifo_keypress == NULL || buf == NULL ||
+      res->task_stack == NULL) {
+    free(fifo_keypress);
+    free(buf);
+    goto fail;
+  }
+  window->fifo_keypress = fifo_keypress;
+  fifo8_init(fifo_keypress, 128, buf);
+  window->console = res;
   window->draw = draw_console_window;
   window->puts = puts_console_window;
-  res->tty = mtty_alloc((void *)res, xsize / 8, ysize / 16, putchar_console,
-                        MoveCursor_console, clear_console, screen_ne_console,
-                        Draw_Box_console);
-
-  uintptr_t stack = (uintptr_t)malloc(32 * 1024) + 32 * 1024;
-  ((uintptr_t *)stack)[-1] =
-      tty_alloc(res->tty, (uintptr_t)mtty_handle, xsize / 8, ysize / 16);
-  // MEMORY LEAK!!!!!
-  uint8_t *buf;
-  buf = malloc(128);
-  res->window->fifo_keypress = malloc(sizeof(struct FIFO8));
-  fifo8_init(res->window->fifo_keypress, 128, buf);
-  res->tid = AddThread("", (uintptr_t)console_task, (unsigned int)stack - 8);
+  uintptr_t stack_top = (uintptr_t)res->task_stack + 32 * 1024;
+  ((uintptr_t *)stack_top)[-1] = res->tty_handle;
+  int thread_tid =
+      AddThread("", (uintptr_t)console_task, (unsigned int)stack_top - 8);
+  if (thread_tid < 0) {
+    goto fail;
+  }
+  tty_set(thread_tid, res->tty_handle);
   return res;
+
+fail:
+  window->console = NULL;
+  window->draw = draw_window;
+  window->puts = puts_window;
+  if (res->tty_handle != 0) {
+    tty_free(res->tty_handle);
+  }
+  if (window->fifo_keypress != NULL) {
+    free(window->fifo_keypress->buf);
+    free(window->fifo_keypress);
+    window->fifo_keypress = NULL;
+  }
+  free(res->task_stack);
+  if (res->sht_cur != NULL) {
+    sheet_free(res->sht_cur);
+  }
+  if (res->sht_copy != NULL) {
+    sheet_free(res->sht_copy);
+  }
+  free(res->vram_cur);
+  free(res->vram_copy);
+  if (res->shtctl != NULL) {
+    ctl_free(res->shtctl);
+  }
+  free(res->tty);
+  free(res);
+  return NULL;
 }

@@ -3,7 +3,10 @@ section .data
 GLOBAL asm_inthandler21, asm_inthandler20
 EXTERN inthandler21, inthandler20, inthandler2c, signal_deal
 EXTERN x86_syscall_dispatch
+EXTERN kernel_lock_enter, kernel_lock_leave
+EXTERN scheduler_reschedule_interrupt
 GLOBAL x86_syscall_entry
+GLOBAL x86_reschedule_entry
 GLOBAL asm_inthandler2c, floppy_int
 section .text
 global null_inthandler
@@ -22,9 +25,11 @@ x86_syscall_entry:
   mov ax, ss
   mov ds, ax
   mov es, ax
+  call kernel_lock_enter
   call x86_syscall_dispatch
   add esp, 4
   call signal_deal
+  call kernel_lock_leave
   popa
   pop gs
   pop fs
@@ -47,8 +52,10 @@ floppy_int:
 	MOV		AX,SS
 	MOV		DS,AX
 	MOV		ES,AX
+	CALL kernel_lock_enter
 	CALL	flint
 	POP		EAX
+	CALL kernel_lock_leave
 	;call signal_deal
 	POPAD
 	POP		DS
@@ -71,7 +78,9 @@ PCNET_ASM_INTHANDLER:
   mov ax, ss
   mov ds, ax
   mov es, ax
+  call kernel_lock_enter
   call PCNET_IRQ
+  call kernel_lock_leave
   popa
   pop gs
   pop fs
@@ -90,7 +99,9 @@ RTL8139_ASM_INTHANDLER:
   mov ax, ss
   mov ds, ax
   mov es, ax
+  call kernel_lock_enter
   call RTL8139_IRQ
+  call kernel_lock_leave
   popa
   pop gs
   pop fs
@@ -114,8 +125,10 @@ asm_sb16_handler:
 	MOV		AX,SS
 	MOV		DS,AX
 	MOV		ES,AX
+	CALL kernel_lock_enter
 	CALL	sb16_handler
 	POP		EAX
+	CALL kernel_lock_leave
 	;call signal_deal
 	POPAD
 	POP		DS
@@ -142,8 +155,10 @@ asm_ide_irq:
 	MOV		AX,SS
 	MOV		DS,AX
 	MOV		ES,AX
+	CALL kernel_lock_enter
 	CALL	ide_irq
 	POP		EAX
+	CALL kernel_lock_leave
 	;call signal_deal
 	POPAD
 	POP		DS
@@ -160,7 +175,12 @@ asm_rtc_handler:
   push fs
   push gs
   pusha
+	mov ax, ss
+	mov ds, ax
+	mov es, ax
+	call kernel_lock_enter
 	call rtc_irq
+	call kernel_lock_leave
   popa
   pop gs
   pop fs
@@ -182,6 +202,7 @@ asm_inthandler20:
 	MOV		AX,SS
 	MOV		DS,AX
 	MOV		ES,AX
+	CALL kernel_lock_enter
 	MOV EAX,0
 	MOV   AX,CS
 	PUSH  EAX
@@ -189,6 +210,7 @@ asm_inthandler20:
 	pop eax
 	POP		EAX
 	call signal_deal
+	call kernel_lock_leave
 	POPAD
 	POP		DS
 	POP		ES
@@ -212,9 +234,11 @@ asm_inthandler21:
 	MOV		AX,SS
 	MOV		DS,AX
 	MOV		ES,AX
+	CALL kernel_lock_enter
 	CALL	inthandler21
 	POP		EAX
 	call signal_deal
+	call kernel_lock_leave
 	POPAD
 	POP		DS
 	POP		ES
@@ -230,10 +254,34 @@ asm_inthandler2c:
   push fs
   push gs
   pusha
+  mov ax, ss
+  mov ds, ax
+  mov es, ax
+  call kernel_lock_enter
   CALL	inthandler2c
+  call kernel_lock_leave
   popa
   pop gs
   pop fs
   pop es
   pop ds
   IRETD
+
+x86_reschedule_entry:
+  push ds
+  push es
+  push fs
+  push gs
+  pusha
+  mov ax, ss
+  mov ds, ax
+  mov es, ax
+  call kernel_lock_enter
+  call scheduler_reschedule_interrupt
+  call kernel_lock_leave
+  popa
+  pop gs
+  pop fs
+  pop es
+  pop ds
+  iretd

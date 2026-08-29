@@ -2,6 +2,8 @@
 
 section .text
 
+extern kernel_lock_leave
+
 global arch_task_switch
 global arch_task_start
 global arch_task_interrupt_return
@@ -73,6 +75,7 @@ arch_task_start:
 ; byte-for-byte equivalent to the normal interrupt_entries.asm restore tail.
 arch_task_interrupt_return:
   xchg bx, bx
+  call kernel_lock_leave
   popa
   pop gs
   pop fs
