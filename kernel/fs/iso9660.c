@@ -601,9 +601,22 @@ static int iso_read(vfs_t *vfs, const vfs_node_t *node, uint32_t offset,
   }
   size_t completed = 0;
   while (completed < length) {
+    uint32_t remaining = length - completed;
+    if (fsectoff(&file) == 0 && remaining >= 2048) {
+      uint32_t sectors = remaining / 2048;
+      if (!CDROM_Read(file.first_sector + fsector(&file), sectors,
+                      (uint8_t *)buffer + completed,
+                      vfs_mount_disk_number(vfs))) {
+        return completed == 0 ? VFS_ERROR_IO : (int)completed;
+      }
+      uint32_t bytes = sectors * 2048;
+      file.position += bytes;
+      completed += bytes;
+      continue;
+    }
     size_t read = 0;
-    if (l9660_read(&file, (uint8_t *)buffer + completed, length - completed,
-                   &read) != L9660_OK) {
+    if (l9660_read(&file, (uint8_t *)buffer + completed, remaining, &read) !=
+        L9660_OK) {
       return completed == 0 ? VFS_ERROR_IO : (int)completed;
     }
     if (read == 0) {

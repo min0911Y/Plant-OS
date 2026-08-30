@@ -19,6 +19,7 @@
 #define ATA_CMD_IDENTIFY 0xecu
 
 #define ATAPI_CMD_READ 0xa8u
+#define ATAPI_FEATURE_DMA 0x01u
 
 #define ATA_IDENT_MODEL 54u
 #define ATA_IDENT_CAPABILITIES 98u
@@ -48,8 +49,13 @@
 #define ATA_REG_CONTROL 12u
 #define ATA_REG_ALTSTATUS 12u
 
-#define IDE_DMA_MAX_SECTORS 128u
-#define IDE_DMA_BUFFER_BYTES (IDE_DMA_MAX_SECTORS * 512u)
+#define IDE_ATA_SECTOR_BYTES 512u
+#define IDE_ATAPI_SECTOR_BYTES 2048u
+#define IDE_DMA_BUFFER_BYTES 0x10000u
+#define IDE_DMA_MAX_ATA_SECTORS                                            \
+  (IDE_DMA_BUFFER_BYTES / IDE_ATA_SECTOR_BYTES)
+#define IDE_DMA_MAX_ATAPI_SECTORS                                          \
+  (IDE_DMA_BUFFER_BYTES / IDE_ATAPI_SECTOR_BYTES)
 #define IDE_BM_COMMAND 0u
 #define IDE_BM_STATUS 2u
 #define IDE_BM_PRDT 4u
@@ -99,14 +105,6 @@ static inline void ide_read_data32(uint16_t port, void *buffer,
                                    uint32_t dwords) {
   asm volatile("cld; rep insl"
                : "+D"(buffer), "+c"(dwords)
-               : "d"(port)
-               : "memory");
-}
-
-static inline void ide_read_data16(uint16_t port, void *buffer,
-                                   uint32_t words) {
-  asm volatile("cld; rep insw"
-               : "+D"(buffer), "+c"(words)
                : "d"(port)
                : "memory");
 }
@@ -315,18 +313,42 @@ static uint8_t ide_dma_transfer(uint8_t direction, uint8_t drive,
                                 uint32_t lba, uint8_t sectors, void *buffer) {
   ide_device_t *device = &ide_devices[drive];
   ide_channel_t *channel = &ide_channels[device->channel];
-  uint32_t bytes = (uint32_t)sectors * 512u;
-  if (sectors == 0 || sectors > IDE_DMA_MAX_SECTORS || buffer == NULL ||
+  uint32_t sector_bytes = device->type == IDE_ATAPI
+                              ? IDE_ATAPI_SECTOR_BYTES
+                              : IDE_ATA_SECTOR_BYTES;
+  uint32_t bytes = (uint32_t)sectors * sector_bytes;
+  if (sectors == 0 || bytes > IDE_DMA_BUFFER_BYTES || buffer == NULL ||
+      (device->type == IDE_ATAPI && direction != ATA_READ) ||
       channel->bus_master_base == 0 || current_task() == NULL ||
       !ide_dma_build_prdt(channel, bytes) ||
       !ide_wait(device->channel, false, true)) {
     return 2;
   }
 
-  uint8_t lba_mode;
-  uint8_t head;
+  uint8_t lba_mode = 0;
+  uint8_t head = 0;
   uint8_t lba_io[6] = {0};
-  if (lba >= 0x10000000u) {
+  uint8_t packet[12] = {0};
+  if (device->type == IDE_ATAPI) {
+    packet[0] = ATAPI_CMD_READ;
+    packet[2] = lba >> 24;
+    packet[3] = lba >> 16;
+    packet[4] = lba >> 8;
+    packet[5] = lba;
+    packet[9] = sectors;
+
+    ide_register_write(device->channel, ATA_REG_CONTROL, 2);
+    ide_register_write(device->channel, ATA_REG_HDDEVSEL, device->drive << 4);
+    ide_delay_400ns(device->channel);
+    ide_register_write(device->channel, ATA_REG_FEATURES, ATAPI_FEATURE_DMA);
+    ide_register_write(device->channel, ATA_REG_LBA1, bytes);
+    ide_register_write(device->channel, ATA_REG_LBA2, bytes >> 8);
+    ide_register_write(device->channel, ATA_REG_COMMAND, ATA_CMD_PACKET);
+    if (!ide_wait(device->channel, true, false)) {
+      ide_register_write(device->channel, ATA_REG_CONTROL, 0);
+      return 2;
+    }
+  } else if (lba >= 0x10000000u) {
     if ((device->command_sets & (1u << 26)) == 0) {
       return 2;
     }
@@ -335,7 +357,6 @@ static uint8_t ide_dma_transfer(uint8_t direction, uint8_t drive,
     lba_io[1] = lba >> 8;
     lba_io[2] = lba >> 16;
     lba_io[3] = lba >> 24;
-    head = 0;
   } else if ((device->capabilities & 0x200u) != 0) {
     lba_mode = 1;
     lba_io[0] = lba;
@@ -343,7 +364,6 @@ static uint8_t ide_dma_transfer(uint8_t direction, uint8_t drive,
     lba_io[2] = lba >> 16;
     head = lba >> 24;
   } else {
-    lba_mode = 0;
     uint32_t sector = lba % 63u + 1u;
     uint32_t cylinder = (lba + 1u - sector) / (16u * 63u);
     lba_io[0] = sector;
@@ -373,28 +393,32 @@ static uint8_t ide_dma_transfer(uint8_t direction, uint8_t drive,
                    (uint32_t)(uintptr_t)channel->prdt);
   x86_port_write8(bus_master + IDE_BM_COMMAND, bus_master_command);
 
-  ide_register_write(device->channel, ATA_REG_CONTROL, 0);
-  ide_register_write(device->channel, ATA_REG_HDDEVSEL,
-                     (lba_mode == 0 ? 0xa0u : 0xe0u) |
-                         (device->drive << 4) | head);
-  ide_delay_400ns(device->channel);
-  if (lba_mode == 2) {
-    ide_register_write(device->channel, ATA_REG_SECCOUNT1, 0);
-    ide_register_write(device->channel, ATA_REG_LBA3, lba_io[3]);
-    ide_register_write(device->channel, ATA_REG_LBA4, lba_io[4]);
-    ide_register_write(device->channel, ATA_REG_LBA5, lba_io[5]);
-  }
-  ide_register_write(device->channel, ATA_REG_SECCOUNT0, sectors);
-  ide_register_write(device->channel, ATA_REG_LBA0, lba_io[0]);
-  ide_register_write(device->channel, ATA_REG_LBA1, lba_io[1]);
-  ide_register_write(device->channel, ATA_REG_LBA2, lba_io[2]);
-  uint8_t command = direction == ATA_READ
-                        ? (lba_mode == 2 ? ATA_CMD_READ_DMA_EXT
-                                         : ATA_CMD_READ_DMA)
-                        : (lba_mode == 2 ? ATA_CMD_WRITE_DMA_EXT
-                                         : ATA_CMD_WRITE_DMA);
   asm volatile("" ::: "memory");
-  ide_register_write(device->channel, ATA_REG_COMMAND, command);
+  ide_register_write(device->channel, ATA_REG_CONTROL, 0);
+  if (device->type == IDE_ATAPI) {
+    ide_write_data16(channel->command_base, packet, 6);
+  } else {
+    ide_register_write(device->channel, ATA_REG_HDDEVSEL,
+                       (lba_mode == 0 ? 0xa0u : 0xe0u) |
+                           (device->drive << 4) | head);
+    ide_delay_400ns(device->channel);
+    if (lba_mode == 2) {
+      ide_register_write(device->channel, ATA_REG_SECCOUNT1, 0);
+      ide_register_write(device->channel, ATA_REG_LBA3, lba_io[3]);
+      ide_register_write(device->channel, ATA_REG_LBA4, lba_io[4]);
+      ide_register_write(device->channel, ATA_REG_LBA5, lba_io[5]);
+    }
+    ide_register_write(device->channel, ATA_REG_SECCOUNT0, sectors);
+    ide_register_write(device->channel, ATA_REG_LBA0, lba_io[0]);
+    ide_register_write(device->channel, ATA_REG_LBA1, lba_io[1]);
+    ide_register_write(device->channel, ATA_REG_LBA2, lba_io[2]);
+    uint8_t command = direction == ATA_READ
+                          ? (lba_mode == 2 ? ATA_CMD_READ_DMA_EXT
+                                           : ATA_CMD_READ_DMA)
+                          : (lba_mode == 2 ? ATA_CMD_WRITE_DMA_EXT
+                                           : ATA_CMD_WRITE_DMA);
+    ide_register_write(device->channel, ATA_REG_COMMAND, command);
+  }
   x86_port_write8(bus_master + IDE_BM_COMMAND,
                    bus_master_command | IDE_BM_START);
   irq_restore(state);
@@ -410,7 +434,7 @@ static uint8_t ide_dma_transfer(uint8_t direction, uint8_t drive,
   asm volatile("" ::: "memory");
   if (direction == ATA_READ) {
     memcpy(buffer, channel->dma_buffer, bytes);
-  } else {
+  } else if (device->type == IDE_ATA) {
     ide_register_write(device->channel, ATA_REG_CONTROL, 2);
     ide_register_write(device->channel, ATA_REG_COMMAND,
                        lba_mode == 2 ? ATA_CMD_CACHE_FLUSH_EXT
@@ -422,37 +446,6 @@ static uint8_t ide_dma_transfer(uint8_t direction, uint8_t drive,
     }
   }
   return 0;
-}
-
-static uint8_t ide_atapi_read_sector(uint8_t drive, uint32_t lba,
-                                     void *buffer) {
-  ide_device_t *device = &ide_devices[drive];
-  uint8_t channel = device->channel;
-  uint8_t packet[12] = {ATAPI_CMD_READ, 0,       lba >> 24, lba >> 16,
-                        lba >> 8,       lba,     0,         0,
-                        0,              1,       0,         0};
-  ide_active_channel = channel;
-  ide_register_write(channel, ATA_REG_CONTROL, 2);
-  ide_register_write(channel, ATA_REG_HDDEVSEL, device->drive << 4);
-  ide_delay_400ns(channel);
-  ide_register_write(channel, ATA_REG_FEATURES, 0);
-  ide_register_write(channel, ATA_REG_LBA1, 0x00);
-  ide_register_write(channel, ATA_REG_LBA2, 0x08);
-  ide_register_write(channel, ATA_REG_COMMAND, ATA_CMD_PACKET);
-  if (!ide_wait(channel, true, false)) {
-    ide_active_channel = -1;
-    return 2;
-  }
-  ide_write_data16(ide_channels[channel].command_base, packet, 6);
-  if (!ide_wait(channel, true, false)) {
-    ide_active_channel = -1;
-    return 2;
-  }
-  ide_read_data16(ide_channels[channel].command_base, buffer, 1024);
-  bool completed = ide_wait(channel, false, true);
-  ide_register_write(channel, ATA_REG_CONTROL, 0);
-  ide_active_channel = -1;
-  return completed ? 0 : 2;
 }
 
 static void ide_report_error(uint8_t drive, uint8_t error) {
@@ -479,14 +472,7 @@ void ide_read_sectors(unsigned char drive, unsigned char sectors,
     error = 1;
   } else {
     lock(&ide_controller_lock);
-    if (ide_devices[drive].type == IDE_ATA) {
-      error = ide_dma_transfer(ATA_READ, drive, lba, sectors, buffer);
-    } else {
-      for (unsigned int i = 0; i < sectors && error == 0; i++) {
-        error = ide_atapi_read_sector(
-            drive, lba + i, (uint8_t *)buffer + i * 2048u);
-      }
-    }
+    error = ide_dma_transfer(ATA_READ, drive, lba, sectors, buffer);
     unlock(&ide_controller_lock);
   }
   ide_report_error(drive, error);
@@ -588,9 +574,8 @@ void ide_initialize(void) {
 
   for (unsigned int i = 0; i < count; i++) {
     ide_device_t *device = &ide_devices[i];
-    if (device->type == IDE_ATA &&
-        (ide_channels[device->channel].bus_master_base == 0 ||
-         (device->capabilities & 0x100u) == 0)) {
+    if (ide_channels[device->channel].bus_master_base == 0 ||
+        (device->capabilities & 0x100u) == 0) {
       logk("ide: %s lacks usable DMA support\n", device->model);
       continue;
     }
@@ -598,13 +583,14 @@ void ide_initialize(void) {
     disk.Read = ide_vdisk_read;
     disk.Write = ide_vdisk_write;
     disk.flag = device->type == IDE_ATAPI ? 2 : 1;
-    disk.size = device->sectors * 512u;
+    disk.size = device->sectors * IDE_ATA_SECTOR_BYTES;
     disk.max_transfer_sectors =
-        device->type == IDE_ATA ? IDE_DMA_MAX_SECTORS : 8;
+        device->type == IDE_ATAPI ? IDE_DMA_MAX_ATAPI_SECTORS
+                                  : IDE_DMA_MAX_ATA_SECTORS;
     strcpy(disk.DriveName, "PCI IDE");
     register_vdisk_at('C' + i, disk);
-    logk("ide: %s %s sectors=%d drive=%c\n",
-         device->type == IDE_ATA ? "DMA" : "ATAPI", device->model,
+    logk("ide: %s DMA %s sectors=%d drive=%c\n",
+         device->type == IDE_ATAPI ? "ATAPI" : "ATA", device->model,
          device->sectors, 'C' + i);
   }
 }
