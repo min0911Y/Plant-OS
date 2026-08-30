@@ -439,44 +439,8 @@ static void psh_readline_words(char *prefix, pl_readline_words_t words) {
   }
 }
 
-static int psh_readline_getch(void) {
-  for (;;) {
-    int input = getch();
-    switch (input) {
-    case KEY_INPUT_UP:
-      return PL_READLINE_KEY_UP;
-    case KEY_INPUT_DOWN:
-      return PL_READLINE_KEY_DOWN;
-    case KEY_INPUT_LEFT:
-      return PL_READLINE_KEY_LEFT;
-    case KEY_INPUT_RIGHT:
-      return PL_READLINE_KEY_RIGHT;
-    case '\n':
-      return PL_READLINE_KEY_ENTER;
-    case '\b':
-      return PL_READLINE_KEY_BACKSPACE;
-    case '\t':
-      return PL_READLINE_KEY_TAB;
-    default:
-      break;
-    }
-    if (input >= ' ' && input <= UCHAR_MAX && input != 0x7f) {
-      return input;
-    }
-  }
-}
-
-static int psh_readline_putch(int input) {
-  putch((char)input);
-  return input;
-}
-
-static void psh_readline_flush(void) {}
-
 static bool run_shell(void) {
-  pl_readline_t reader =
-      pl_readline_init(psh_readline_getch, psh_readline_putch,
-                       psh_readline_flush, psh_readline_words);
+  pl_readline_t reader = pl_readline_init_plant_os(psh_readline_words);
   if (reader == NULL) {
     return false;
   }

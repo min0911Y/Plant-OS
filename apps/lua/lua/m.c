@@ -116,6 +116,7 @@
 
 #include "lauxlib.h"
 #include "lualib.h"
+#include <pl_readline.h>
 
 
 #if !defined(LUA_PROGNAME)
@@ -455,44 +456,6 @@ static int handle_luainit (lua_State *L) {
 #define LUA_PROMPT2		">> "
 #endif
 
-#if !defined(LUA_MAXINPUT)
-#define LUA_MAXINPUT		512
-#endif
-
-
-
-
-/*
-** lua_readline defines how to show a prompt and then read a line from
-** the standard input.
-** lua_saveline defines how to "save" a read line in a "history".
-** lua_freeline defines how to free a line read by lua_readline.
-*/
-#if !defined(lua_readline)	/* { */
-
-#if defined(LUA_USE_READLINE)	/* { */
-
-#include <readline/readline.h>
-#include <readline/history.h>
-#define lua_initreadline(L)	((void)L, rl_readline_name="lua")
-#define lua_readline(L,b,p)	((void)L, ((b)=readline(p)) != NULL)
-#define lua_saveline(L,line)	((void)L, add_history(line))
-#define lua_freeline(L,b)	((void)L, free(b))
-
-#else				/* }{ */
-
-#define lua_initreadline(L)  ((void)L)
-#define lua_readline(L,b,p) \
-        ((void)L, fputs(p, stdout), fflush(stdout),  /* show prompt */ \
-        fgets(b, LUA_MAXINPUT, stdin) != NULL)  /* get line */
-#define lua_saveline(L,line)	{ (void)L; (void)line; }
-#define lua_freeline(L,b)	{ (void)L; (void)b; }
-
-#endif				/* } */
-
-#endif				/* } */
-
-
 /*
 ** Return the string to be used as a prompt by the interpreter. Leave
 ** the string (or nil, if using the default value) on the stack, to keep
@@ -691,23 +654,18 @@ static int incomplete (lua_State *L, int status) {
 /*
 ** Prompt the user, read a line, and push it into the Lua stack.
 */
-static int pushline (lua_State *L, int firstline) {
-  char buffer[LUA_MAXINPUT];
-  char *b = buffer;
+static int pushline (lua_State *L, pl_readline_t reader, int firstline) {
   size_t l;
   const char *prmt = get_prompt(L, firstline);
-  int readstatus = lua_readline(L, b, prmt);
-  if (readstatus == 0)
+  const char *b = pl_readline(reader, prmt);
+  if (b == NULL)
     return 0;  /* no input (prompt will be popped by caller) */
   lua_pop(L, 1);  /* remove prompt */
   l = strlen(b);
-  if (l > 0 && b[l-1] == '\n')  /* line ends with newline? */
-    b[--l] = '\0';  /* remove it */
   if (firstline && b[0] == '=')  /* for compatibility with 5.2, ... */
     lua_pushfstring(L, "return %s", b + 1);  /* change '=' to 'return' */
   else
     lua_pushlstring(L, b, l);
-  lua_freeline(L, b);
   return 1;
 }
 
@@ -722,8 +680,6 @@ static int addreturn (lua_State *L) {
   int status = luaL_loadbuffer(L, retline, strlen(retline), "=stdin");
   if (status == LUA_OK) {
     lua_remove(L, -2);  /* remove modified line */
-    if (line[0] != '\0')  /* non empty? */
-      lua_saveline(L, line);  /* keep history */
   }
   else
     lua_pop(L, 2);  /* pop result from 'luaL_loadbuffer' and modified line */
@@ -734,13 +690,12 @@ static int addreturn (lua_State *L) {
 /*
 ** Read multiple lines until a complete Lua statement
 */
-static int multiline (lua_State *L) {
+static int multiline (lua_State *L, pl_readline_t reader) {
   for (;;) {  /* repeat until gets a complete statement */
     size_t len;
     const char *line = lua_tolstring(L, 1, &len);  /* get what it has */
     int status = luaL_loadbuffer(L, line, len, "=stdin");  /* try it */
-    if (!incomplete(L, status) || !pushline(L, 0)) {
-      lua_saveline(L, line);  /* keep history */
+    if (!incomplete(L, status) || !pushline(L, reader, 0)) {
       return status;  /* cannot or should not try to add continuation line */
     }
     lua_pushliteral(L, "\n");  /* add newline... */
@@ -756,13 +711,13 @@ static int multiline (lua_State *L) {
 ** the final status of load/call with the resulting function (if any)
 ** in the top of the stack.
 */
-static int loadline (lua_State *L) {
+static int loadline (lua_State *L, pl_readline_t reader) {
   int status;
   lua_settop(L, 0);
-  if (!pushline(L, 1))
+  if (!pushline(L, reader, 1))
     return -1;  /* no input */
   if ((status = addreturn(L)) != LUA_OK)  /* 'return ...' did not work? */
-    status = multiline(L);  /* try as command, maybe with continuation lines */
+    status = multiline(L, reader);  /* try as command, maybe with continuation lines */
   lua_remove(L, 1);  /* remove line from the stack */
   lua_assert(lua_gettop(L) == 1);
   return status;
@@ -792,9 +747,13 @@ static void l_print (lua_State *L) {
 static void doREPL (lua_State *L) {
   int status;
   const char *oldprogname = progname;
+  pl_readline_t reader = pl_readline_init_plant_os(NULL);
+  if (reader == NULL) {
+    l_message(NULL, "unable to initialize line editor");
+    return;
+  }
   progname = NULL;  /* no 'progname' on errors in interactive mode */
-  lua_initreadline(L);
-  while ((status = loadline(L)) != -1) {
+  while ((status = loadline(L, reader)) != -1) {
     if (status == LUA_OK)
       status = docall(L, 0, LUA_MULTRET);
     if (status == LUA_OK) l_print(L);
@@ -802,6 +761,7 @@ static void doREPL (lua_State *L) {
   }
   lua_settop(L, 0);  /* clear stack */
   lua_writeline();
+  pl_readline_uninit(reader);
   progname = oldprogname;
 }
 

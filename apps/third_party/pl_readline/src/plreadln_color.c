@@ -47,27 +47,7 @@ int get_command_color(_self, const char *word, int is_first_word) {
 }
 
 // Function to redisplay the buffer with colorized commands
-void redisplay_buffer_with_colors(_self, int show_prompt) {
-    if (self->pl_readline_get_words == NULL) {
-        size_t prompt_len = self->prompt == NULL ? 0 : strlen(self->prompt);
-        char cursor[16];
-        pl_readline_print(self, "\r");
-        if (show_prompt) {
-            if (self->prompt != NULL) pl_readline_print(self, self->prompt);
-        } else if (prompt_len != 0) {
-            sprintf(cursor, "\033[%uC", (unsigned)prompt_len);
-            pl_readline_print(self, cursor);
-        }
-        pl_readline_print(self, "\033[K");
-        pl_readline_print(self, self->buffer);
-
-        if (self->ptr != self->length) {
-            pl_readline_print(self, "\r");
-            sprintf(cursor, "\033[%uC", (unsigned)(prompt_len + self->ptr));
-            pl_readline_print(self, cursor);
-        }
-        return;
-    }
+void pl_readline_redisplay(_self, int show_prompt) {
 #define EXPAND_BUFFER                                                                                                    \
     do {                                                                                                                 \
         if (word_count == self->color_max_words) {                                                                             \
@@ -82,7 +62,7 @@ void redisplay_buffer_with_colors(_self, int show_prompt) {
     // Calculate prompt length (only if shown)
     if (self->prompt) {
         // Count visible characters in the prompt (ignoring ANSI escape sequences)
-        char *p = self->prompt;
+        const char *p = self->prompt;
         while (*p) {
             if (*p == '\033') {
                 // Skip ANSI escape sequence

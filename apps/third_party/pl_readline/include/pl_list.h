@@ -123,12 +123,6 @@ static pl_list_t pl_list_delete_node(pl_list_t list, pl_list_t node);
  */
 static size_t pl_list_length(pl_list_t list);
 
-/**
- *\brief 打印链表中的节点数据
- *\param[in] list 链表头指针
- */
-static void pl_list_print(pl_list_t list);
-
 static pl_list_t pl_list_alloc(void *data) {
     pl_list_t node = (pl_list_t)malloc(sizeof(*node));
     if (node == NULL) return NULL;

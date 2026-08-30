@@ -143,7 +143,7 @@ static bool pl_readline_handle_history(_self, int n) {
     self->input_buf[self->input_ptr] = '\0';
     self->input_ptr                  = strlen(self->input_buf); // 更新输入缓冲区指针
 
-    redisplay_buffer_with_colors(self, 0);
+    pl_readline_redisplay(self, 0);
     return true;
 }
 
@@ -156,7 +156,7 @@ int pl_readline_insert_char_and_view(_self, char ch) {
     self->length++;
 
     // Use colorized redisplay for all edits
-    redisplay_buffer_with_colors(self, 0); // Don't show prompt during edit
+    pl_readline_redisplay(self, 0); // Don't show prompt during edit
     return PL_READLINE_SUCCESS;
 }
 
@@ -219,7 +219,7 @@ int pl_readline_handle_key(_self, int ch) {
         }
 
         // Redraw the line with updated coloring
-        redisplay_buffer_with_colors(self, 0);
+        pl_readline_redisplay(self, 0);
         break;
     case PL_READLINE_KEY_RIGHT:
         if (self->ptr == self->length) // 光标在最右边
@@ -247,7 +247,7 @@ int pl_readline_handle_key(_self, int ch) {
         }
 
         // Redraw the line with updated coloring
-        redisplay_buffer_with_colors(self, 0);
+        pl_readline_redisplay(self, 0);
         break;
     case PL_READLINE_KEY_BACKSPACE:
         if (!self->ptr) // 光标在最左边
@@ -276,7 +276,7 @@ int pl_readline_handle_key(_self, int ch) {
         self->length--;
 
         // Redraw the entire line with updated colors
-        redisplay_buffer_with_colors(self, 0);
+        pl_readline_redisplay(self, 0);
         break;
     case PL_READLINE_KEY_ENTER:
         pl_readline_to_the_end(self, self->length - self->ptr);
@@ -290,6 +290,7 @@ int pl_readline_handle_key(_self, int ch) {
         }
         return PL_READLINE_SUCCESS;
     case PL_READLINE_KEY_TAB: { // 自动补全
+#if PL_ENABLE_INTELLISENSE
         if (self->pl_readline_get_words == NULL) break;
         // **NOTE**: words 在 pl_readline_intellisense 会被destory
         pl_readline_words_t words         = pl_readline_word_maker_init();
@@ -299,7 +300,7 @@ int pl_readline_handle_key(_self, int ch) {
             // pl_readline_intellisense_insert会释放word_seletion.word
             pl_readline_intellisense_insert(self, word_seletion);
             // Redisplay with colors after completion but don't show prompt
-            redisplay_buffer_with_colors(self, 0);
+            pl_readline_redisplay(self, 0);
             self->pl_readline_hal_flush();
         } else if (word_seletion.first) {
             pl_readline_print(self, "\n");
@@ -307,10 +308,11 @@ int pl_readline_handle_key(_self, int ch) {
             self->buffer[self->length] = '\0';
 
             // Use colorized display without showing prompt since we printed it already
-            redisplay_buffer_with_colors(self, 0);
+            pl_readline_redisplay(self, 0);
 
             self->pl_readline_hal_flush();
         }
+#endif
         break;
     }
     case PL_READLINE_KEY_CTRL_A:
@@ -376,7 +378,7 @@ int pl_readline_handle_key(_self, int ch) {
 }
 
 // 主体函数
-const char *pl_readline(_self, char *prompt) {
+const char *pl_readline(_self, const char *prompt) {
     // 清空运行时状态
     memset(self->buffer, 0, self->maxlen);
     memset(self->input_buf, 0, self->maxlen);

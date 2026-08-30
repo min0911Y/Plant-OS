@@ -1,6 +1,0 @@
-Upstream: https://github.com/plos-clan/pl_readline
-Commit: 1d9d589777d25f0eaa4444d49b61eccbe997e72a
-License: MIT; see LICENSE.
-Local changes: internal list symbols are prefixed with pl_ to avoid Plant OS API collisions;
-completion callbacks are optional, the no-completion redraw path avoids per-key allocations,
-and psh's initialization, buffer growth, and history updates propagate allocation failures.

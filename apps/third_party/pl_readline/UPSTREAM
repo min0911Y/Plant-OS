@@ -1,0 +1,8 @@
+Upstream: https://github.com/plos-clan/pl_readline
+Commit: 1d9d589777d25f0eaa4444d49b61eccbe997e72a
+License: MIT; see LICENSE.
+Local changes: internal list symbols are prefixed with pl_ to avoid Plant OS API collisions;
+completion callbacks and compile-time intellisense are optional, the plain redraw path avoids
+color/completion code and per-key allocations, the shared Plant OS port maps native key events
+for psh and Lua, and initialization, buffer growth, and history updates propagate allocation
+failures.

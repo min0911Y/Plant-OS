@@ -28,7 +28,7 @@ void pl_readline_delete_char(char *str, int idx) {
     str[len] = '\0';
 }
 
-void pl_readline_print(_self, char *str) {
+void pl_readline_print(_self, const char *str) {
     while (*str) {
         self->pl_readline_hal_putch(*str++);
     }
