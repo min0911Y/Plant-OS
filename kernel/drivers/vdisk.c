@@ -1,12 +1,74 @@
 #include <dos.h>
 #include <drivers.h>
+#include <limits.h>
 int getReadyDisk(); // init.c
 vdisk vdisk_ctl[26];
 static unsigned char *drive_name[16] = {NULL, NULL, NULL, NULL, NULL, NULL,
                                         NULL, NULL, NULL, NULL, NULL, NULL,
                                         NULL, NULL, NULL, NULL};
-static struct FIFO8 drive_fifo[16];
-static unsigned char drive_buf[16][256];
+typedef struct {
+  uint32_t *tids;
+  uint32_t head;
+  uint32_t count;
+  uint32_t capacity;
+} drive_wait_queue_t;
+
+#define DRIVE_WAIT_INITIAL_CAPACITY 16u
+
+static drive_wait_queue_t drive_queues[16];
+
+static bool drive_queue_push(drive_wait_queue_t *queue, uint32_t tid) {
+  if (queue->count == queue->capacity) {
+    uint32_t capacity = queue->capacity == 0
+                            ? DRIVE_WAIT_INITIAL_CAPACITY
+                            : queue->capacity * 2;
+    if (capacity < queue->capacity ||
+        capacity > UINT_MAX / sizeof(*queue->tids)) {
+      return false;
+    }
+    uint32_t *tids = malloc(capacity * sizeof(*tids));
+    if (tids == NULL) {
+      return false;
+    }
+    for (uint32_t i = 0; i < queue->count; i++) {
+      tids[i] = queue->tids[(queue->head + i) % queue->capacity];
+    }
+    free(queue->tids);
+    queue->tids = tids;
+    queue->head = 0;
+    queue->capacity = capacity;
+  }
+  queue->tids[(queue->head + queue->count) % queue->capacity] = tid;
+  queue->count++;
+  return true;
+}
+
+static uint32_t drive_queue_front(const drive_wait_queue_t *queue) {
+  return queue->count == 0 ? (uint32_t)-1 : queue->tids[queue->head];
+}
+
+static uint32_t drive_queue_pop(drive_wait_queue_t *queue) {
+  uint32_t tid = drive_queue_front(queue);
+  if (queue->count != 0) {
+    queue->head = (queue->head + 1) % queue->capacity;
+    queue->count--;
+  }
+  return tid;
+}
+
+static bool drive_queue_remove(drive_wait_queue_t *queue, uint32_t tid) {
+  uint32_t count = queue->count;
+  bool removed = false;
+  for (uint32_t i = 0; i < count; i++) {
+    uint32_t queued_tid = drive_queue_pop(queue);
+    if (queued_tid == tid) {
+      removed = true;
+    } else {
+      drive_queue_push(queue, queued_tid);
+    }
+  }
+  return removed;
+}
 
 static bool drive_can_skip_sync(void) {
   mtask *task = current_task();
@@ -31,7 +93,8 @@ static bool drive_wait_turn(unsigned int drive_code) {
   if (drive_code >= 16 || drive_can_skip_sync()) {
     return true;
   }
-  while (drive_buf[drive_code][drive_fifo[drive_code].q] != get_tid(current_task())) {
+  while (drive_queue_front(&drive_queues[drive_code]) !=
+         get_tid(current_task())) {
     task_fall_blocked_reason(WAITING, WAIT_REASON_DISK);
   }
   return true;
@@ -132,7 +195,6 @@ bool SetDrive(unsigned char *name) {
   for (int i = 0; i != 16; i++) {
     if (drive_name[i] == NULL) {
       drive_name[i] = name;
-      fifo8_init(&drive_fifo[i], 256, drive_buf[i]);
       return true;
     }
   }
@@ -155,7 +217,9 @@ bool DriveSemaphoreTake(unsigned int drive_code) {
   if (drive_can_skip_sync()) {
     return true;
   }
-  fifo8_put(&drive_fifo[drive_code], get_tid(current_task()));
+  if (!drive_queue_push(&drive_queues[drive_code], get_tid(current_task()))) {
+    return false;
+  }
   return drive_wait_turn(drive_code);
 }
 void DriveSemaphoreGive(unsigned int drive_code) {
@@ -165,13 +229,14 @@ void DriveSemaphoreGive(unsigned int drive_code) {
   if (drive_can_skip_sync()) {
     return;
   }
-  if (drive_buf[drive_code][drive_fifo[drive_code].q] != get_tid(current_task())) {
+  drive_wait_queue_t *queue = &drive_queues[drive_code];
+  if (drive_queue_front(queue) != get_tid(current_task())) {
     // 暂时先不做处理 一般不会出现这种情况
     return;
   }
-  fifo8_get(&drive_fifo[drive_code]);
-  if (fifo8_status(&drive_fifo[drive_code]) > 0) {
-    mtask *next = get_task(drive_buf[drive_code][drive_fifo[drive_code].q]);
+  drive_queue_pop(queue);
+  if (queue->count > 0) {
+    mtask *next = get_task(drive_queue_front(queue));
     if (next) {
       mtask_run_now(next);
       task_run(next);
@@ -181,26 +246,12 @@ void DriveSemaphoreGive(unsigned int drive_code) {
 
 void vdisk_remove_task(unsigned tid) {
   for (unsigned int drive_code = 0; drive_code < 16; drive_code++) {
-    struct FIFO8 *fifo = &drive_fifo[drive_code];
-    unsigned char keep[256];
-    int keep_count = 0;
-    int count = fifo8_status(fifo);
-    bool removed = false;
-
-    for (int i = 0; i < count; i++) {
-      int queued_tid = fifo8_get(fifo);
-      if ((unsigned)queued_tid == tid) {
-        removed = true;
-        continue;
+    drive_wait_queue_t *queue = &drive_queues[drive_code];
+    if (drive_queue_remove(queue, tid) && queue->count > 0) {
+      mtask *next = get_task(drive_queue_front(queue));
+      if (next != NULL) {
+        task_run(next);
       }
-      keep[keep_count++] = (unsigned char)queued_tid;
-    }
-    for (int i = 0; i < keep_count; i++) {
-      fifo8_put(fifo, keep[i]);
-    }
-    if (removed && fifo8_status(fifo) > 0) {
-      mtask *next = get_task(drive_buf[drive_code][fifo->q]);
-      task_run(next);
     }
   }
 }

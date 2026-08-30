@@ -30,12 +30,14 @@
 #define PAGE_USER_RW_FLAGS (PG_P | PG_USU | PG_RWW)
 
 struct PAGE_INFO {
-  uint8_t task_id;
-  uint8_t count;
-} __attribute__((packed));
+  uint32_t task_id;
+  uint32_t count;
+};
+
+_Static_assert(PAGE_ALLOCATOR_RESERVED_END < KASAN_SHADOW_START,
+               "page metadata overlaps KASAN shadow");
 
 void *page_malloc_one_no_mark();
-void flush_tlb(unsigned vaddr); 
 unsigned div_round_up(unsigned num, unsigned size);
 static struct PAGE_INFO *pages = (struct PAGE_INFO *)PAGE_MANNAGER;
 static uint32_t *page_free_bitmap = (uint32_t *)PAGE_BITMAP_ADDRESS;
@@ -43,6 +45,28 @@ static unsigned page_alloc_limit = PAGE_TOTAL_COUNT;
 static unsigned page_low_hint = 0;
 static unsigned page_high_hint = PAGE_TOTAL_COUNT - 1;
 static unsigned page_run_hint = 0;
+
+typedef struct {
+  irq_state_t irq_state;
+  uint32_t active_pde;
+} page_table_access_t;
+
+static page_table_access_t page_table_access_begin(void) {
+  page_table_access_t access;
+  access.irq_state = irq_save();
+  access.active_pde = x86_cr3_read() & PAGE_ENTRY_ADDR_MASK;
+  if (access.active_pde != PDE_ADDRESS) {
+    x86_cr3_write(PDE_ADDRESS);
+  }
+  return access;
+}
+
+static void page_table_access_end(const page_table_access_t *access) {
+  if (access->active_pde != PDE_ADDRESS) {
+    x86_cr3_write(access->active_pde);
+  }
+  irq_restore(access->irq_state);
+}
 
 static __attribute__((noreturn)) void page_ref_panic(const char *reason,
                                                      unsigned idx) {
@@ -93,6 +117,18 @@ static inline uint32_t *page_table_entry_from_dir(uint32_t pde_entry,
                                                   unsigned vaddr) {
   return (uint32_t *)(page_entry_addr(pde_entry) +
                       TIDX(vaddr) * PAGE_ENTRY_BYTES);
+}
+
+static uint32_t page_get_attr_pde_raw(unsigned vaddr, unsigned pde) {
+  uint32_t *pde_entry = page_dir_entry(pde, vaddr);
+  uint32_t *pte_entry = page_table_entry_from_dir(*pde_entry, vaddr);
+  return page_entry_flags(*pte_entry);
+}
+
+static uint32_t page_get_phy_pde_raw(unsigned vaddr, unsigned pde) {
+  uint32_t *pde_entry = page_dir_entry(pde, vaddr);
+  uint32_t *pte_entry = page_table_entry_from_dir(*pde_entry, vaddr);
+  return page_entry_addr(*pte_entry);
 }
 
 static inline unsigned page_alloc_word(unsigned idx) { return idx >> 5; }
@@ -152,7 +188,7 @@ static void page_ref_inc_idx(unsigned idx) {
   if (idx >= PAGE_TOTAL_COUNT) {
     page_ref_panic("retain index out of range", idx);
   }
-  if (pages[idx].count == UCHAR_MAX) {
+  if (pages[idx].count == UINT_MAX) {
     page_ref_panic("overflow", idx);
   }
   if (pages[idx].count == 0) {
@@ -193,7 +229,7 @@ static inline void page_ref_dec_entry(uint32_t entry) {
   page_ref_dec_idx(IDX(page_entry_addr(entry)));
 }
 
-static void page_claim_idx(unsigned idx, uint8_t task_id) {
+static void page_claim_idx(unsigned idx, uint32_t task_id) {
   page_ref_inc_idx(idx);
   if (pages[idx].count != 1) {
     page_ref_panic("claim reused page", idx);
@@ -227,7 +263,8 @@ unsigned page_used_count(unsigned physical_size) {
   return used;
 }
 
-static void page_claim_range(unsigned start, unsigned count, uint8_t task_id) {
+static void page_claim_range(unsigned start, unsigned count,
+                             uint32_t task_id) {
   for (unsigned idx = start; idx < start + count; idx++) {
     page_claim_idx(idx, task_id);
   }
@@ -345,7 +382,7 @@ static int page_find_free_run(unsigned start, unsigned count) {
   return found;
 }
 
-static void *page_alloc_single(uint8_t task_id) {
+static void *page_alloc_single(uint32_t task_id) {
   int idx = page_find_free_low();
   if (idx < 0) {
     return NULL;
@@ -361,7 +398,7 @@ static void *page_alloc_single(uint8_t task_id) {
   return (void *)PAGE((unsigned)idx);
 }
 
-static void *page_alloc_single_high(uint8_t task_id) {
+static void *page_alloc_single_high(uint32_t task_id) {
   int idx = page_find_free_high();
   if (idx < 0) {
     return NULL;
@@ -416,6 +453,7 @@ unsigned pde_clone(unsigned addr) {
     return 0;
   }
 
+  page_table_access_t access = page_table_access_begin();
   for (int i = 0; i < 0x1000; i += 4) {
     unsigned int *pde_entry = (unsigned int *)(addr + i);
     if (!page_entry_has_all(*pde_entry, PAGE_USER_PRESENT_FLAGS)) {
@@ -437,9 +475,7 @@ unsigned pde_clone(unsigned addr) {
     }
   }
   memcpy((void *)result, (void *)addr, 0x1000);
-  flush_tlb(result);
-  flush_tlb(addr);
-  x86_cr3_write(addr);
+  page_table_access_end(&access);
 
   return result;
 }
@@ -449,6 +485,7 @@ void pde_retain(unsigned addr) {
   }
 }
 void pde_reset(unsigned addr) {
+  page_table_access_t access = page_table_access_begin();
   for (int i = 0; i < 0x1000; i += 4) {
     unsigned int *pde_entry = (unsigned int *)(addr + i);
     if (!page_entry_has_all(*pde_entry, PAGE_USER_PRESENT_FLAGS)) {
@@ -456,14 +493,19 @@ void pde_reset(unsigned addr) {
     }
     *pde_entry = page_entry_add_flags(*pde_entry, PG_RWW);
   }
+  page_table_access_end(&access);
 }
-// BUG
 void free_pde(unsigned addr) {
-  if (addr == PDE_ADDRESS)
+  if (addr == PDE_ADDRESS) {
     return;
+  }
   if (page_refcount_idx(IDX(addr)) > 1) {
     page_ref_dec_idx(IDX(addr));
     return;
+  }
+  page_table_access_t access = page_table_access_begin();
+  if (access.active_pde == addr) {
+    access.active_pde = PDE_ADDRESS;
   }
   for (int i = 0; i < DIDX(PAGE_PDE_FREE_END) * 4; i += 4) {
     unsigned int *pde_entry = (unsigned int *)(addr + i);
@@ -480,14 +522,9 @@ void free_pde(unsigned addr) {
 
     page_ref_dec_entry(*pde_entry);
   }
-  flush_tlb(addr);
   page_free_one((void *)addr);
+  page_table_access_end(&access);
 }
-// 刷新虚拟地址 vaddr 的 块表 TLB
-void flush_tlb(unsigned vaddr) {
-  asm volatile("invlpg (%0)" ::"r"(vaddr) : "memory");
-}
-
 static bool page_prepare_user_table(uint32_t *pde_entry) {
   if (!page_entry_has_all(*pde_entry, PAGE_USER_PRESENT_FLAGS)) {
     void *table = page_malloc_one_count_from_4gb();
@@ -525,11 +562,9 @@ bool page_share_range_pde(uint32_t source, uint32_t target, uint32_t size,
     return false;
   }
 
-  uint32_t source_pde_backup = current_task()->pde;
   uint32_t mapped = 0;
   bool result = false;
-  current_task()->pde = PDE_ADDRESS;
-  x86_cr3_write(PDE_ADDRESS);
+  page_table_access_t access = page_table_access_begin();
 
   for (uint32_t offset = 0; offset < size; offset += PAGE_SIZE_BYTES) {
     uint32_t source_address = source + offset;
@@ -577,8 +612,7 @@ rollback:
   }
 
 restore:
-  current_task()->pde = source_pde_backup;
-  x86_cr3_write(source_pde_backup);
+  page_table_access_end(&access);
   return result;
 }
 
@@ -588,10 +622,8 @@ bool page_unmap_shared_range_pde(uint32_t target, uint32_t size,
     return false;
   }
 
-  uint32_t pde_backup = current_task()->pde;
   bool result = false;
-  current_task()->pde = PDE_ADDRESS;
-  x86_cr3_write(PDE_ADDRESS);
+  page_table_access_t access = page_table_access_begin();
 
   for (uint32_t offset = 0; offset < size; offset += PAGE_SIZE_BYTES) {
     uint32_t *directory = page_dir_entry(target_pde, target + offset);
@@ -621,16 +653,13 @@ bool page_unmap_shared_range_pde(uint32_t target, uint32_t size,
   result = true;
 
 restore:
-  current_task()->pde = pde_backup;
-  x86_cr3_write(pde_backup);
+  page_table_access_end(&access);
   return result;
 }
 
 static int page_link_pde(unsigned addr, unsigned pde) {
-  unsigned pde_backup = current_task()->pde;
   int result = 0;
-  current_task()->pde = PDE_ADDRESS;
-  x86_cr3_write(PDE_ADDRESS);
+  page_table_access_t access = page_table_access_begin();
   uint32_t *directory = page_dir_entry(pde, addr);
 
   if (!page_prepare_user_table(directory)) {
@@ -646,11 +675,9 @@ static int page_link_pde(unsigned addr, unsigned pde) {
     page_ref_dec_entry(*entry);
   }
   *entry = page_entry_make((uint32_t)(uintptr_t)new_page, PAGE_USER_RW_FLAGS);
-  flush_tlb(addr);
   result = 1;
 restore:
-  current_task()->pde = pde_backup;
-  x86_cr3_write(pde_backup);
+  page_table_access_end(&access);
   return result;
 }
 int page_link(unsigned addr) {
@@ -658,24 +685,28 @@ int page_link(unsigned addr) {
 }
 void copy_from_phy_to_line(unsigned phy, unsigned line, unsigned pde,
                            unsigned size) {
+  page_table_access_t access = page_table_access_begin();
   unsigned pg = div_round_up(size, 0x1000);
   for (int i = 0; i < pg; i++) {
-    memcpy((void *)page_get_phy_pde(line, pde), (void *)phy,
+    memcpy((void *)page_get_phy_pde_raw(line, pde), (void *)phy,
            size >= 0x1000 ? 0x1000 : size);
     size -= 0x1000;
     line += 0x1000;
     phy += 0x1000;
   }
+  page_table_access_end(&access);
 }
 void set_line_address(unsigned val, unsigned line, unsigned pde,
                       unsigned size) {
+  page_table_access_t access = page_table_access_begin();
   unsigned pg = div_round_up(size, 0x1000);
   for (int i = 0; i < pg; i++) {
-    memset((void *)page_get_phy_pde(line, pde), val,
+    memset((void *)page_get_phy_pde_raw(line, pde), val,
            size >= 0x1000 ? 0x1000 : size);
     size -= 0x1000;
     line += 0x1000;
   }
+  page_table_access_end(&access);
 }
 void page_unlink(unsigned addr) {}
 void init_page(void) {
@@ -737,16 +768,13 @@ void *page_malloc_one() {
   return page_alloc_single(get_tid(current_task()));
 }
 void *page_malloc_one_mark(unsigned tid) {
-  return page_alloc_single((uint8_t)tid);
+  return page_alloc_single(tid);
 }
 void *page_malloc_one_count_from_4gb() {
   return page_alloc_single_high(get_tid(current_task()));
 }
 void *page_malloc_one_count_from_4gb_mark(unsigned tid) {
-  if (tid > UCHAR_MAX) {
-    page_ref_panic("owner out of range", tid);
-  }
-  return page_alloc_single_high((uint8_t)tid);
+  return page_alloc_single_high(tid);
 }
 void gc(unsigned tid) {
   for (unsigned i = 0; i < PAGE_TOTAL_COUNT; i++) {
@@ -755,7 +783,7 @@ void gc(unsigned tid) {
         (count > 1 && pages[i].task_id != 0)) {
       page_ref_panic("invalid owner", i);
     }
-    if (tid != 0 && count == 1 && pages[i].task_id == (uint8_t)tid) {
+    if (tid != 0 && count == 1 && pages[i].task_id == tid) {
       page_ref_dec_idx(i);
     }
   }
@@ -861,10 +889,7 @@ void page_map(void *target, void *start, void *end) {
                                      (void *)tmp);
   }
 }
-void change_page_task_id(int task_id, void *p, unsigned int size) {
-  if (task_id < 0 || task_id > UCHAR_MAX) {
-    page_ref_panic("owner out of range", IDX(p));
-  }
+void change_page_task_id(uint32_t task_id, void *p, unsigned int size) {
   if (size == 0) {
     return;
   }
@@ -882,7 +907,7 @@ void change_page_task_id(int task_id, void *p, unsigned int size) {
       }
       continue;
     }
-    pages[idx].task_id = (uint8_t)task_id;
+    pages[idx].task_id = task_id;
   }
 }
 void showPage() {
@@ -898,9 +923,10 @@ void showPage() {
   //}
 }
 uint32_t page_get_attr_pde(unsigned vaddr, unsigned pde) {
-  uint32_t *pde_entry = page_dir_entry(pde, vaddr);
-  uint32_t *pte_entry = page_table_entry_from_dir(*pde_entry, vaddr);
-  return page_entry_flags(*pte_entry);
+  page_table_access_t access = page_table_access_begin();
+  uint32_t attr = page_get_attr_pde_raw(vaddr, pde);
+  page_table_access_end(&access);
+  return attr;
 }
 uint32_t page_get_attr(unsigned vaddr) {
   unsigned pde;
@@ -909,9 +935,10 @@ uint32_t page_get_attr(unsigned vaddr) {
 }
 
 uint32_t page_get_phy_pde(unsigned vaddr, unsigned pde) {
-  uint32_t *pde_entry = page_dir_entry(pde, vaddr);
-  uint32_t *pte_entry = page_table_entry_from_dir(*pde_entry, vaddr);
-  return page_entry_addr(*pte_entry);
+  page_table_access_t access = page_table_access_begin();
+  uint32_t physical = page_get_phy_pde_raw(vaddr, pde);
+  page_table_access_end(&access);
+  return physical;
 }
 uint32_t page_get_phy(unsigned vaddr) {
   return page_get_phy_pde(vaddr, current_task()->pde);
@@ -929,7 +956,7 @@ bool page_fault_try_resolve(uintptr_t address, uint32_t error) {
     return false;
   }
   unsigned owner_tid = task_address_space_owner(active_pde);
-  if (owner_tid > UCHAR_MAX) {
+  if (owner_tid == (uint32_t)-1) {
     return false;
   }
 
@@ -956,6 +983,10 @@ bool page_fault_try_resolve(uintptr_t address, uint32_t error) {
   bool pde_writable = page_entry_has_any(old_pde, PG_RWW);
   bool pte_writable = page_entry_has_any(old_pte_value, PG_RWW);
   if (pde_writable && pte_writable) {
+    /* Another CPU may have completed COW before this CPU consumed its stale
+     * read-only TLB entry.  Reloading CR3 below is sufficient once the current
+     * page tables already describe a writable mapping. */
+    resolved = true;
     goto restore;
   }
 
@@ -1014,10 +1045,9 @@ restore:
 }
 // 设置页属性和物理地址
 void page_set_physics_attr(uint32_t vaddr, void *paddr, uint32_t attr) {
-  unsigned pde_backup = current_task()->pde;
-  current_task()->pde = PDE_ADDRESS;
-  x86_cr3_write(PDE_ADDRESS);
-  uint32_t *directory = page_dir_entry(pde_backup, vaddr);
+  unsigned pde = current_task()->pde;
+  page_table_access_t access = page_table_access_begin();
+  uint32_t *directory = page_dir_entry(pde, vaddr);
   if (!page_prepare_user_table(directory)) {
     goto restore;
   }
@@ -1033,12 +1063,11 @@ void page_set_physics_attr(uint32_t vaddr, void *paddr, uint32_t attr) {
       page_entry_addr(old_mapping) != (unsigned)paddr)
     page_ref_inc_idx(IDX(paddr));
   *physics = page_entry_make((unsigned)paddr, attr);
-  flush_tlb(vaddr);
 restore:
-  current_task()->pde = pde_backup;
-  x86_cr3_write(pde_backup);
+  page_table_access_end(&access);
 }
 void page_set_attr(unsigned start, unsigned end, unsigned attr, unsigned pde) {
+  page_table_access_t access = page_table_access_begin();
   int count = div_round_up(end - start, 0x1000); // 整除
   for (int i = 0; i < count; i++) {
     unsigned vaddr = start + i * PAGE_SIZE_BYTES;
@@ -1046,5 +1075,5 @@ void page_set_attr(unsigned start, unsigned end, unsigned attr, unsigned pde) {
     uint32_t *pte_entry = page_table_entry_from_dir(*pde_entry, vaddr);
     *pte_entry = page_entry_add_flags(*pte_entry, attr);
   }
-  x86_cr3_write(pde);
+  page_table_access_end(&access);
 }

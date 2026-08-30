@@ -28,8 +28,13 @@ void timer_init(struct TIMER *timer, struct FIFO8 *fifo, unsigned char data);
 void timer_settime(struct TIMER *timer, unsigned int timeout);
 void inthandler20(int cs, perf_irq_frame_t *frame);
 // mtask.c
+typedef struct {
+  uint32_t next_tid;
+} task_iterator_t;
+
 mtask *current_task();
 mtask *get_task(unsigned tid);
+mtask *task_iter_next(task_iterator_t *iterator);
 mtask *create_task(uintptr_t entry, unsigned weight);
 bool task_publish(mtask *task);
 void task_abort_creation(mtask *task);
@@ -91,7 +96,7 @@ int find_kpage(int line, int n);
 void *page_malloc(int size);
 void page_free(void *p, int size);
 void page_map(void *target, void *start, void *end);
-void change_page_task_id(int task_id, void *p, unsigned int size);
+void change_page_task_id(uint32_t task_id, void *p, unsigned int size);
 void page_set_physics_attr(uint32_t vaddr, void *paddr, uint32_t attr);
 uint32_t page_get_attr(unsigned vaddr);
 uint32_t page_get_phy(unsigned vaddr);

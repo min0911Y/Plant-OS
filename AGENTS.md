@@ -115,7 +115,7 @@ make -C kernel MEMTEST=0 MEMSIZE_MB=512
 - QEMU 命令使用 `-serial stdio`；启动、崩溃和测试输出优先从串口收集。不要只依赖图形界面现象。
 - 需要自动运行系统内命令时，临时修改 `kernel/res/init.mst`，构建并测试后立即恢复该文件。禁止用 QEMU monitor 的 `sendkey` 注入命令。
 - IPC/RPC 改动可在系统中运行 `rpctest.bin`；磁盘和任务生命周期相关改动可结合 `dktest.bin`。两者都已由 `kernel/Makefile` 打包进主镜像。
-- GUI RPC 与共享映射改动可运行 `guitest.bin`：它 fork 出 `gui.bin`，验证服务发现、窗口创建、共享 framebuffer、异步刷新、键盘队列控制与关闭回收，并在串口输出 `GUITEST PASS`。高任务数与多客户端刷新回归使用 `guitest.bin stress`：它保持 120 个负载进程和 48 个窗口，再从两个全新的 exec 地址空间按 50ms 周期持续刷新，任一窗口的共享 damage 连续 2 秒未被消费即失败，成功时输出 `GUISTRESS PASS`。自动运行时仍临时修改 `init.mst`，测试后立即恢复。
+- GUI RPC 与共享映射改动可运行 `guitest.bin`：它 fork 出 `gui.bin`，验证服务发现、窗口创建、共享 framebuffer、异步刷新、键盘队列控制与关闭回收，并在串口输出 `GUITEST PASS`。高任务数与多客户端刷新回归使用 `guitest.bin stress`：它保持 256 个负载进程和 48 个窗口，确保系统实际越过旧的 255 TID/页引用边界，再从两个全新的 exec 地址空间按 50ms 周期持续刷新；任一窗口的共享 damage 连续 2 秒未被消费即失败，成功时输出 `GUISTRESS PASS`。无 KVM 的慢速 TCG 环境可使用同样越过 255 边界、但只保留两个刷新窗口的 `guitest.bin capacity`。自动运行时仍临时修改 `init.mst`，测试后立即恢复。
 - x86 异常入口与用户异常退出可在系统中运行 `exc_test.bin`，它依次验证 `#DE`、`#UD`、`#GP`、`#PF` 的子进程退出状态；该程序同样已打包进主镜像。
 - SMP FPU 保存、恢复、fork 快照与迁移回归使用 `fputest.bin`：它按 CPU 数创建多个独立进程，在 x87 栈保留哨兵值后连续主动让出 CPU，并校验多次切换及 fork 两侧的完整状态；成功时串口输出 `FPUTEST PASS`。
 
@@ -188,7 +188,7 @@ python3 scripts/kernel-perf.py \
 - PC speaker 完全由 `kernel/drivers/beep.c` 用 `arch/x86/io.h` 直接编程 PIT channel 2 与 port `0x61`，时长通过 `sleep()` 计时；不得回到基于 port `0x61` refresh 位的忙等或汇编实现。
 - 物理内存探测在 `kernel/dos/mm/mem.c` 内用 C 完成：先用 AC 位区分 386/486，再在一次 `irq_save()`/`irq_restore()` 临界区内 read-modify-write 设置并清除 `X86_CR0_CD|X86_CR0_NW`，探测本身用 `volatile uint32_t` 写-取反-回读并恢复原值，步长从 1GiB 逐次缩到 1/4（最小 4KiB）。该文件用 `KERNEL_NOKASAN_CFLAGS` 编译，探测循环不得引入 KASAN 插桩或打印。
 - 分页由 `init_page()`（`kernel/dos/mm/page.c`）一次完成：构造 PDE/PTE 与页管理器后自己写 CR3 并以 read-modify-write 置 `X86_CR0_PG|X86_CR0_WP`；调用方不得再单独补写 WP，也不得恢复 `C_init_page` + 汇编 wrapper 的两段式实现。
-- 高地址 bootstrap 页表是仅内核可见、未逐地址空间计入引用数的隐式共享映射。任何路径要在原本不含 `PG_USU` 的 PDE 中建立用户映射，必须先分配并清零私有页表，禁止原地添加 user/write 位或修改该全局页表。exec 装载准备只处理同时 present+user 的 PDE，并丢弃继承的 `PG_SHARED` PTE；不得把设备映射或 GUI 共享页降级成只读映射后留给新程序。用户页映射统一经 `page_prepare_user_table` 完成页表分离，不得恢复已删除的 `page_links`/`page_link_share` 旁路。
+- 高地址 bootstrap 页表是仅内核可见、未逐地址空间计入引用数的隐式共享映射。任何遍历任意物理页目录/页表的路径（包括 `pde_clone`、`free_pde`、共享映射和 `page_get_*_pde`）必须在保存中断状态后临时切到 `PDE_ADDRESS` 的恒等映射，再恢复调用者 CR3；禁止在当前用户页表下直接把高端物理页表地址当线性地址解引用。任何路径要在原本不含 `PG_USU` 的 PDE 中建立用户映射，必须先分配并清零私有页表，禁止原地添加 user/write 位或修改该全局页表。exec 装载准备只处理同时 present+user 的 PDE，并丢弃继承的 `PG_SHARED` PTE；不得把设备映射或 GUI 共享页降级成只读映射后留给新程序。用户页映射统一经 `page_prepare_user_table` 完成页表分离，不得恢复已删除的 `page_links`/`page_link_share` 旁路。
 - 内核入口的 boot ABI 检查是 `arch_boot_verify()`（`kernel/arch/x86/descriptor_tables.c`），只校验 CS 等于内核代码 selector，失败时直写文本 VRAM 并 `cli; hlt` 停机；不得依赖 loader 的 IDT 或 `int 0x36` 打印。段寄存器在 `arch_interrupt_init` 里紧跟 `lgdt` 重新载入内核数据段 selector，`do_init_seg_register` 这类独立入口不再存在。
 - 分页启用后必须永久设置 `X86_CR0_WP`，使 ring0 写只读用户页也触发 `#PF` 并进入 COW；后续 CR0 修改必须使用 read-modify-write 保留 WP，不得写入会清除该位的固定值。
 - descriptor table 与任务状态的通用入口是 `arch_interrupt_init`、`arch_task_state_init` 和 `arch_task_set_kernel_stack`；GDT/IDT/TSS 的地址、limit、布局、selector、access bits 及 `lgdt`/`lidt`/`ltr` 只能出现在 `kernel/arch/x86/` 私有实现中。首次 GDT/IDT 构造和活动 descriptor 更新必须全程保存并关闭中断；IDT 必须先完整构造全部 256 个有效入口再执行 `lidt`，`0xff` 默认入口必须可直接安全返回且不发送错误 EOI。
@@ -204,6 +204,7 @@ python3 scripts/kernel-perf.py \
 <!-- 过时：C 内联 helper 只计算 `ESP - sizeof(frame)` 后直接写入，未实际调整栈指针保留空间。 -->
 - 任务创建需显式记录本路径是否 clone/retain 了 PDE；失败回滚只释放自己拥有的 PDE，启动任务共享的 `PDE_ADDRESS` 不得释放。fork 只能在 PDE、VFS、FIFO 等全部构造成功后发布为 `RUNNING`。
 - `create_task`/`create_thread_task` 只返回 `ALLOCATING` 任务；调用方必须在 TTY、line、FIFO、参数页等外围资源完整后调用 `task_publish` 一次发布，失败则调用 `task_abort_creation`。任务退出会取消其 waiter timer；高文本光标 owner 退出时还必须清空全局 cursor/timer 引用，不能让 timer FIFO 指向已释放的任务栈。
+- 任务槽由 `kernel/dos/task/mtask.c` 的稳定地址分块注册表按需扩容，TID 不再受 255 个静态数组槽限制；跨子系统扫描统一使用任务迭代器，不得重新暴露或假定连续的全局 `mtask[]`。物理页 owner 与引用计数均为 32 位，fork/COW/共享映射不得把 TID 或引用数收窄到 8 位；页元数据末端必须通过静态断言保持在 KASAN shadow 之前。
 <!-- 过时：`create_task_impl` 在调用方写入 line、TTY 和启动参数前直接设为 `RUNNING`。 -->
 - 用户态 ELF/shell heap、stack 和 `0xf0000000` 映射必须逐页检查 `page_link`；任一失败在写用户地址或进入 `iretd` 前终止任务，由任务退出统一回收已标记的部分映射。
 - 物理页引用计数和 fallback owner 仅由 `kernel/dos/mm/page.c` 的正式接口维护，外部代码不得直接读写 `PAGE_INFO.count/task_id`。`task_id` 仅在 `count == 1` 时可表示独占 owner；引用从 1 增到 2 前必须清空 owner，共享页降回 1 仍保持无 owner。任务退出的 `gc` 只回收 `count == 1` 且 owner 匹配的独占页，不能把仍有引用的共享页强制归零；retain 溢出和 release 下溢属于 fatal 不变量错误。
@@ -220,7 +221,7 @@ python3 scripts/kernel-perf.py \
 - CPU 本地时钟均为 100Hz：BSP 继续负责全局 timer、网络 timeout 与 IPC timeout；AP 使用 TSC-deadline，缺失时校准 Local APIC periodic timer。每个 CPU 的时钟只累计本 CPU 当前任务的运行时间并触发本地调度，AP 不得重复推进全局时间和全局 timer 链。
 - 调度启动后的 `sleep()` 必须通过内核 timer 和 `WAIT_REASON_TIMER` 阻塞；禁止在持有 kernel lock 时轮询 BSP 的 `timerctl.count`，否则迁移到 AP 的任务会阻塞 BSP 时钟 IRQ。只有 `current_task()->tid == NULL_TID` 的调度前引导路径可保留 tick 忙等。
 - 当前遗留内核子系统仍以可调度的 kernel lock 串行进入；系统调用、异常和已注册硬件 IRQ 的汇编入口必须成对进入/离开该锁。锁所有权按 CPU 记录并可在同一 CPU 的上下文切换中直接交接；`kernel_lock_leave()` 可能触发调度，因此恢复后必须重新读取当前 CPU，不能使用切换前缓存的 CPU 编号。用户态在不同 CPU 上并行运行，idle 在释放 kernel lock 后使用 `sti; hlt`。
-- 在实现跨 CPU TLB shootdown 之前，共享同一 PDE 的线程固定在同一 CPU；跨进程共享映射只允许修改当前未在 CPU 上运行的目标任务。修改这一限制时必须先实现同步 TLB shootdown，保证目标 CPU 在旧映射物理页释放前完成失效。
+- 在实现跨 CPU TLB shootdown 之前，共享同一 PDE 的整个任务组固定在同一 CPU：创建首个线程时必须同时固定 leader 和已有同地址空间任务，`task_pin_current` 迁移时也必须整体迁移，不能只固定新线程。跨进程共享映射只允许修改当前未在 CPU 上运行的目标任务。修改这一限制时必须先实现同步 TLB shootdown，保证目标 CPU 在旧映射物理页释放前完成失效；若硬件因本地旧 TLB 权限产生 fault，而当前 PDE/PTE 已可写，异常路径可在重载 CR3 后重试。
 - BIOS/VBE 实模式调用只能在 BSP（逻辑 CPU 0）执行；用户任务首次请求 VBE/BIOS video 时固定并迁移到 BSP，后续由其他用户进程继续占用 AP。`set_mode` 返回失败、framebuffer 未页对齐、尺寸溢出或物理范围回绕时必须停止映射并向用户返回失败，不能从 `0xffffffff` 建立页表。
 - GUI terminal 的输入 FIFO 位于 GUI 用户地址空间；`gmouse` 写入 console FIFO 后必须调用 `tty_notify_input(tty_t)`。内核只接受仍注册在 `tty_list` 中的句柄，并按 TTY 唤醒 `WAIT_REASON_KEYBOARD` 任务；仅写用户 FIFO而不通知内核会使 terminal 永久睡眠。
 - GUI 桌面显式维护唯一 `focused_window`：窗口首次显示以及任意鼠标按下（包括标题栏和右键）都必须经统一焦点入口置于普通窗口最上层、鼠标等 overlay 下方；键盘只投递给该焦点窗口，禁止再用 `sheet->height == top - 1` 猜测焦点。隐藏或销毁焦点窗口时必须从剩余可见窗口中重新选择焦点。
@@ -242,6 +243,7 @@ python3 scripts/kernel-perf.py \
 ### 新增或修改应用
 
 - 应用通常包含 `../defs.mk`，定义 32 位 freestanding 编译参数、`Main` 入口和基础库链接方式。沿用相邻小型应用的 `Makefile`，不要使用宿主默认链接规则。
+- `apps/libp` 的 `mkdir`、`chdir` 等文件系统包装遵循 POSIX 返回语义：成功返回 `0`，失败返回 `-1` 并设置 `errno`；调用方必须用 `== 0`/`!= 0` 判断，不得恢复旧布尔式 `!mkdir(...)`。需要接受已存在目录时，仅在 `errno == EEXIST` 且 `stat` 确认目标为目录后继续。
 - 新应用必须加入 `apps/Makefile` 才会进入全量构建。
 - 如果应用需要出现在系统镜像中，还必须在 `kernel/Makefile` 的合适镜像段添加显式 `mcopy`；仅生成 `apps/out/<name>.bin` 不会自动打包。
 - C/C++ 应用实现常规的 `main`，不要绕过 `apps/libp` 的 `Main` 启动包装，除非任务明确要求自定义运行时。
@@ -267,7 +269,7 @@ python3 scripts/kernel-perf.py \
 - libp `FILE` 是公开不透明类型，私有结构持有真实 fd、8 KiB 缓冲、EOF/error 与 ungetc 状态；`fopen/fread/fwrite/fseek/fflush/fclose/fdopen/fileno` 必须遵守当前 VFS offset 和 errno 语义。
 - VFS 使用全局 4 KiB clean-page 读缓存，默认容量为检测内存的 `1/128`（限制在 256 KiB..8 MiB）；哈希桶负责常数复杂度查找，LRU 链只维护淘汰顺序。达到 8 KiB 的读取先检查请求范围是否已全部驻留，未命中时必须一次进入文件系统，并用结果填充完整覆盖的缓存页（到达 EOF 的末页也是完整有效页），禁止重新拆成逐页驱动调用。单次流式读取可缓存页数超过全部容量时不得边插入边淘汰。写入为 write-through：驱动成功后再更新或失效重叠缓存页，不得在没有完整回写/失败语义时引入脏页。
 - FAT 对齐的完整连续簇必须合并为批量磁盘 I/O，只在首尾非对齐或清零写入时分配 bounce buffer；不得恢复逐簇获取磁盘信号量、逐簇分配或无条件二次复制。程序 ELF 加载只解析一次路径并直接使用 VFS handle，段复制完成后立即释放内核临时镜像。
-- `vdisk.max_transfer_sectors` 是块设备单次传输能力，未声明时保守使用 8 个扇区；通用磁盘层按设备能力分批并在每批之间响应已发布的重调度，不得在持有全局 kernel lock 时将长读写变成不可抢占的整段忙等。内核 ATA IDE 数据路径只使用 PCI Bus Master DMA：从 `init_PCI` 已建立的设备表按 class/subclass 查找兼容模式 IDE controller，验证 BAR4 是范围合法的 I/O window 并启用 PCI I/O/bus-master command bits，不得恢复启动时传入零 BAR 或 ATA PIO fallback。每个 channel 持有 page-backed 64 KiB bounce buffer 与 PRDT，PRD 必须在 64 KiB 边界分段，单次最多 128 个 512-byte 扇区；命令通过 IRQ 完成并以 `WAIT_REASON_DISK` 阻塞/唤醒调用者，IRQ 必须停止 bus master、清除 status、读 ATA status 并只发送一次对应 EOI。ATAPI packet read 仍是独立的短 PIO 路径，不得与 ATA DMA 状态机混用。
+- `vdisk.max_transfer_sectors` 是块设备单次传输能力，未声明时保守使用 8 个扇区；通用磁盘层按设备能力分批并在每批之间响应已发布的重调度，不得在持有全局 kernel lock 时将长读写变成不可抢占的整段忙等。每个逻辑磁盘信号量使用可扩容的 32 位 TID FIFO，禁止把等待者重新塞进 `FIFO8` 或固定 256 项字节数组。内核 ATA IDE 数据路径只使用 PCI Bus Master DMA：从 `init_PCI` 已建立的设备表按 class/subclass 查找兼容模式 IDE controller，验证 BAR4 是范围合法的 I/O window 并启用 PCI I/O/bus-master command bits，不得恢复启动时传入零 BAR 或 ATA PIO fallback。每个 channel 持有 page-backed 64 KiB bounce buffer 与 PRDT，PRD 必须在 64 KiB 边界分段，单次最多 128 个 512-byte 扇区；命令通过 IRQ 完成并以 `WAIT_REASON_DISK` 阻塞/唤醒调用者，IRQ 必须停止 bus master、清除 status、读 ATA status 并只发送一次对应 EOI。ATAPI packet read 仍是独立的短 PIO 路径，不得与 ATA DMA 状态机混用。
 - 程序创建、fork、页分配和用户堆扩展的成功热路径不得输出裸地址或逐次分配日志；串口日志只保留可操作的错误、显式诊断模式和必要生命周期状态，避免同步输出成为程序启动延迟。
 - 内核通用堆由 `kernel/dos/mm/heap.c` 统一封装 vendored i686 liballoc/talc；第三方导出在构建副本中统一改名为私有 `liballoc_*`，内核和模块只能使用带 KASAN/元数据校验的标准 `malloc/free/realloc`。heap 从 1 MiB span 起步并按需通过 `page_malloc` 增长，不得恢复 `memory/freeinfo` 排序整理器或启动时预清零固定 128 MiB arena。链接时 liballoc archive 必须紧跟 `heap.o`，使其静态锁状态位于固定 `0x400000` 页表区之前；放到对象列表末尾会在 KASAN 构建中被页表初始化覆盖。
 - PFS format 必须在写盘前完整读取并校验 boot sector 与 `dosldr.bin`，按 boot sector 每次 92 个扇区的读取粒度动态扩大并清零 loader 保留区，再把 bitmap/root 布置在保留区之后；检查长度、磁盘容量和分配失败，所有区域写后校验并把真实失败传播到 VFS/psh/安装器。VFS 统一负责安全摘除无人使用的活动挂载；psh 格式化成功后重新挂载目标盘，安装器成功后重新 mount/change，失败时按逆序尽力恢复源盘。

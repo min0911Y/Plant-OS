@@ -1,8 +1,10 @@
 #include <ctype.h>
+#include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <syscall.h>
 
 static bool restore_source_drive(char drive) {
@@ -19,12 +21,13 @@ static bool restore_source_drive(char drive) {
   return true;
 }
 
-static bool directory_exists(const char *path) {
-  struct finfo_block *entries = NULL;
-  size_t count;
-  bool exists = list_directory(path, &entries, &count) == 0;
-  free(entries);
-  return exists;
+static bool ensure_directory(const char *path) {
+  if (mkdir(path) == 0) {
+    return true;
+  }
+  struct stat status;
+  return errno == EEXIST && stat(path, &status) == 0 &&
+         S_ISDIR(status.st_mode);
 }
 
 static bool copy_directory_recursive(const char *source_directory,
@@ -64,7 +67,7 @@ static bool copy_directory_recursive(const char *source_directory,
 
     memcpy(destination + base_length, files[i].name, name_length + 1);
     if (files[i].type == DIR) {
-      if (!mkdir(destination)) {
+      if (!ensure_directory(destination)) {
         printf("Unable to create destination directory %s.\n", destination);
         success = false;
       } else {
@@ -119,7 +122,6 @@ int main(int argc, char **argv) {
 
   char remount_command[] = "remount_drive X:";
   remount_command[sizeof("remount_drive ") - 1] = destination_drive;
-  printf("remount command: %s\n", remount_command);
   if (system(remount_command) != 0) {
     printf("Unable to remount drive %c:.\n", destination_drive);
     restore_source_drive(source_drive);
@@ -133,7 +135,7 @@ int main(int argc, char **argv) {
   destination[2] = '\\';
   memcpy(destination + 3, argv[2], directory_length);
   destination[directory_length + 3] = '\0';
-  if (!mkdir(destination) && !directory_exists(destination)) {
+  if (!ensure_directory(destination)) {
     printf("Unable to create destination directory %s.\n", destination);
     goto cleanup;
   }

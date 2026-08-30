@@ -153,9 +153,10 @@ static mtask *keyboard_foreground_task(void) {
 
   mtask *process = NULL;
   mtask *fallback = NULL;
-  for (unsigned tid = 0; tid < 255; tid++) {
-    mtask *task = get_task(tid);
-    if (task == NULL || task->TTY != foreground || task->keyfifo == NULL ||
+  task_iterator_t iterator = {0};
+  mtask *task;
+  while ((task = task_iter_next(&iterator)) != NULL) {
+    if (task->TTY != foreground || task->keyfifo == NULL ||
         task->state == DIED || task->terminate_pending) {
       continue;
     }
@@ -200,12 +201,11 @@ void inthandler21(int *esp) {
   }
   // 快捷键处理
   if (data == 0x2e && ctrl) {
-    for (int i = 0; i < 255; i++) {
-      if (!get_task(i)) {
-        continue;
-      }
-      if (get_task(i)->sigint_up) {
-        get_task(i)->signal |= SIGMASK(SIGINT);
+    task_iterator_t iterator = {0};
+    mtask *task;
+    while ((task = task_iter_next(&iterator)) != NULL) {
+      if (task->sigint_up) {
+        task->signal |= SIGMASK(SIGINT);
       }
     }
     // return;
@@ -233,22 +233,19 @@ void inthandler21(int *esp) {
             data, keyboard_use_task->tid); // 处理按下键
       }
       keyboard_wake_task(keyboard_use_task);
-    } else
-      for (int i = 0; i < 255; i++) {
-        if (!get_task(i)) {
-          continue;
-        }
-        if (get_task(i)->keyboard_release != NULL) {
+    } else {
+      task_iterator_t iterator = {0};
+      mtask *task;
+      while ((task = task_iter_next(&iterator)) != NULL) {
+        if (task->keyboard_release != NULL) {
           // TASK结构体中有对松开键特殊处理的
           if (e0_flag) {
-            get_task(i)->keyboard_release(0xe0, i);
+            task->keyboard_release(0xe0, task->tid);
           }
-          get_task(i)->keyboard_release(data, i); // 处理松开键
-
-          if (disable_flag) {
-          }
+          task->keyboard_release(data, task->tid); // 处理松开键
         }
       }
+    }
     if (e0_flag == 1)
       e0_flag = 0;
     return;
@@ -263,20 +260,20 @@ void inthandler21(int *esp) {
                                         keyboard_use_task->tid); // 处理按下键
     }
     keyboard_wake_task(keyboard_use_task);
-  } else
-    for (int i = 0; i < 255; i++) {
+  } else {
+    task_iterator_t iterator = {0};
+    mtask *task;
+    while ((task = task_iter_next(&iterator)) != NULL) {
       // printk("up\n");
-      if (!get_task(i)) {
-        continue;
-      }
-      if (get_task(i)->keyboard_press != NULL) {
+      if (task->keyboard_press != NULL) {
         // TASK结构体中有对按下键特殊处理的
         if (e0_flag) {
-          get_task(i)->keyboard_press(0xe0, i);
+          task->keyboard_press(0xe0, task->tid);
         }
-        get_task(i)->keyboard_press(data, i); // 处理按下键
+        task->keyboard_press(data, task->tid); // 处理按下键
       }
     }
+  }
   if (disable_flag == 0) {
     mtask *task = keyboard_foreground_task();
     if (task != NULL) {

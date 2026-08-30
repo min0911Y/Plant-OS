@@ -196,7 +196,7 @@ static enum step_result run_step(SPACE *step, MST_Object *m) {
       char *name = directory == NULL
                        ? NULL
                        : MST_get_string_in_space(m, "dir", directory);
-      if (name == NULL || !mkdir(name)) {
+      if (name == NULL || mkdir(name) != 0) {
         return STEP_ERROR;
       }
       continue;

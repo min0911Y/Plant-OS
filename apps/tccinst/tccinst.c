@@ -59,8 +59,8 @@ int main() {
     goto cleanup;
   }
   printf("installation is making tcc dict....\n -> tcc\n");
-  if (!mkdir("tcc") || system("cd tcc") != 0 || !mkdir("crt") ||
-      !mkdir("lib") || !mkdir("inst") || !mkdir("include")) {
+  if (mkdir("tcc") != 0 || system("cd tcc") != 0 || mkdir("crt") != 0 ||
+      mkdir("lib") != 0 || mkdir("inst") != 0 || mkdir("include") != 0) {
     printf("Unable to create installation directories.\n");
     goto cleanup;
   }

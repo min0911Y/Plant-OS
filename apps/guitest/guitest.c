@@ -11,13 +11,13 @@
 
 enum {
   GUI_STRESS_WINDOW_PROCESSES = 48,
-  GUI_STRESS_IDLE_PROCESSES = 72,
+  GUI_STRESS_IDLE_PROCESSES = 208,
   GUI_STRESS_PROCESSES =
       GUI_STRESS_WINDOW_PROCESSES + GUI_STRESS_IDLE_PROCESSES,
   GUI_STRESS_FRAMES = 200,
   GUI_STRESS_FRAME_MS = 50,
   GUI_STRESS_STALL_MS = 2000,
-  GUI_STRESS_IPC_TIMEOUT_MS = 10000,
+  GUI_STRESS_IPC_TIMEOUT_MS = 60000,
   GUI_STRESS_READY = 0x475201,
   GUI_STRESS_START = 0x475202,
   GUI_STRESS_RELEASE = 0x475203,
@@ -70,16 +70,17 @@ static int gui_test_basic(void) {
   return 0;
 }
 
-static int gui_stress_load_process(unsigned parent_tid, unsigned index) {
+static int gui_stress_load_process(unsigned parent_tid, unsigned index,
+                                   unsigned window_processes) {
   window_t window = NULL;
-  if (index < GUI_STRESS_WINDOW_PROCESSES) {
+  if (index < window_processes) {
     window = create_window("GUI stress load", (int)(index * 13 % 320),
                            (int)(index * 17 % 240), 648, 428);
   }
 
   gui_stress_status_t ready = {
       .index = index,
-      .status = index >= GUI_STRESS_WINDOW_PROCESSES || window != NULL ? 0 : 1,
+      .status = index >= window_processes || window != NULL ? 0 : 1,
   };
   if (ipc_send_to(parent_tid, GUI_STRESS_READY, index, &ready, sizeof(ready),
                   GUI_STRESS_IPC_TIMEOUT_MS) != IPC_OK) {
@@ -172,7 +173,7 @@ static int gui_stress_refresh_process(unsigned parent_tid, unsigned index) {
   return 0;
 }
 
-static int gui_test_stress(void) {
+static int gui_test_stress(unsigned window_processes) {
   unsigned parent_tid = NowTaskID();
   int children[GUI_STRESS_PROCESSES];
   bool load_ready[GUI_STRESS_PROCESSES] = {false};
@@ -188,7 +189,7 @@ static int gui_test_stress(void) {
       break;
     }
     if (pid == 0) {
-      return gui_stress_load_process(parent_tid, i);
+      return gui_stress_load_process(parent_tid, i, window_processes);
     }
     children[child_count++] = pid;
   }
@@ -299,7 +300,7 @@ static int gui_test_stress(void) {
 
   if (result == 0) {
     logkf("GUISTRESS PASS tasks=%u windows=%u frames=%u\n",
-          (unsigned)task_count, GUI_STRESS_WINDOW_PROCESSES + 2,
+          (unsigned)task_count, window_processes + 2,
           GUI_STRESS_FRAMES * 2);
   } else {
     logkf("GUISTRESS FAIL result=%d\n", result);
@@ -332,8 +333,11 @@ int main(int argc, char **argv) {
     logkf("GUITEST FAIL connect=%d\n", result);
     return 2;
   }
-  if (argc > 1 && strcmp(argv[1], "stress") == 0) {
-    return gui_test_stress();
+  if (argc > 1 &&
+      (strcmp(argv[1], "stress") == 0 || strcmp(argv[1], "capacity") == 0)) {
+    return gui_test_stress(strcmp(argv[1], "stress") == 0
+                               ? GUI_STRESS_WINDOW_PROCESSES
+                               : 0);
   }
   result = gui_test_basic();
   if (result != 0) {

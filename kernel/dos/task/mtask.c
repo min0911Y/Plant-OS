@@ -11,14 +11,23 @@
 #define REAPER_TID 0u
 #define TASK_ID_NONE ((uint32_t)-1)
 #define TASK_KILLED_STATUS ((unsigned)-1)
+#define TASK_SLOT_CHUNK_SIZE 64u
 void free_pde(unsigned addr);
 unsigned pde_clone(unsigned addr);
 void gc(unsigned tid);
-static void reset_task_slot(mtask *task, int tid);
+static void task_slot_reset(mtask *task, uint32_t tid);
+static void task_slot_release(mtask *task);
 static void task_bootstrap(void);
 static void task_finish_pending(mtask *task);
 char default_drive = 'A';
-mtask m[255];
+typedef struct {
+  mtask **chunks;
+  uint32_t chunk_count;
+  uint32_t chunk_capacity;
+  uint32_t slot_count;
+  uint32_t free_hint;
+} task_registry_t;
+
 typedef struct {
   mtask *current;
   mtask *idle;
@@ -27,9 +36,101 @@ typedef struct {
   uint32_t need_resched;
 } scheduler_cpu_t;
 
+static task_registry_t task_registry;
 static scheduler_cpu_t scheduler_cpus[SMP_MAX_CPUS];
 static uint32_t scheduler_cpu_total = 1;
 static uint32_t scheduler_active;
+
+static bool task_slot_in_use(const mtask *task) {
+  return task != NULL && task->state != EMPTY && task->state != WILL_EMPTY &&
+         task->state != READY && task->state != ALLOCATING;
+}
+
+static mtask *task_slot_at(uint32_t tid) {
+  if (tid >= task_registry.slot_count) {
+    return NULL;
+  }
+  uint32_t chunk = tid / TASK_SLOT_CHUNK_SIZE;
+  uint32_t offset = tid % TASK_SLOT_CHUNK_SIZE;
+  return &task_registry.chunks[chunk][offset];
+}
+
+static bool task_registry_grow(void) {
+  if (task_registry.slot_count > UINT_MAX - TASK_SLOT_CHUNK_SIZE) {
+    return false;
+  }
+
+  mtask *chunk = malloc(sizeof(*chunk) * TASK_SLOT_CHUNK_SIZE);
+  if (chunk == NULL) {
+    return false;
+  }
+  uint32_t first_tid = task_registry.slot_count;
+  memset(chunk, 0, sizeof(*chunk) * TASK_SLOT_CHUNK_SIZE);
+  for (uint32_t i = 0; i < TASK_SLOT_CHUNK_SIZE; i++) {
+    task_slot_reset(&chunk[i], first_tid + i);
+  }
+
+  irq_state_t state = irq_save();
+  if (task_registry.chunk_count == task_registry.chunk_capacity) {
+    uint32_t capacity = task_registry.chunk_capacity == 0
+                            ? 1
+                            : task_registry.chunk_capacity * 2;
+    if (capacity < task_registry.chunk_capacity ||
+        capacity > UINT_MAX / sizeof(*task_registry.chunks)) {
+      irq_restore(state);
+      free(chunk);
+      return false;
+    }
+    mtask **chunks = realloc(task_registry.chunks,
+                             capacity * sizeof(*task_registry.chunks));
+    if (chunks == NULL) {
+      irq_restore(state);
+      free(chunk);
+      return false;
+    }
+    task_registry.chunks = chunks;
+    task_registry.chunk_capacity = capacity;
+  }
+
+  task_registry.chunks[task_registry.chunk_count++] = chunk;
+  task_registry.slot_count += TASK_SLOT_CHUNK_SIZE;
+  if (first_tid < task_registry.free_hint) {
+    task_registry.free_hint = first_tid;
+  }
+  irq_restore(state);
+  return true;
+}
+
+static mtask *task_slot_claim(bool allow_zero) {
+  for (;;) {
+    irq_state_t state = irq_save();
+    uint32_t first = task_registry.free_hint;
+    if (!allow_zero && first == 0) {
+      first = 1;
+    }
+    for (uint32_t tid = first; tid < task_registry.slot_count; tid++) {
+      mtask *task = task_slot_at(tid);
+      if (task->state != EMPTY) {
+        continue;
+      }
+      uint32_t generation = task->generation + 1;
+      if (generation == 0) {
+        generation = 1;
+      }
+      task_slot_reset(task, tid);
+      task->generation = generation;
+      task->state = ALLOCATING;
+      task_registry.free_hint = tid + 1;
+      irq_restore(state);
+      return task;
+    }
+    irq_restore(state);
+    if (!task_registry_grow()) {
+      return NULL;
+    }
+  }
+}
+
 void task_set_default_drive(char drive) {
   if (drive >= 'a' && drive <= 'z') {
     drive -= 'a' - 'A';
@@ -40,62 +141,15 @@ void task_set_default_drive(char drive) {
   default_drive = drive;
 }
 mtask null_task;
-static void init_task() {
-  for (int i = 0; i < 255; i++) {
-    m[i].vruntime = 0;
-    m[i].runtime_ticks = 0;
-    m[i].cpu = 0;
-    m[i].on_cpu = 0;
-    m[i].sched_flags = 0;
-    m[i].user_mode = 0; // 此项暂时废除
-    m[i].weight = 0;
-    m[i].state = EMPTY; // EMPTY
-    m[i].tid = i;       // task id
-    m[i].ptid = -1;     // parent task id
-    m[i].tgid = i;
-    m[i].generation = 0;
-    m[i].kind = TASK_PROCESS;
-    /* keyboard hook */
-    m[i].keyboard_press = NULL;
-    m[i].keyboard_release = NULL;
-    m[i].urgent = 0;
-    m[i].fpu_initialized = false;
-    m[i].fifosleep = 0;
-    m[i].mx = 0;
-    m[i].my = 0;
-    m[i].line = NULL;
-    m[i].timer = NULL;
-    m[i].fs_context = NULL;
-    m[i].waittid = -1;
-    m[i].wait_generation = 0;
-    m[i].wait_reason = WAIT_REASON_NONE;
-    m[i].group_lock_owner = TASK_ID_NONE;
-    m[i].group_lock_depth = 0;
-    m[i].alloc_addr = 0;
-    m[i].alloc_size = 0;
-    m[i].alloced = 0;
-    m[i].TTY = NULL;
-    m[i].tty_session = NULL;
-    m[i].ready = 0;
-    m[i].pde = 0;
-    m[i].Pkeyfifo = NULL;
-    m[i].Ukeyfifo = NULL;
-    m[i].sigint_up = 0;
-    m[i].signal_disable = 0;
-    m[i].times = 0;
-    m[i].keyboard_press = NULL;
-    m[i].keyboard_release = NULL;
-    ipc_task_init(&m[i]);
-    for (int k = 0; k < 30; k++) {
-      m[i].handler[k] = 0;
-    }
-  }
+static bool init_task(void) {
+  memset(&task_registry, 0, sizeof(task_registry));
+  return task_registry_grow();
 }
 extern mtask *mouse_use_task;
 static uint32_t scheduler_load(uint32_t cpu) {
   uint32_t load = 0;
-  for (uint32_t i = 0; i < 255; i++) {
-    mtask *task = &m[i];
+  for (uint32_t i = 0; i < task_registry.slot_count; i++) {
+    mtask *task = task_slot_at(i);
     if (task->state == RUNNING && task->cpu == cpu &&
         !(task->sched_flags & TASK_SCHED_IDLE)) {
       load += task->weight ? task->weight : 1;
@@ -133,6 +187,33 @@ static void scheduler_place_task(mtask *task, uint32_t cpu) {
   smp_send_reschedule(cpu);
 }
 
+static bool task_pin_address_space(unsigned pde, uint32_t cpu) {
+  mtask *current = current_task();
+  for (uint32_t tid = 0; tid < task_registry.slot_count; tid++) {
+    mtask *task = task_slot_at(tid);
+    if (!task_slot_in_use(task) || task->pde != pde) {
+      continue;
+    }
+    if (task->on_cpu && task != current) {
+      return false;
+    }
+  }
+
+  for (uint32_t tid = 0; tid < task_registry.slot_count; tid++) {
+    mtask *task = task_slot_at(tid);
+    if (!task_slot_in_use(task) || task->pde != pde) {
+      continue;
+    }
+    task->sched_flags |= TASK_SCHED_PINNED;
+    if (task->on_cpu) {
+      task->cpu = cpu;
+    } else if (task->cpu != cpu) {
+      scheduler_place_task(task, cpu);
+    }
+  }
+  return true;
+}
+
 static int scheduler_task_eligible(const mtask *task, uint32_t cpu,
                                    const mtask *current) {
   return task->state == RUNNING && task->cpu == cpu &&
@@ -148,11 +229,11 @@ static mtask *scheduler_pick_next(scheduler_cpu_t *cpu, uint32_t cpu_index) {
     next = NULL;
   }
 
-  for (uint32_t i = 0; i < 255; i++) {
-    mtask *candidate = &m[i];
+  for (uint32_t i = 0; i < task_registry.slot_count; i++) {
+    mtask *candidate = task_slot_at(i);
     if (candidate->state == READY && !candidate->on_cpu &&
         candidate != current) {
-      reset_task_slot(candidate, candidate->tid);
+      task_slot_release(candidate);
       continue;
     }
     if (!scheduler_task_eligible(candidate, cpu_index, current)) {
@@ -191,8 +272,8 @@ static void scheduler_balance(void) {
   }
 
   mtask *selected = NULL;
-  for (uint32_t i = 0; i < 255; i++) {
-    mtask *task = &m[i];
+  for (uint32_t i = 0; i < task_registry.slot_count; i++) {
+    mtask *task = task_slot_at(i);
     if (task->state != RUNNING || task->cpu != busiest || task->on_cpu ||
         (task->sched_flags & (TASK_SCHED_IDLE | TASK_SCHED_PINNED))) {
       continue;
@@ -288,37 +369,32 @@ void task_next(void) {
 
 static mtask *create_task_impl(uintptr_t entry, unsigned weight,
                                bool share_pde) {
-  mtask *t = NULL;
-  irq_state_t interrupt_state = irq_save();
-  int first = m[0].state == EMPTY ? 0 : 1;
-  for (int i = first; i < 255; i++) {
-    if (m[i].state == EMPTY) {
-      t = &(m[i]);
-      break;
+  if (share_pde && scheduler_active) {
+    irq_state_t state = irq_save();
+    bool pinned =
+        task_pin_address_space(current_task()->pde, smp_current_cpu());
+    irq_restore(state);
+    if (!pinned) {
+      return NULL;
     }
   }
-  if (!t) {
-    irq_restore(interrupt_state);
+  mtask *t = task_slot_claim(!scheduler_active);
+  if (t == NULL) {
     return NULL;
   }
-  int tid = (int)(t - m);
-  uint32_t generation = t->generation + 1;
-  reset_task_slot(t, tid);
-  t->generation = generation;
+  uint32_t tid = t->tid;
   t->kind = share_pde ? TASK_THREAD : TASK_PROCESS;
   t->tgid = share_pde && scheduler_active ? current_task()->tgid
                                           : (uint32_t)tid;
   t->ptid = share_pde && scheduler_active ? current_task()->ptid
                                           : TASK_ID_NONE;
-  t->state = ALLOCATING;
   if (share_pde && scheduler_active) {
     t->cpu = smp_current_cpu();
     t->sched_flags = TASK_SCHED_PINNED;
   }
-  irq_restore(interrupt_state);
   void *stack_base = page_malloc(STACK_SIZE);
   if (stack_base == NULL) {
-    reset_task_slot(t, tid);
+    task_slot_release(t);
     return NULL;
   }
   uintptr_t esp_alloced = (uintptr_t)stack_base + STACK_SIZE;
@@ -341,7 +417,7 @@ static mtask *create_task_impl(uintptr_t entry, unsigned weight,
     t->pde = pde_clone(current_task()->pde); // 启用了就复制一个
     if (t->pde == 0) {
       page_free(stack_base, STACK_SIZE);
-      reset_task_slot(t, tid);
+      task_slot_release(t);
       return NULL;
     }
     t->times = t->pde;
@@ -366,7 +442,7 @@ static mtask *create_task_impl(uintptr_t entry, unsigned weight,
         free_pde(t->pde);
       }
       page_free(stack_base, STACK_SIZE);
-      reset_task_slot(t, tid);
+      task_slot_release(t);
       return NULL;
     }
   }
@@ -392,14 +468,15 @@ bool task_publish(mtask *task) {
   return published;
 }
 mtask *get_task(unsigned tid) {
-  if (tid >= 255) {
+  mtask *task = task_slot_at(tid);
+  if (task == NULL) {
     return NULL;
   }
-  if (m[tid].state == EMPTY || m[tid].state == WILL_EMPTY ||
-      m[tid].state == READY || m[tid].state == ALLOCATING) {
+  if (task->state == EMPTY || task->state == WILL_EMPTY ||
+      task->state == READY || task->state == ALLOCATING) {
     return NULL;
   }
-  return &(m[tid]);
+  return task;
 }
 void task_to_user_mode(unsigned eip, unsigned esp) {
   mtask *task = current_task();
@@ -424,16 +501,11 @@ void task_to_user_mode(unsigned eip, unsigned esp) {
   x86_return_to_user(&iframe);
 }
 
-static bool task_slot_in_use(const mtask *task) {
-  return task != NULL && task->state != EMPTY && task->state != WILL_EMPTY &&
-         task->state != READY && task->state != ALLOCATING;
-}
-
 unsigned task_address_space_owner(unsigned pde) {
   mtask *fallback = NULL;
 
-  for (unsigned i = 0; i < sizeof(m) / sizeof(m[0]); i++) {
-    mtask *task = &m[i];
+  for (uint32_t i = 0; i < task_registry.slot_count; i++) {
+    mtask *task = task_slot_at(i);
     if (!task_slot_in_use(task) || task->pde != pde) {
       continue;
     }
@@ -446,6 +518,19 @@ unsigned task_address_space_owner(unsigned pde) {
   }
 
   return fallback != NULL ? fallback->tgid : TASK_ID_NONE;
+}
+
+mtask *task_iter_next(task_iterator_t *iterator) {
+  if (iterator == NULL) {
+    return NULL;
+  }
+  while (iterator->next_tid < task_registry.slot_count) {
+    mtask *task = task_slot_at(iterator->next_tid++);
+    if (task_slot_in_use(task)) {
+      return task;
+    }
+  }
+  return NULL;
 }
 
 static void task_clear_ipc_refs(mtask *task) {
@@ -461,11 +546,12 @@ static void task_clear_external_refs(mtask *task) {
   if (leader && leader->group_lock_owner == task->tid) {
     leader->group_lock_owner = TASK_ID_NONE;
     leader->group_lock_depth = 0;
-    for (int i = 0; i < 255; i++) {
-      if (task_slot_in_use(&m[i]) && m[i].tgid == task->tgid &&
-          m[i].state == WAITING &&
-          m[i].wait_reason == WAIT_REASON_TASK_GROUP_LOCK) {
-        task_run(&m[i]);
+    for (uint32_t i = 0; i < task_registry.slot_count; i++) {
+      mtask *waiter = task_slot_at(i);
+      if (task_slot_in_use(waiter) && waiter->tgid == task->tgid &&
+          waiter->state == WAITING &&
+          waiter->wait_reason == WAIT_REASON_TASK_GROUP_LOCK) {
+        task_run(waiter);
       }
     }
   }
@@ -563,17 +649,16 @@ void task_abort_creation(mtask *task) {
   if (task == NULL || task->state != ALLOCATING) {
     return;
   }
-  int tid = task->tid;
   task_release_resources(task);
-  reset_task_slot(task, tid);
+  task_slot_release(task);
 }
 
 static void wake_child_waiter(mtask *child) {
   if (child->ptid == TASK_ID_NONE || child->ptid == REAPER_TID) {
     return;
   }
-  for (int i = 0; i < 255; i++) {
-    mtask *waiter = &m[i];
+  for (uint32_t i = 0; i < task_registry.slot_count; i++) {
+    mtask *waiter = task_slot_at(i);
     if (!task_slot_in_use(waiter) || waiter->tgid != child->ptid ||
         waiter->state != WAITING ||
         waiter->wait_reason != WAIT_REASON_CHILD ||
@@ -586,21 +671,22 @@ static void wake_child_waiter(mtask *child) {
 }
 
 static void reparent_children(uint32_t old_parent, uint32_t new_parent) {
-  for (int i = 0; i < 255; i++) {
-    mtask *child = &m[i];
+  for (uint32_t i = 0; i < task_registry.slot_count; i++) {
+    mtask *child = task_slot_at(i);
     if (!task_slot_in_use(child) || child->kind != TASK_PROCESS ||
         child->ptid != old_parent) {
       continue;
     }
     child->ptid = new_parent;
-    for (int j = 0; j < 255; j++) {
-      if (task_slot_in_use(&m[j]) && m[j].kind == TASK_THREAD &&
-          m[j].tgid == child->tgid) {
-        m[j].ptid = new_parent;
+    for (uint32_t j = 0; j < task_registry.slot_count; j++) {
+      mtask *thread = task_slot_at(j);
+      if (task_slot_in_use(thread) && thread->kind == TASK_THREAD &&
+          thread->tgid == child->tgid) {
+        thread->ptid = new_parent;
       }
     }
     if (child->state == DIED && new_parent == REAPER_TID) {
-      reset_task_slot(child, i);
+      task_slot_release(child);
     }
   }
 }
@@ -615,7 +701,7 @@ static void finish_task(mtask *task, unsigned status, bool waitable) {
   } else if (is_current) {
     task->state = WILL_EMPTY;
   } else {
-    reset_task_slot(task, task->tid);
+    task_slot_release(task);
   }
 }
 
@@ -633,8 +719,8 @@ static void request_task_termination(mtask *task, unsigned status) {
 }
 
 static void terminate_thread_group(uint32_t tgid, mtask *except) {
-  for (int i = 0; i < 255; i++) {
-    mtask *thread = &m[i];
+  for (uint32_t i = 0; i < task_registry.slot_count; i++) {
+    mtask *thread = task_slot_at(i);
     if (thread == except || !task_slot_in_use(thread) ||
         thread->kind != TASK_THREAD || thread->tgid != tgid) {
       continue;
@@ -695,7 +781,10 @@ mtask *current_task() {
   return current;
 }
 int into_mtask() {
-  init_task();
+  if (!init_task()) {
+    Panic_K("unable to initialize task registry");
+    return -1;
+  }
   arch_task_state_init();
   scheduler_cpu_total = smp_cpu_count();
   memset(scheduler_cpus, 0, sizeof(scheduler_cpus));
@@ -777,21 +866,27 @@ bool task_pin_current(uint32_t cpu) {
     return false;
   }
   mtask *task = current_task();
-  task->sched_flags |= TASK_SCHED_PINNED;
-  task->cpu = cpu;
+  irq_state_t state = irq_save();
+  bool pinned = task_pin_address_space(task->pde, cpu);
+  if (!pinned) {
+    irq_restore(state);
+    return false;
+  }
   if (cpu != smp_current_cpu()) {
     scheduler_cpus[cpu].need_resched = 1;
     smp_send_reschedule(cpu);
     task_next();
   }
-  return smp_current_cpu() == cpu;
+  bool on_target = smp_current_cpu() == cpu;
+  irq_restore(state);
+  return on_target;
 }
 
 unsigned task_wake_tty(struct tty *tty) {
   unsigned woken = 0;
-  for (unsigned tid = 0; tid < 255; tid++) {
-    mtask *task = get_task(tid);
-    if (task == NULL || task->state != WAITING ||
+  for (uint32_t tid = 0; tid < task_registry.slot_count; tid++) {
+    mtask *task = task_slot_at(tid);
+    if (!task_slot_in_use(task) || task->state != WAITING ||
         task->wait_reason != WAIT_REASON_KEYBOARD || task->terminate_pending ||
         task->TTY != tty) {
       continue;
@@ -810,8 +905,8 @@ void task_close_tty(struct tty *tty, struct tty *fallback) {
   mtask *self = current_task();
   bool kill_self = false;
   for (enum TASK_KIND kind = TASK_PROCESS; kind <= TASK_THREAD; kind++) {
-    for (unsigned tid = 0; tid < 255; tid++) {
-      mtask *task = &m[tid];
+    for (uint32_t tid = 0; tid < task_registry.slot_count; tid++) {
+      mtask *task = task_slot_at(tid);
       if (!task_slot_in_use(task) || task->kind != kind ||
           task->tty_session != tty) {
         continue;
@@ -821,7 +916,7 @@ void task_close_tty(struct tty *tty, struct tty *fallback) {
         task->TTY = fallback;
       }
       if (task->state == DIED) {
-        reset_task_slot(task, tid);
+        task_slot_release(task);
         continue;
       }
       if (task == self) {
@@ -844,8 +939,8 @@ void task_close_tty(struct tty *tty, struct tty *fallback) {
 
 int task_snapshot(task_info_t *entries, uint32_t capacity, uint32_t *count) {
   uint32_t required = 0;
-  for (uint32_t i = 0; i < 255; i++) {
-    enum STATE state = m[i].state;
+  for (uint32_t i = 0; i < task_registry.slot_count; i++) {
+    enum STATE state = task_slot_at(i)->state;
     if (state != EMPTY && state != ALLOCATING && state != WILL_EMPTY &&
         state != READY) {
       required++;
@@ -860,8 +955,8 @@ int task_snapshot(task_info_t *entries, uint32_t capacity, uint32_t *count) {
   }
 
   uint32_t output = 0;
-  for (uint32_t i = 0; i < 255; i++) {
-    mtask *task = &m[i];
+  for (uint32_t i = 0; i < task_registry.slot_count; i++) {
+    mtask *task = task_slot_at(i);
     if (task->state == EMPTY || task->state == ALLOCATING ||
         task->state == WILL_EMPTY || task->state == READY) {
       continue;
@@ -968,11 +1063,12 @@ void task_unlock() {
   leader->group_lock_depth--;
   if (leader->group_lock_depth == 0) {
     leader->group_lock_owner = TASK_ID_NONE;
-    for (int i = 0; i < 255; i++) {
-      if (task_slot_in_use(&m[i]) && m[i].tgid == self->tgid &&
-          m[i].state == WAITING &&
-          m[i].wait_reason == WAIT_REASON_TASK_GROUP_LOCK) {
-        task_run(&m[i]);
+    for (uint32_t i = 0; i < task_registry.slot_count; i++) {
+      mtask *waiter = task_slot_at(i);
+      if (task_slot_in_use(waiter) && waiter->tgid == self->tgid &&
+          waiter->state == WAITING &&
+          waiter->wait_reason == WAIT_REASON_TASK_GROUP_LOCK) {
+        task_run(waiter);
       }
     }
   }
@@ -1044,7 +1140,7 @@ int waittid(uint32_t tid) {
       self->waittid = TASK_ID_NONE;
       self->wait_generation = 0;
       self->wait_reason = WAIT_REASON_NONE;
-      reset_task_slot(child, tid);
+      task_slot_release(child);
       irq_restore(interrupt_state);
       logk("task exit with code %d\n", status);
       return status;
@@ -1119,7 +1215,7 @@ static bool clone_task_fifo(struct FIFO8 **dest, struct FIFO8 *src,
   memcpy((*dest)->buf, src->buf, 4096);
   return true;
 }
-static void reset_task_slot(mtask *task, int tid) {
+static void task_slot_reset(mtask *task, uint32_t tid) {
   uint32_t generation = task->generation;
   memset(task, 0, sizeof(mtask));
   task->tid = tid;
@@ -1133,16 +1229,17 @@ static void reset_task_slot(mtask *task, int tid) {
   task->group_lock_owner = TASK_ID_NONE;
   ipc_task_init(task);
 }
-mtask *mtask_get_free() {
-  mtask *t = NULL;
-  for (int i = 1; i < 255; i++) {
-    if (m[i].state == EMPTY) {
-      t = &(m[i]);
-      break;
-    }
+
+static void task_slot_release(mtask *task) {
+  irq_state_t state = irq_save();
+  uint32_t tid = task->tid;
+  task_slot_reset(task, tid);
+  if (tid < task_registry.free_hint) {
+    task_registry.free_hint = tid;
   }
-  return t;
+  irq_restore(state);
 }
+
 void roc() {
   logk("ROCT\n");
   for (;;)
@@ -1160,121 +1257,120 @@ static void build_fork_stack(mtask *task) {
 }
 int task_fork() {
   mtask *parent = current_task();
-  irq_state_t state = irq_save();
-  mtask *m = mtask_get_free();
-  if (!m) {
-    irq_restore(state);
+  mtask *child = task_slot_claim(false);
+  if (child == NULL) {
     return -1;
   }
-  int tid = m->tid;
-  uint32_t generation = m->generation + 1;
+  uint32_t tid = child->tid;
+  uint32_t generation = child->generation;
+  irq_state_t state = irq_save();
   x86_fpu_flush_cpu();
-  memcpy(m, parent, sizeof(mtask));
-  m->tid = tid;
-  m->generation = generation;
-  m->kind = TASK_PROCESS;
-  m->tgid = tid;
-  m->ptid = parent->tgid;
-  m->state = ALLOCATING;
-  m->on_cpu = 0;
-  m->sched_flags = 0;
-  m->runtime_ticks = 0;
-  m->terminate_pending = 0;
-  m->terminate_status = 0;
+  memcpy(child, parent, sizeof(mtask));
+  child->tid = tid;
+  child->generation = generation;
+  child->kind = TASK_PROCESS;
+  child->tgid = tid;
+  child->ptid = parent->tgid;
+  child->state = ALLOCATING;
+  child->on_cpu = 0;
+  child->sched_flags = 0;
+  child->runtime_ticks = 0;
+  child->terminate_pending = 0;
+  child->terminate_status = 0;
   uintptr_t stack = (uintptr_t)page_malloc(STACK_SIZE);
   if (stack == 0) {
-    reset_task_slot(m, tid);
+    task_slot_release(child);
     irq_restore(state);
     return -1;
   }
   change_page_task_id(tid, (void *)stack, STACK_SIZE);
-  uintptr_t old_stack_base = m->top - STACK_SIZE;
-  uintptr_t old_context = (uintptr_t)m->context;
+  uintptr_t old_stack_base = child->top - STACK_SIZE;
+  uintptr_t old_context = (uintptr_t)child->context;
   uintptr_t context_offset = old_context - old_stack_base;
   memcpy((void *)stack, (void *)old_stack_base, STACK_SIZE);
-  m->top = stack + STACK_SIZE;
-  m->context = (arch_task_context_t *)(stack + context_offset);
-  m->fs_context = NULL;
-  m->Pkeyfifo = NULL;
-  m->Ukeyfifo = NULL;
-  m->keyfifo = NULL;
-  m->mousefifo = NULL;
-  m->timer = NULL;
-  m->alloced = 0;
-  m->alloc_size = NULL;
+  child->top = stack + STACK_SIZE;
+  child->context = (arch_task_context_t *)(stack + context_offset);
+  child->fs_context = NULL;
+  child->Pkeyfifo = NULL;
+  child->Ukeyfifo = NULL;
+  child->keyfifo = NULL;
+  child->mousefifo = NULL;
+  child->timer = NULL;
+  child->alloced = 0;
+  child->alloc_size = NULL;
   /* 消息队列不继承：父进程队列里的负载归父进程所有 */
-  ipc_task_init(m);
-  m->waittid = TASK_ID_NONE;
-  m->wait_generation = 0;
-  m->wait_reason = WAIT_REASON_NONE;
-  m->group_lock_owner = TASK_ID_NONE;
-  m->group_lock_depth = 0;
-  m->ready = 0;
-  m->urgent = 0;
-  m->line = NULL;
-  m->signal = 0;
+  ipc_task_init(child);
+  child->waittid = TASK_ID_NONE;
+  child->wait_generation = 0;
+  child->wait_reason = WAIT_REASON_NONE;
+  child->group_lock_owner = TASK_ID_NONE;
+  child->group_lock_depth = 0;
+  child->ready = 0;
+  child->urgent = 0;
+  child->line = NULL;
+  child->signal = 0;
   if (parent->alloced && parent->alloc_size) {
-    m->alloc_size = malloc(sizeof(uint32_t));
-    if (m->alloc_size == NULL) {
+    child->alloc_size = malloc(sizeof(uint32_t));
+    if (child->alloc_size == NULL) {
       page_free((void *)stack, STACK_SIZE);
-      reset_task_slot(m, tid);
+      task_slot_release(child);
       irq_restore(state);
       return -1;
     }
-    *(m->alloc_size) = *(parent->alloc_size);
-    m->alloced = 1;
+    *(child->alloc_size) = *(parent->alloc_size);
+    child->alloced = 1;
   } else {
-    m->alloc_size = parent->alloc_size;
-    m->alloced = 0;
+    child->alloc_size = parent->alloc_size;
+    child->alloced = 0;
   }
-  if (!clone_task_fifo(&m->Pkeyfifo, parent->Pkeyfifo, true) ||
-      !clone_task_fifo(&m->Ukeyfifo, parent->Ukeyfifo, true) ||
-      !clone_task_fifo(&m->keyfifo, parent->keyfifo, false) ||
-      !clone_task_fifo(&m->mousefifo, parent->mousefifo, false)) {
-    release_task_fifos(m);
-    if (m->alloced) {
-      free(m->alloc_size);
+  if (!clone_task_fifo(&child->Pkeyfifo, parent->Pkeyfifo, true) ||
+      !clone_task_fifo(&child->Ukeyfifo, parent->Ukeyfifo, true) ||
+      !clone_task_fifo(&child->keyfifo, parent->keyfifo, false) ||
+      !clone_task_fifo(&child->mousefifo, parent->mousefifo, false)) {
+    release_task_fifos(child);
+    if (child->alloced) {
+      free(child->alloc_size);
     }
     page_free((void *)stack, STACK_SIZE);
-    reset_task_slot(m, tid);
+    task_slot_release(child);
     irq_restore(state);
     return -1;
   }
-  m->fs_context = vfs_context_fork(parent->fs_context);
-  if (m->fs_context == NULL) {
-    release_task_fifos(m);
-    if (m->alloced) {
-      free(m->alloc_size);
+  child->fs_context = vfs_context_fork(parent->fs_context);
+  if (child->fs_context == NULL) {
+    release_task_fifos(child);
+    if (child->alloced) {
+      free(child->alloc_size);
     }
     page_free((void *)stack, STACK_SIZE);
-    reset_task_slot(m, tid);
+    task_slot_release(child);
     irq_restore(state);
     return -1;
   }
-  m->pde = pde_clone(parent->pde);
-  if (m->pde == 0) {
-    vfs_context_release(m->fs_context);
-    m->fs_context = NULL;
-    release_task_fifos(m);
-    if (m->alloced) {
-      free(m->alloc_size);
+  child->pde = pde_clone(parent->pde);
+  if (child->pde == 0) {
+    vfs_context_release(child->fs_context);
+    child->fs_context = NULL;
+    release_task_fifos(child);
+    if (child->alloced) {
+      free(child->alloc_size);
     }
     page_free((void *)stack, STACK_SIZE);
-    reset_task_slot(m, tid);
+    task_slot_release(child);
     irq_restore(state);
     return -1;
   }
-  m->weight = 1;
-  m->ptid = parent->tgid;
-  m->tgid = tid;
-  m->kind = TASK_PROCESS;
-  m->tid = tid;
-  build_fork_stack(m);
-  if (!task_publish(m)) {
-    task_abort_creation(m);
+  child->weight = 1;
+  child->ptid = parent->tgid;
+  child->tgid = tid;
+  child->kind = TASK_PROCESS;
+  child->tid = tid;
+  build_fork_stack(child);
+  if (!task_publish(child)) {
+    task_abort_creation(child);
     irq_restore(state);
     return -1;
   }
   irq_restore(state);
-  return tid;
+  return (int)tid;
 }

@@ -76,9 +76,9 @@ static __attribute__((noreturn)) void
 x86_exception_fail_stop(const x86_exception_frame_t *frame,
                         const x86_exception_descriptor_t *descriptor) {
   Panic_K("x86 exception vector=%d name=%s error=%08x eip=%08x cs=%08x "
-          "tid=%d",
+          "cr2=%08x tid=%d",
           frame->vector, descriptor->name, frame->error, frame->eip, frame->cs,
-          current_task()->tid);
+          frame->vector == 14 ? x86_cr2_read() : 0, current_task()->tid);
   for (;;) {
     asm volatile("cli\n\thlt" : : : "memory");
   }

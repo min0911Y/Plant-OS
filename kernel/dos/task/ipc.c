@@ -109,9 +109,9 @@ static IPCMessage *ipc_find_free(IPC_Header *ipc) {
 
 // 唤醒所有因为「目标队列满」而阻塞在 to_tid 上的发送者
 static void ipc_wake_senders(uint32_t to_tid) {
-  extern mtask m[255];
-  for (int i = 0; i < 255; i++) {
-    mtask *task = &m[i];
+  task_iterator_t iterator = {0};
+  mtask *task;
+  while ((task = task_iter_next(&iterator)) != NULL) {
     if (task->state != WAITING || task->wait_reason != WAIT_REASON_IPC) {
       continue;
     }
@@ -202,9 +202,9 @@ static void ipc_wait(mtask *self, uint32_t peer_tid, uint32_t deadline,
 
 // 由时钟中断调用：把等到超时的 IPC 等待者唤醒
 void ipc_tick(void) {
-  extern mtask m[255];
-  for (int i = 0; i < 255; i++) {
-    mtask *task = &m[i];
+  task_iterator_t iterator = {0};
+  mtask *task;
+  while ((task = task_iter_next(&iterator)) != NULL) {
     if (task->state != WAITING || task->wait_reason != WAIT_REASON_IPC ||
         !task->ipc_deadline_set) {
       continue;
@@ -235,9 +235,6 @@ int ipc_send(uint32_t to_tid, uint32_t to_generation, uint32_t type, uint32_t id
   }
   if (size && !data) {
     return IPC_ERR_INVAL;
-  }
-  if (to_tid >= 255) {
-    return IPC_ERR_NOTASK;
   }
   if (size) {
     payload = malloc(size);
