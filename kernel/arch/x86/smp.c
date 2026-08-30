@@ -13,12 +13,18 @@ typedef struct {
   volatile uint32_t online;
 } smp_cpu_t;
 
+typedef enum {
+  SMP_SECONDARIES_PARKED,
+  SMP_SECONDARIES_RELEASE_PENDING,
+  SMP_SECONDARIES_RELEASED,
+} smp_secondary_state_t;
+
 static smp_cpu_t smp_cpus[SMP_MAX_CPUS];
 static uint8_t smp_boot_stacks[SMP_MAX_CPUS][SMP_BOOT_STACK_SIZE]
     __attribute__((aligned(16)));
 static uint32_t smp_cpu_total = 1;
 static volatile uint32_t smp_online_total = 1;
-static volatile uint32_t smp_secondary_release;
+static volatile smp_secondary_state_t smp_secondary_state;
 static volatile uint32_t kernel_lock_owner;
 static uint32_t kernel_lock_nesting[SMP_MAX_CPUS];
 
@@ -109,7 +115,7 @@ void smp_start_aps(void) {
     Panic_K("SMP trampoline exceeds one page");
     return;
   }
-  smp_secondary_release = 0;
+  smp_secondary_state = SMP_SECONDARIES_PARKED;
   for (uint32_t cpu = 1; cpu < smp_cpu_total; cpu++) {
     smp_start_cpu(cpu);
   }
@@ -130,16 +136,21 @@ static __attribute__((noreturn)) void x86_smp_secondary_entry(uint32_t cpu) {
   if (__sync_bool_compare_and_swap(&smp_cpus[cpu].online, 0, 1)) {
     __sync_fetch_and_add(&smp_online_total, 1);
   }
-  while (!smp_secondary_release) {
-    asm volatile("pause");
+  while (smp_secondary_state != SMP_SECONDARIES_RELEASED) {
+    asm volatile("sti; hlt; cli" ::: "memory");
   }
   __sync_synchronize();
+  apic_timer_init_secondary();
   scheduler_start_secondary(cpu);
 }
 
-void smp_release_secondary_cpus(void) {
+void smp_request_secondary_release(void) {
+  if (smp_cpu_total <= 1 ||
+      smp_secondary_state != SMP_SECONDARIES_PARKED) {
+    return;
+  }
   __sync_synchronize();
-  smp_secondary_release = 1;
+  smp_secondary_state = SMP_SECONDARIES_RELEASE_PENDING;
 }
 
 uint32_t smp_cpu_count(void) { return smp_cpu_total; }
@@ -178,8 +189,13 @@ void kernel_lock_enter(void) {
     kernel_lock_nesting[cpu]++;
     return;
   }
-  while (!kernel_lock_try_acquire(owner)) {
-    asm volatile("pause");
+  for (;;) {
+    while (kernel_lock_owner != 0) {
+      asm volatile("pause");
+    }
+    if (kernel_lock_try_acquire(owner)) {
+      break;
+    }
   }
   kernel_lock_nesting[cpu] = 1;
 }
@@ -204,6 +220,16 @@ void kernel_lock_leave(void) {
   if (--kernel_lock_nesting[cpu] == 0) {
     asm volatile("" ::: "memory");
     kernel_lock_owner = 0;
+    if (smp_secondary_state == SMP_SECONDARIES_RELEASE_PENDING) {
+      __sync_synchronize();
+      smp_secondary_state = SMP_SECONDARIES_RELEASED;
+      __sync_synchronize();
+      for (uint32_t target = 1; target < smp_cpu_total; target++) {
+        if (smp_cpus[target].online) {
+          apic_send_fixed_ipi(smp_cpus[target].lapic_id, X86_VECTOR_SMP_WAKE);
+        }
+      }
+    }
   }
 }
 

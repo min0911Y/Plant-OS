@@ -19,6 +19,7 @@ IMGPATH = ./img/
 LOADERPATH = ../loader/out/
 ARCHX86PATH = ./arch/x86/
 QEMU_CPUS ?= 4
+LIVECD_ISO = plant-os-livecd.iso
 LIBALLOC_RELEASE = $(DOSPATH)mm/third_party/liballoc/liballoc-i686.a
 LIBALLOC_KERNEL = $(OUTPATH)liballoc-kernel.a
 
@@ -28,7 +29,8 @@ RULEFILE = make.rul
 COPY     = copy
 DEL      = rm
 
-OBJS_BOOTPACK = $(OUTPATH)kernelc.o $(OUTPATH)screen.o $(OUTPATH)command.o $(OUTPATH)timer.o \
+OBJS_BOOTPACK = $(OUTPATH)boot_entry.obj $(OUTPATH)boot.o \
+				$(OUTPATH)kernelc.o $(OUTPATH)screen.o $(OUTPATH)command.o $(OUTPATH)timer.o \
 				$(OUTPATH)mem.o $(OUTPATH)heap.o $(LIBALLOC_KERNEL) $(OUTPATH)file.o $(OUTPATH)bios_interrupt.obj \
 				$(OUTPATH)interrupt_entries.obj $(OUTPATH)exceptions.obj $(OUTPATH)vga.o $(OUTPATH)harddisk.o $(OUTPATH)tm.o  \
 				$(OUTPATH)mouse.o $(OUTPATH)acpi.o $(OUTPATH)is.o $(OUTPATH)descriptor_tables.o $(OUTPATH)arg.o \
@@ -48,7 +50,7 @@ OBJS_BOOTPACK = $(OUTPATH)kernelc.o $(OUTPATH)screen.o $(OUTPATH)command.o $(OUT
 				$(OUTPATH)vdisk.o $(OUTPATH)rootfs.o $(OUTPATH)mount.o \
 				$(OUTPATH)mtask.o $(OUTPATH)basetask.o $(OUTPATH)execute.o $(OUTPATH)network.o $(OUTPATH)rtl8139.o \
 				$(OUTPATH)vfs.o $(OUTPATH)build.o $(OUTPATH)mst.o $(OUTPATH)str.o $(OUTPATH)pfs.o $(OUTPATH)signal.o \
-				$(OUTPATH)rtc.o $(OUTPATH)ahci.o $(OUTPATH)farcall.o $(OUTPATH)fartty.o $(OUTPATH)iso9660.o \
+				$(OUTPATH)rtc.o $(OUTPATH)ahci.o $(OUTPATH)initramfs.o $(OUTPATH)farcall.o $(OUTPATH)fartty.o $(OUTPATH)iso9660.o \
 				$(OUTPATH)module.o $(OUTPATH)kasan.o $(OUTPATH)perf.o $(OUTPATH)fpu.o $(OUTPATH)irq.o $(OUTPATH)exceptions.o \
 				$(OUTPATH)smp.o $(OUTPATH)task_context.o $(OUTPATH)smp_trampoline.obj \
 				$(OUTPATH)task_context.obj $(OUTPATH)user_return.obj
@@ -66,6 +68,17 @@ default : make_dir
 	$(MAKE) -C $(MSTPATH)
 	$(MAKE) -C modules
 	$(MAKE) Mimg
+
+.PHONY: livecd livecd_run
+
+livecd: default
+	../scripts/build-livecd.sh $(LIVECD_ISO)
+
+livecd_run: livecd
+	qemu-system-i386 -enable-kvm -cpu host -smp $(QEMU_CPUS) \
+		-netdev user,id=net0 -device pcnet,netdev=net0 -serial stdio \
+		-device sb16 -drive file=./boot.img,format=raw,if=ide \
+		-cdrom ./$(LIVECD_ISO) -boot d -m 4096
 
 # 镜像文件生成
 $(OUTPATH)boot.bin : $(BOOTPATH)boot.asm Makefile
@@ -89,8 +102,8 @@ $(LIBALLOC_KERNEL) : $(LIBALLOC_RELEASE) Makefile
 		--redefine-sym heap_set_oom_handler=liballoc_heap_set_oom_handler \
 		$(LIBALLOC_RELEASE) $(LIBALLOC_KERNEL)
 
-$(OUTPATH)kernel.bin : $(OBJS_BOOTPACK) Makefile
-	ld -m elf_i386 -static -Ttext 0x280000 -e KernelMain $(OBJS_BOOTPACK) ./libubscan.a ../apps/libs/libtcc1.a -o $(OUTPATH)kernel.bin
+$(OUTPATH)kernel.bin : $(OBJS_BOOTPACK) $(ARCHX86PATH)kernel.ld Makefile
+	ld -m elf_i386 -static -T $(ARCHX86PATH)kernel.ld $(OBJS_BOOTPACK) ./libubscan.a ../apps/libs/libtcc1.a -o $(OUTPATH)kernel.bin
 
 make_dir:
 	mkdir -p img
@@ -362,4 +375,5 @@ full_run:
 clean :
 	rm -r ./obj
 	rm -r ./img
+	rm -f ./$(LIVECD_ISO)
 	$(MAKE) -C $(APPSPATH) clean

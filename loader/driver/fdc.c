@@ -9,9 +9,11 @@ int fdc_rw(int block, unsigned char *blockbuff, int read,
            unsigned long nosectors);
 void sendbyte(int byte);
 int getbyte(void);
-void reset(void);
-void wait_floppy_interrupt(void);
-void recalibrate(void);
+static bool reset(void);
+static bool wait_floppy_interrupt(void);
+static bool recalibrate(void);
+static bool floppy_media_ready(void);
+static int seek(int track);
 typedef struct DrvGeom {
   unsigned char heads;
   unsigned char tracks;
@@ -38,6 +40,8 @@ typedef struct DrvGeom {
 #define FDC_DATA (0x3f5) /* 数据寄存器 */
 #define FDC_DIR (0x3f7)  /* 数字输入寄存器（输入） */
 #define FDC_CCR (0x3f7)  /* CCR寄存器 */
+#define FDC_DIR_DISK_CHANGE 0x80
+#define FDC_IRQ_TIMEOUT 1000000
 
 /* 软盘命令 */
 #define CMD_SPECIFY (0x03) /* 指定驱动器计时 */
@@ -48,12 +52,14 @@ typedef struct DrvGeom {
 #define CMD_FORMAT (0x4d)  /* 格式化磁道 */
 #define CMD_SEEK (0x0f)    /* 寻找磁道 */
 #define CMD_VERSION (0x10) /* 获取软盘驱动器的版本 */
+enum fdc_result {
+  FDC_RESULT_NO_MEDIA = -1,
+  FDC_RESULT_ERROR,
+  FDC_RESULT_OK,
+};
 /**globals*/
-static volatile int done = 0;
-static int dchange = 0;
-int motor = 0;
-int mtick = 0;
-static volatile int tmout = 0;
+static int motor = 0;
+static int mtick = 0;
 static unsigned char status[7] = {0};
 static unsigned char statsz = 0;
 static unsigned char sr0 = 0;
@@ -64,21 +70,47 @@ static void Read(char drive,
                  unsigned char* buffer,
                  unsigned int number,
                  unsigned int lba) {
-  fdc_rw(lba,buffer,1,number);
+  int result = fdc_rw(lba, buffer, 1, number);
+  if (result != FDC_RESULT_OK) {
+    memset(buffer, 0, number * 512);
+  }
+  if (result == FDC_RESULT_NO_MEDIA) {
+    printf("floppy: media removed\n");
+    logout_vdisk(drive);
+  }
 }
 static void Write(char drive,
                   unsigned char* buffer,
                   unsigned int number,
                   unsigned int lba) {
-  fdc_rw(lba,buffer,0,number);
+  if (fdc_rw(lba, buffer, 0, number) == FDC_RESULT_NO_MEDIA) {
+    printf("floppy: media removed\n");
+    logout_vdisk(drive);
+  }
+}
+static void register_floppy(bool ready) {
+  vdisk vd;
+  memset(&vd, 0, sizeof(vd));
+  strcpy(vd.DriveName, ready ? "floppy" : "floppy (no media)");
+  vd.flag = ready ? VDISK_TYPE_BLOCK : VDISK_TYPE_UNAVAILABLE;
+  if (ready) {
+    vd.Read = Read;
+    vd.Write = Write;
+    vd.size = 1474560;
+  }
+  if (register_vdisk(vd) != 'A') {
+    printf("floppy: unable to reserve drive A\n");
+  }
 }
 void init_floppy() {
-  #ifndef __NO_FLOPPY__
+  bool ready = false;
+#ifndef __NO_FLOPPY__
   sendbyte(
       CMD_VERSION); //发送命令（获取软盘版本），如果收到回应，说明软盘正在工作
-  if (getbyte() == -1) {
-    printf("floppy: no floppy drive found");
-    printf("No fount FDC");
+  int version = getbyte();
+  if (version == -1) {
+    printf("floppy: controller not found\n");
+    register_floppy(false);
     return;
   }
   //设置软盘驱动器的中断服务程序
@@ -86,18 +118,17 @@ void init_floppy() {
   set_gatedesc(idt + 0x26, (int)floppy_int, 4 * 8, AR_INTGATE32);
   ClearMaskIrq(0x6); //清除IRQ6的中断
   printf("FLOPPY DISK:RESETING\n");
-  reset(); //重置软盘驱动器
+  if (!reset()) {
+    printf("floppy: controller reset timed out\n");
+    register_floppy(false);
+    return;
+  }
   printf("FLOPPY DISK:reset over!\n");
-  sendbyte(CMD_VERSION);               //获取软盘版本
-  printf("FDC_VER:0x%x\n", getbyte()); //并且输出到屏幕上
-  #endif
-  vdisk vd;
-  strcpy(vd.DriveName,"floppy");
-  vd.Read = Read;
-  vd.Write =Write;
-  vd.size = 1474560;
-  vd.flag = 1;
-  register_vdisk(vd);
+  printf("FDC_VER:0x%x\n", version);
+  ready = floppy_media_ready();
+  printf(ready ? "floppy: media ready\n" : "floppy: no media\n");
+#endif
+  register_floppy(ready);
 }
 void flint(int* esp) {
   /**
@@ -108,7 +139,7 @@ void flint(int* esp) {
       1;  // 设置中断计数器为1，代表中断已经发生（或者是系统已经收到了中断）
   io_out8(0x20, 0x20);  // 发送EOI信号，告诉PIC，我们已经处理完了这个中断
 }
-void reset(void) {
+static bool reset(void) {
   /* 停止软盘电机并禁用IRQ和DMA传输 */
   io_out8(FDC_DOR, 0);
   
@@ -120,11 +151,14 @@ void reset(void) {
   /* 数据传输速度 (500K/s) */
   io_out8(FDC_DRS, 0);
   /* 重新启动软盘中断（让软盘发送iRQ6），这将会调用上面的flint函数 */
+  floppy_int_count = 0;
   io_out8(FDC_DOR, 0x0c);
 
   /* 重置软盘驱动器将会引发一个中断了，我们需要进行处理 */
   //for(;;);
-  wait_floppy_interrupt();  //等待软盘驱动器的中断发生
+  if (!wait_floppy_interrupt()) {
+    return false;
+  }
 
   /* 指定软盘驱动器定时（不使用在实模式时BIOS设定的操作） */
   sendbyte(CMD_SPECIFY);
@@ -132,10 +166,11 @@ void reset(void) {
   sendbyte(0x02); /* HLT = 16ms, ND = 0 */
 
   /* 清除“磁盘更改”状态 */
-  recalibrate();
+  if (!recalibrate()) {
+    return false;
+  }
 
-  dchange =
-      0;  //清除“磁盘更改”状态（将dchange设置为false，让别的函数知道磁盘更改状态已经被清楚了）
+  return true;
 }
 void motoron(void) {
   if (!motor) {
@@ -155,7 +190,7 @@ void motoroff(void) {
 }
 
 /* 重新校准驱动器 */
-void recalibrate(void) {
+static bool recalibrate(void) {
   /* 先启用电机 */
   motoron();
 
@@ -164,11 +199,24 @@ void recalibrate(void) {
   sendbyte(0);
 
   /* 等待软盘中断（也就是电机校准成功） */
-  wait_floppy_interrupt();
+  bool completed = wait_floppy_interrupt();
   /* 关闭电机 */
   motoroff();
+  return completed && (sr0 & 0xc0) == 0;
 }
-int seek(int track) {
+static bool floppy_media_ready(void) {
+  motoron();
+  if ((io_in8(FDC_DIR) & FDC_DIR_DISK_CHANGE) == 0) {
+    motoroff();
+    return true;
+  }
+  fdc_track = 0xff;
+  bool ready = seek(1) && recalibrate() &&
+               (io_in8(FDC_DIR) & FDC_DIR_DISK_CHANGE) == 0;
+  motoroff();
+  return ready;
+}
+static int seek(int track) {
   if (fdc_track == track) /* 目前的磁道和需要seek的磁道一样吗 */
   {
     // 一样的话就不用seek了
@@ -181,7 +229,9 @@ int seek(int track) {
   sendbyte(track); /* 要seek到的磁道号 */
 
   /* 发送完之后，软盘理应会送来一个中断 */
-  wait_floppy_interrupt();  // 所以我们需要等待软盘中断
+  if (!wait_floppy_interrupt()) {
+    return 0;
+  }
 
   /* 然后我们等待软盘seek（大约15ms） */
   // sleep(1); // 注意：这里单位是hz，1hz=10ms，所以sleep(1)就是sleep(10)
@@ -230,9 +280,17 @@ int getbyte() {
   }
   return -1; /* 没读取到 */
 }
-void wait_floppy_interrupt() {
-  while (!floppy_int_count)
-    ;
+static bool wait_floppy_interrupt() {
+  int timeout = FDC_IRQ_TIMEOUT;
+  while (!floppy_int_count && timeout-- > 0) {
+    io_in8(0x80);
+  }
+  if (!floppy_int_count) {
+    statsz = 0;
+    sr0 = 0xff;
+    fdc_track = 0xff;
+    return false;
+  }
   statsz = 0;  // 清空状态
   while (
       (statsz < 7) &&
@@ -249,7 +307,7 @@ void wait_floppy_interrupt() {
   fdc_track = getbyte();
 
   floppy_int_count = 0;
-  return;
+  return true;
 }
 void block2hts(int block, int* track, int* head, int* sector) {
   *track = (block / 18) / 2;
@@ -284,19 +342,15 @@ int fdc_rw(int block,
   }
 
   for (tries = 0; tries < 3; tries++) {
-    /* 检查 */
-    if (io_in8(FDC_DIR) & 0x80) {
-      dchange = 1;
-      seek(1); /* 清除磁盘更改 */
-      recalibrate();
+    if ((io_in8(FDC_DIR) & FDC_DIR_DISK_CHANGE) != 0 &&
+        !floppy_media_ready()) {
       motoroff();
-
-      return fdc_rw(block, blockbuff, read, nosectors);
+      return FDC_RESULT_NO_MEDIA;
     }
     /* seek到track的位置*/
     if (!seek(track)) {
       motoroff();
-      return 0;
+      return FDC_RESULT_ERROR;
     }
 
     /* 传输速度（500K/s） */
@@ -326,7 +380,10 @@ int fdc_rw(int block,
 
     /* 等待中断...... */
     /* 读写数据不需要中断状态 */
-    wait_floppy_interrupt();
+    if (!wait_floppy_interrupt()) {
+      recalibrate();
+      continue;
+    }
 
     if ((status[0] & 0xc0) == 0)
       break; /* worked! outta here! */
@@ -337,7 +394,8 @@ int fdc_rw(int block,
   /* 关闭电动机 */
   motoroff();
 
-  if (read && blockbuff) {
+  bool success = tries != 3;
+  if (success && read && blockbuff) {
     /* 复制数据 */
     p_blockbuff = blockbuff;
     p_tbaddr = (char*)0x80000;
@@ -348,7 +406,7 @@ int fdc_rw(int block,
     }
   }
 
-  return (tries != 3);
+  return success ? FDC_RESULT_OK : FDC_RESULT_ERROR;
 }
 int fdc_rw_ths(int track,
                int head,
@@ -372,17 +430,14 @@ int fdc_rw_ths(int track,
   }
 
   for (tries = 0; tries < 3; tries++) {
-    if (io_in8(FDC_DIR) & 0x80) {
-      dchange = 1;
-      seek(1);
-      recalibrate();
+    if ((io_in8(FDC_DIR) & FDC_DIR_DISK_CHANGE) != 0 &&
+        !floppy_media_ready()) {
       motoroff();
-
-      return fdc_rw_ths(track, head, sector, blockbuff, read, nosectors);
+      return FDC_RESULT_NO_MEDIA;
     }
     if (!seek(track)) {
       motoroff();
-      return 0;
+      return FDC_RESULT_ERROR;
     }
 
     io_out8(FDC_CCR, 0);
@@ -408,7 +463,10 @@ int fdc_rw_ths(int track,
       sendbyte(DG168_GAP3RW);
     sendbyte(0xff);
 
-    wait_floppy_interrupt();
+    if (!wait_floppy_interrupt()) {
+      recalibrate();
+      continue;
+    }
 
     if ((status[0] & 0xc0) == 0)
       break;
@@ -418,7 +476,8 @@ int fdc_rw_ths(int track,
 
   motoroff();
 
-  if (read && blockbuff) {
+  bool success = tries != 3;
+  if (success && read && blockbuff) {
     p_blockbuff = blockbuff;
     p_tbaddr = (char*)0x80000;
     for (copycount = 0; copycount < (nosectors * 512); copycount++) {
@@ -428,7 +487,7 @@ int fdc_rw_ths(int track,
     }
   }
 
-  return (tries != 3);
+  return success ? FDC_RESULT_OK : FDC_RESULT_ERROR;
 }
 int read_block(int block, unsigned char* blockbuff, unsigned long nosectors) {
   int track = 0, sector = 0, head = 0, track2 = 0, result = 0, loop = 0;
@@ -436,8 +495,12 @@ int read_block(int block, unsigned char* blockbuff, unsigned long nosectors) {
   block2hts(block + nosectors, &track2, &head, &sector);
 
   if (track != track2) {
-    for (loop = 0; loop < nosectors; loop++)
+    for (loop = 0; loop < nosectors; loop++) {
       result = fdc_rw(block + loop, blockbuff + (loop * 512), 1, 1);
+      if (result != FDC_RESULT_OK) {
+        return result;
+      }
+    }
     return result;
   }
   return fdc_rw(block, blockbuff, 1, nosectors);
@@ -453,4 +516,5 @@ int write_floppy_for_ths(int track,
                          unsigned char* blockbuff,
                          unsigned long nosec) {
   int res = fdc_rw_ths(track, head, sec, blockbuff, 0, nosec);
+  return res;
 }

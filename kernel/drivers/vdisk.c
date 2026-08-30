@@ -101,7 +101,7 @@ static bool drive_wait_turn(unsigned int drive_code) {
 }
 int init_vdisk() {
   for (int i = 0; i < 26; i++) {
-    vdisk_ctl[i].flag = 0; // 设置为未使用
+    vdisk_ctl[i].flag = VDISK_TYPE_NONE; // 设置为未使用
   }
   return 0;
 }
@@ -132,7 +132,7 @@ int logout_vdisk(char drive) {
     return 0; // 失败
   }
   if (vdisk_ctl[indx].flag) {
-    vdisk_ctl[indx].flag = 0; // 设置为没有
+    vdisk_ctl[indx].flag = VDISK_TYPE_NONE; // 设置为没有
     return 1;                 // 成功
   } else {
     return 0; // 失败
@@ -166,6 +166,10 @@ bool have_vdisk(char drive) {
   } else {
     return 0; // 失败
   }
+}
+vdisk_type_t vdisk_type(char drive) {
+  int index = drive - 'A';
+  return index >= 0 && index < 26 ? vdisk_ctl[index].flag : VDISK_TYPE_NONE;
 }
 char first_vdisk(void) {
   for (int i = 0; i < 26; i++) {
@@ -320,7 +324,7 @@ bool CDROM_Read(unsigned int lba, unsigned int number, void *buffer,
                 char drive) {
   if (have_vdisk(drive)) {
     int indx = drive - ('A');
-    if(vdisk_ctl[indx].flag != 2) {
+    if(vdisk_ctl[indx].flag != VDISK_TYPE_OPTICAL) {
       return false;
     }
     unsigned int drive_code = disk_drive_slot(drive);

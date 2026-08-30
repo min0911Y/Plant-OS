@@ -232,7 +232,7 @@ void ide_initialize(unsigned int BAR0, unsigned int BAR1, unsigned int BAR2,
       if (ide_devices[i].Type == IDE_ATAPI) {
         vd.flag = 2;
       } else {
-        vd.flag = 1;
+        vd.flag = VDISK_TYPE_BLOCK;
       }
       vd.Read = Read;
       vd.Write = Write;

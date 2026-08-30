@@ -442,6 +442,27 @@ void page_set_alloced(struct PAGE_INFO *pg, unsigned int start,
     page_ref_inc_idx(i); // 设置占用，但是没有进程引用
   }
 }
+
+bool page_reserve_physical_range(uintptr_t start, uint32_t size) {
+  if (size == 0 || start > UINT_MAX - (size - 1)) {
+    return false;
+  }
+
+  unsigned first = IDX(start);
+  unsigned last = IDX((start + size - 1));
+  if (last >= PAGE_TOTAL_COUNT) {
+    return false;
+  }
+  for (unsigned idx = first; idx <= last; idx++) {
+    if (pages[idx].count != 0) {
+      return false;
+    }
+  }
+  for (unsigned idx = first; idx <= last; idx++) {
+    page_ref_inc_idx(idx);
+  }
+  return true;
+}
 // 某些设计思路：
 // 从0x70000000开始，到0xf0000000
 // 大概2GB的内存可以给应用程序分配，OS使用前0x70000000的内存地址

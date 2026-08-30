@@ -654,13 +654,12 @@ void apic_init_secondary(void) {
   wrmsr64(IA32_APIC_BASE_MSR, apic_base);
   lapic_write(LAPIC_REG_SVR, APIC_SVR_ENABLE | APIC_SPURIOUS_VECTOR);
   apic_send_eoi();
+}
 
+void apic_timer_init_secondary(void) {
   if (apic_tsc_deadline_supported && apic_timer_deadline_interval_tsc) {
     apic_timer_init_tsc_deadline();
   } else {
-    if (!tsc_khz) {
-      tsc_khz = cpu_detect_tsc_khz();
-    }
     apic_timer_init_periodic();
   }
 }

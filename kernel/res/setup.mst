@@ -1,30 +1,43 @@
-"step" = [{
-	"files" = ["dosldr.bin","kernel.bin","init.mst","boot.bin","boot_pfs.bin","psh.bin","init.bin","copydir.bin",{
-		"dir" = "other"
-	},"other/uname.bin","other/font.bin","other/HZK16"]
-	"next" = {
-		"state" = "Install apps"
-		"info" = "System has been installed, copy apps?"
-		"disk_name" = "Disk2"
-	}
-}, {
-	"files" = [{
-		"dir" = "bin"
-	},"bin/aigobang.bin","bin/lua.bin","bin/snake.bin","bin/randnum.bin","bin/bf.bin","bin/copy.bin","bin/basic.bin","bin/cal.bin","bin/bitz.bin","bin/editor.bin","bin/calc.bin","editor.mst"]
-	"next" = {
-		"state" = "Install apps"
-		"info" = "Install extra apps?"
-		"disk_name" = "Disk3"
-	}
-},{
-	"files" = ["bin/minizip.bin","bin/miniunz.bin","bin/image.bin","bin/c4.bin","bin/lox.bin","bin/Maze.bin","bin/clock.bin","bin/luac.bin"]
-	"next" = {
-		"state" = "Copy resource"
-		"info" = "Copy resource?"
-		"disk_name" = "res"
-	}
-},{
-	"files" = [{
-		"dir" = "res"
-	},"res/hello.nas","res/coin.wav","res/test.wav","res/desktop.jpg","res/huaji.jpg","res/load.jpg","res/io.bas","res/shot.png","res/shot1.png","res/test.htm","res/test1.htm","res/yee.bmp","res/fib.lua","res/guess.lua","res/gobang.lua","res/bainian.lua","res/student.lua","res/asm.lua","res/chinese.txt","res/bf.txt","res/c4.c"]
-}]
+"files" = [
+    {"type" = "file" "source" = "DOSLDR.BIN" "path" = "DOSLDR.bin" "fat" = "DOSLDR.BIN"},
+    {"type" = "dir" "path" = "other" "fat" = "OTHER"},
+    {"type" = "file" "source" = "123.PNG" "path" = "123.png" "fat" = "123.PNG"},
+    {"type" = "file" "source" = "AUTOEXEC.BAT" "path" = "autoexec.bat" "fat" = "AUTOEXEC.BAT"},
+    {"type" = "file" "source" = "BOOT.BIN" "path" = "boot.bin" "fat" = "BOOT.BIN"},
+    {"type" = "file" "source" = "BOOT32.BIN" "path" = "boot32.bin" "fat" = "BOOT32.BIN"},
+    {"type" = "file" "source" = "BOOT_PFS.BIN" "path" = "boot_pfs.bin" "fat" = "BOOT_PFS.BIN"},
+    {"type" = "file" "source" = "COPYDIR.BIN" "path" = "copydir.bin" "fat" = "COPYDIR.BIN"},
+    {"type" = "file" "source" = "DKTEST.BIN" "path" = "dktest.bin" "fat" = "DKTEST.BIN"},
+    {"type" = "file" "source" = "DOOM.BIN" "path" = "doom.bin" "fat" = "DOOM.BIN"},
+    {"type" = "file" "source" = "DOOM1.WAD" "path" = "doom1.wad" "fat" = "DOOM1.WAD"},
+    {"type" = "file" "source" = "DUKTAPE.BIN" "path" = "duktape.bin" "fat" = "DUKTAPE.BIN"},
+    {"type" = "file" "source" = "ENV.CFG" "path" = "env.cfg" "fat" = "ENV.CFG"},
+    {"type" = "file" "source" = "EXC_TEST.BIN" "path" = "exc_test.bin" "fat" = "EXC_TEST.BIN"},
+    {"type" = "file" "source" = "FONT.BIN" "path" = "font.bin" "fat" = "FONT.BIN"},
+    {"type" = "file" "source" = "FONT.TTF" "path" = "font.ttf" "fat" = "FONT.TTF"},
+    {"type" = "file" "source" = "FPUTEST.BIN" "path" = "fputest.bin" "fat" = "FPUTEST.BIN"},
+    {"type" = "file" "source" = "G.NES" "path" = "g.nes" "fat" = "G.NES"},
+    {"type" = "file" "source" = "GUI.BIN" "path" = "gui.bin" "fat" = "GUI.BIN"},
+    {"type" = "file" "source" = "GUITEST.BIN" "path" = "guitest.bin" "fat" = "GUITEST.BIN"},
+    {"type" = "file" "source" = "HELLO.MOD" "path" = "hello.mod" "fat" = "HELLO.MOD"},
+    {"type" = "file" "source" = "HZK16" "path" = "HZK16" "fat" = "HZK16"},
+    {"type" = "file" "source" = "INIT.BIN" "path" = "init.bin" "fat" = "INIT.BIN"},
+    {"type" = "file" "source" = "INIT.MST" "path" = "init.mst" "fat" = "INIT.MST"},
+    {"type" = "file" "source" = "KERNEL.BIN" "path" = "kernel.bin" "fat" = "KERNEL.BIN"},
+    {"type" = "file" "source" = "MY_BASIC.BIN" "path" = "my_basic.bin" "fat" = "MY_BASIC.BIN"},
+    {"type" = "file" "source" = "NASM.ZIP" "path" = "nasm.zip" "fat" = "NASM.ZIP"},
+    {"type" = "file" "source" = "NETTEST.BIN" "path" = "nettest.bin" "fat" = "NETTEST.BIN"},
+    {"type" = "file" "source" = "OTHER/COIN.WAV" "path" = "other/coin.wav" "fat" = "OTHER/COIN.WAV"},
+    {"type" = "file" "source" = "OTHER/COPY.BIN" "path" = "other/copy.bin" "fat" = "OTHER/COPY.BIN"},
+    {"type" = "file" "source" = "OTHER/FONT.BIN" "path" = "other/font.bin" "fat" = "OTHER/FONT.BIN"},
+    {"type" = "file" "source" = "OTHER/HZK16" "path" = "other/HZK16" "fat" = "OTHER/HZK16"},
+    {"type" = "file" "source" = "OTHER/UNAME.BIN" "path" = "other/uname.bin" "fat" = "OTHER/UNAME.BIN"},
+    {"type" = "file" "source" = "PING.BIN" "path" = "ping.bin" "fat" = "PING.BIN"},
+    {"type" = "file" "source" = "PS.BIN" "path" = "ps.bin" "fat" = "PS.BIN"},
+    {"type" = "file" "source" = "PSH.BIN" "path" = "psh.bin" "fat" = "PSH.BIN"},
+    {"type" = "file" "source" = "RPCTEST.BIN" "path" = "rpctest.bin" "fat" = "RPCTEST.BIN"},
+    {"type" = "file" "source" = "SETUP1.BIN" "path" = "setup1.bin" "fat" = "SETUP1.BIN"},
+    {"type" = "file" "source" = "SYS.CFG" "path" = "sys.cfg" "fat" = "SYS.CFG"},
+    {"type" = "file" "source" = "TTF.BIN" "path" = "ttf.bin" "fat" = "TTF.BIN"},
+    {"type" = "file" "source" = "SETUP.MST" "path" = "setup.mst" "fat" = "SETUP.MST"}
+]

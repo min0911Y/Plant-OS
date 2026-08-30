@@ -5,8 +5,9 @@ EXTERN inthandler21, inthandler20, inthandler2c, signal_deal
 EXTERN x86_syscall_dispatch
 EXTERN kernel_lock_enter, kernel_lock_leave
 EXTERN scheduler_reschedule_interrupt
+EXTERN apic_send_eoi
 GLOBAL x86_syscall_entry
-GLOBAL x86_reschedule_entry
+GLOBAL x86_reschedule_entry, x86_smp_wake_entry
 GLOBAL asm_inthandler2c, floppy_int
 section .text
 global null_inthandler
@@ -279,6 +280,23 @@ x86_reschedule_entry:
   call kernel_lock_enter
   call scheduler_reschedule_interrupt
   call kernel_lock_leave
+  popa
+  pop gs
+  pop fs
+  pop es
+  pop ds
+  iretd
+
+x86_smp_wake_entry:
+  push ds
+  push es
+  push fs
+  push gs
+  pusha
+  mov ax, ss
+  mov ds, ax
+  mov es, ax
+  call apic_send_eoi
   popa
   pop gs
   pop fs

@@ -834,7 +834,7 @@ OK:
     }
     logk("ports %d: total sector = %d\n", ports[i], buf.lba_capacity);
     vdisk vd;
-    vd.flag = 1;
+    vd.flag = VDISK_TYPE_BLOCK;
     vd.Read = ahci_vdisk_read;
     vd.Write = ahci_vdisk_write;
     vd.size = buf.lba_capacity * 512;

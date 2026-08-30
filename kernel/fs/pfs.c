@@ -1177,7 +1177,7 @@ static int pfs_vfs_mount(vfs_t *vfs) {
 }
 
 static bool pfs_check(uint8_t disk_number) {
-  if (!DiskReady(disk_number)) {
+  if (vdisk_type(disk_number) != VDISK_TYPE_BLOCK) {
     return false;
   }
   uint8_t mbr[512];

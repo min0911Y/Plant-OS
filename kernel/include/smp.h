@@ -7,7 +7,7 @@ enum { SMP_MAX_CPUS = 32 };
 
 void smp_topology_init(void);
 void smp_start_aps(void);
-void smp_release_secondary_cpus(void);
+void smp_request_secondary_release(void);
 uint32_t smp_cpu_count(void);
 uint32_t smp_online_cpu_count(void);
 uint32_t smp_current_cpu(void);

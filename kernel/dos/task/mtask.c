@@ -818,10 +818,12 @@ int into_mtask() {
     Panic_K("unable to publish bootstrap tasks");
     return -1;
   }
+
+  (void)irq_save();
   scheduler_active = 1;
-  mtask *idle = scheduler_cpus[0].idle;
-  idle->on_cpu = 1;
-  arch_task_start(idle->context, idle->pde, &scheduler_cpus[0].current, idle);
+  init_task->on_cpu = 1;
+  arch_task_start(init_task->context, init_task->pde,
+                  &scheduler_cpus[0].current, init_task);
 }
 
 __attribute__((noreturn)) void scheduler_start_secondary(uint32_t cpu) {
@@ -837,13 +839,10 @@ __attribute__((noreturn)) void scheduler_start_secondary(uint32_t cpu) {
 }
 
 static void task_bootstrap(void) {
+  mtask *task = current_task();
   if (kernel_lock_depth() == 0) {
     kernel_lock_enter();
   }
-  if (smp_current_cpu() == 0) {
-    smp_release_secondary_cpus();
-  }
-  mtask *task = current_task();
   void (*entry)(void) = (void (*)(void))task->entry;
   entry();
   task_exit(0);

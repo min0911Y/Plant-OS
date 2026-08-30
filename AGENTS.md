@@ -10,15 +10,16 @@
 ## 项目定位
 
 - 本文件适用于整个仓库。
-- Plant OS 是用于学习操作系统原理的 32 位 x86（i386）操作系统，运行于保护模式，采用 BIOS/磁盘镜像启动方式。它不是宿主系统上的普通应用。
+- Plant OS 是用于学习操作系统原理的 32 位 x86（i386）操作系统，运行于保护模式，支持现有 BIOS/FAT 磁盘镜像启动和 Limine BIOS LiveCD 启动。它不是宿主系统上的普通应用。
 - 内核、加载器和用户程序都是 freestanding 代码：不能默认使用宿主 libc、线程库、文件系统语义或现代 CPU 运行时。
 - 当前仓库的有效实现是 `kernel/` 下的 32 位内核。仓库中没有 `kernel64/`；`.gitignore`、`doc/README_zh-cn.md` 和 `scripts/build_rootfs.sh` 中残留的 `kernel64` 内容属于旧版本痕迹，不要据此创建或修改 64 位实现。
 - 构建文件和当前源码比 README 中的历史描述更可信。发现两者不一致时，以实际 `Makefile` 和调用链为准，并在修改中指出差异。
 
 ## 启动与运行模型
 
-- `kernel/boot/` 生成启动扇区；`loader/` 生成 `loader/out/dosldr.bin`，链接地址为 `0x100000`，入口为 `loader_main`；加载器再寻找并装载 `kernel.bin`。
-- 内核生成 `kernel/obj/kernel.bin`，链接地址为 `0x280000`，入口为 `KernelMain`（`kernel/dos/init/main.c`）。
+- `kernel/boot/` 生成现有磁盘启动扇区；`loader/` 生成 `loader/out/dosldr.bin`，链接地址为 `0x100000`，入口为 `loader_main`；加载器再寻找并装载 `kernel.bin`。这条链继续由 `boot.img`/`img_run` 使用。
+- 内核生成 `kernel/obj/kernel.bin`，链接地址为 `0x280000`。ELF 入口是 `kernel/arch/x86/boot_entry.asm` 的 `x86_boot_entry`：它同时接受现有 DOSLDR 入口状态和 Limine Multiboot2 状态，建立固定的平坦 GDT/内核栈后调用 `KernelMain`（`kernel/dos/init/main.c`）。Multiboot2 header 必须保留在文件前 32 KiB 内，链接布局由 `kernel/arch/x86/kernel.ld` 固定，并断言内核不覆盖 `0x400000` 的 bootstrap 页表。
+- Limine LiveCD 默认直接加载 `kernel.bin` 和一个 FAT initramfs module，不经过 DOSLDR。x86 早期入口依据 Multiboot2 memory map 把 module 搬到 KASAN shadow 之后的首个可用物理区；分页初始化后必须立刻经正式 page API 保留这些页，内存探测不得改写 module。initramfs 注册为可写但不持久化的 `R:` 虚拟盘，系统启动只挂载该盘作为根。Limine 菜单的第二项只 chainload 第一块硬盘上的现有 Plant OS 磁盘引导器。
 - 用户程序统一链接到 `0x70000000`，链接入口为 `Main`。`apps/libp/entry.c` 或 `apps/libp/cppstart.cpp` 完成运行时初始化后调用应用自己的 `main(argc, argv)`。
 - 内核与应用共享的是项目自定义 ABI，不是 Linux ABI。地址、结构体布局、寄存器约定和中断号都可能是兼容性边界；不要随意改成宿主平台惯例。
 
@@ -36,7 +37,7 @@
 <!-- 过时：用户态 shell 及安装工具通过 `rdrv` 重挂载磁盘，并由调用方直接传递未经校验的盘符。 -->
 - `apps/psh` 中严格无参的简单内建命令（`cls`、`mem`、`pause`、`lsmod`）通过只读命令表分派；`dir` 独立接受零或一个目录参数，零参数传空路径枚举当前目录，有参数则直接传给 `list_directory`。有参命令继续按各自语义解析和校验，不要把不同参数模型硬塞进同一处理表。
 <!-- 过时：`apps/psh` 的所有简单无参内建命令都在主命令函数中使用连续 `if/else` 分派。 -->
-- `apps/psh -c` 直接把 `argv[2..]` 作为命令 argv 交给统一分派，不拼接后重新解析。交互输入也使用 `apps/libp/runtime_args.c` 的同一 quote/backslash-aware parser；所有内建命令校验 exact argc，外部命令通过共享的可逆 builder 生成执行命令行。
+- `apps/psh -c` 直接把 `argv[2..]` 作为命令 argv 交给统一分派，不拼接后重新解析。交互输入也使用 `apps/libp/runtime_args.c` 的同一 quote/backslash-aware parser；所有内建命令校验 exact argc，外部命令通过共享的可逆 builder 生成执行命令行。外部命令解析只接受常规文件，路径存在但为目录时必须继续尝试补 `.bin` 和搜索 `path`，因此 `/tcc` 目录不能遮蔽 `tcc.bin`。
 <!-- 过时：`psh -c` 只接受一个不含空格的命令参数。 -->
 <!-- 过时：`psh -c` 把 `argv[2..]` 用裸空格拼接成字符串，再交给 shell 的第二套解析器。 -->
 - `apps/psh` 与 `apps/lua` 的交互行编辑统一使用 `apps/third_party/pl_readline` 及其共享 Plant OS 按键适配；适配层必须把 `KEY_INPUT_*` 方向键及 Enter、Backspace、Tab 映射为库按键，只丢弃 `getch()` 返回的 `0` 与其他无字符控制值，不能再把它们写进命令行或恢复另一套本地编辑器。psh 的补全词表只含内建命令，首词统一用 `PL_COLOR_CYAN` 染色，文件路径暂不参与补全；Lua REPL 只使用行编辑与历史，以 `PL_ENABLE_INTELLISENSE=0` 配合普通重绘对象，不链接补全和高亮代码。该移植版将内部 `pl_list_*` 名称空间化以避开 MST 的链表 API，并依赖文本与高文本 TTY 保持标准 CR 和 `CSI K` 语义。
@@ -49,6 +50,7 @@
 <!-- 过时：GDT/IDT 地址、descriptor/TSS 布局和 `set_segmdesc`/`set_gatedesc`/`load_*` 从 `define.h`、`dos.h` 暴露给通用代码。 -->
 - `kernel/res/`：打包进镜像的资源；资源是否进入镜像由 `kernel/Makefile` 中显式的 `mcopy` 命令决定。
 - `loader/`：独立的加载器，包含自己的驱动、文件系统和基础库实现。不要假设它能直接复用内核实现。
+- DOSLDR 的软驱驱动必须区分控制器、介质与可读块设备：无控制器或无介质时仍以 `VDISK_TYPE_UNAVAILABLE` 保留 A: 槽位，保证后续保留槽与首块 IDE 磁盘继续落在 B:/C:，但 `DiskReady()` 只能对具有读回调的 `VDISK_TYPE_BLOCK` 返回真。FDC disk-change 位必须通过强制步进/重新校准后复检来判定介质；无介质直接返回并清零失败读缓冲，禁止递归重进 `fdc_rw`。所有 IRQ 等待必须有界，介质移除后注销软驱，不能无限忙等或继续把陈旧 DMA 缓冲当作有效扇区。
 - `apps/include/`：用户态头文件和公开 ABI。
 - `apps/libp/`：用户态 C/C++ 启动代码、系统调用、内存/标准库、IPC/RPC 等基础库。
 - `apps/<name>/`：各个用户程序；通常每个目录有自己的 `Makefile`，产物写入 `apps/out/`。
@@ -57,10 +59,12 @@
 - `font/`、`kernel/res/` 包含当前镜像使用的运行时二进制资源；`kernel/iso/` 中只有 `modules/*` 被当前 `kernel/Makefile` 打包，其余内容是未接入当前 32 位 `Mimg` 流程的旧 ISO 暂存资源。不要重新提交 `a.iso`、`cd.iso` 或 `iso/psh.bin` 等旧生成物。
 - `chat/`、`netgobang/`、`fattools/` 是宿主侧辅助/演示程序，不属于内核或 Plant OS 用户态 ABI。
 - `scripts/kernel-perf.py` 用于把串口性能采样转换为 folded stacks；`scripts/build_rootfs.sh` 当前引用已不存在的 `kernel64`，不是 32 位主构建流程的一部分。
+- `scripts/build-livecd.sh` 从当前 `boot.img` 提取通用运行时文件，使用当前 `kernel.bin` 与 `apps/out/*.bin` 覆盖构建产物后生成 FAT initramfs；`boot.bin`、`boot32.bin`、`boot_pfs.bin` 与规范名称 `DOSLDR.bin` 必须作为 FAT/PFS 格式化及硬盘安装资源保留，但不得把 DOSLDR 或整个 `boot.img` 配置为 Limine 默认启动 module。应用默认位于根目录，`doom.bin` 与 `doom1.wad` 位于 `/games`，`apps/lite-1.11/data` 整体复制到 `/data`，不得手工枚举其 core、fonts、plugins、user 子目录。TCC 文件沿用 `tcc.img` 布局：`apps/include` 完整复制到 `/tcc/include`，静态库放入 `/tcc/lib`，`libtcc1.a` 单独放入 `/tcc/inst`，`apps/tcc` 构建的 `crti.obj` 作为 `/tcc/crt/crti.o` 供 LiveCD 直接链接，根目录的 `crti.c` 继续供 `tccinst.bin` 使用。脚本最后用固定校验值的 Limine 12.6.1 构造 BIOS ISO。
+- LiveCD 的 `setup.mst` 不使用静态文件清单：initramfs 首次填充后，`scripts/build-livecd.sh` 必须通过 `mshortname` 从镜像本身取得每个路径的真实 FAT 别名，再自动生成覆盖全部目录和文件的清单并写回镜像。每个条目记录源 FAT 短路径、PFS 原路径和 FAT 8.3 目标路径；`DOSLDR.bin` 必须是第一个文件条目，`kernel.bin` 与 `setup.mst` 本身也必须包含。`setup1.bin` 从当前源盘复制到 C:，继续允许用户选择 FAT/PFS：FAT 使用清单短名，PFS 保留原名，不得因存在长文件名而强制 PFS，也不得恢复 A:/多软盘 `next` 流程。
 
 ## 构建环境与命令
 
-需要 GNU make、支持 `-m32`/`elf_i386` 的 GCC/G++ 与 binutils、NASM、mtools（`mformat`、`mcopy`）和 QEMU（`qemu-system-i386`、`qemu-img`）。代码还假定编译器支持 freestanding、无 PIE 的 32 位输出。
+需要 GNU make、支持 `-m32`/`elf_i386` 的 GCC/G++ 与 binutils、NASM、mtools（`mformat`、`mcopy`）和 QEMU（`qemu-system-i386`、`qemu-img`）。LiveCD 还需要 `curl`、`tar` 以及 `xorriso` 或 `genisoimage`。代码还假定编译器支持 freestanding、无 PIE 的 32 位输出。
 
 干净工作区的标准构建顺序是：
 
@@ -76,6 +80,7 @@ make -C kernel
 - `loader` 生成内核制镜像时需要的 `loader/out/dosldr.bin`。
 - `kernel` 最后编译内核、模块并创建/填充 `kernel/boot.img`、`kernel/disk.img` 和 `kernel/img/*.img`。
 - `make -C kernel full` 会构建应用，但仍假定加载器和部分已有产物可用，不能替代上面的干净构建顺序。
+- 标准构建完成后，`make -C kernel livecd` 生成 `kernel/plant-os-livecd.iso`；首次构建会下载并校验固定版本 Limine。`make -C kernel livecd_run` 从 CD 启动并把 `boot.img` 作为第一硬盘附加，以便菜单第二项验证现有引导链。
 
 常用的局部构建方式：
 
@@ -110,6 +115,7 @@ make -C kernel MEMTEST=0 MEMSIZE_MB=512
 
 - 仓库没有统一的宿主侧自动化测试套件。最低验证要求是：相关局部构建成功；涉及 ABI、链接、启动或镜像内容时再执行完整构建和 QEMU 冒烟测试。
 - 当前 `Mimg` 规则生成并填充 `boot.img`/`disk.img`。`make -C kernel img_run` 使用这套镜像并启动 QEMU，是与当前制镜像流程最一致的现成目标。
+- LiveCD 改动至少同时验证 `kernel.bin` 只有规范的 `PT_LOAD` program headers、Multiboot2 header 位于前 32 KiB、默认 Limine+initramfs 路径冷启动到 `init.bin`/`psh.bin`，以及菜单硬盘 chainload 项仍能通过现有 DOSLDR 启动。自动选择菜单项时临时改 `kernel/res/limine.conf` 的 default entry，测试后立即恢复；仍禁止 `sendkey`。
 - `make -C kernel run`、`full_run`、`kernel/run.sh` 和 `bochsrc.txt` 仍引用 `kernel/img/Powerint_DOS_386.img`，但当前 `Mimg` 不生成该文件；除非任务专门修复旧软盘流程，不要把这些目标成功与否当作唯一验证标准。
 - 现成运行目标使用 KVM/`-cpu host`。在没有 KVM 的环境中，应基于同一镜像手动运行 QEMU，并去掉 `-enable-kvm -cpu host`，而不是修改内核来迁就宿主环境。
 - QEMU 命令使用 `-serial stdio`；启动、崩溃和测试输出优先从串口收集。不要只依赖图形界面现象。
@@ -199,6 +205,9 @@ python3 scripts/kernel-perf.py \
 - x86 软件任务上下文统一使用 `arch/x86/task.h` 的 `arch_task_context_t`；调度器通过 `arch_task_switch`/`arch_task_start` 显式传入当前 context 槽、下一 context、CR3 和 scheduler current 槽/任务。架构汇编不得读取 `mtask` 字段偏移或全局 `current`；fork 中断帧通过 `arch_task_interrupt_return` 恢复。
 - `task_next()` 在没有其他 runnable 任务或选出的 next 就是 current 时必须直接返回，禁止调用 `arch_task_switch` 自切换；自切换会先覆盖当前 context 槽、再加载调用前取得的旧 context 指针，造成内核栈回退和返回地址损坏。
 <!-- 过时：`define.h` 定义通用 `stack_frame`，`mtask->esp`/`pde` 依赖 0/4 字节固定偏移，切换汇编直接读全局 `current`，fork 通过 `handlers.asm` 的拼写错误入口 `interrput_exit` 恢复。 -->
+- SMP 调度器启动必须在所有 per-CPU idle 与 bootstrap task 发布完成后关中断发布 `scheduler_active`，再由 BSP 单独直接启动 bootstrap task，不能先进入 idle 或让 BSP/AP 并发执行首次 context start。显式 bootstrap 入口只请求 AP release，真正的 release 必须由 BSP 最外层 kernel lock 在 owner 清零后提交，禁止在仍持有大内核锁时唤醒 AP。AP 只启动自己的 idle，通用 task bootstrap 不承担 SMP release 等一次性全局职责。
+- 大内核自旋锁使用 test-and-test-and-set：锁被占用时只读 owner 并执行 `pause`，观察到空闲后才尝试一次 locked compare-exchange；禁止在等待循环的每次迭代都执行 `lock cmpxchg`，否则 VirtualBox 等虚拟化环境会因总线锁争用导致锁持有者饥饿。
+- online 但尚未 release 的 AP 必须在本地 APIC 已启用、定时器尚未启动的状态下用 `sti; hlt; cli` 休眠；BSP 提交 release 后通过专用 `X86_VECTOR_SMP_WAKE` IPI 唤醒，wake handler 只发送 Local APIC EOI，不获取 kernel lock 或进入调度器。AP 醒来确认 release 后才初始化本地定时器并启动 idle，禁止恢复 `pause` 忙等 parked AP。
 - 正在运行的内核 C 栈上切换用户态时，C 只在安全的本地对象中完成 frame 构造，最后一步调用 `kernel/arch/x86/user_return.asm` 的 noreturn helper；helper 先 `cli`，在当前 ring0 栈真实 `sub`/复制完整 frame，再原子恢复寄存器并 `iretd`。不得在 C 中把“当前 ESP 减 frame 大小”当作已预留空间。
 <!-- 过时：用户态切换函数进入时立即在 `task->top - sizeof(frame)` 写入最终中断帧。 -->
 <!-- 过时：C 内联 helper 只计算 `ESP - sizeof(frame)` 后直接写入，未实际调整栈指针保留空间。 -->
@@ -245,7 +254,7 @@ python3 scripts/kernel-perf.py \
 - 应用通常包含 `../defs.mk`，定义 32 位 freestanding 编译参数、`Main` 入口和基础库链接方式。沿用相邻小型应用的 `Makefile`，不要使用宿主默认链接规则。
 - `apps/libp` 的 `mkdir`、`chdir` 等文件系统包装遵循 POSIX 返回语义：成功返回 `0`，失败返回 `-1` 并设置 `errno`；调用方必须用 `== 0`/`!= 0` 判断，不得恢复旧布尔式 `!mkdir(...)`。需要接受已存在目录时，仅在 `errno == EEXIST` 且 `stat` 确认目标为目录后继续。
 - 新应用必须加入 `apps/Makefile` 才会进入全量构建。
-- 如果应用需要出现在系统镜像中，还必须在 `kernel/Makefile` 的合适镜像段添加显式 `mcopy`；仅生成 `apps/out/<name>.bin` 不会自动打包。
+- 非 LiveCD 镜像仍由 `kernel/Makefile` 的显式 `mcopy` 控制；LiveCD 则动态收录全部 `apps/out/*.bin`，不要再为 LiveCD 维护第二份应用列表。
 - C/C++ 应用实现常规的 `main`，不要绕过 `apps/libp` 的 `Main` 启动包装，除非任务明确要求自定义运行时。
 - 修改用户态库时检查 C 与 C++ 两套归档：`libp.a`、`libcpps.a`，以及 `libabi.a`、`libgui.a` 等相关产物。
 
@@ -259,7 +268,9 @@ python3 scripts/kernel-perf.py \
 - rename 由 VFS 独立解析两个 parent+leaf，跨挂载必须失败；当前 FAT/PFS 仅支持同目录 rename。仍被打开的文件或作为 cwd/祖先的目录在 unlink/rename 时返回 `EBUSY`。
 - 内核虚拟盘 `disk_read` 的物理扇区固定为 512 字节，因此当前 FAT 实现只接受 BPB `BytsPerSec == 512`。多簇目录缓冲区的每簇偏移必须使用 `ClustnoBytes`，数据簇号必须先验证 `>= 2` 且整簇落在磁盘范围内。
 - 虚拟盘可通过 `register_vdisk_at` 预留 ABI 盘符；软盘、DEVFS 和 legacy IDE 分别固定使用 `A:`、`B:` 与 `C:` 起的设备槽，不能退回 first-free 注册导致 IDE 回调访问的设备编号与 `vdisk` 容量元数据错位。ATA IDENTIFY 声明 48-bit LBA 但容量字段为零时必须回退 28-bit 容量。
+- 块文件系统探测必须先检查 `vdisk_type`：FAT/PFS 只读取 512-byte 块盘，ISO9660 只通过 `CDROM_Read` 读取 2048-byte 光盘。禁止让 FAT/PFS 用 `disk_read` 探测 ATAPI 盘，否则单扇区探测会把 2048 字节写入 512 字节缓冲并破坏堆。
 - FAT format 根据磁盘容量选择 FAT12/16/32，迭代计算 FAT 长度并只使用 2 的幂次 sectors-per-cluster；FAT 表和根目录必须完整清零、写入标准保留项，并回读 boot sector、两份 FAT 和根目录后才报告成功。不得恢复未初始化格式化缓冲区或任意非 2 次幂簇大小。
+- VFS format syscall 返回标准状态：内核 `vfs_format` 成功为 `VFS_OK`，忙、参数错误、不支持的文件系统及底层 I/O 失败返回对应负错误；`libp format()` 统一转换为成功 `0`、失败 `-1` 并设置 `errno`。psh 必须据此区分占用、不支持和 I/O 错误，不得恢复无论原因都提示“切换盘符并关闭程序”的布尔接口。
 - FAT 表 API 的长度统一表示条目数，循环使用 `i < count`；FAT12 奇数末项、链目标、保留标记和磁盘范围必须在写入缓存前验证，损坏 FAT 使 `init_fs` 失败。新目录只写 `.`、`..` 和标准 `0x00` 终止项，不创建 `NULL` 伪文件或额外占用簇。
 <!-- 过时：FAT 保存长度表示“末项偏移”并使用 `i <= length`，新目录额外创建名为 `NULL` 的占位文件。 -->
 - FAT mkdir 直接持有 parent slot、child cluster 和可选的 parent-extension cluster；所有分配、list append 与 realloc 在提交 parent entry/FAT 前完成并可逆序回滚，提交后直接写标准目录簇，不得恢复 `mkfile -> 再查路径 -> del 回滚` 的间接流程。

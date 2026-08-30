@@ -5,6 +5,7 @@ TOOLPATH := ../../tools/
 MAKE     := $(TOOLPATH)make.exe -r
 obj_driver = $(out_path_src)acpi.o $(out_path_src)beep.o $(out_path_src)cmos.o \
 	     $(out_path_src)serial.o $(out_path_src)dma.o $(out_path_src)floppy.o \
+	     $(out_path_src)initramfs.o \
 	     $(out_path_src)harddisk.o $(out_path_src)keyboard.o $(out_path_src)mouse.o \
 	     $(out_path_src)pci.o $(out_path_src)pcnet.o $(out_path_src)vbe.o $(out_path_src)pic.o \
 	     $(out_path_src)vga.o $(out_path_src)sb16.o $(out_path_src)driver.o $(out_path_src)timer.o \

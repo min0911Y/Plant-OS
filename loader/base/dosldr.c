@@ -41,7 +41,6 @@ int is_ide_device(uint8_t bus, uint8_t device, uint8_t function) {
         return 0; // 不是IDE设备
     }
 }
-int get_vdisk_type(char drive);
 void DOSLDR_MAIN() {
   struct MEMMAN *memman = (struct MEMMAN *)(uintptr_t)MEMMAN_ADDR;
   unsigned int memtotal;
@@ -59,9 +58,9 @@ void DOSLDR_MAIN() {
   Register_fat_fileSys();
   reg_pfs();
   vdisk vd;
-  vd.flag = 1;
-  vd.Read = NULL;
-  vd.Write = NULL;
+  memset(&vd, 0, sizeof(vd));
+  strcpy(vd.DriveName, "reserved");
+  vd.flag = VDISK_TYPE_UNAVAILABLE;
   vd.size = 1;
   register_vdisk(vd);
   ide_initialize(0x1F0, 0x3F6, 0x170, 0x376, 0x000);
@@ -95,7 +94,7 @@ void DOSLDR_MAIN() {
     }
   }
   default_drive = default_drive_number + 0x41;
-  if(get_vdisk_type(default_drive) != 1) {
+  if (get_vdisk_type(default_drive) != VDISK_TYPE_BLOCK) {
     default_drive++;
   }
   NowTask()->drive = default_drive;

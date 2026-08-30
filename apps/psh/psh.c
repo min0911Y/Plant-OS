@@ -1,4 +1,5 @@
 #include <ctype.h>
+#include <errno.h>
 #include <limits.h>
 #include <mst.h>
 #include <pl_readline.h>
@@ -11,9 +12,11 @@
 static char *search_path;
 static MST_Object *environment;
 
-static int file_size(const char *path) {
+static int regular_file_size(const char *path) {
   struct stat status;
-  return stat(path, &status) == 0 ? (int)status.st_size : -1;
+  return stat(path, &status) == 0 && S_ISREG(status.st_mode)
+             ? (int)status.st_size
+             : -1;
 }
 
 static char *env_read(char *name) {
@@ -28,7 +31,7 @@ static bool env_init(int command_mode) {
   search_path = "";
   environment = NULL;
 
-  int size = file_size("env.cfg");
+  int size = regular_file_size("env.cfg");
   if (size < 0) {
     if (command_mode) {
       return true;
@@ -38,7 +41,7 @@ static bool env_init(int command_mode) {
       fwrite("# created by psh", 1, 16, created);
       fclose(created);
     }
-    size = file_size("env.cfg");
+    size = regular_file_size("env.cfg");
     if (size < 0) {
       printf("Unable to create env.cfg.\n");
       return false;
@@ -129,7 +132,7 @@ static bool find_in_search_path(const char *file_name, char **result) {
       path[offset++] = '\\';
     }
     memcpy(path + offset, file_name, file_name_length + 1);
-    if (file_size(path) != -1) {
+    if (regular_file_size(path) != -1) {
       *result = path;
       return true;
     }
@@ -216,9 +219,9 @@ static int execute_external_command(int argc, char **argv, int *ok) {
   memcpy(name, argv[0], name_length + 1);
   char *path = NULL;
   char *executable = name;
-  if (file_size(name) == -1 && !find_in_search_path(name, &path)) {
+  if (regular_file_size(name) == -1 && !find_in_search_path(name, &path)) {
     memcpy(name + name_length, ".bin", sizeof(".bin"));
-    if (file_size(name) == -1 && !find_in_search_path(name, &path)) {
+    if (regular_file_size(name) == -1 && !find_in_search_path(name, &path)) {
       free(name);
       *ok = 0;
       return 0;
@@ -310,7 +313,7 @@ static int run_command(int argc, char **argv) {
       return 1;
     }
   } else if (strcmp("mkfile", argv[0]) == 0) {
-    FILE *created = argc == 2 && file_size(argv[1]) < 0
+    FILE *created = argc == 2 && regular_file_size(argv[1]) < 0
                         ? fopen(argv[1], "wb")
                         : NULL;
     if (created == NULL) {
@@ -323,7 +326,7 @@ static int run_command(int argc, char **argv) {
       printf("type <file>\n");
       return 1;
     }
-    int content_size = file_size(argv[1]);
+    int content_size = regular_file_size(argv[1]);
     if (content_size < 0) {
       printf("File not found.\n");
       return 1;
@@ -384,13 +387,21 @@ static int run_command(int argc, char **argv) {
       return 1;
     }
     bool was_mounted = vfs_check_mount(normalized_drive);
-    if (!format(normalized_drive, argv[2])) {
+    if (format(normalized_drive, argv[2]) != 0) {
+      int error = errno;
       if (was_mounted && !vfs_check_mount(normalized_drive)) {
         vfs_mount(normalized_drive, normalized_drive);
       }
-      printf("Unable to format drive %c:. Switch away from it and close "
-             "programs using it.\n",
-             normalized_drive);
+      if (error == EBUSY) {
+        printf("Drive %c: is in use. Switch away from it and close programs "
+               "using it.\n",
+               normalized_drive);
+      } else if (error == EOPNOTSUPP) {
+        printf("Unsupported filesystem: %s.\n", argv[2]);
+      } else {
+        printf("Unable to format drive %c: as %s: %s.\n", normalized_drive,
+               argv[2], strerror(error));
+      }
       return 1;
     }
     if (!vfs_check_mount(normalized_drive) &&

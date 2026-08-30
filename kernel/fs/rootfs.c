@@ -84,7 +84,7 @@ void init_devfs(void) {
   disk.Read = dev_read;
   disk.Write = dev_write;
   disk.size = 114514;
-  disk.flag = 1;
+  disk.flag = VDISK_TYPE_BLOCK;
   register_vdisk_at('B', disk);
 
   static const vfs_filesystem_t filesystem = {

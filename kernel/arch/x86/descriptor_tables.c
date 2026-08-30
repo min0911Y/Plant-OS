@@ -240,6 +240,8 @@ void arch_interrupt_init(void) {
                           X86_USER_ACCESS(X86_ACCESS_INTERRUPT_GATE));
   x86_interrupt_entry_set(X86_VECTOR_RESCHEDULE, x86_reschedule_entry,
                           X86_ACCESS_INTERRUPT_GATE);
+  x86_interrupt_entry_set(X86_VECTOR_SMP_WAKE, x86_smp_wake_entry,
+                          X86_ACCESS_INTERRUPT_GATE);
 
   x86_descriptor_table_pointer_t idt_pointer = {
       .limit = X86_IDT_LIMIT,

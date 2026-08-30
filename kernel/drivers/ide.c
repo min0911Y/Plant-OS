@@ -582,7 +582,8 @@ void ide_initialize(void) {
     vdisk disk = {0};
     disk.Read = ide_vdisk_read;
     disk.Write = ide_vdisk_write;
-    disk.flag = device->type == IDE_ATAPI ? 2 : 1;
+    disk.flag = device->type == IDE_ATAPI ? VDISK_TYPE_OPTICAL
+                                          : VDISK_TYPE_BLOCK;
     disk.size = device->sectors * IDE_ATA_SECTOR_BYTES;
     disk.max_transfer_sectors =
         device->type == IDE_ATAPI ? IDE_DMA_MAX_ATAPI_SECTORS

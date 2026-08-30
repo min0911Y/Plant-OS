@@ -210,7 +210,7 @@ int format(unsigned disk, char *filesystem) {
   vfs_syscall_request_t request = {0};
   request.arguments.format.disk = disk;
   request.arguments.format.filesystem = (uint32_t)(uintptr_t)filesystem;
-  return vfs_invoke(VFS_SYSCALL_FORMAT, &request) > 0;
+  return vfs_result(vfs_invoke(VFS_SYSCALL_FORMAT, &request));
 }
 
 int Copy(char *source, char *destination) {

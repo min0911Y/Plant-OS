@@ -910,11 +910,11 @@ bool vfs_check_mount(uint8_t drive) {
   return mounted;
 }
 
-bool vfs_format(uint8_t disk_number, const char *filesystem_name) {
+int vfs_format(uint8_t disk_number, const char *filesystem_name) {
   uint8_t normalized;
   if (!vfs_normalize_drive(disk_number, &normalized) ||
       filesystem_name == NULL) {
-    return false;
+    return VFS_ERROR_INVALID;
   }
   const vfs_filesystem_t *filesystem = NULL;
   for (uint32_t index = 0; index < VFS_MAX_FILESYSTEMS; index++) {
@@ -925,7 +925,7 @@ bool vfs_format(uint8_t disk_number, const char *filesystem_name) {
     }
   }
   if (filesystem == NULL || filesystem->format == NULL) {
-    return false;
+    return VFS_ERROR_NOT_SUPPORTED;
   }
   uint32_t disk_index = normalized - 'A';
   struct vfs_mount *unused = NULL;
@@ -933,7 +933,7 @@ bool vfs_format(uint8_t disk_number, const char *filesystem_name) {
   if (vfs_disks[disk_index].formatting ||
       vfs_disks[disk_index].retired_count != 0) {
     irq_restore(state);
-    return false;
+    return VFS_ERROR_BUSY;
   }
   for (uint32_t index = 0; index < VFS_MAX_MOUNTS; index++) {
     struct vfs_mount *mount = vfs_mounts[index];
@@ -941,7 +941,7 @@ bool vfs_format(uint8_t disk_number, const char *filesystem_name) {
       if (mount->state != VFS_MOUNT_ACTIVE || mount->references != 0 ||
           unused != NULL) {
         irq_restore(state);
-        return false;
+        return VFS_ERROR_BUSY;
       }
       unused = mount;
       vfs_mounts[index] = NULL;
@@ -953,7 +953,7 @@ bool vfs_format(uint8_t disk_number, const char *filesystem_name) {
   if (unused != NULL) {
     vfs_destroy_mount(unused);
   }
-  bool result = filesystem->format(normalized);
+  int result = filesystem->format(normalized) ? VFS_OK : VFS_ERROR_IO;
   state = irq_save();
   vfs_disks[disk_index].formatting = false;
   irq_restore(state);

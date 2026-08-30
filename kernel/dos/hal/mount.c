@@ -31,7 +31,7 @@ int mount(char *fileName) {
         fclose(fp);
         return 0;
       }
-      md[i].vd.flag = 1;
+      md[i].vd.flag = VDISK_TYPE_BLOCK;
       md[i].vd.Read = MountDiskRead;
       md[i].vd.Write = MountDiskWrite;
       md[i].vd.size = size;

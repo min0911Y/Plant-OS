@@ -3,11 +3,13 @@
 
 #include <arch/x86/fpu.h>
 #include <arch/x86/task.h>
+#include <boot.h>
 #include <stddef.h>
 
 struct mtask;
 
 void arch_boot_verify(void);
+bool arch_boot_initramfs(boot_module_t *module);
 void arch_interrupt_init(void);
 void arch_interrupt_init_secondary(void);
 void arch_task_state_init(void);

@@ -118,6 +118,8 @@ static unsigned calibrate_base_count_fallback(void) {
 #endif
 
 void sysinit(void) {
+  boot_module_t initramfs = {0};
+  bool has_initramfs = arch_boot_initramfs(&initramfs);
   struct FIFO8 keyfifo, mousefifo;
   struct FIFO8 keyfifo_sr1, keyfifo_sr2;
   struct FIFO8 mousefifo_sr1, mousefifo_sr2;
@@ -129,6 +131,11 @@ void sysinit(void) {
   char mousebuf_sr2[128];
 
   init_page(); // 初始化分页与 WP
+  if (has_initramfs &&
+      !page_reserve_physical_range(initramfs.address, initramfs.size)) {
+    Panic_K("unable to reserve initramfs memory");
+    return;
+  }
   arch_interrupt_init();
   init_pic();
   init_pit();
@@ -180,7 +187,8 @@ void sysinit(void) {
   printk("Welcome to Plant OS Kernel!!!!!!\n");
 #ifndef KERNEL_DISABLE_MEMTEST
   logk("sysinit: memtest start\n");
-  memsize = memtest(0x00400000, 0xbfffffff);
+  memsize = memtest(0x00400000, 0xbfffffff, initramfs.address,
+                    has_initramfs ? initramfs.size : 0);
   logk("sysinit: memtest done memsize=%08x\n", memsize);
 #else
   memsize = KERNEL_MEMSIZE_BYTES;
@@ -188,6 +196,13 @@ void sysinit(void) {
   logk("sysinit: memtest disabled memsize=%08x memsize_mb=%u\n", memsize,
        KERNEL_MEMSIZE_MB);
 #endif
+
+  if (has_initramfs &&
+      (initramfs.address >= memsize ||
+       initramfs.size > memsize - initramfs.address)) {
+    Panic_K("initramfs lies outside detected memory");
+    return;
+  }
 
   if (memsize / (1024 * 1024) < 256) {
     while (1) {
@@ -203,6 +218,10 @@ void sysinit(void) {
   logk("sysinit: init_vdisk start\n");
   init_vdisk();
   logk("sysinit: init_vdisk done\n");
+  if (has_initramfs && !boot_initramfs_register(&initramfs)) {
+    Panic_K("unable to register initramfs");
+    return;
+  }
   printk("VFS\n");
   logk("sysinit: init_vfs start\n");
   init_vfs();

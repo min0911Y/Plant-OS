@@ -129,6 +129,7 @@ void apic_send_init_ipi(uint32_t apic_id);
 void apic_send_startup_ipi(uint32_t apic_id, uint32_t vector);
 void apic_send_fixed_ipi(uint32_t apic_id, uint8_t vector);
 void apic_init_secondary(void);
+void apic_timer_init_secondary(void);
 // vbe.c
 int SwitchVBEMode(int mode);
 int check_vbe_mode(int mode, struct VBEINFO *vinfo);
@@ -170,6 +171,7 @@ int logout_vdisk(char drive);
 int rw_vdisk(char drive, unsigned int lba, unsigned char *buffer,
              unsigned int number, int read);
 bool have_vdisk(char drive);
+vdisk_type_t vdisk_type(char drive);
 char first_vdisk(void);
 char next_vdisk(char drive);
 // timer.c

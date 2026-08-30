@@ -77,6 +77,7 @@ void task_close_tty(struct tty *tty, struct tty *fallback);
 void signal_deal(void);
 // page.c
 void init_page(void);
+bool page_reserve_physical_range(uintptr_t start, uint32_t size);
 void pf_set(unsigned int memsize);
 int get_line_address(int t, int p, int o);
 int get_page_from_line_address(int line_address);
@@ -157,7 +158,8 @@ void task_sr2();
 void tty_stop_cursor_moving(struct tty *t);
 void tty_start_curor_moving(struct tty *t);
 // mem.c
-unsigned int memtest(unsigned int start, unsigned int end);
+unsigned int memtest(unsigned int start, unsigned int end,
+                     uintptr_t preserved_start, uint32_t preserved_size);
 void init_iso9660(void);
 void reg_pfs(void);
 int into_mtask(void);

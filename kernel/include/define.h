@@ -800,12 +800,18 @@ struct IDEHardDiskInfomationBlock {
   char ID[40];
 };
 
+typedef enum {
+  VDISK_TYPE_NONE,
+  VDISK_TYPE_BLOCK,
+  VDISK_TYPE_OPTICAL,
+} vdisk_type_t;
+
 typedef struct {
   void (*Read)(char drive, unsigned char *buffer, unsigned int number,
                unsigned int lba);
   void (*Write)(char drive, unsigned char *buffer, unsigned int number,
                 unsigned int lba);
-  int flag;
+  vdisk_type_t flag;
   unsigned int size; // 大小
   unsigned int max_transfer_sectors;
   char DriveName[50];

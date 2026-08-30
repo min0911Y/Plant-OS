@@ -1936,7 +1936,7 @@ static void fat_delete_fs(struct vfs_mount *vfs) {
   vfs_mount_set_data(vfs, NULL);
 }
 bool fat_check(uint8_t disk_number) {
-  if (!DiskReady(disk_number)) {
+  if (vdisk_type(disk_number) != VDISK_TYPE_BLOCK) {
     return false;
   }
   uint8_t *boot_sec = malloc(512);

@@ -6,9 +6,6 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <syscall.h>
-#define All_Kernel_files_count 10
-#define All_App_files_count 30
-#define All_Res_files_count 21
 #define Line_X 205
 #define Line_Y 186
 #define Left_Up 201
@@ -17,11 +14,7 @@
 #define Right_Down 188
 #define T_DrawBox(x, y, w, h, c) Text_Draw_Box((y), (x), (h) + y, (w) + x, (c))
 
-static bool copy_file(char *source, char *destination) {
-  return Copy(source, destination) == 0;
-}
-
-void Box(int x, int y, int w, int h) {
+static void Box(int x, int y, int w, int h) {
   goto_xy(x, y);
   putch(Left_Up);
   w--;
@@ -48,13 +41,13 @@ void Box(int x, int y, int w, int h) {
   goto_xy(x + w, y + 1 + h - 1);
   putch(Right_Down);
 }
-void Set_Loading(int percentage) {
+static void Set_Loading(int percentage) {
   T_DrawBox(6, 19, 67, 1, 0x1f);
   float p = ((float)percentage / 100.0) * 67;
   int percent = (int)p;
   T_DrawBox(6, 19, percent, 1, 0x5f);
 }
-void putSpace(int x, int y, int w, int h) {
+static void putSpace(int x, int y, int w, int h) {
   goto_xy(x, y);
   for (int i = 0; i < h; i++) {
     goto_xy(x, y + i);
@@ -63,7 +56,7 @@ void putSpace(int x, int y, int w, int h) {
     }
   }
 }
-int OKCancelMsg(char *msg) {
+static int OKCancelMsg(char *msg) {
   putSpace(40 - (strlen(msg) + 15) / 2, 4, strlen(msg) + 20, 8);
   Box(40 - (strlen(msg) + 15) / 2, 4, strlen(msg) + 15, 8);
   goto_xy(40 - (strlen(msg) + 15) / 2 + 1, 4);
@@ -98,7 +91,7 @@ int OKCancelMsg(char *msg) {
   putSpace(40 - (strlen(msg) + 15) / 2, 4, strlen(msg) + 15, 8);
   return res;
 }
-int OKMsg(char *msg) {
+static int OKMsg(char *msg) {
   putSpace(40 - (strlen(msg) + 15) / 2, 4, strlen(msg) + 15, 8);
   Box(40 - (strlen(msg) + 15) / 2, 4, strlen(msg) + 15, 8);
   goto_xy(40 - (strlen(msg) + 15) / 2 + 1, 4);
@@ -118,13 +111,13 @@ int OKMsg(char *msg) {
   putSpace(40 - (strlen(msg) + 15) / 2, 4, strlen(msg) + 15, 8);
   return res;
 }
-void setState(char *msg) {
+static void setState(char *msg) {
   putSpace(0, 24, 80, 1);
   goto_xy(0, 24);
   print(msg);
   T_DrawBox(0, 24, 80, 1, 0x70);
 }
-int get_array_len(Array *arr) {
+static int get_array_len(Array *arr) {
   if (arr == NULL) {
     return -1;
   }
@@ -133,100 +126,80 @@ int get_array_len(Array *arr) {
     ;
   return r;
 }
-void set(int current, int total) {
+static void set(int current, int total) {
   if (total <= 0) {
     Set_Loading(100);
     return;
   }
   Set_Loading((int)((float)((float)(current) / (float)total) * 100.0));
 }
-enum step_result { STEP_ERROR = -1, STEP_DONE, STEP_CONTINUE };
-static enum step_result run_next_step(SPACE *next, MST_Object *m) {
-  if (next == NULL || m == NULL) {
-    return STEP_ERROR;
-  }
-  char *state = MST_get_string_in_space(m, "state", next);
-  char *info = MST_get_string_in_space(m, "info", next);
-  char *disk_name = MST_get_string_in_space(m, "disk_name", next);
-  if (info == NULL || disk_name == NULL) {
-    return STEP_ERROR;
-  }
-  if (state != NULL) {
-    setState(state);
-  }
-  if (OKCancelMsg(info)) {
-    Box(0, 0, 80, 24);
-    goto_xy(26, 0);
-    print("Powerint DOS 386 Installation");
-    T_DrawBox(26, 0, 29, 1, 0x4f);
-    size_t disk_name_length = strlen(disk_name);
-    if (disk_name_length > (size_t)UINT_MAX - sizeof("Please insert ")) {
-      return STEP_ERROR;
-    }
-    char *tip = malloc(sizeof("Please insert ") + disk_name_length);
-    if (tip == NULL) {
-      return STEP_ERROR;
-    }
-    sprintf(tip, "Please insert %s", disk_name);
-    OKMsg(tip);
-    free(tip);
-    if (system("remount_drive A:") != 0 || system("C:") != 0) {
-      return STEP_ERROR;
-    }
-    return STEP_CONTINUE;
-  }
-  return STEP_DONE;
-}
-
-static enum step_result run_step(SPACE *step, MST_Object *m) {
-  if (step == NULL || m == NULL) {
-    return STEP_ERROR;
-  }
-  Var *files = MST_get_var("files", step);
-  Array *files_arr = files == NULL ? NULL : MST_space_get_array(files);
-  int files_in_total = get_array_len(files_arr);
+static bool copy_manifest(Array *files, MST_Object *m, char source_drive,
+                          const char *filesystem) {
+  int files_in_total = get_array_len(files);
   if (files_in_total < 0) {
-    return STEP_ERROR;
+    return false;
   }
+  SPACE *loader = MST_get_space_in_array(m, 0, files);
+  char *loader_path = loader == NULL
+                          ? NULL
+                          : MST_get_string_in_space(m, "path", loader);
+  if (loader_path == NULL || strcmp(loader_path, "DOSLDR.bin") != 0) {
+    return false;
+  }
+  bool fat = strcmp(filesystem, "FAT") == 0;
   Set_Loading(0);
   for (int i = 0; i < files_in_total; i++) {
-    char *entry = MST_get_string_in_array(m, i, files_arr);
-    if (entry == NULL) {
-      SPACE *directory = MST_get_space_in_array(m, i, files_arr);
-      char *name = directory == NULL
-                       ? NULL
-                       : MST_get_string_in_space(m, "dir", directory);
-      if (name == NULL || mkdir(name) != 0) {
-        return STEP_ERROR;
+    SPACE *entry = MST_get_space_in_array(m, i, files);
+    char *kind =
+        entry == NULL ? NULL : MST_get_string_in_space(m, "type", entry);
+    char *path =
+        entry == NULL ? NULL : MST_get_string_in_space(m, "path", entry);
+    char *fat_path =
+        entry == NULL ? NULL : MST_get_string_in_space(m, "fat", entry);
+    char *destination_name = fat ? fat_path : path;
+    if (kind == NULL || path == NULL || fat_path == NULL ||
+        destination_name == NULL) {
+      return false;
+    }
+    setState(path);
+    if (strcmp(kind, "dir") == 0) {
+      if (mkdir(destination_name) != 0) {
+        return false;
       }
+      set(i + 1, files_in_total);
       continue;
     }
-    setState(entry);
-    size_t entry_length = strlen(entry);
-    if (entry_length > (size_t)UINT_MAX - 4) {
-      return STEP_ERROR;
+    if (strcmp(kind, "file") != 0) {
+      return false;
     }
-    char *source = malloc(entry_length + 4);
-    char *destination = malloc(entry_length + 4);
+    char *source_name = MST_get_string_in_space(m, "source", entry);
+    if (source_name == NULL) {
+      return false;
+    }
+    size_t source_length = strlen(source_name);
+    size_t destination_length = strlen(destination_name);
+    if (source_length > (size_t)UINT_MAX - 4 ||
+        destination_length > (size_t)UINT_MAX - 4) {
+      return false;
+    }
+    char *source = malloc(source_length + 4);
+    char *destination = malloc(destination_length + 4);
     if (source == NULL || destination == NULL) {
       free(source);
       free(destination);
-      return STEP_ERROR;
+      return false;
     }
-    sprintf(source, "A:\\%s", entry);
-    sprintf(destination, "C:\\%s", entry);
-    bool copied = copy_file(source, destination);
+    sprintf(source, "%c:\\%s", source_drive, source_name);
+    sprintf(destination, "C:\\%s", destination_name);
+    bool copied = Copy(source, destination) == 0;
     free(source);
     free(destination);
     if (!copied) {
-      return STEP_ERROR;
+      return false;
     }
     set(i + 1, files_in_total);
   }
-  if (!MST_get_var("next", step)) {
-    return STEP_DONE;
-  }
-  return run_next_step(MST_get_space_in_space(m, "next", step), m);
+  return true;
 }
 int main() {
   char source_drive = toupper(api_current_drive());
@@ -267,6 +240,15 @@ int main() {
     free(config);
     return 1;
   }
+  SPACE *root = MST_get_root_space(m);
+  Var *files_var = root == NULL ? NULL : MST_get_var("files", root);
+  Array *files = files_var == NULL ? NULL : MST_space_get_array(files_var);
+  if (files == NULL) {
+    printf("Invalid setup manifest.\n");
+    MST_free(m);
+    free(config);
+    return 1;
+  }
   if (system("cls") != 0 || system("color 1f") != 0) {
     MST_free(m);
     free(config);
@@ -301,14 +283,15 @@ int main() {
   T_DrawBox(35, 7, 9, 1, 0x0f);
   char fs_choice[4] = "FAT";
   for (;;) {
-    int i = getch();
-    if (i == '\n') {
+    int key = getch();
+    if (key == '\n') {
       break;
-    } else if (i == -1) {
+    }
+    if (key == -1) {
       T_DrawBox(35, 6, 9, 1, 0x4f);
       T_DrawBox(35, 7, 9, 1, 0x0f);
       strcpy(fs_choice, "FAT");
-    } else if (i == -2) {
+    } else if (key == -2) {
       T_DrawBox(35, 6, 9, 1, 0x0f);
       T_DrawBox(35, 7, 9, 1, 0x4f);
       strcpy(fs_choice, "PFS");
@@ -321,7 +304,7 @@ int main() {
     OKMsg("The target disk is in use.");
     goto fail;
   }
-  if (!format('C', fs_choice)) {
+  if (format('C', fs_choice) != 0) {
     if (target_was_mounted && !vfs_check_mount('C')) {
       vfs_mount('C', 'C');
     }
@@ -333,22 +316,8 @@ int main() {
     goto fail;
   }
   Set_Loading(100);
-  SPACE *root = MST_get_root_space(m);
-  Var *step_var = root == NULL ? NULL : MST_get_var("step", root);
-  Array *step = step_var == NULL ? NULL : MST_space_get_array(step_var);
-  int all_steps = get_array_len(step);
-  if (all_steps < 0) {
+  if (!copy_manifest(files, m, source_drive, fs_choice)) {
     goto fail;
-  }
-  for (int i = 0; i < all_steps; i++) {
-    enum step_result step_result =
-        run_step(MST_get_space_in_array(m, i, step), m);
-    if (step_result == STEP_ERROR) {
-      goto fail;
-    }
-    if (step_result == STEP_DONE) {
-      break;
-    }
   }
   Set_Loading(0);
   setState("Config --- Create env.cfg");
@@ -358,7 +327,7 @@ int main() {
   }
   Set_Loading(25);
   setState("Config --- Write env.cfg");
-  static char env_config[] = "\"path\" = \"C:\\bin;C:;\"";
+  static char env_config[] = "\"path\" = \"C:;C:\\bin;\"";
   if (fwrite(env_config, 1, sizeof(env_config) - 1, config_file) !=
           sizeof(env_config) - 1 ||
       fclose(config_file) != 0) {
@@ -373,7 +342,7 @@ int main() {
   Set_Loading(75);
   setState("Config --- Write sys.cfg");
   static char system_config[] =
-      "\"network\" = \"enable\"\n\"video_mode\" = \"HIGHTEXTMODE\"";
+      "\"network\" = \"enable\"\n\"video_mode\" = \"TEXTMODE\"";
   if (fwrite(system_config, 1, sizeof(system_config) - 1, config_file) !=
           sizeof(system_config) - 1 ||
       fclose(config_file) != 0) {

@@ -89,6 +89,11 @@ typedef struct {
   unsigned int size; // 大小
   char DriveName[50];
 } vdisk;
+enum vdisk_type {
+  VDISK_TYPE_NONE,
+  VDISK_TYPE_BLOCK,
+  VDISK_TYPE_UNAVAILABLE,
+};
 void ide_read_sectors(unsigned char drive, unsigned char numsects,
                       unsigned int lba, unsigned short es, unsigned int edi);
 void ide_write_sectors(unsigned char drive, unsigned char numsects,
@@ -101,6 +106,9 @@ int logout_vdisk(char drive);
 int rw_vdisk(char drive, unsigned int lba, unsigned char *buffer,
              unsigned int number, int read);
 bool have_vdisk(char drive);
+int get_vdisk_type(char drive);
+int disk_Size(char drive);
+bool DiskReady(char drive);
 
 struct IDEHardDiskInfomationBlock {
   char reserve1[2];

@@ -131,7 +131,7 @@ void init_floppy() {
   vd.Write = Write;
   vd.size = 1474560;
   vd.max_transfer_sectors = SECTORS_ONCE;
-  vd.flag = 1;
+  vd.flag = VDISK_TYPE_BLOCK;
   register_vdisk_at('A', vd);
 }
 void flint(int *esp) {

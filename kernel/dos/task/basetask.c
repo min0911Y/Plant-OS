@@ -45,6 +45,7 @@ void idle() {
   }
 }
 void init() {
+  smp_request_secondary_release();
   irq_enable();
   logk("init task has been started!\n");
 
@@ -58,8 +59,17 @@ void init() {
   printk("init ahci\n");
   ahci_init();
   // init_palette();
-  vfs_mount_all_disks();
-  char system_drive = find_system_drive();
+  boot_module_t initramfs;
+  char system_drive;
+  if (arch_boot_initramfs(&initramfs)) {
+    if (!vfs_mount_disk(BOOT_INITRAMFS_DRIVE, BOOT_INITRAMFS_DRIVE)) {
+      Panic_K("unable to mount initramfs");
+    }
+    system_drive = BOOT_INITRAMFS_DRIVE;
+  } else {
+    vfs_mount_all_disks();
+    system_drive = find_system_drive();
+  }
   if (system_drive == 0 || !vfs_check_mount(system_drive)) {
     Panic_K("system disk not found");
   }
