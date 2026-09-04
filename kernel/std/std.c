@@ -58,12 +58,27 @@ char* strncat(char* dest, const char* src, size_t n) {
 }
 // memset
 void* memset(void* s, int c, size_t n) {
-  void *ret = s;
-  asm volatile("cld; rep stosb"
-               : "+D"(s), "+c"(n)
-               : "a"(c & 0xff)
-               : "memory");
-  return ret;
+  typedef uintptr_t alias_word_t __attribute__((may_alias));
+  unsigned char *destination = s;
+  unsigned char byte = (unsigned char)c;
+  alias_word_t pattern = byte;
+  for (unsigned shift = 8; shift < sizeof(pattern) * 8; shift *= 2) {
+    pattern |= pattern << shift;
+  }
+  while (n != 0 && ((uintptr_t)destination & (sizeof(pattern) - 1)) != 0) {
+    *destination++ = byte;
+    n--;
+  }
+  alias_word_t *wide = (alias_word_t *)destination;
+  while (n >= sizeof(pattern)) {
+    *wide++ = pattern;
+    n -= sizeof(pattern);
+  }
+  destination = (unsigned char *)wide;
+  while (n-- != 0) {
+    *destination++ = byte;
+  }
+  return s;
 }
 // strtol
 long strtol(const char* nptr, char** endptr, int base) {
@@ -153,12 +168,24 @@ int memcmp(const void* s1, const void* s2, size_t n) {
 }
 // memcpy
 void* memcpy(void* s, const void* ct, size_t n) {
-  void *ret = s;
-  asm volatile("cld; rep movsb"
-               : "+D"(s), "+S"(ct), "+c"(n)
-               :
-               : "memory");
-  return ret;
+  typedef uintptr_t alias_word_t __attribute__((may_alias));
+  unsigned char *destination = s;
+  const unsigned char *source = ct;
+  if ((((uintptr_t)destination | (uintptr_t)source) &
+       (sizeof(alias_word_t) - 1)) == 0) {
+    alias_word_t *wide_destination = (alias_word_t *)destination;
+    const alias_word_t *wide_source = (const alias_word_t *)source;
+    while (n >= sizeof(alias_word_t)) {
+      *wide_destination++ = *wide_source++;
+      n -= sizeof(alias_word_t);
+    }
+    destination = (unsigned char *)wide_destination;
+    source = (const unsigned char *)wide_source;
+  }
+  while (n-- != 0) {
+    *destination++ = *source++;
+  }
+  return s;
 }
 // isspace
 int isspace(int c) {

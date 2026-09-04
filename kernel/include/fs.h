@@ -72,7 +72,7 @@ typedef struct {
   uint32_t size;
   union {
     struct {
-      uint32_t path;
+      uintptr_t path;
       uint32_t flags;
     } open;
     struct {
@@ -80,7 +80,7 @@ typedef struct {
     } descriptor;
     struct {
       int32_t descriptor;
-      uint32_t buffer;
+      uintptr_t buffer;
       uint32_t length;
     } io;
     struct {
@@ -89,27 +89,27 @@ typedef struct {
       int32_t whence;
     } seek;
     struct {
-      uint32_t path;
-      uint32_t status;
+      uintptr_t path;
+      uintptr_t status;
     } stat;
     struct {
       int32_t descriptor;
-      uint32_t status;
+      uintptr_t status;
     } fstat;
     struct {
-      uint32_t path;
-      uint32_t entries;
+      uintptr_t path;
+      uintptr_t entries;
       uint32_t capacity;
     } list;
     struct {
-      uint32_t path;
+      uintptr_t path;
     } path;
     struct {
-      uint32_t source;
-      uint32_t destination;
+      uintptr_t source;
+      uintptr_t destination;
     } rename;
     struct {
-      uint32_t buffer;
+      uintptr_t buffer;
       uint32_t capacity;
     } cwd;
     struct {

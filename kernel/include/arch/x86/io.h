@@ -33,6 +33,22 @@ static inline void x86_port_write32(uint16_t port, uint32_t value) {
   asm volatile("outl %0, %1" : : "a"(value), "Nd"(port) : "memory");
 }
 
+static inline void x86_port_read32s(uint16_t port, void *buffer,
+                                    size_t count) {
+  asm volatile("cld; rep insl"
+               : "+D"(buffer), "+c"(count)
+               : "d"(port)
+               : "memory");
+}
+
+static inline void x86_port_write16s(uint16_t port, const void *buffer,
+                                     size_t count) {
+  asm volatile("cld; rep outsw"
+               : "+S"(buffer), "+c"(count)
+               : "d"(port)
+               : "memory");
+}
+
 static inline void x86_io_wait(void) {
   x86_port_write8(0x80, 0);
 }

@@ -61,7 +61,7 @@ typedef struct {
   uint32_t size;
   union {
     struct {
-      uint32_t path;
+      uintptr_t path;
       uint32_t flags;
     } open;
     struct {
@@ -69,7 +69,7 @@ typedef struct {
     } descriptor;
     struct {
       int32_t descriptor;
-      uint32_t buffer;
+      uintptr_t buffer;
       uint32_t length;
     } io;
     struct {
@@ -78,27 +78,27 @@ typedef struct {
       int32_t whence;
     } seek;
     struct {
-      uint32_t path;
-      uint32_t status;
+      uintptr_t path;
+      uintptr_t status;
     } stat;
     struct {
       int32_t descriptor;
-      uint32_t status;
+      uintptr_t status;
     } fstat;
     struct {
-      uint32_t path;
-      uint32_t entries;
+      uintptr_t path;
+      uintptr_t entries;
       uint32_t capacity;
     } list;
     struct {
-      uint32_t path;
+      uintptr_t path;
     } path;
     struct {
-      uint32_t source;
-      uint32_t destination;
+      uintptr_t source;
+      uintptr_t destination;
     } rename;
     struct {
-      uint32_t buffer;
+      uintptr_t buffer;
       uint32_t capacity;
     } cwd;
     struct {
@@ -113,7 +113,7 @@ typedef struct {
 } vfs_syscall_request_t;
 
 int vfs_syscall(uint32_t operation, const vfs_syscall_request_t *request);
-typedef unsigned int tty_t;
+typedef uintptr_t tty_t;
 typedef struct module_handle {
   uint32_t id;
   char name[32];
@@ -181,7 +181,7 @@ void PhyMemSetByte(int addr, char data);
 int format(unsigned drive, char *fs_name);
 void *malloc(size_t size);
 void free(void *p);
-void *realloc(void *ptr, uint32_t size);
+void *realloc(void *ptr, size_t size);
 int get_hour_hex();
 int get_min_hex();
 int get_sec_hex();
@@ -189,7 +189,7 @@ int get_day_of_month();
 int get_day_of_week();
 int get_mon_hex();
 int get_year();
-int AddThread(char *name, uintptr_t func, unsigned int stack);
+int AddThread(char *name, uintptr_t func, uintptr_t stack);
 void TaskLock();
 void TaskUnlock();
 void SubThread(unsigned int taskID);
@@ -206,8 +206,8 @@ uint8_t key_press_status();
 uint8_t key_up_status();
 uint8_t get_key_press();
 uint8_t get_key_up();
-unsigned api_heapsize();
-int sbrk(unsigned size);
+size_t api_heapsize();
+int sbrk(size_t size);
 int api_current_drive();
 int exec(char *filename, char *cmdline);
 void clear();
@@ -238,7 +238,7 @@ typedef enum {
 } input_wait_event_t;
 int input_wait(uint32_t events);
 void api_yield(void);
-tty_t tty_alloc(void *vram,unsigned handle,unsigned xsize,unsigned ysize);
+tty_t tty_alloc(void *vram, uintptr_t handle, unsigned xsize, unsigned ysize);
 void tty_set(unsigned tid,tty_t tty);
 void tty_free(tty_t tty);
 int tty_notify_input(tty_t tty);

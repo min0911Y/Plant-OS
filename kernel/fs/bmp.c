@@ -1,8 +1,8 @@
-#include <arch/x86/io.h>
 // bmp.c ：位图解析
 #include <dos.h>
 #include <fs.h>
 #include <io.h>
+#include <platform.h>
 static unsigned char *bmp_load(const char *path, uint32_t *size) {
   vfs_stat_t status;
   if (vfs_stat(current_task()->fs_context, path, &status) < 0 ||
@@ -30,7 +30,8 @@ bool BMPVIEW8(char *path, unsigned char *vram, int xsize) {
     return false;
   }
   int i, j;
-  unsigned short pxsize, pysize, start;
+  unsigned short pxsize, pysize;
+  uint32_t start;
   unsigned int length;
   if (p[0] != 'B' || p[1] != 'M') {
     free(p);
@@ -39,17 +40,22 @@ bool BMPVIEW8(char *path, unsigned char *vram, int xsize) {
   pxsize = *(unsigned short *)(p + 0x12);
   pysize = *(unsigned short *)(p + 0x16);
   length = *(unsigned int *)(p + 2);
-  start = *(unsigned short *)(p + 0xa);
+  start = *(uint32_t *)(p + 0xa);
   if (length > size || start >= size) {
     free(p);
     return false;
   }
-  x86_port_write8(VGA_DAC_WRITE_INDEX, 0);
-  for (i = 0; i != 256; i++) {
-    x86_port_write8(VGA_DAC_DATA, p[0x36 + i * 4 + 2] / 4);
-    x86_port_write8(VGA_DAC_DATA, p[0x36 + i * 4 + 1] / 4);
-    x86_port_write8(VGA_DAC_DATA, p[0x36 + i * 4] / 4);
+  if (start < 0x436u) {
+    free(p);
+    return false;
   }
+  uint8_t palette[256 * 3];
+  for (i = 0; i < 256; i++) {
+    palette[i * 3 + 0] = p[0x36 + i * 4 + 2];
+    palette[i * 3 + 1] = p[0x36 + i * 4 + 1];
+    palette[i * 3 + 2] = p[0x36 + i * 4];
+  }
+  platform_palette_set(0, 256, palette);
   for (i = 0; i < pysize; i++) {
     for (j = 0; j < pxsize; j++) {
       // Draw_Px(j, i, p[length - (i * pxsize + pxsize - j)]);

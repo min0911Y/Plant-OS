@@ -1,5 +1,6 @@
 // Plant OS IPC 用户态封装
 #include <ipc.h>
+#include "syscall_internal.h"
 
 #define IPC_SYSCALL 0x5d
 #define IPC_SYS_SEND 0x01
@@ -11,49 +12,44 @@
 #define IPC_SYS_LOOKUP 0x07
 #define IPC_SYS_GENERATION 0x08
 
-static int ipc_do_syscall(unsigned sub, unsigned arg1, unsigned arg2) {
-  int ret;
-  unsigned clobber_b, clobber_c, clobber_d;
-  asm volatile("int $0x36"
-               : "=a"(ret), "=b"(clobber_b), "=c"(clobber_c), "=d"(clobber_d)
-               : "a"(IPC_SYSCALL), "1"(sub), "2"(arg1), "3"(arg2)
-               : "memory");
-  return ret;
+static int ipc_do_syscall(unsigned sub, uintptr_t arg1, uintptr_t arg2) {
+  return (int)libp_syscall3(IPC_SYSCALL, sub, arg1, arg2);
 }
 
 int ipc_send_msg(ipc_msg_t *msg) {
   if (!msg) {
     return IPC_ERR_INVAL;
   }
-  return ipc_do_syscall(IPC_SYS_SEND, (unsigned)msg, 0);
+  return ipc_do_syscall(IPC_SYS_SEND, (uintptr_t)msg, 0);
 }
 
 int ipc_recv_msg(ipc_msg_t *msg) {
   if (!msg) {
     return IPC_ERR_INVAL;
   }
-  return ipc_do_syscall(IPC_SYS_RECV, (unsigned)msg, 0);
+  return ipc_do_syscall(IPC_SYS_RECV, (uintptr_t)msg, 0);
 }
 
 int ipc_peek_msg(ipc_msg_t *msg) {
   if (!msg) {
     return IPC_ERR_INVAL;
   }
-  return ipc_do_syscall(IPC_SYS_PEEK, (unsigned)msg, 0);
+  return ipc_do_syscall(IPC_SYS_PEEK, (uintptr_t)msg, 0);
 }
 
 int ipc_pending(void) { return ipc_do_syscall(IPC_SYS_PENDING, 0, 0); }
 
 int ipc_register(const char *name) {
-  return ipc_do_syscall(IPC_SYS_REGISTER, (unsigned)name, 0);
+  return ipc_do_syscall(IPC_SYS_REGISTER, (uintptr_t)name, 0);
 }
 
 int ipc_unregister(const char *name) {
-  return ipc_do_syscall(IPC_SYS_UNREGISTER, (unsigned)name, 0);
+  return ipc_do_syscall(IPC_SYS_UNREGISTER, (uintptr_t)name, 0);
 }
 
 int ipc_lookup(const char *name, unsigned *generation) {
-  return ipc_do_syscall(IPC_SYS_LOOKUP, (unsigned)name, (unsigned)generation);
+  return ipc_do_syscall(IPC_SYS_LOOKUP, (uintptr_t)name,
+                        (uintptr_t)generation);
 }
 
 int ipc_generation(void) { return ipc_do_syscall(IPC_SYS_GENERATION, 0, 0); }

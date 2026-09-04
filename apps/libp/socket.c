@@ -36,7 +36,7 @@ int bind(socket_t socket, const struct sockaddr *address, socklen_t length) {
   socket_syscall_request_t request;
   socket_request_init(&request);
   request.socket = socket;
-  request.address = (uint32_t)(uintptr_t)address;
+  request.address = (uintptr_t)address;
   request.address_length = length;
   return socket_call(SOCKET_SYSCALL_BIND, &request);
 }
@@ -48,7 +48,7 @@ int connect(socket_t socket, const struct sockaddr *address, socklen_t length) {
   socket_syscall_request_t request;
   socket_request_init(&request);
   request.socket = socket;
-  request.address = (uint32_t)(uintptr_t)address;
+  request.address = (uintptr_t)address;
   request.address_length = length;
   return socket_call(SOCKET_SYSCALL_CONNECT, &request);
 }
@@ -69,7 +69,7 @@ socket_t accept(socket_t socket, struct sockaddr *address, socklen_t *length) {
   socket_request_init(&request);
   request.socket = socket;
   if (address != NULL) {
-    request.address = (uint32_t)(uintptr_t)address;
+    request.address = (uintptr_t)address;
     request.address_length = *length;
   }
   int result = socket_call(SOCKET_SYSCALL_ACCEPT, &request);
@@ -90,10 +90,10 @@ int sendto(socket_t socket, const void *data, uint32_t length, uint32_t flags,
   socket_syscall_request_t request;
   socket_request_init(&request);
   request.socket = socket;
-  request.buffer = (uint32_t)(uintptr_t)data;
+  request.buffer = (uintptr_t)data;
   request.length = length;
   request.flags = flags;
-  request.address = (uint32_t)(uintptr_t)address;
+  request.address = (uintptr_t)address;
   request.address_length = address_length;
   return socket_call(SOCKET_SYSCALL_SENDTO, &request);
 }
@@ -111,11 +111,11 @@ int recvfrom(socket_t socket, void *data, uint32_t length, uint32_t flags,
   socket_syscall_request_t request;
   socket_request_init(&request);
   request.socket = socket;
-  request.buffer = (uint32_t)(uintptr_t)data;
+  request.buffer = (uintptr_t)data;
   request.length = length;
   request.flags = flags;
   if (address != NULL) {
-    request.address = (uint32_t)(uintptr_t)address;
+    request.address = (uintptr_t)address;
     request.address_length = *address_length;
   }
   int result = socket_call(SOCKET_SYSCALL_RECVFROM, &request);
@@ -137,7 +137,7 @@ static int socket_getname(socket_t socket, struct sockaddr *address,
   socket_syscall_request_t request;
   socket_request_init(&request);
   request.socket = socket;
-  request.address = (uint32_t)(uintptr_t)address;
+  request.address = (uintptr_t)address;
   request.address_length = *length;
   int result = socket_call(operation, &request);
   if (result == 0) {
@@ -275,9 +275,9 @@ static int socket_resolve_ipv4(const char *name, struct in_addr *address) {
   }
   socket_syscall_request_t request;
   socket_request_init(&request);
-  request.buffer = (uint32_t)(uintptr_t)name;
+  request.buffer = (uintptr_t)name;
   request.length = length;
-  request.address = (uint32_t)(uintptr_t)&address->s_addr;
+  request.address = (uintptr_t)&address->s_addr;
   return socket_call(SOCKET_SYSCALL_RESOLVE, &request);
 }
 
@@ -376,6 +376,6 @@ int socket_interface_address(struct in_addr *address) {
   }
   socket_syscall_request_t request;
   socket_request_init(&request);
-  request.address = (uint32_t)(uintptr_t)&address->s_addr;
+  request.address = (uintptr_t)&address->s_addr;
   return socket_call(SOCKET_SYSCALL_INTERFACE_ADDRESS, &request);
 }

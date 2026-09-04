@@ -21,7 +21,7 @@ struct tty {
   void (*print)(struct tty *res, const char *string); // print函数
   void (*Draw_Box)(struct tty *res, int x, int y, int x1, int y1,
                    unsigned char color); // Draw_Box函数
-  unsigned int reserved[4];              // 保留项
+  uintptr_t reserved[4];                  // 保留项
 };
 typedef struct desktop desktop_t;
 typedef struct window window_t;

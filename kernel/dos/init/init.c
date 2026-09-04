@@ -1,29 +1,12 @@
 #include <arch.h>
-#include <arch/x86/control.h>
 #include <dos.h>
 #include <irq.h>
-extern struct ide_device {
-  unsigned char Reserved;      // 0 (Empty) or 1 (This Drive really exists).
-  unsigned char Channel;       // 0 (Primary Channel) or 1 (Secondary Channel).
-  unsigned char Drive;         // 0 (Master Drive) or 1 (Slave Drive).
-  unsigned short Type;         // 0: ATA, 1:ATAPI.
-  unsigned short Signature;    // Drive Signature
-  unsigned short Capabilities; // Features.
-  unsigned int CommandSets;    // Command Sets Supported.
-  unsigned int Size;           // Size in Sectors.
-  unsigned char Model[41];     // Model in string.
-} ide_devices[4];
+#include <platform.h>
 // struct TASK *shell_task;
 // struct TASK *sr1, *sr2;
 // struct TASK normal;
-unsigned int memsize;
-struct MOUSE_DEC mdec;
-extern unsigned char *IVT;
-void disable_sb16(void);
-void init_mount_disk(void);
-int getReadyDisk();
-void init_devfs();
-void init_vfs();
+uintptr_t memsize;
+mouse_decoder_t mdec;
 
 #ifdef KERNEL_DISABLE_MEMTEST
 #define KERNEL_MEMSIZE_BYTES ((unsigned int)KERNEL_MEMSIZE_MB * 1024U * 1024U)
@@ -97,8 +80,9 @@ static void bench_timer_modes(void) {
 #endif
 
 void sysinit(void) {
-  boot_module_t initramfs = {0};
-  bool has_initramfs = arch_boot_initramfs(&initramfs);
+  const boot_info_t *boot_info = arch_boot_info();
+  boot_module_t initramfs = boot_info->initramfs;
+  bool has_initramfs = initramfs.size != 0;
   struct FIFO8 keyfifo, mousefifo;
   struct FIFO8 keyfifo_sr1, keyfifo_sr2;
   struct FIFO8 mousefifo_sr1, mousefifo_sr2;
@@ -109,21 +93,14 @@ void sysinit(void) {
   char keybuf_sr2[32];
   char mousebuf_sr2[128];
 
-  init_page(); // 初始化分页与 WP
+  init_page(boot_info); // 初始化分页与 WP
   if (has_initramfs &&
       !page_reserve_physical_range(initramfs.address, initramfs.size)) {
     Panic_K("unable to reserve initramfs memory");
     return;
   }
   arch_interrupt_init();
-  init_pic();
-  init_pit();
-  init_acpi();
-  apic_init();
-  smp_topology_init();
-
-  IVT = page_malloc(0x400);
-  memcpy(IVT, 0x0, 0x400);
+  platform_early_initialize();
 
   irq_enable();
 #ifdef KERNEL_PERF
@@ -133,7 +110,7 @@ void sysinit(void) {
   if (!apic_timer_uses_tsc_deadline()) {
     irq_mask_clear(0);  // pit (timer)
   }
-  x86_fpu_init_cpu();
+  arch_fpu_init_cpu();
 
   fifo8_init(&keyfifo, 32, (unsigned char *)keybuf);
   fifo8_init(&mousefifo, 128, (unsigned char *)mousebuf);
@@ -170,8 +147,7 @@ void sysinit(void) {
   printk("Welcome to Plant OS Kernel!!!!!!\n");
 #ifndef KERNEL_DISABLE_MEMTEST
   logk("sysinit: memtest start\n");
-  memsize = memtest(0x00400000, 0xbfffffff, initramfs.address,
-                    has_initramfs ? initramfs.size : 0);
+  memsize = arch_memory_detect(boot_info);
   logk("sysinit: memtest done memsize=%08x\n", memsize);
 #else
   memsize = KERNEL_MEMSIZE_BYTES;

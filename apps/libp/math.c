@@ -558,25 +558,6 @@ double __cos(double x, double y) {
   w = 1.0 - hz;
   return w + (((1.0 - w) - hz) + (z * r - x * y));
 }
-static const double tiny = 1.0e-300;
-double sin(double x) {
-  double res;
-  __asm__("fsin" : "=t"(res) : "0"(x));
-  return res;
-}
-
-double cos(double x) {
-  double res;
-  __asm__("fcos" : "=t"(res) : "0"(x));
-  return res;
-}
-
-double sqrt(double x) {
-  double res;
-  __asm__("fsqrt" : "=t"(res) : "0"(x));
-  return res;
-}
-
 int abs(int a)
 {
 	return a>0 ? a : -a;

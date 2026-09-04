@@ -1,4 +1,5 @@
 #include <dos.h>
+#include <platform.h>
 static struct SHEET *sht_cur;
 static struct SHTCTL *shtctl0;
 static struct TIMER *cur_tmr;
@@ -197,32 +198,6 @@ void Draw_Box_HighTextMode(struct tty *res, int x, int y, int x1, int y1,
   }
   sheet_refresh(sht, x * 8, y * 16, x1 * 8, y1 * 16);
 }
-/*void Gar_Test_Task() {
-  char fifo_buf[128];
-  struct FIFO8 fifo;
-  fifo8_init(&fifo, 128, fifo_buf);
-  struct TIMER *timer;
-  timer = timer_alloc();
-  timer_init(timer, &fifo, 1);
-  timer_settime(timer, 250);
-  while (1) {
-    sheet_slide(sht_cur, tty_h->x * 8, tty_h->y * 16);
-    if (fifo8_status(&fifo) != 0) {
-      int i = fifo8_get(&fifo);
-      if (i == 1) {
-        sheet_updown(sht_cur, -1);
-        timer_init(timer, &fifo, 2);
-        timer_settime(timer, 250);
-      } else if (i == 2) {
-        sheet_updown(sht_cur, 1);
-        timer_init(timer, &fifo, 1);
-        timer_settime(timer, 250);
-      }
-    }
-  }
-}*/
-int c = 0;
-lock_t ll;
 void high_text_cursor_task_exited(mtask *task) {
   if (cursor == task) {
     cursor = NULL;
@@ -272,20 +247,20 @@ void cur_service() {
 int default_tty_fifo_status(struct tty *res);
 int default_tty_fifo_get(struct tty *res);
 bool SwitchToHighTextMode(void) {
-  if (set_mode(1024, 768, 32) == (unsigned)(-1)) {
+  platform_video_info_t info;
+  if (!platform_video_set_mode(1024, 768, 32, &info)) {
     printk("Can't enable 1024x768x32 VBE mode.\n\n");
     return false;
   }
   lock_init(&l);
   lock_init(&l1);
   cur_tmr = NULL;
-  struct VBEINFO *vinfo = (struct VBEINFO *)VBEINFO_ADDRESS;
-  shtctl0 = shtctl_init((vram_t *)(uintptr_t)vinfo->vram, vinfo->xsize, vinfo->ysize);
+  shtctl0 = shtctl_init((vram_t *)info.framebuffer, info.width, info.height);
   if (shtctl0 == NULL) {
     return false;
   }
   size_t screen_buffer_size =
-      (vinfo->xsize + 1) * (vinfo->ysize + 1) * sizeof(color_t);
+      (info.width + 1) * (info.height + 1) * sizeof(color_t);
   size_t cursor_buffer_size = 16 * 32 * sizeof(color_t);
   vram_t *scr_buf =
       page_malloc(screen_buffer_size);
@@ -317,18 +292,14 @@ bool SwitchToHighTextMode(void) {
     sht_cur = NULL;
     return false;
   }
-  sheet_setbuf(sht_scr, scr_buf, vinfo->xsize, vinfo->ysize, -1);
+  sheet_setbuf(sht_scr, scr_buf, info.width, info.height, -1);
   sheet_setbuf(sht_cur, cur_buf, 8, 16, COL_TRANSPARENT);
-  memset(scr_buf, 0, vinfo->xsize * vinfo->ysize * sizeof(color_t));
+  memset(scr_buf, 0, info.width * info.height * sizeof(color_t));
   Draw_Cur(cur_buf, 0, 0, 8);
   sheet_slide(sht_scr, 0, 0);
   sheet_slide(sht_cur, 0, 0);
   sheet_updown(sht_scr, 0);
   sheet_updown(sht_cur, 1);
-  /*stack = (unsigned int)page_malloc(64 * 1024);
-  t1 = AddTask("t1", 1, 2 * 8, (int)Gar_Test_Task, 1 * 8, 1 * 8,
-               stack + 64 * 1024);*/
-
   cursor = create_task((uintptr_t)cur_service, 1);
   if (cursor == NULL) {
     WARNING_K("unable to create high-text cursor task");
@@ -344,10 +315,11 @@ bool SwitchToHighTextMode(void) {
   cursor->sched_flags = TASK_SCHED_PINNED;
   cursor->cpu = 0;
   task_set_name(cursor, "cursor");
-  struct tty *tty_h = tty_alloc((void *)sht_scr, vinfo->xsize / 8,
-                                vinfo->ysize / 16, putchar_HighTextMode,
-                                MoveCursor_HighTextMode, clear_HighTextMode,
-                                screen_ne_HighTextMode, Draw_Box_HighTextMode,default_tty_fifo_status,default_tty_fifo_get);
+  struct tty *tty_h = tty_alloc(
+      (void *)sht_scr, info.width / 8, info.height / 16,
+      putchar_HighTextMode, MoveCursor_HighTextMode, clear_HighTextMode,
+      screen_ne_HighTextMode, Draw_Box_HighTextMode, default_tty_fifo_status,
+      default_tty_fifo_get);
   if (tty_h == NULL) {
     task_abort_creation(cursor);
     cursor = NULL;
@@ -376,49 +348,6 @@ bool SwitchToHighTextMode(void) {
   tty_set_default(tty_h);
   tty_set(current_task(), tty_h);
   return true;
-}
-void SwitchShell_HighTextMode(int i) {
-  // extern struct List* tty_list;
-  // extern struct tty* tty_default;
-  // struct tty* t = (struct tty*)list_get(i + 1, tty_list)->val;
-  // struct tty* n = NULL;
-  // for (int j = 1; list_get(j, tty_list) != 0; j++) {
-  //   n = (struct tty*)list_get(j, tty_list)->val;
-  //   struct SHEET* sht = (struct SHEET*)n->vram;
-  //   if (sht->height == 0) {
-  //     break;
-  //   } else {
-  //     n = NULL;
-  //   }
-  // }
-  // if (n == NULL) {
-  //   n = tty_default;
-  // }
-  // if (n == t) {
-  //   return;
-  // }
-  // // 交换
-  // struct SHEET* sht_t = (struct SHEET*)t->vram;
-  // struct SHEET* sht_n = (struct SHEET*)n->vram;
-  // sheet_updown(sht_n, -1);
-  // sheet_updown(sht_t, 0);
-  // for (int j = 1; get_task(j) != 0; j++) {
-  //   mtask* task = get_task(j);
-  //   if (task->TTY == t && (strcmp("Shell", task->name) == 0 ||
-  //                          (task->app == 1 && task->forever == 0))) {
-  //     task->sleep = 0;
-  //     if (task->fifosleep == 3) {
-  //       task->fifosleep = 0;
-  //     }
-  //   } else if ((task->TTY == n || task->TTY->using1 != 1) &&
-  //              (strcmp("Shell", task->name) == 0 ||
-  //               (task->app == 1 && task->forever == 0))) {
-  //     if (task->fifosleep == 0) {
-  //       task->fifosleep = 3;
-  //     }
-  //   }
-  // }
-  // t->MoveCursor(t, t->x, t->y);
 }
 bool now_tty_HighTextMode(struct tty *res) {
   struct SHEET *sht = (struct SHEET *)res->vram;

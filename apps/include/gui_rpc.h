@@ -7,8 +7,8 @@
 #define GUI_TITLE_MAX 255u
 
 /* This range is reserved for client-side GUI shared mappings. */
-#define GUI_SHARED_REGION_START 0xf0100000u
-#define GUI_SHARED_REGION_END 0xf1000000u
+#define GUI_SHARED_REGION_START ((uintptr_t)0xf0100000u)
+#define GUI_SHARED_REGION_END ((uintptr_t)0xf1000000u)
 
 #define GUI_EVENT_QUEUE_CAPACITY 64u
 
@@ -48,18 +48,12 @@ typedef struct {
 } gui_window_shared_t;
 
 static inline void gui_damage_lock(gui_damage_t *damage) {
-  uint32_t locked = 1;
-  do {
-    asm volatile("xchgl %0, %1"
-                 : "+r"(locked), "+m"(damage->lock)
-                 :
-                 : "memory");
-  } while (locked);
+  while (__atomic_exchange_n(&damage->lock, 1, __ATOMIC_ACQUIRE)) {
+  }
 }
 
 static inline void gui_damage_unlock(gui_damage_t *damage) {
-  asm volatile("" ::: "memory");
-  damage->lock = 0;
+  __atomic_store_n(&damage->lock, 0, __ATOMIC_RELEASE);
 }
 
 static inline void gui_damage_init(gui_damage_t *damage) {
@@ -122,25 +116,25 @@ static inline void gui_event_queue_init(gui_event_queue_t *queue) {
 static inline int gui_event_queue_push(gui_event_queue_t *queue,
                                        uint32_t value) {
   uint32_t write = queue->write;
-  if (write - queue->read >= GUI_EVENT_QUEUE_CAPACITY) {
+  uint32_t read = __atomic_load_n(&queue->read, __ATOMIC_ACQUIRE);
+  if (write - read >= GUI_EVENT_QUEUE_CAPACITY) {
     return 0;
   }
   queue->data[write % GUI_EVENT_QUEUE_CAPACITY] = value;
-  asm volatile("" ::: "memory");
-  queue->write = write + 1;
+  __atomic_store_n(&queue->write, write + 1, __ATOMIC_RELEASE);
   return 1;
 }
 
 static inline int gui_event_queue_push2(gui_event_queue_t *queue,
                                         uint32_t first, uint32_t second) {
   uint32_t write = queue->write;
-  if (write - queue->read > GUI_EVENT_QUEUE_CAPACITY - 2) {
+  uint32_t read = __atomic_load_n(&queue->read, __ATOMIC_ACQUIRE);
+  if (write - read > GUI_EVENT_QUEUE_CAPACITY - 2) {
     return 0;
   }
   queue->data[write % GUI_EVENT_QUEUE_CAPACITY] = first;
   queue->data[(write + 1) % GUI_EVENT_QUEUE_CAPACITY] = second;
-  asm volatile("" ::: "memory");
-  queue->write = write + 2;
+  __atomic_store_n(&queue->write, write + 2, __ATOMIC_RELEASE);
   return 1;
 }
 
@@ -148,30 +142,32 @@ static inline int gui_event_queue_push3(gui_event_queue_t *queue,
                                         uint32_t first, uint32_t second,
                                         uint32_t third) {
   uint32_t write = queue->write;
-  if (write - queue->read > GUI_EVENT_QUEUE_CAPACITY - 3) {
+  uint32_t read = __atomic_load_n(&queue->read, __ATOMIC_ACQUIRE);
+  if (write - read > GUI_EVENT_QUEUE_CAPACITY - 3) {
     return 0;
   }
   queue->data[write % GUI_EVENT_QUEUE_CAPACITY] = first;
   queue->data[(write + 1) % GUI_EVENT_QUEUE_CAPACITY] = second;
   queue->data[(write + 2) % GUI_EVENT_QUEUE_CAPACITY] = third;
-  asm volatile("" ::: "memory");
-  queue->write = write + 3;
+  __atomic_store_n(&queue->write, write + 3, __ATOMIC_RELEASE);
   return 1;
 }
 
 static inline int gui_event_queue_pop(gui_event_queue_t *queue) {
   uint32_t read = queue->read;
-  if (read == queue->write) {
+  uint32_t write = __atomic_load_n(&queue->write, __ATOMIC_ACQUIRE);
+  if (read == write) {
     return -1;
   }
   uint32_t value = queue->data[read % GUI_EVENT_QUEUE_CAPACITY];
-  asm volatile("" ::: "memory");
-  queue->read = read + 1;
+  __atomic_store_n(&queue->read, read + 1, __ATOMIC_RELEASE);
   return (int)value;
 }
 
 static inline unsigned gui_event_queue_count(const gui_event_queue_t *queue) {
-  return queue->write - queue->read;
+  uint32_t write = __atomic_load_n(&queue->write, __ATOMIC_ACQUIRE);
+  uint32_t read = __atomic_load_n(&queue->read, __ATOMIC_ACQUIRE);
+  return write - read;
 }
 
 enum gui_rpc_opcode {
@@ -207,7 +203,7 @@ typedef struct {
   int32_t y;
   uint32_t width;
   uint32_t height;
-  uint32_t client_mapping;
+  uintptr_t client_mapping;
   uint32_t title_length;
 } gui_rpc_create_request_t;
 

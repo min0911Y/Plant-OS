@@ -12,12 +12,25 @@ STDPATH = ./std/
 FSPATH = ./fs/
 NETPATH = ./net/
 MSTPATH = ./mst/
+PLATFORM ?= pc
+ifeq ($(PLATFORM),pc)
+PLATFORMPATH = ./platform/pc/
+else
+$(error unsupported PLATFORM '$(PLATFORM)'; supported platforms: pc)
+endif
 RESPATH = ./res/
 INCPATH  = ./include/
 OUTPATH = ./obj/
 IMGPATH = ./img/
 LOADERPATH = ../loader/out/
-ARCHX86PATH = ./arch/x86/
+ARCH ?= i386
+ifeq ($(ARCH),i386)
+ARCHPATH = ./arch/x86/i386/
+ARCH_LD_EMULATION = elf_i386
+QEMU_SYSTEM = qemu-system-i386
+else
+$(error unsupported ARCH '$(ARCH)'; supported architectures: i386)
+endif
 QEMU_CPUS ?= 4
 LIVECD_ISO = plant-os-livecd.iso
 LIBALLOC_RELEASE = $(DOSPATH)mm/third_party/liballoc/liballoc-i686.a
@@ -31,15 +44,16 @@ DEL      = rm
 
 OBJS_BOOTPACK = $(OUTPATH)boot_entry.obj $(OUTPATH)boot.o \
 				$(OUTPATH)kernelc.o $(OUTPATH)screen.o $(OUTPATH)command.o $(OUTPATH)timer.o \
-				$(OUTPATH)mem.o $(OUTPATH)heap.o $(LIBALLOC_KERNEL) $(OUTPATH)file.o $(OUTPATH)bios_interrupt.obj \
-				$(OUTPATH)interrupt_entries.obj $(OUTPATH)exceptions.obj $(OUTPATH)vga.o $(OUTPATH)harddisk.o $(OUTPATH)tm.o  \
+				$(OUTPATH)memory.o $(OUTPATH)heap.o $(LIBALLOC_KERNEL) $(OUTPATH)file.o $(OUTPATH)bios_interrupt.obj \
+				$(OUTPATH)interrupt_entries.obj $(OUTPATH)exceptions.obj $(OUTPATH)vga.o $(OUTPATH)tm.o  \
 				$(OUTPATH)mouse.o $(OUTPATH)acpi.o $(OUTPATH)is.o $(OUTPATH)descriptor_tables.o $(OUTPATH)arg.o \
 				$(OUTPATH)other.o $(OUTPATH)floppy.o $(OUTPATH)dma.o $(OUTPATH)init.o $(OUTPATH)main.o \
+				$(OUTPATH)init_platform.o \
 				$(OUTPATH)std.o $(OUTPATH)sheet.o $(OUTPATH)vbe.o $(OUTPATH)cmos.o $(OUTPATH)pci.o $(OUTPATH)fat.o \
 				$(OUTPATH)beep.o $(OUTPATH)syscall.o $(OUTPATH)fifo.o $(OUTPATH)list.o $(OUTPATH)input.o $(OUTPATH)keyboard.o \
 				$(OUTPATH)pcnet.o $(OUTPATH)ipc.o $(OUTPATH)tty.o $(OUTPATH)page.o $(OUTPATH)serial.o $(OUTPATH)log.o \
-				$(OUTPATH)path.o $(OUTPATH)draw.o $(OUTPATH)httm.o $(OUTPATH)pic.o $(OUTPATH)bmp.o $(OUTPATH)sb16.o \
-				$(OUTPATH)lock.o $(OUTPATH)elf.o $(OUTPATH)driver.o $(OUTPATH)md5.o $(OUTPATH)libcpp.o $(OUTPATH)rand.o \
+				$(OUTPATH)path.o $(OUTPATH)draw.o $(OUTPATH)httm.o $(OUTPATH)interrupt_controller.o $(OUTPATH)bmp.o $(OUTPATH)sb16.o \
+				$(OUTPATH)lock.o $(OUTPATH)executable.o $(OUTPATH)md5.o $(OUTPATH)libcpp.o $(OUTPATH)rand.o \
 				$(OUTPATH)time.o $(OUTPATH)net_stack.o $(OUTPATH)socket.o $(OUTPATH)lwip_port.o $(OUTPATH)lwip_core_init.o $(OUTPATH)lwip_core_def.o \
 				$(OUTPATH)lwip_core_dns.o $(OUTPATH)lwip_core_inet_chksum.o $(OUTPATH)lwip_core_ip.o $(OUTPATH)lwip_core_mem.o \
 				$(OUTPATH)lwip_core_memp.o $(OUTPATH)lwip_core_netif.o $(OUTPATH)lwip_core_pbuf.o $(OUTPATH)lwip_core_raw.o \
@@ -47,20 +61,23 @@ OBJS_BOOTPACK = $(OUTPATH)boot_entry.obj $(OUTPATH)boot.o \
 				$(OUTPATH)lwip_core_timeouts.o $(OUTPATH)lwip_core_udp.o $(OUTPATH)lwip_ipv4_dhcp.o $(OUTPATH)lwip_ipv4_etharp.o \
 				$(OUTPATH)lwip_ipv4_icmp.o $(OUTPATH)lwip_ipv4_ip4.o $(OUTPATH)lwip_ipv4_ip4_addr.o $(OUTPATH)lwip_ipv4_ip4_frag.o \
 				$(OUTPATH)lwip_netif_ethernet.o $(OUTPATH)bit.o $(OUTPATH)linux_style_file.o $(OUTPATH)ide.o \
-				$(OUTPATH)vdisk.o $(OUTPATH)rootfs.o $(OUTPATH)mount.o \
+				$(OUTPATH)vdisk.o $(OUTPATH)rootfs.o $(OUTPATH)interrupt.o $(OUTPATH)mount.o \
 				$(OUTPATH)mtask.o $(OUTPATH)basetask.o $(OUTPATH)execute.o $(OUTPATH)network.o $(OUTPATH)rtl8139.o \
 				$(OUTPATH)vfs.o $(OUTPATH)build.o $(OUTPATH)mst.o $(OUTPATH)str.o $(OUTPATH)pfs.o $(OUTPATH)signal.o \
-				$(OUTPATH)rtc.o $(OUTPATH)ahci.o $(OUTPATH)initramfs.o $(OUTPATH)farcall.o $(OUTPATH)fartty.o $(OUTPATH)iso9660.o \
+				$(OUTPATH)rtc.o $(OUTPATH)ahci.o $(OUTPATH)initramfs.o $(OUTPATH)address_space_call.o $(OUTPATH)fartty.o $(OUTPATH)iso9660.o \
 				$(OUTPATH)module.o $(OUTPATH)kasan.o $(OUTPATH)perf.o $(OUTPATH)fpu.o $(OUTPATH)irq.o $(OUTPATH)exceptions.o \
-				$(OUTPATH)smp.o $(OUTPATH)task_context.o $(OUTPATH)smp_trampoline.obj \
-				$(OUTPATH)task_context.obj $(OUTPATH)user_return.obj
+				$(OUTPATH)cpu.o $(OUTPATH)smp.o $(OUTPATH)task_context.o $(OUTPATH)smp_trampoline.obj \
+				$(OUTPATH)syscall_adapter.o $(OUTPATH)x86_irq_dispatch.o \
+				$(OUTPATH)task_context.obj \
+				$(OUTPATH)user_return.obj
 
 # 默认动作
 default : make_dir
-	$(MAKE) -C $(ARCHX86PATH)
+	$(MAKE) -C $(ARCHPATH) ARCH=$(ARCH)
 	$(MAKE) -C $(DOSPATH)
 	$(MAKE) -C $(IOPATH)
 	$(MAKE) -C $(FSPATH)
+	$(MAKE) -C $(PLATFORMPATH) ARCH=$(ARCH)
 	$(MAKE) -C $(DRIVERSPATH)
 	$(MAKE) -C $(STDPATH)
 	$(MAKE) -C $(CMDPATH)
@@ -75,7 +92,7 @@ livecd: default
 	../scripts/build-livecd.sh $(LIVECD_ISO)
 
 livecd_run: livecd
-	qemu-system-i386 -enable-kvm -cpu host -smp $(QEMU_CPUS) \
+	$(QEMU_SYSTEM) -enable-kvm -cpu host -smp $(QEMU_CPUS) \
 		-netdev user,id=net0 -device pcnet,netdev=net0 -serial stdio \
 		-device sb16 -drive file=./boot.img,format=raw,if=ide \
 		-cdrom ./$(LIVECD_ISO) -boot d -m 4096
@@ -102,15 +119,15 @@ $(LIBALLOC_KERNEL) : $(LIBALLOC_RELEASE) Makefile
 		--redefine-sym heap_set_oom_handler=liballoc_heap_set_oom_handler \
 		$(LIBALLOC_RELEASE) $(LIBALLOC_KERNEL)
 
-$(OUTPATH)kernel.bin : $(OBJS_BOOTPACK) $(ARCHX86PATH)kernel.ld Makefile
-	ld -m elf_i386 -static -T $(ARCHX86PATH)kernel.ld $(OBJS_BOOTPACK) ./libubscan.a ../apps/libs/libtcc1.a -o $(OUTPATH)kernel.bin
+$(OUTPATH)kernel.bin : $(OBJS_BOOTPACK) $(ARCHPATH)kernel.ld Makefile
+	ld -m $(ARCH_LD_EMULATION) -static -T $(ARCHPATH)kernel.ld $(OBJS_BOOTPACK) ./libubscan.a ../apps/libs/libtcc1.a -o $(OUTPATH)kernel.bin
 
 make_dir:
 	mkdir -p img
 	mkdir -p obj
 
-$(OUTPATH)irq.o: $(ARCHX86PATH)irq.c $(INCPATH)irq.h $(ARCHX86PATH)Makefile
-	$(MAKE) -C $(ARCHX86PATH)
+$(OUTPATH)irq.o: $(ARCHPATH)irq.c $(INCPATH)irq.h $(ARCHPATH)Makefile
+	$(MAKE) -C $(ARCHPATH) ARCH=$(ARCH)
 
 make_img: make_dir
 	qemu-img create boot.img 64M
@@ -247,10 +264,11 @@ Mimg : make_dir $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $
 # 运行程序
 
 img_run :
-	$(MAKE) -C $(ARCHX86PATH)
+	$(MAKE) -C $(ARCHPATH) ARCH=$(ARCH)
 	$(MAKE) -C $(DOSPATH)
 	$(MAKE) -C $(IOPATH)
 	$(MAKE) -C $(FSPATH)
+	$(MAKE) -C $(PLATFORMPATH) ARCH=$(ARCH)
 	$(MAKE) -C $(DRIVERSPATH)
 	$(MAKE) -C $(STDPATH)
 	$(MAKE) -C $(CMDPATH)
@@ -258,14 +276,15 @@ img_run :
 	$(MAKE) -C $(MSTPATH)
 	$(MAKE) -C modules
 	$(MAKE) Mimg
-	qemu-system-i386 -enable-kvm -cpu host -smp $(QEMU_CPUS) -netdev user,id=net0 -device pcnet,netdev=net0 -serial stdio -device sb16 -device floppy -hda ./boot.img  \
+	$(QEMU_SYSTEM) -enable-kvm -cpu host -smp $(QEMU_CPUS) -netdev user,id=net0 -device pcnet,netdev=net0 -serial stdio -device sb16 -device floppy -hda ./boot.img  \
 	 -hdb disk.img \
 	 -boot c -m 4096
 full : make_dir
-	$(MAKE) -C $(ARCHX86PATH)
+	$(MAKE) -C $(ARCHPATH) ARCH=$(ARCH)
 	$(MAKE) -C $(DOSPATH)
 	$(MAKE) -C $(IOPATH)
 	$(MAKE) -C $(FSPATH)
+	$(MAKE) -C $(PLATFORMPATH) ARCH=$(ARCH)
 	$(MAKE) -C $(DRIVERSPATH)
 	$(MAKE) -C $(STDPATH)
 	$(MAKE) -C $(CMDPATH)
@@ -274,19 +293,20 @@ full : make_dir
 	$(MAKE) -C $(MSTPATH)
 	$(MAKE) Mimg
 run:
-	qemu-system-i386 -d in_asm -no-reboot -smp $(QEMU_CPUS) -netdev user,id=net0 -device pcnet,netdev=net0 -serial stdio -device sb16 -device floppy -fda ./img/Powerint_DOS_386.img -drive id=disk,file=disk.img,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -hdb ./img/Disk2.img -hdc ./img/Disk3.img -hdd ./img/res.img -boot a -m 512
+	$(QEMU_SYSTEM) -d in_asm -no-reboot -smp $(QEMU_CPUS) -netdev user,id=net0 -device pcnet,netdev=net0 -serial stdio -device sb16 -device floppy -fda ./img/Powerint_DOS_386.img -drive id=disk,file=disk.img,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -hdb ./img/Disk2.img -hdc ./img/Disk3.img -hdd ./img/res.img -boot a -m 512
 full_run:
-	$(MAKE) -C $(ARCHX86PATH)
+	$(MAKE) -C $(ARCHPATH) ARCH=$(ARCH)
 	$(MAKE) -C $(DOSPATH)
 	$(MAKE) -C $(IOPATH)
 	$(MAKE) -C $(FSPATH)
+	$(MAKE) -C $(PLATFORMPATH) ARCH=$(ARCH)
 	$(MAKE) -C $(DRIVERSPATH)
 	$(MAKE) -C $(STDPATH)
 	$(MAKE) -C $(CMDPATH)
 	$(MAKE) -C $(NETPATH)
 	$(MAKE) -C $(APPSPATH)
 	$(MAKE) Mimg
-	qemu-system-i386 -smp $(QEMU_CPUS) -netdev user,id=net0 -device pcnet,netdev=net0 -serial stdio -device sb16 -device floppy -fda ./img/Powerint_DOS_386.img -drive id=disk,file=disk.img,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -hdb ./img/Disk2.img -hdc ./img/Disk3.img -hdd ./img/res.img -boot a -m 512 -enable-kvm -cpu host
+	$(QEMU_SYSTEM) -smp $(QEMU_CPUS) -netdev user,id=net0 -device pcnet,netdev=net0 -serial stdio -device sb16 -device floppy -fda ./img/Powerint_DOS_386.img -drive id=disk,file=disk.img,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -hdb ./img/Disk2.img -hdc ./img/Disk3.img -hdd ./img/res.img -boot a -m 512 -enable-kvm -cpu host
 clean :
 	rm -r ./obj
 	rm -r ./img

@@ -1,7 +1,8 @@
-#include <arch/x86/interrupt.h>
 #include <arch/x86/io.h>
 #include <dos.h>
+#include <dma.h>
 #include <drivers.h>
+#include <limits.h>
 #include <net_link.h>
 #include <pci.h>
 
@@ -59,6 +60,7 @@ typedef struct {
 } pcnet_state_t;
 
 static pcnet_state_t pcnet;
+static void pcnet_interrupt(void);
 static pcnet_init_block_t pcnet_init_block __attribute__((aligned(16)));
 static pcnet_descriptor_t
     pcnet_receive_descriptors[PCNET_RING_COUNT] __attribute__((aligned(16)));
@@ -89,16 +91,32 @@ static void pcnet_rearm_receive(pcnet_descriptor_t *descriptor) {
   descriptor->flags = PCNET_DESC_OWN | PCNET_DESC_RX_BUFFER;
 }
 
-static void pcnet_prepare_rings(const uint8_t mac[6]) {
+static bool pcnet_dma32(const void *address, size_t size, uint32_t *mapped) {
+  dma_addr_t dma_address;
+  if (!dma_map(address, size, UINT_MAX, &dma_address)) {
+    return false;
+  }
+  *mapped = (uint32_t)dma_address;
+  return true;
+}
+
+static bool pcnet_prepare_rings(const uint8_t mac[6],
+                                uint32_t *init_block_address) {
   for (unsigned i = 0; i < PCNET_RING_COUNT; i++) {
-    pcnet_transmit_descriptors[i].address =
-        (uint32_t)(uintptr_t)pcnet_transmit_buffers[i];
+    uint32_t transmit_address;
+    uint32_t receive_address;
+    if (!pcnet_dma32(pcnet_transmit_buffers[i], PCNET_BUFFER_BYTES,
+                     &transmit_address) ||
+        !pcnet_dma32(pcnet_receive_buffers[i], PCNET_BUFFER_BYTES,
+                     &receive_address)) {
+      return false;
+    }
+    pcnet_transmit_descriptors[i].address = transmit_address;
+    pcnet_receive_descriptors[i].address = receive_address;
     pcnet_transmit_descriptors[i].flags = PCNET_DESC_RX_BUFFER;
     pcnet_transmit_descriptors[i].flags2 = 0;
     pcnet_transmit_descriptors[i].available = 0;
 
-    pcnet_receive_descriptors[i].address =
-        (uint32_t)(uintptr_t)pcnet_receive_buffers[i];
     pcnet_rearm_receive(&pcnet_receive_descriptors[i]);
   }
 
@@ -106,9 +124,24 @@ static void pcnet_prepare_rings(const uint8_t mac[6]) {
   pcnet_init_block.tlen = 3u << 4;
   pcnet_init_block.rlen = 3u << 4;
   memcpy(pcnet_init_block.mac, mac, sizeof(pcnet_init_block.mac));
-  pcnet_init_block.receive_ring = (uint32_t)(uintptr_t)pcnet_receive_descriptors;
-  pcnet_init_block.transmit_ring =
-      (uint32_t)(uintptr_t)pcnet_transmit_descriptors;
+  uint32_t receive_ring;
+  uint32_t transmit_ring;
+  if (!pcnet_dma32(pcnet_receive_descriptors, sizeof(pcnet_receive_descriptors),
+                   &receive_ring) ||
+      !pcnet_dma32(pcnet_transmit_descriptors,
+                   sizeof(pcnet_transmit_descriptors), &transmit_ring) ||
+      !pcnet_dma32(&pcnet_init_block, sizeof(pcnet_init_block),
+                   init_block_address)) {
+    return false;
+  }
+  pcnet_init_block.receive_ring = receive_ring;
+  pcnet_init_block.transmit_ring = transmit_ring;
+  dma_sync_for_device(&pcnet_init_block, sizeof(pcnet_init_block));
+  dma_sync_for_device(pcnet_receive_descriptors,
+                      sizeof(pcnet_receive_descriptors));
+  dma_sync_for_device(pcnet_transmit_descriptors,
+                      sizeof(pcnet_transmit_descriptors));
+  return true;
 }
 
 static bool pcnet_receive(void) {
@@ -116,6 +149,7 @@ static bool pcnet_receive(void) {
   for (;;) {
     pcnet_descriptor_t *descriptor =
         &pcnet_receive_descriptors[pcnet.next_receive];
+    dma_sync_for_cpu(descriptor, sizeof(*descriptor));
     uint32_t flags = descriptor->flags;
     if ((flags & PCNET_DESC_OWN) != 0) {
       return reschedule;
@@ -125,11 +159,13 @@ static bool pcnet_receive(void) {
     if ((flags & (PCNET_DESC_ERR | PCNET_DESC_STP | PCNET_DESC_ENP)) ==
             (PCNET_DESC_STP | PCNET_DESC_ENP) &&
         length >= 4 && length - 4 >= 14 && length - 4 <= PCNET_FRAME_MAX) {
+      dma_sync_for_cpu(pcnet_receive_buffers[pcnet.next_receive], length);
       reschedule |=
           pcnet.receive(pcnet_receive_buffers[pcnet.next_receive], length - 4);
     }
 
     pcnet_rearm_receive(descriptor);
+    dma_sync_for_device(descriptor, sizeof(*descriptor));
     pcnet.next_receive = (pcnet.next_receive + 1) % PCNET_RING_COUNT;
   }
 }
@@ -170,15 +206,19 @@ bool pcnet_link_start(net_link_receive_t receive, uint8_t mac[6]) {
   for (unsigned i = 0; i < 6; i++) {
     mac[i] = x86_port_read8(pcnet.io_base + PCNET_APROM0 + i);
   }
-  pcnet_prepare_rings(mac);
+  uint32_t init_block_address;
+  if (!pcnet_prepare_rings(mac, &init_block_address)) {
+    logk("pcnet: DMA buffers are not addressable\n");
+    return false;
+  }
 
-  pcnet_write_csr(PCNET_CSR1, (uint16_t)(uintptr_t)&pcnet_init_block);
-  pcnet_write_csr(PCNET_CSR2, (uint16_t)((uintptr_t)&pcnet_init_block >> 16));
+  pcnet_write_csr(PCNET_CSR1, (uint16_t)init_block_address);
+  pcnet_write_csr(PCNET_CSR2, (uint16_t)(init_block_address >> 16));
   pcnet_write_csr(PCNET_CSR0, 0x0041);
   pcnet_write_csr(PCNET_CSR4, pcnet_read_csr(PCNET_CSR4) | 0x0c00);
   pcnet_write_csr(PCNET_CSR0, 0x0042);
 
-  if (!interrupt_register_entry(IRQ_BASE_VECTOR + irq, PCNET_ASM_INTHANDLER)) {
+  if (!irq_register_handler(irq, pcnet_interrupt)) {
     logk("pcnet: unable to register IRQ %d\n", irq);
     return false;
   }
@@ -210,12 +250,14 @@ int pcnet_link_transmit(const uint8_t *frame, uint16_t length) {
   descriptor->available = 0;
   descriptor->flags =
       PCNET_DESC_TX_FLAGS | ((uint16_t)(-(int)transmit_length) & 0x0fffu);
+  dma_sync_for_device(buffer, transmit_length);
+  dma_sync_for_device(descriptor, sizeof(*descriptor));
   pcnet.next_transmit = (pcnet.next_transmit + 1) % PCNET_RING_COUNT;
   pcnet_write_csr(PCNET_CSR0, 0x0048);
   return 0;
 }
 
-void PCNET_IRQ(void) {
+static void pcnet_interrupt(void) {
   bool reschedule = false;
   uint16_t status = pcnet_read_csr(PCNET_CSR0);
   pcnet_write_csr(PCNET_CSR0, status);

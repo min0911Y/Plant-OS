@@ -3,20 +3,21 @@
 
 #include <ctypes.h>
 
-#define USER_SPACE_START 0x70000000u
-#define USER_HEAP_END 0xf0000000u
-#define USER_SHARED_END 0xf1000000u
+#if defined(KERNEL_ARCH_I386)
+#include <arch/x86/i386/user.h>
+#else
+#error "User address-space layout is not defined for the selected architecture"
+#endif
 
 struct user_runtime_layout {
   uint32_t total_pages;
-  uint32_t stack_top;
-  uint32_t allocation_base;
+  uintptr_t stack_top;
+  uintptr_t allocation_base;
 };
 
-bool user_runtime_layout_calculate(uint32_t aligned_image_end,
-                                   uint32_t heap_pages,
-                                   uint32_t stack_pages,
-                                   bool uses_status_page, uint32_t entry,
+bool user_runtime_layout_calculate(uintptr_t aligned_image_end,
+                                   size_t heap_pages, size_t stack_pages,
+                                   bool uses_status_page, uintptr_t entry,
                                    struct user_runtime_layout *layout);
 
 #endif

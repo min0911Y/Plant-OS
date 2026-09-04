@@ -3,6 +3,12 @@
 
 #include <ctypes.h>
 
+#if defined(KERNEL_ARCH_I386)
+#include <arch/x86/i386/kasan.h>
+#else
+#error "KASAN layout is not defined for the selected architecture"
+#endif
+
 #ifdef __GNUC__
 #define KASAN_NOINSTR __attribute__((no_sanitize_address))
 #else
@@ -18,11 +24,6 @@
 #define KASAN_HEAP_LEFT_REDZONE 0u
 #define KASAN_HEAP_RIGHT_REDZONE 0u
 #endif
-#define KASAN_SHADOW_GRANULE 8u
-#define KASAN_SHADOW_SIZE (64u * 1024u * 1024u)
-#define KASAN_SHADOW_START 0x01200000u
-#define KASAN_SHADOW_END (KASAN_SHADOW_START + KASAN_SHADOW_SIZE - 1u)
-
 enum kasan_alloc_type {
   KASAN_ALLOC_MALLOC = 1,
   KASAN_ALLOC_KMALLOC = 2,

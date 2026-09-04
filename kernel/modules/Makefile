@@ -19,7 +19,7 @@ $(OUTDIR)/hello.o: hello/hello.c Makefile $(KERNEL_CONFIG_STAMP) \
 	gcc $(MODULE_CFLAGS) -c hello/hello.c -o $(OUTDIR)/hello.o
 
 $(MODDIR)/hello.mod: $(OUTDIR)/hello.o | dirs
-	ld -m elf_i386 -r $(OUTDIR)/hello.o -o $(MODDIR)/hello.mod
+	ld -m $(KERNEL_ARCH_LD_EMULATION) -r $(OUTDIR)/hello.o -o $(MODDIR)/hello.mod
 
 clean:
 	rm -rf $(OUTDIR) $(MODDIR)

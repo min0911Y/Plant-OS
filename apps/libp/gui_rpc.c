@@ -8,7 +8,7 @@
 struct gui_window {
   struct gui_window *next;
   uint32_t id;
-  uint32_t mapping;
+  uintptr_t mapping;
   uint32_t mapping_size;
   uint32_t width;
   uint32_t height;
@@ -23,18 +23,12 @@ static volatile unsigned gui_windows_lock;
 #define GUI_CONNECT_TIMEOUT_MS 15000u
 
 static void gui_lock(void) {
-  unsigned value = 1;
-  do {
-    asm volatile("xchgl %0, %1"
-                 : "+r"(value), "+m"(gui_windows_lock)
-                 :
-                 : "memory");
-  } while (value);
+  while (__atomic_exchange_n(&gui_windows_lock, 1, __ATOMIC_ACQUIRE)) {
+  }
 }
 
 static void gui_unlock(void) {
-  asm volatile("" ::: "memory");
-  gui_windows_lock = 0;
+  __atomic_store_n(&gui_windows_lock, 0, __ATOMIC_RELEASE);
 }
 
 static int gui_connect(void) {
@@ -67,8 +61,8 @@ static int gui_call(unsigned opcode, const void *arg, unsigned arg_len,
   return result;
 }
 
-static uint32_t gui_mapping_find(unsigned size) {
-  uint32_t address = GUI_SHARED_REGION_START;
+static uintptr_t gui_mapping_find(unsigned size) {
+  uintptr_t address = GUI_SHARED_REGION_START;
   for (struct gui_window *window = gui_windows; window != NULL;
        window = window->next) {
     if (size <= window->mapping - address) {
@@ -117,7 +111,7 @@ window_t create_window(const char *title, int x, int y, int width, int height) {
     return NULL;
   }
   gui_lock();
-  uint32_t mapping = gui_mapping_find(mapping_size);
+  uintptr_t mapping = gui_mapping_find(mapping_size);
   if (mapping != 0) {
     window->id = 0;
     window->mapping = mapping;

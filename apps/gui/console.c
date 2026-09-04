@@ -223,7 +223,7 @@ struct tty *mtty_alloc(void *vram, int xsize, int ysize,
   res->color = 0x07;
   return res;
 }
-void mtty_handle(uint32_t *a) {
+void mtty_handle(uintptr_t *a) {
   struct tty *tty;
   tty = (struct tty *)a[1]; // tty
   tty->x = a[7];
@@ -359,7 +359,7 @@ console_t *create_console(window_t *window, int xsize, int ysize, int x,
   uintptr_t stack_top = (uintptr_t)res->task_stack + 32 * 1024;
   ((uintptr_t *)stack_top)[-1] = res->tty_handle;
   int thread_tid =
-      AddThread("", (uintptr_t)console_task, (unsigned int)stack_top - 8);
+      AddThread("", (uintptr_t)console_task, stack_top - 8);
   if (thread_tid < 0) {
     goto fail;
   }

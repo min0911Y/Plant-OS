@@ -2,19 +2,16 @@
 #define _INTERRUPTS_H
 #include <ctypes.h>
 
-typedef void (*interrupt_entry_t)(void);
+typedef void (*irq_handler_t)(void);
 
-bool interrupt_register_entry(unsigned vector, interrupt_entry_t entry);
+bool irq_register_handler(unsigned irq, irq_handler_t handler);
+void irq_dispatch(unsigned irq);
 bool irq_is_valid(unsigned irq);
 
-#define IRQ_BASE_VECTOR 0x20
 #define IRQ_TRIGGER_EDGE 0
 #define IRQ_TRIGGER_LEVEL 1
 #define IRQ_POLARITY_HIGH 0
 #define IRQ_POLARITY_LOW 1
-// inthandler.c
-void inthandler21(int *esp);
-void inthandler2c(int *esp);
 // pic.c
 void init_pic(void);
 void pic_disable(void);

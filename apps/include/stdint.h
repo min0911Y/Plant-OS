@@ -2,7 +2,7 @@
 #ifndef _STDINT_H
 #define _STDINT_H   1
 #include <ctypes.h>
-typedef long int		intptr_t;
+typedef __INTPTR_TYPE__ intptr_t;
 typedef long long _Int64;
 typedef _Int64 intmax_t;
 typedef uint64_t uintmax_t;

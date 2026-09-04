@@ -34,19 +34,13 @@ static bool heap_ready;
 static __attribute__((noreturn)) void heap_corruption(void *ptr) {
   Panic_K("kernel heap metadata corrupted ptr=%08x",
           (uint32_t)(uintptr_t)ptr);
-  (void)irq_save();
-  for (;;) {
-    asm volatile("hlt");
-  }
+  arch_halt();
 }
 
 static void liballoc_error(liballoc_heap_error_t error, void *ptr) {
   Panic_K("liballoc error=%u ptr=%08x", (uint32_t)error,
           (uint32_t)(uintptr_t)ptr);
-  (void)irq_save();
-  for (;;) {
-    asm volatile("hlt");
-  }
+  arch_halt();
 }
 
 static bool heap_allocation_size(size_t size, size_t *total) {

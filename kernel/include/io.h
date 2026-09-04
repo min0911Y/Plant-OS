@@ -23,7 +23,6 @@ void screen_ne_TextMode(struct tty *res);
 void clear_TextMode(struct tty *res);
 void Draw_Box_TextMode(struct tty *res, int x, int y, int x1, int y1,
                        unsigned char color);
-void SwitchShell_TextMode(int i);
 bool now_tty_TextMode(struct tty *res);
 // tty.c
 bool init_tty(void);
@@ -40,9 +39,9 @@ void high_text_cursor_task_exited(mtask *task);
 struct tty *tty_set(mtask *task, struct tty *res);
 bool tty_notify_input(struct tty *tty);
 struct tty *tty_set_default(struct tty *res);
-void tty_set_reserved(struct tty *res, unsigned int reserved1,
-                      unsigned int reserved2, unsigned int reserved3,
-                      unsigned int reserved4);
+void tty_set_reserved(struct tty *res, uintptr_t reserved1,
+                      uintptr_t reserved2, uintptr_t reserved3,
+                      uintptr_t reserved4);
 // log.c
 void kprint(char *str);
 void logk(char *str, ...);
@@ -67,7 +66,6 @@ bool now_tty_HighTextMode(struct tty *res);
 bool SwitchToHighTextMode(void);
 void Draw_Box_HighTextMode(struct tty *res, int x, int y, int x1, int y1,
                            unsigned char color);
-void SwitchShell_HighTextMode(int i);
 // Draw.c
 void Draw_Circle_Hollow_32(unsigned char *vram, int xsize, int x, int y, int r,
                            int Cr, int Cg, int Cb, int br, int bg, int bb);

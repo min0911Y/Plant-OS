@@ -17,6 +17,7 @@ RECORD_RE = re.compile(
 )
 SYMBOL_RE = re.compile(r"^([0-9a-fA-F]+)\s+([A-Za-z])\s+(.+)$")
 UINT32_MAX = 0xFFFFFFFF
+ADDRESS_MAX = 0xFFFFFFFFFFFFFFFF
 PERF_STACK_MAX_DEPTH = 16
 
 
@@ -83,7 +84,7 @@ class PerfDump:
             text_start, text_end = self.text_bounds
         except (KeyError, ValueError) as exc:
             raise PerfFormatError("invalid or missing PERF text bounds") from exc
-        if text_start < 0 or text_start >= text_end or text_end > UINT32_MAX:
+        if text_start < 0 or text_start >= text_end or text_end > ADDRESS_MAX:
             raise PerfFormatError("out-of-range PERF text bounds")
 
         expected_stacks = int(self.metadata["stacks"])
@@ -151,10 +152,10 @@ class SymbolTable:
 
     def resolve(self, address, show_offset=False):
         if address < self.text_start or address >= self.text_end:
-            return f"0x{address:08x}"
+            return f"0x{address:x}"
         index = bisect.bisect_right(self.addresses, address) - 1
         if index < 0:
-            return f"0x{address:08x}"
+            return f"0x{address:x}"
 
         name = self.names[index]
         offset = address - self.addresses[index]
@@ -219,7 +220,7 @@ def parse_record(line, line_number):
         pcs = tuple(int(token, 16) for token in tokens)
     except ValueError as exc:
         raise PerfFormatError(f"invalid address on line {line_number}") from exc
-    if any(pc < 0 or pc > UINT32_MAX for pc in pcs):
+    if any(pc < 0 or pc > ADDRESS_MAX for pc in pcs):
         raise PerfFormatError(f"out-of-range address on line {line_number}")
     if kind is SampleKind.KERNEL and not pcs:
         raise PerfFormatError(f"empty kernel stack on line {line_number}")

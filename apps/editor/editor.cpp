@@ -1179,12 +1179,12 @@ public:
 #if VIEW_LINE
     c->ml = n->maxLine();
 #endif
-    char *stack = (char *)malloc(16 * 1024);
-    stack += 16 * 1024 - 4;
-    unsigned int *s = (unsigned int *)(stack);
-    *s = (unsigned int)this;
+    uintptr_t stack = (uintptr_t)malloc(16 * 1024);
+    stack += 16 * 1024 - sizeof(uintptr_t);
+    uintptr_t *s = (uintptr_t *)stack;
+    *s = (uintptr_t)this;
     if (mouse_support())
-      AddThread("mouse", (unsigned int)&m_thread, (unsigned int)stack - 4);
+      AddThread("mouse", (uintptr_t)&m_thread, stack - sizeof(uintptr_t));
     r->showAll();
     int times = 0;
     int tap = 0;

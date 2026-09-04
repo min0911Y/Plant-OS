@@ -2,6 +2,7 @@
 #define _DEFINE_H
 #include <arch.h>
 #include <ctypes.h>
+#include <mouse.h>
 #include <stdarg.h>
 #include <stddef.h>
 typedef unsigned int vram_t;
@@ -9,10 +10,6 @@ typedef vram_t color_t;
 
 /* dos.h */
 #define VERSION "0.7b" // Version of the program
-#define ADR_BOTPAK 0x00280000
-#define LIMIT_BOTPAK 0x0007ffff
-#define PIT_CTRL 0x0043
-#define PIT_CNT0 0x0040
 #define NULL_TID 11459810
 #define Panic_Print(func, info, ...)                                           \
   func("%s--PANIC: %s:%d Info:" info "\n", __FUNCTION__, __FILE__, __LINE__,   \
@@ -32,11 +29,11 @@ typedef vram_t color_t;
 #define get_tid(task) task->tid
 #define POWERINTDOS 0
 #define HIGHTEXTMODE 1
-extern struct MOUSE_DEC mdec;
+extern mouse_decoder_t mdec;
 extern int gmx, gmy;
 extern unsigned char *font, *ascfont, *hzkfont;
 extern struct TIMERCTL timerctl;
-extern unsigned int memsize;
+extern uintptr_t memsize;
 extern uint32_t running_mode;
 
 #define MAX_TIMER 500
@@ -120,43 +117,6 @@ typedef struct { // IPC头（在TASK结构体中的头）
   uint64_t seq;   // 下一条消息的入队序号
   IPCMessage messages[MAX_IPC_MESSAGE];
 } IPC_Header;
-// struct THREAD {
-//   struct TASK *father;
-// };
-// struct TASK {
-//   int sel, sleep, level;
-//   char name[32];
-//   char running;
-//   struct tty *TTY;
-//   struct FIFO8 *keyfifo, *mousefifo; // 基本输入设备的缓冲区
-//   int fifosleep;
-//   int cs_base, ds_base;
-//   void *alloc_addr;
-//   int alloc_size;
-//   struct IPC_Header IPC_header;
-//   struct TIMER *timer;
-//   int esp_start; // 开始的esp
-//   int eip_start; // 开始的eip
-//   short cs_start;
-//   short ss_start;
-//   int is_child; // 是子线程吗
-//   int app;
-//   struct THREAD thread;
-//   int drive_number;
-//   char drive;
-//   char *line;
-//   void (*keyboard_press)(unsigned char data, uint32_t task);
-//   void (*keyboard_release)(unsigned char data, uint32_t task);
-//   int nl;
-//   int lock; // 被锁住了？
-//   char forever;
-//   int mx, my;
-//   struct vfs_t *nfs;
-//   struct FIFO8 *Pkeyfifo, *Ukeyfifo;
-//   uint32_t fpu_use;
-//   uint32_t *gdt_data;
-//   uint32_t pde;
-// } __attribute__((packed));
 enum STATE {
   EMPTY,
   RUNNING,
@@ -189,9 +149,9 @@ enum { TASK_KERNEL_STACK_SIZE = 1024u * 1024u };
 typedef struct mtask {
   arch_task_context_t *context;
   uintptr_t entry;
-  unsigned pde;
+  arch_address_space_t address_space;
   unsigned user_mode;
-  unsigned top;
+  uintptr_t top;
   unsigned weight;
   enum STATE state; // 此项为1（RUNNING） 即正常调度，为 2（WAITING） 3
                     // （SLEEPING）的时候不执行 ，0 EMPTY 空闲格子
@@ -207,12 +167,12 @@ typedef struct mtask {
   uint32_t tgid; /* process/thread-group leader tid */
   uint32_t generation;
   enum TASK_KIND kind;
-  uint32_t alloc_addr;
-  uint32_t *alloc_size;
+  uintptr_t alloc_addr;
+  size_t *alloc_size;
   uint32_t alloced;
   struct tty *TTY;
   struct tty *tty_session;
-  x86_fpu_state_t fpu_state;
+  arch_fpu_state_t fpu_state;
   uint8_t fpu_initialized;
   struct FIFO8 *Pkeyfifo, *Ukeyfifo;
   struct FIFO8 *keyfifo, *mousefifo; // 基本输入设备的缓冲区
@@ -238,20 +198,10 @@ typedef struct mtask {
   unsigned terminate_status;
   unsigned terminate_pending;
   unsigned signal;
-  unsigned handler[30];
-  unsigned ret_to_app;
-  unsigned times;
+  uintptr_t handler[30];
+  uintptr_t ret_to_app;
   unsigned signal_disable;
 } mtask;
-#define PG_P 1
-#define PG_USU 4
-#define PG_RWW 2
-#define PG_PCD 16
-#define PG_SHARED 1024
-#define PDE_ADDRESS 0x400000
-#define PTE_ADDRESS (PDE_ADDRESS + 0x1000)
-#define PAGE_END (PTE_ADDRESS + 0x400000)
-#define PAGE_MANNAGER PAGE_END
 struct FIFO8 {
   unsigned char *buf;
   int p, q, size, free, flags;
@@ -276,9 +226,8 @@ typedef struct List List;
 
 /* fs.h */
 
-extern uint32_t Path_Addr;
 struct FAT_CACHE {
-  unsigned int ADR_DISKIMG;
+  uintptr_t ADR_DISKIMG;
   struct FAT_FILEINFO *root_directory;
   struct List *directory_list;
   struct List *directory_clustno_list;
@@ -393,33 +342,6 @@ struct FAT_FILEINFO {
   unsigned short update_time, update_date, clustno_low;
   unsigned int size;
 };
-#define rmfarptr2ptr(x) ((x).seg * 0x10 + (x).offset)
-struct DLL_STRPICENV {
-  int work[16384];
-};
-struct RGB {
-  unsigned char b, g, r, t;
-};
-struct paw_info {
-  unsigned char reserved[12]; // 12 bytes reserved(0xFF)
-  char oem[3];                // PRA
-  int xsize;                  // xsize
-  int ysize;                  // ysize
-};
-
-/* interrupts.h */
-#define PIC0_ICW1 0x0020
-#define PIC0_OCW2 0x0020
-#define PIC0_IMR 0x0021
-#define PIC0_ICW2 0x0021
-#define PIC0_ICW3 0x0021
-#define PIC0_ICW4 0x0021
-#define PIC1_ICW1 0x00a0
-#define PIC1_OCW2 0x00a0
-#define PIC1_IMR 0x00a1
-#define PIC1_ICW2 0x00a1
-#define PIC1_ICW3 0x00a1
-#define PIC1_ICW4 0x00a1
 /* io.h */
 typedef enum {
   MODE_A = 'A',
@@ -455,7 +377,7 @@ struct tty {
                    unsigned char color); // Draw_Box函数
   int (*fifo_status)(struct tty *res);
   int (*fifo_get)(struct tty *res);
-  unsigned int reserved[4]; // 保留项
+  uintptr_t reserved[4]; // backend-private values
 
   //////////////实现VT100需要的//////////////////
 
@@ -506,275 +428,6 @@ struct SHTCTL {
 #define COL_008484 0x00008484
 #define COL_FFFFFF 0x00ffffff
 #define COL_TRANSPARENT 0x50ffffff
-
-/* drivers.h */
-struct ACPI_RSDP {
-  char Signature[8];
-  unsigned char Checksum;
-  char OEMID[6];
-  unsigned char Revision;
-  unsigned int RsdtAddress;
-  unsigned int Length;
-  unsigned int XsdtAddress[2];
-  unsigned char ExtendedChecksum;
-  unsigned char Reserved[3];
-};
-struct ACPISDTHeader {
-  char Signature[4];
-  unsigned int Length;
-  unsigned char Revision;
-  unsigned char Checksum;
-  char OEMID[6];
-  char OEMTableID[8];
-  unsigned int OEMRevision;
-  unsigned int CreatorID;
-  unsigned int CreatorRevision;
-};
-struct ACPI_RSDT {
-  struct ACPISDTHeader header;
-  unsigned int Entry;
-};
-typedef struct {
-  unsigned char AddressSpace;
-  unsigned char BitWidth;
-  unsigned char BitOffset;
-  unsigned char AccessSize;
-  unsigned int Address[2];
-} GenericAddressStructure;
-struct ACPI_FADT {
-  struct ACPISDTHeader h;
-  unsigned int FirmwareCtrl;
-  unsigned int Dsdt;
-
-  // field used in ACPI 1.0; no longer in use, for compatibility only
-  unsigned char Reserved;
-
-  unsigned char PreferredPowerManagementProfile;
-  unsigned short SCI_Interrupt;
-  unsigned int SMI_CommandPort;
-  unsigned char AcpiEnable;
-  unsigned char AcpiDisable;
-  unsigned char S4BIOS_REQ;
-  unsigned char PSTATE_Control;
-  unsigned int PM1aEventBlock;
-  unsigned int PM1bEventBlock;
-  unsigned int PM1aControlBlock;
-  unsigned int PM1bControlBlock;
-  unsigned int PM2ControlBlock;
-  unsigned int PMTimerBlock;
-  unsigned int GPE0Block;
-  unsigned int GPE1Block;
-  unsigned char PM1EventLength;
-  unsigned char PM1ControlLength;
-  unsigned char PM2ControlLength;
-  unsigned char PMTimerLength;
-  unsigned char GPE0Length;
-  unsigned char GPE1Length;
-  unsigned char GPE1Base;
-  unsigned char CStateControl;
-  unsigned short WorstC2Latency;
-  unsigned short WorstC3Latency;
-  unsigned short FlushSize;
-  unsigned short FlushStride;
-  unsigned char DutyOffset;
-  unsigned char DutyWidth;
-  unsigned char DayAlarm;
-  unsigned char MonthAlarm;
-  unsigned char Century;
-
-  // reserved in ACPI 1.0; used since ACPI 2.0+
-  unsigned short BootArchitectureFlags;
-
-  unsigned char Reserved2;
-  unsigned int Flags;
-
-  // 12 byte structure; see below for details
-  GenericAddressStructure ResetReg;
-
-  unsigned char ResetValue;
-  unsigned char Reserved3[3];
-
-  // 64bit pointers - Available on ACPI 2.0+
-  unsigned int X_FirmwareControl[2];
-  unsigned int X_Dsdt[2];
-
-  GenericAddressStructure X_PM1aEventBlock;
-  GenericAddressStructure X_PM1bEventBlock;
-  GenericAddressStructure X_PM1aControlBlock;
-  GenericAddressStructure X_PM1bControlBlock;
-  GenericAddressStructure X_PM2ControlBlock;
-  GenericAddressStructure X_PMTimerBlock;
-  GenericAddressStructure X_GPE0Block;
-  GenericAddressStructure X_GPE1Block;
-} __attribute__((packed));
-struct ACPI_MADT {
-  struct ACPISDTHeader h;
-  uint32_t LocalApicAddress;
-  uint32_t Flags;
-  uint8_t Entries[0];
-} __attribute__((packed));
-#define BCD_HEX(n) ((n >> 4) * 10) + (n & 0xf)
-#define HEX_BCD(n) ((n / 10) << 4) + (n % 10)
-#define CMOS_CUR_SEC 0x0
-#define CMOS_ALA_SEC 0x1
-#define CMOS_CUR_MIN 0x2
-#define CMOS_ALA_MIN 0x3
-#define CMOS_CUR_HOUR 0x4
-#define CMOS_ALA_HOUR 0x5
-#define CMOS_WEEK_DAY 0x6
-#define CMOS_MON_DAY 0x7
-#define CMOS_CUR_MON 0x8
-#define CMOS_CUR_YEAR 0x9
-#define CMOS_DEV_TYPE 0x12
-#define CMOS_CUR_CEN 0x32
-#define cmos_index 0x70
-#define cmos_data 0x71
-#define PORT_KEYDAT 0x0060
-#define PORT_KEYSTA 0x0064
-#define PORT_KEYCMD 0x0064
-#define MOUSE_ROLL_NONE 0
-#define MOUSE_ROLL_UP 1
-#define MOUSE_ROLL_DOWN 2
-struct MOUSE_DEC {
-  unsigned char buf[4], phase;
-  int x, y, btn;
-  int sleep;
-  char roll;
-};
-typedef struct {
-  unsigned short offset;
-  unsigned short seg;
-} ReadModeFarPointer;
-typedef struct {
-  unsigned short attributes;
-  unsigned char winA, winB;
-  unsigned short granularity;
-  unsigned short winsize;
-  unsigned short segmentA, segmentB;
-  /* In VBE Specification, this field should be
-   * ReadModeFarPointer winPosFunc;
-   * However, we overwrite this field in loader n*/
-  unsigned short mode;
-  unsigned short reserved2;
-  unsigned short bytesPerLine;
-  unsigned short width, height;
-  unsigned char Wchar, Ychar, planes, bitsPerPixel, banks;
-  unsigned char memory_model, bank_size, image_pages;
-  unsigned char reserved0;
-  unsigned char red_mask, red_position;
-  unsigned char green_mask, green_position;
-  unsigned char blue_mask, blue_position;
-  unsigned char rsv_mask, rsv_position;
-  unsigned char directcolor_attributes;
-  unsigned int physbase; // your LFB (Linear Framebuffer) address ;)
-  unsigned int offscreen;
-  unsigned short offsize;
-
-} __attribute__((packed)) VESAModeInfo;
-typedef struct {
-  unsigned char signature[4];
-  unsigned short Version;
-  ReadModeFarPointer oemString;
-  unsigned int capabilities;
-  ReadModeFarPointer videoModes;
-  unsigned short totalMemory;
-  unsigned short OEMVersion;
-  ReadModeFarPointer vendor;
-  ReadModeFarPointer product;
-  ReadModeFarPointer revision;
-  /* In VBE Specification, this field should be reserved.
-   * However, we overwrite this field in loader */
-  unsigned short modeCount;
-  unsigned char reserved0[220];
-  unsigned char oemUse[256];
-  VESAModeInfo modeList[0];
-} __attribute__((packed)) VESAControllerInfo;
-struct VBEINFO {
-  char res1[18];
-  short xsize, ysize;
-  char res2[18];
-  int vram;
-};
-#define VBEINFO_ADDRESS 0x7e00
-#define VGA_AC_INDEX 0x3C0
-#define VGA_AC_WRITE 0x3C0
-#define VGA_AC_READ 0x3C1
-#define VGA_MISC_WRITE 0x3C2
-#define VGA_SEQ_INDEX 0x3C4
-#define VGA_SEQ_DATA 0x3C5
-#define VGA_DAC_READ_INDEX 0x3C7
-#define VGA_DAC_WRITE_INDEX 0x3C8
-#define VGA_DAC_DATA 0x3C9
-#define VGA_MISC_READ 0x3CC
-#define VGA_GC_INDEX 0x3CE
-#define VGA_GC_DATA 0x3CF
-/*			COLOR emulation		MONO emulation */
-#define VGA_CRTC_INDEX 0x3D4 /* 0x3B4 */
-#define VGA_CRTC_DATA 0x3D5  /* 0x3B5 */
-#define VGA_INSTAT_READ 0x3DA
-#define VGA_NUM_SEQ_REGS 5
-#define VGA_NUM_CRTC_REGS 25
-#define VGA_NUM_GC_REGS 9
-#define VGA_NUM_AC_REGS 21
-#define VGA_NUM_REGS                                                           \
-  (1 + VGA_NUM_SEQ_REGS + VGA_NUM_CRTC_REGS + VGA_NUM_GC_REGS + VGA_NUM_AC_REGS)
-#define _vmemwr(DS, DO, S, N) memcpy((char *)((DS) * 16 + (DO)), S, N)
-#define SB16_IRQ 5
-#define SB16_FAKE_TID -3
-#define SB16_PORT_MIXER 0x224
-#define SB16_PORT_DATA 0x225
-#define SB16_PORT_RESET 0x226
-#define SB16_PORT_READ 0x22A
-#define SB16_PORT_WRITE 0x22C
-#define SB16_PORT_READ_STATUS 0x22E
-#define SB16_PORT_DSP_16BIT_INTHANDLER_IRQ 0x22F
-#define COMMAND_DSP_WRITE 0x40
-#define COMMAND_DSP_SOSR 0x41
-#define COMMAND_DSP_TSON 0xD1
-#define COMMAND_DSP_TSOF 0xD3
-#define COMMAND_DSP_STOP8 0xD0
-#define COMMAND_DSP_RP8 0xD4
-#define COMMAND_DSP_STOP16 0xD5
-#define COMMAND_DSP_RP16 0xD6
-#define COMMAND_DSP_VERSION 0xE1
-#define COMMAND_MIXER_MV 0x22
-#define COMMAND_SET_IRQ 0x80
-#define BUF_RDY_VAL 128
-#define MAX_DRIVERS 256
-#define DRIVER_USE 1
-#define DRIVER_FREE 0
-typedef struct driver *drv_t;
-typedef int drv_type_t;
-struct driver {
-  struct TASK *drv_task; // 驱动程序的任务
-  drv_type_t drv_type;   // 驱动程序类型
-  int flags;             // 驱动程序的状态
-};
-struct driver_ctl {
-  struct driver drivers[MAX_DRIVERS]; // 驱动程序数组
-  int driver_num;                     // 驱动程序数量
-};
-struct arg_struct {
-  int func_num;
-  void *arg; // 参数(base=0x00)
-  int tid;
-};
-struct IDEHardDiskInfomationBlock {
-  char reserve1[2];
-  unsigned short CylinesNum;
-  char reserve2[2];
-  unsigned short HeadersNum;
-  unsigned short TrackBytes;
-  unsigned short SectorBytes;
-  unsigned short TrackSectors;
-  char reserve3[6];
-  char OEM[20];
-  char reserve4[2];
-  unsigned short BuffersBytes;
-  unsigned short EECCheckSumLength;
-  char Version[8];
-  char ID[40];
-};
 
 typedef enum {
   VDISK_TYPE_NONE,

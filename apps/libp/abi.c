@@ -1,13 +1,13 @@
 #include <stdint.h>
 #include <syscall.h>
 
-unsigned api_malloc(int size);
+uintptr_t api_malloc(int size);
 
 uint64_t __udivmoddi4(uint64_t num, uint64_t den, uint64_t *rem_p) {
   uint64_t quot = 0, qbit = 1;
 
   if (den == 0) {
-    __asm__ __volatile__("int $0");
+    __builtin_trap();
     return 0; /* If trap returns... */
   }
 
@@ -35,7 +35,7 @@ int64_t __divmoddi4(int64_t num, int64_t den, int64_t *rem_p) {
   int64_t quot = 0, qbit = 1;
 
   if (den == 0) {
-    __asm__ __volatile__("int $0");
+    __builtin_trap();
     return 0; /* If trap returns... */
   }
 
@@ -115,40 +115,33 @@ static void assert_failed() {
  */
 static void *_bottom, *_top, *_empty;
 uintptr_t alloc_start_addr;
-static unsigned sz;
-static unsigned sz_left = 0;
+static size_t sz;
+static size_t sz_left;
 static volatile unsigned allocator_lock;
 
 static void allocator_lock_acquire(void) {
-  unsigned value = 1;
-  do {
-    __asm__ __volatile__("xchgl %0, %1"
-                         : "+r"(value), "+m"(allocator_lock)
-                         :
-                         : "memory");
-  } while (value);
+  while (__atomic_exchange_n(&allocator_lock, 1, __ATOMIC_ACQUIRE)) {
+  }
 }
 
 static void allocator_lock_release(void) {
-  __asm__ __volatile__("" ::: "memory");
-  allocator_lock = 0;
+  __atomic_store_n(&allocator_lock, 0, __ATOMIC_RELEASE);
 }
 
 static void free_unlocked(void *ptr);
 static void *malloc_unlocked(size_t size);
 
-static uintptr_t msbrk(unsigned size) {
-  if ((uintptr_t)sz > UINTPTR_MAX - alloc_start_addr)
+static uintptr_t msbrk(size_t size) {
+  if (sz > UINTPTR_MAX - alloc_start_addr)
     return (uintptr_t)-1;
   uintptr_t result = alloc_start_addr + sz;
   if (sz_left < size) {
-    unsigned request = (size + 0xfff) & 0xfffff000;
-    if (request < size || sbrk(request) < 0 ||
-        sz_left > UINTPTR_MAX - request)
+    size_t request = (size + 0xfff) & ~(size_t)0xfff;
+    if (request < size || sbrk(request) < 0 || sz_left > SIZE_MAX - request)
       return (uintptr_t)-1;
     sz_left += request;
   }
-  if (sz_left < size || (uintptr_t)sz > UINTPTR_MAX - size)
+  if (sz_left < size || sz > SIZE_MAX - size)
     return (uintptr_t)-1;
   sz_left -= size;
   sz += size;
@@ -176,11 +169,11 @@ static int grow(size_t len) {
   end = top + len;
   aligned_end = Align(end, BRKSIZE);
   if (aligned_end < end || aligned_end < top ||
-      (uintptr_t)sz > UINTPTR_MAX - alloc_start_addr)
+      sz > UINTPTR_MAX - alloc_start_addr)
     return (0);
   current_end = alloc_start_addr + sz;
   if (aligned_end < current_end ||
-      msbrk((unsigned)(aligned_end - current_end)) == (uintptr_t)-1)
+      msbrk((size_t)(aligned_end - current_end)) == (uintptr_t)-1)
     return (0);
   p = (char *)aligned_end;
   NextSlot((char *)_top) = p;
@@ -192,7 +185,8 @@ static int grow(size_t len) {
 
 static void *malloc_unlocked(size_t size) {
   register char *prev, *p, *next, *new;
-  register unsigned len, ntries;
+  register size_t len;
+  register unsigned ntries;
 
   if (size == 0)
     return NULL;
@@ -261,7 +255,7 @@ static void *realloc_unlocked(void *oldp, size_t size) {
   }
   len = Align(size, PTRSIZE) + PTRSIZE;
   next = NextSlot(old);
-  n = (int)(next - old); /* old length */
+  n = (size_t)(next - old); /* old length */
   /*
    * extend old if there is any free space just behind it
    */

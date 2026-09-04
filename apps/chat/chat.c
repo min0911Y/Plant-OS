@@ -60,7 +60,7 @@ int main(int argc, char **argv) { // 用于接收用户想要发送的内容
   inp[3] = 'D';
   inp[4] = ' ';
   AddThread("chat_recv_task", (uintptr_t)chat_recv_task,
-            (unsigned int)((uintptr_t)malloc(32 * 1024) + 32 * 1024 - 4));
+            (uintptr_t)malloc(32 * 1024) + 32 * 1024 - 4);
   for (;;) {
     printf("To %d.%d.%d.%d:%d Server ### ", sip1, sip2, sip3, sip4, server_port); // 提示符信息
     scan(&inp[5], 4096 - 5); // 输入，&inp[5]是因为上面声明了指令（五个字节），同样，4096是通过4096-5得到的

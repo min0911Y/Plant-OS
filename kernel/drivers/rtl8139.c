@@ -1,7 +1,8 @@
-#include <arch/x86/interrupt.h>
 #include <arch/x86/io.h>
 #include <dos.h>
+#include <dma.h>
 #include <drivers.h>
+#include <limits.h>
 #include <net_link.h>
 #include <pci.h>
 
@@ -36,15 +37,35 @@ typedef struct {
   uint8_t next_transmit;
   bool active;
   net_link_receive_t receive;
+  uint32_t receive_dma;
+  uint32_t transmit_dma[RTL8139_TX_BUFFERS];
 } rtl8139_state_t;
 
 static rtl8139_state_t rtl8139;
+static void rtl8139_interrupt(void);
 static uint8_t rtl8139_receive_buffer[RTL8139_RX_BUFFER_BYTES]
     __attribute__((aligned(16)));
 static uint8_t rtl8139_transmit_buffers[RTL8139_TX_BUFFERS]
                                       [RTL8139_TX_BUFFER_BYTES]
     __attribute__((aligned(16)));
 static uint8_t rtl8139_wrapped_frame[RTL8139_FRAME_MAX];
+
+static bool rtl8139_prepare_dma(void) {
+  dma_addr_t address;
+  if (!dma_map(rtl8139_receive_buffer, sizeof(rtl8139_receive_buffer),
+               UINT_MAX, &address)) {
+    return false;
+  }
+  rtl8139.receive_dma = (uint32_t)address;
+  for (unsigned index = 0; index < RTL8139_TX_BUFFERS; index++) {
+    if (!dma_map(rtl8139_transmit_buffers[index], RTL8139_TX_BUFFER_BYTES,
+                 UINT_MAX, &address)) {
+      return false;
+    }
+    rtl8139.transmit_dma[index] = (uint32_t)address;
+  }
+  return true;
+}
 
 static uint16_t rtl8139_read16(uint16_t offset) {
   return x86_port_read16(rtl8139.io_base + offset);
@@ -66,6 +87,7 @@ static bool rtl8139_deliver_frame(uint16_t length) {
 
 static bool rtl8139_receive(void) {
   bool reschedule = false;
+  dma_sync_for_cpu(rtl8139_receive_buffer, sizeof(rtl8139_receive_buffer));
   while ((x86_port_read8(rtl8139.io_base + RTL8139_CMD) &
           RTL8139_CMD_RX_EMPTY) == 0) {
     uint16_t status;
@@ -116,6 +138,10 @@ bool rtl8139_link_start(net_link_receive_t receive, uint8_t mac[6]) {
   rtl8139.receive_offset = 0;
   rtl8139.next_transmit = 0;
   rtl8139.active = false;
+  if (!rtl8139_prepare_dma()) {
+    logk("rtl8139: DMA buffers are not addressable\n");
+    return false;
+  }
 
   pci_command_enable(device, PCI_COMMAND_IO | PCI_COMMAND_MEMORY |
                                  PCI_COMMAND_BUS_MASTER);
@@ -130,7 +156,7 @@ bool rtl8139_link_start(net_link_receive_t receive, uint8_t mac[6]) {
     mac[i] = x86_port_read8(rtl8139.io_base + RTL8139_MAC0 + i);
   }
   x86_port_write32(rtl8139.io_base + RTL8139_RBSTART,
-                   (uint32_t)(uintptr_t)rtl8139_receive_buffer);
+                   rtl8139.receive_dma);
   x86_port_write16(rtl8139.io_base + RTL8139_CAPR, 0);
   x86_port_write32(rtl8139.io_base + RTL8139_TCR,
                     (1u << 16) | (3u << 24) | (7u << 8));
@@ -140,8 +166,7 @@ bool rtl8139_link_start(net_link_receive_t receive, uint8_t mac[6]) {
   x86_port_write16(rtl8139.io_base + RTL8139_IMR, 0x0005);
   x86_port_write8(rtl8139.io_base + RTL8139_CMD, 0x0c);
 
-  if (!interrupt_register_entry(IRQ_BASE_VECTOR + irq,
-                                RTL8139_ASM_INTHANDLER)) {
+  if (!irq_register_handler(irq, rtl8139_interrupt)) {
     logk("rtl8139: unable to register IRQ %d\n", irq);
     return false;
   }
@@ -169,15 +194,16 @@ int rtl8139_link_transmit(const uint8_t *frame, uint16_t length) {
   if (transmit_length > length) {
     memset(buffer + length, 0, transmit_length - length);
   }
+  dma_sync_for_device(buffer, transmit_length);
   x86_port_write32(rtl8139.io_base + RTL8139_TSAD0 + slot * 4,
-                   (uint32_t)(uintptr_t)buffer);
+                   rtl8139.transmit_dma[slot]);
   x86_port_write32(rtl8139.io_base + RTL8139_TSD0 + slot * 4,
                    transmit_length);
   rtl8139.next_transmit = (slot + 1) % RTL8139_TX_BUFFERS;
   return 0;
 }
 
-void RTL8139_IRQ(void) {
+static void rtl8139_interrupt(void) {
   bool reschedule = false;
   uint16_t status = rtl8139_read16(RTL8139_ISR);
   x86_port_write16(rtl8139.io_base + RTL8139_ISR, status);

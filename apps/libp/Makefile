@@ -1,9 +1,12 @@
 NASM = nasm
+INCLUDE_PATH := ../include
+include ../defs.mk
+ARCH_SOURCE := arch/$(ARCH)
 OBJS_PACK = ../out/entry.obj ../out/syscall.obj ../out/rand.obj ../out/arg.obj \
-			../out/mouse.obj ../out/math.obj ../out/libc.obj ../out/socket.obj ../out/socket_syscall.obj ../out/vfs_syscall.obj ../out/time.obj ../out/posix.obj ../out/pow.obj ../out/exit.obj \
+			../out/mouse.obj ../out/math.obj ../out/math_arch.obj ../out/libc.obj ../out/socket.obj ../out/socket_syscall.obj ../out/vfs_syscall.obj ../out/time.obj ../out/posix.obj ../out/pow.obj ../out/exit.obj \
 			../out/ipc.obj ../out/rpc.obj ../out/runtime_args.obj ../out/task.obj
 OBJS_PACK_CPP = ../out/cppstart.obj ../out/syscall.obj ../out/rand.obj ../out/arg.obj \
-			../out/mouse.obj ../out/math.obj ../out/libc.obj ../out/socket.obj ../out/socket_syscall.obj ../out/vfs_syscall.obj ../out/time.obj ../out/posix.obj ../out/pow.obj ../out/exit.obj \
+			../out/mouse.obj ../out/math.obj ../out/math_arch.obj ../out/libc.obj ../out/socket.obj ../out/socket_syscall.obj ../out/vfs_syscall.obj ../out/time.obj ../out/posix.obj ../out/pow.obj ../out/exit.obj \
 			../out/ipc.obj ../out/rpc.obj ../out/runtime_args.obj ../out/task.obj
 OBJS_PACK_GUI = ../out/libp_gui_rpc.obj
 default : $(OBJS_PACK_GUI) $(OBJS_PACK) $(OBJS_GUI) ../out/abi.obj $(OBJS_PACK_CPP)
@@ -14,10 +17,16 @@ default : $(OBJS_PACK_GUI) $(OBJS_PACK) $(OBJS_GUI) ../out/abi.obj $(OBJS_PACK_C
 	rm -f ../libs/libgui.a
 	ar rcs ../libs/libgui.a $(OBJS_PACK_GUI)
 ../out/%.obj : %.c Makefile
-	gcc -m32 -I../include -nostdinc -nostdlib -fno-builtin -ffreestanding -fno-stack-protector -Qn -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fomit-frame-pointer -march=pentium -O0 -w -c $*.c -o ../out/$*.obj
+	$(C) -fno-builtin -c $*.c -o ../out/$*.obj
 ../out/libp_gui_rpc.obj : gui_rpc.c Makefile
-	gcc -m32 -I../include -nostdinc -nostdlib -fno-builtin -ffreestanding -fno-stack-protector -Qn -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fomit-frame-pointer -march=pentium -O0 -w -c $< -o $@
+	$(C) -fno-builtin -c $< -o $@
+../out/math_arch.obj: $(ARCH_SOURCE)/math.c Makefile
+	$(C) -fno-builtin -c $< -o $@
 ../out/%.obj : %.cpp Makefile
-	gcc -m32 -I../include -nostdinc -nostdlib -fno-builtin -ffreestanding -fno-stack-protector -Qn -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fomit-frame-pointer -march=pentium -O0 -w -c $*.cpp -o ../out/$*.obj
-../out/%.obj : %.asm Makefile
-	nasm -f elf $*.asm -o ../out/$*.obj
+	$(CPP) -fno-builtin -c $*.cpp -o ../out/$*.obj
+../out/syscall.obj: $(ARCH_SOURCE)/syscall.asm Makefile
+	$(NASM) -f $(ARCH_ASM_FORMAT) $< -o $@
+../out/socket_syscall.obj: $(ARCH_SOURCE)/socket_syscall.asm Makefile
+	$(NASM) -f $(ARCH_ASM_FORMAT) $< -o $@
+../out/vfs_syscall.obj: $(ARCH_SOURCE)/vfs_syscall.asm Makefile
+	$(NASM) -f $(ARCH_ASM_FORMAT) $< -o $@

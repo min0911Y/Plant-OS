@@ -6,19 +6,19 @@
 #include <math.h>
 #include <rand.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <syscall.h>
 #include <time.h>
-static inline float eval_as_float(float x) {
-  float y = x;
-  return y;
+
+static inline float eval_as_float(float value) {
+  float result = value;
+  return result;
 }
 
-#define SZ_4K 0x1000
-typedef unsigned int uintmax_t;
-typedef uintmax_t uintptr_t;
-typedef int intmax_t;
+#define SZ_4K 0x1000u
+
 int __rem_pio2f(float x, double *y);
 int errno = 0;
 FILE *stdout;
@@ -1541,7 +1541,7 @@ char *tmpnam(char *str) {
 int remove(const char *filename) {
   vfs_syscall_request_t request = {0};
   request.size = sizeof(request);
-  request.arguments.path.path = (uint32_t)(uintptr_t)filename;
+  request.arguments.path.path = (uintptr_t)filename;
   int result = vfs_syscall(VFS_SYSCALL_UNLINK, &request);
   if (result < 0) {
     errno = -result;
@@ -1552,8 +1552,8 @@ int remove(const char *filename) {
 int rename(char *filename1, char *filename2) {
   vfs_syscall_request_t request = {0};
   request.size = sizeof(request);
-  request.arguments.rename.source = (uint32_t)(uintptr_t)filename1;
-  request.arguments.rename.destination = (uint32_t)(uintptr_t)filename2;
+  request.arguments.rename.source = (uintptr_t)filename1;
+  request.arguments.rename.destination = (uintptr_t)filename2;
   int result = vfs_syscall(VFS_SYSCALL_RENAME, &request);
   if (result < 0) {
     errno = -result;
@@ -1799,7 +1799,7 @@ char *getcwd(char *buf, size_t size) {
   }
   vfs_syscall_request_t request = {0};
   request.size = sizeof(request);
-  request.arguments.cwd.buffer = (uint32_t)(uintptr_t)buf;
+  request.arguments.cwd.buffer = (uintptr_t)buf;
   request.arguments.cwd.capacity = size;
   int result = vfs_syscall(VFS_SYSCALL_GETCWD, &request);
   if (result < 0) {
@@ -4416,7 +4416,7 @@ freeinfo *make_next_freeinfo(memory *mem) {
     finf = finf->next;
   }
   old->next = fi;
-  fi->f = (free_member *)((uint32_t)fi + sizeof(freeinfo));
+  fi->f = (free_member *)((uintptr_t)fi + sizeof(freeinfo));
   for (int i = 0; i < FREE_MAX_NUM; i++) {
     fi->f[i].start = 0;
     fi->f[i].end = 0;
@@ -4439,8 +4439,8 @@ free_member *mem_insert(int pos, freeinfo *finf) {
     return NULL;
   }
   for (int i = j - 1; i >= pos; i--) {
-    unsigned debug1 = (unsigned)(&(finf->f[i + 1]));
-    unsigned debug2 = (unsigned)(&(finf->f[i]));
+    uintptr_t debug1 = (uintptr_t)(&(finf->f[i + 1]));
+    uintptr_t debug2 = (uintptr_t)(&(finf->f[i]));
     if (!debug1 || !debug2) {
       printf("error!\n");
       for (;;)
@@ -4789,7 +4789,7 @@ int list_directory(const char *path, struct finfo_block **entries,
   for (;;) {
     vfs_syscall_request_t request = {0};
     request.size = sizeof(request);
-    request.arguments.list.path = (uint32_t)(uintptr_t)path;
+    request.arguments.list.path = (uintptr_t)path;
     int required = vfs_syscall(VFS_SYSCALL_LIST_DIRECTORY, &request);
     if (required < 0) {
       free(*entries);
@@ -4819,7 +4819,7 @@ int list_directory(const char *path, struct finfo_block **entries,
       capacity = (size_t)required;
     }
 
-    request.arguments.list.entries = (uint32_t)(uintptr_t)*entries;
+    request.arguments.list.entries = (uintptr_t)*entries;
     request.arguments.list.capacity = capacity;
     int result = vfs_syscall(VFS_SYSCALL_LIST_DIRECTORY, &request);
     if (result >= 0) {

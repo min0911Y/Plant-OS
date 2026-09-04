@@ -46,13 +46,12 @@ int os_execute(char *filename, char *line);
 int os_execute_shell(const char *line, size_t line_length);
 void idle();
 void init();
-extern uint64_t global_time;
 struct FIFO8 *task_get_key_fifo(mtask *task);
 void task_fifo_sleep(mtask *task);
 struct FIFO8 *task_get_mouse_fifo(mtask *task);
 void task_lock();
 void task_unlock();
-void task_to_user_mode(unsigned eip, unsigned esp);
+void task_to_user_mode(uintptr_t instruction_pointer, uintptr_t stack_pointer);
 void task_set_fifo(mtask *task, struct FIFO8 *kfifo, struct FIFO8 *mfifo);
 void os_execute_no_ret(char *filename, char *line);
 uint32_t get_father_tid(mtask *t);
@@ -62,7 +61,7 @@ void task_fall_blocked_reason(enum STATE state, enum WAIT_REASON reason);
 void task_run(mtask *task);
 void mtask_run_now(mtask *obj);
 int task_fork();
-unsigned task_address_space_owner(unsigned pde);
+unsigned task_address_space_owner(arch_address_space_t address_space);
 void task_next(void);
 void scheduler_tick(void);
 void scheduler_reschedule_interrupt(void);
@@ -75,48 +74,24 @@ unsigned task_wake_tty(struct tty *tty);
 void task_close_tty(struct tty *tty, struct tty *fallback);
 void signal_deal(void);
 // page.c
-void init_page(void);
+void init_page(const boot_info_t *boot_info);
 bool page_reserve_physical_range(uintptr_t start, uint32_t size);
-void pf_set(unsigned int memsize);
-int get_line_address(int t, int p, int o);
-int get_page_from_line_address(int line_address);
-void page2tpo(int page, int *t, int *p);
-void tpo2page(int *page, int t, int p);
+void pf_set(uintptr_t physical_size);
 void *page_malloc_one();
-void *page_malloc_one_count_from_4gb();
-void *page_malloc_one_count_from_4gb_mark(unsigned tid);
 void *page_malloc_one_no_mark();
-void *page_malloc_one_mark(unsigned tid);
-int get_pageinpte_address(int t, int p);
 unsigned page_ref_count(unsigned paddr);
 void page_ref_release(unsigned paddr);
 unsigned page_used_count(unsigned physical_size);
 void page_free_one(void *p);
-int find_kpage(int line, int n);
 void *page_malloc(int size);
 void page_free(void *p, int size);
-void page_map(void *target, void *start, void *end);
 void change_page_task_id(uint32_t task_id, void *p, unsigned int size);
-void page_set_physics_attr(uint32_t vaddr, void *paddr, uint32_t attr);
-uint32_t page_get_attr(unsigned vaddr);
-uint32_t page_get_phy(unsigned vaddr);
-void copy_from_phy_to_line(unsigned phy, unsigned line, unsigned pde,
-                           unsigned size);
-uint32_t page_get_attr_pde(unsigned vaddr, unsigned pde);
-void set_line_address(unsigned val, unsigned line, unsigned pde, unsigned size);
-uint32_t page_get_phy_pde(unsigned vaddr, unsigned pde);
-bool page_share_range_pde(uint32_t source, uint32_t target, uint32_t size,
-                          uint32_t source_pde, uint32_t target_pde);
-bool page_unmap_shared_range_pde(uint32_t target, uint32_t size,
-                                 uint32_t target_pde);
-int page_link(unsigned addr);
-void pde_retain(unsigned addr);
+int page_link(uintptr_t address);
 // other.c
 void insert_char(char *str, int pos, char ch); // str:字符串，pos:位置，ch:字符
 void delete_char(char *str, int pos);          // str:字符串，pos:位置
 char bcd2hex(char bcd);
 char hex2bcd(char hex);
-void getCPUBrand(char *cBrand); // cBrand 至少 49 字节
 char ascii2num(char c);
 char num2ascii(char c);
 void strtoupper(char *str);
@@ -150,15 +125,12 @@ bool CDROM_Read(unsigned int lba, unsigned int number, void *buffer,
                 char drive);
 bool DiskReady(char drive);
 int getReadyDisk();
+void init_mount_disk(void);
 // kernelc.c
 struct tty *now_tty();
-void task_sr1();
-void task_sr2();
 void tty_stop_cursor_moving(struct tty *t);
 void tty_start_curor_moving(struct tty *t);
 // mem.c
-unsigned int memtest(unsigned int start, unsigned int end,
-                     uintptr_t preserved_start, uint32_t preserved_size);
 void init_iso9660(void);
 void reg_pfs(void);
 int into_mtask(void);
@@ -206,10 +178,10 @@ void lock_init(lock_t *l);
 int mount(char *fileName);
 void unmount(char drive);
 // signal.c
-void set_signal_handler(unsigned sig, unsigned handler);
+void set_signal_handler(unsigned sig, uintptr_t handler);
 // farcall.c
-uint32_t call_across_page(uint32_t (*f)(void *arg), unsigned cr3, void *a);
 // fartty.c
-struct tty *fartty_alloc(void *vram, unsigned handle, unsigned cr3, int xsize,
+struct tty *fartty_alloc(void *vram, uintptr_t handle,
+                         arch_address_space_t address_space, int xsize,
                          int ysize);
 #endif

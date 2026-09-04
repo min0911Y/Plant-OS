@@ -4,7 +4,6 @@ incpath_src := ../include/
 TOOLPATH := ../../tools/
 MAKE     := make
 default :
-	$(MAKE) -C cpu
 	$(MAKE) -C hal
 	$(MAKE) -C init
 	$(MAKE) -C mm

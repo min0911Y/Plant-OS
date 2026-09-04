@@ -1,7 +1,7 @@
 // AHCI Controller Driver Implement
 
-#include <arch/x86/cpuid.h>
 #include <dos.h>
+#include <dma.h>
 #include <limits.h>
 #include <pci.h>
 
@@ -56,7 +56,6 @@ typedef volatile struct tagHBA_PORT {
   uint32_t vendor[4]; // 0x70 ~ 0x7F, vendor specific
 } HBA_PORT;
 int find_cmdslot(HBA_PORT *port);
-void flush_cache(void *addr);
 typedef volatile struct tagHBA_MEM {
   // 0x00 - 0x2B, Generic Host Control
   uint32_t cap;     // 0x00, Host capability
@@ -399,7 +398,7 @@ typedef struct SATA_Ident {
   unsigned short words236_254[19];    /* Reserved */
   unsigned short integrity;           /* Cheksum, Signature */
 } SATA_ident_t;
-static uint32_t port, ahci_ports_base_addr;
+static uint8_t *ahci_ports_base;
 static uint32_t drive_mapping[0xff];
 static uint32_t ports[32];
 static uint32_t port_total = 0;
@@ -408,6 +407,38 @@ static void ahci_vdisk_read(char drive, unsigned char *buffer,
                             unsigned int number, unsigned int lba);
 static void ahci_vdisk_write(char drive, unsigned char *buffer,
                              unsigned int number, unsigned int lba);
+
+static dma_addr_t ahci_dma_limit(void) {
+  return (hba_mem_address->cap & (1u << 31)) != 0 ? ULLONG_MAX : UINT_MAX;
+}
+
+static unsigned ahci_port_index(const HBA_PORT *controller_port) {
+  return (unsigned)(controller_port - hba_mem_address->ports);
+}
+
+static HBA_CMD_HEADER *ahci_command_headers(HBA_PORT *controller_port) {
+  return (HBA_CMD_HEADER *)(ahci_ports_base +
+                            (ahci_port_index(controller_port) << 10));
+}
+
+static HBA_CMD_TBL *ahci_command_table(HBA_PORT *controller_port,
+                                       unsigned slot) {
+  return (HBA_CMD_TBL *)(ahci_ports_base + (40u << 10) +
+                         (ahci_port_index(controller_port) << 13) +
+                         (slot << 8));
+}
+
+static bool ahci_prdt_map(HBA_PRDT_ENTRY *entry, void *buffer, size_t size) {
+  dma_addr_t address;
+  if (!dma_map(buffer, size, ahci_dma_limit(), &address)) {
+    return false;
+  }
+  entry->dba = (uint32_t)address;
+  entry->dbau = (uint32_t)(address >> 32);
+  entry->dbc = (uint32_t)size - 1;
+  entry->i = 1;
+  return true;
+}
 static int check_type(HBA_PORT *port) {
   uint32_t ssts = port->ssts;
 
@@ -440,7 +471,6 @@ void ahci_search_ports(HBA_MEM *abar) {
       int dt = check_type(&abar->ports[i]);
       if (dt == AHCI_DEV_SATA) {
         logk("SATA drive found at port %d\n", i);
-        port = i;
         ports[port_total++] = i;
       } else if (dt == AHCI_DEV_SATAPI) {
         logk("SATAPI drive found at port %d\n", i);
@@ -492,6 +522,11 @@ void stop_cmd(HBA_PORT *port) {
 #define AHCI_CMD_WRITE_DMA_EXT 0x35
 bool ahci_read(HBA_PORT *port, uint32_t startl, uint32_t starth, uint32_t count,
                void *buf0) {
+  if (count == 0 || buf0 == NULL) {
+    return false;
+  }
+  uint32_t sector_count = count;
+  uint32_t remaining = count;
   uint16_t *buf = (uint16_t *)buf0;
   port->is = (uint32_t)-1; // Clear pending interrupt bits
   int spin = 0;            // Spin lock timeout counter
@@ -499,35 +534,31 @@ bool ahci_read(HBA_PORT *port, uint32_t startl, uint32_t starth, uint32_t count,
   if (slot == -1)
     return false;
 
-  HBA_CMD_HEADER *cmdheader = (HBA_CMD_HEADER *)port->clb;
-  cmdheader += slot;
+  HBA_CMD_HEADER *cmdheader = ahci_command_headers(port) + slot;
   cmdheader->cfl = sizeof(FIS_REG_H2D) / sizeof(uint32_t); // Command FIS size
   cmdheader->w = 0;                                        // Read from device
   cmdheader->c = 1;
   cmdheader->p = 1;
-  cmdheader->prdtl = (uint16_t)((count - 1) >> 4) + 1; // PRDT entries count
+  cmdheader->prdtl =
+      (uint16_t)((sector_count - 1) >> 4) + 1; // PRDT entries count
 
-  HBA_CMD_TBL *cmdtbl = (HBA_CMD_TBL *)(cmdheader->ctba);
+  HBA_CMD_TBL *cmdtbl = ahci_command_table(port, slot);
   memset(cmdtbl, 0,
          sizeof(HBA_CMD_TBL) + (cmdheader->prdtl - 1) * sizeof(HBA_PRDT_ENTRY));
 
   // 8K bytes (16 sectors) per PRDT
   int i;
   for (i = 0; i < cmdheader->prdtl - 1; i++) {
-    flush_cache(buf);
-    cmdtbl->prdt_entry[i].dba = (uint32_t)buf;
-    cmdtbl->prdt_entry[i].dbau = 0;
-    cmdtbl->prdt_entry[i].dbc =
-        8 * 1024 - 1; // 8K bytes (this value should always be set to 1 less
-                      // than the actual value)
-    cmdtbl->prdt_entry[i].i = 1;
+    if (!ahci_prdt_map(&cmdtbl->prdt_entry[i], buf, 8 * 1024)) {
+      return false;
+    }
     buf += 4 * 1024; // 4K words
-    count -= 16;     // 16 sectors
+    remaining -= 16; // 16 sectors
   }
   // Last entry
-  cmdtbl->prdt_entry[i].dba = (uint32_t)buf;
-  cmdtbl->prdt_entry[i].dbc = (count << 9) - 1; // 512 bytes per sector
-  cmdtbl->prdt_entry[i].i = 1;
+  if (!ahci_prdt_map(&cmdtbl->prdt_entry[i], buf, remaining << 9)) {
+    return false;
+  }
 
   // Setup command
   FIS_REG_H2D *cmdfis = (FIS_REG_H2D *)(&cmdtbl->cfis);
@@ -545,8 +576,8 @@ bool ahci_read(HBA_PORT *port, uint32_t startl, uint32_t starth, uint32_t count,
   cmdfis->lba4 = (uint8_t)starth;
   cmdfis->lba5 = (uint8_t)(starth >> 8);
 
-  cmdfis->countl = count & 0xFF;
-  cmdfis->counth = (count >> 8) & 0xFF;
+  cmdfis->countl = sector_count & 0xFF;
+  cmdfis->counth = (sector_count >> 8) & 0xFF;
 
   // The below loop waits until the port is no longer busy before issuing a new
   // command
@@ -558,6 +589,10 @@ bool ahci_read(HBA_PORT *port, uint32_t startl, uint32_t starth, uint32_t count,
     return false;
   }
 
+  dma_sync_for_device(cmdtbl, sizeof(HBA_CMD_TBL) +
+                                  (cmdheader->prdtl - 1) *
+                                      sizeof(HBA_PRDT_ENTRY));
+  dma_sync_for_device(cmdheader, sizeof(*cmdheader));
   port->ci = 1 << slot; // Issue command
 
   // Wait for completion
@@ -579,31 +614,31 @@ bool ahci_read(HBA_PORT *port, uint32_t startl, uint32_t starth, uint32_t count,
     return false;
   }
 
-  flush_cache(buf);
+  dma_sync_for_cpu(buf0, sector_count << 9);
   return true;
 }
 
 bool ahci_identify(HBA_PORT *port, void *buf) {
+  if (buf == NULL) {
+    return false;
+  }
   port->is = (uint32_t)-1; // Clear pending interrupt bits
   int spin = 0;            // Spin lock timeout counter
   int slot = find_cmdslot(port);
   if (slot == -1)
     return false;
 
-  HBA_CMD_HEADER *cmdheader = (HBA_CMD_HEADER *)port->clb;
-  cmdheader += slot;
+  HBA_CMD_HEADER *cmdheader = ahci_command_headers(port) + slot;
   cmdheader->cfl = sizeof(FIS_REG_H2D) / sizeof(uint32_t); // Command FIS size
-  cmdheader->w = 0;                                        // Read from device
   cmdheader->prdtl = 1;                                    // PRDT entries count
   cmdheader->c = 1;
-  HBA_CMD_TBL *cmdtbl = (HBA_CMD_TBL *)(cmdheader->ctba);
+  HBA_CMD_TBL *cmdtbl = ahci_command_table(port, slot);
   memset(cmdtbl, 0,
          sizeof(HBA_CMD_TBL) + (cmdheader->prdtl - 1) * sizeof(HBA_PRDT_ENTRY));
 
-  cmdtbl->prdt_entry[0].dba = (uint32_t)buf;
-  cmdtbl->prdt_entry[0].dbau = 0;
-  cmdtbl->prdt_entry[0].dbc = 0x200 - 1;
-  cmdtbl->prdt_entry[0].i = 1;
+  if (!ahci_prdt_map(&cmdtbl->prdt_entry[0], buf, 0x200)) {
+    return false;
+  }
 
   // Setup command
   FIS_REG_H2D *cmdfis = (FIS_REG_H2D *)(&cmdtbl->cfis);
@@ -622,6 +657,8 @@ bool ahci_identify(HBA_PORT *port, void *buf) {
     return false;
   }
 
+  dma_sync_for_device(cmdtbl, sizeof(HBA_CMD_TBL));
+  dma_sync_for_device(cmdheader, sizeof(*cmdheader));
   port->ci = 1 << slot; // Issue command
 
   // Wait for completion
@@ -643,11 +680,17 @@ bool ahci_identify(HBA_PORT *port, void *buf) {
     return false;
   }
 
+  dma_sync_for_cpu(buf, 0x200);
   return true;
 }
 
 bool ahci_write(HBA_PORT *port, uint32_t startl, uint32_t starth,
                 uint32_t count, void *buf0) {
+  if (count == 0 || buf0 == NULL) {
+    return false;
+  }
+  uint32_t sector_count = count;
+  uint32_t remaining = count;
   uint16_t *buf = (uint16_t *)buf0;
   port->is = (uint32_t)-1; // Clear pending interrupt bits
   int spin = 0;            // Spin lock timeout counter
@@ -655,35 +698,31 @@ bool ahci_write(HBA_PORT *port, uint32_t startl, uint32_t starth,
   if (slot == -1)
     return false;
 
-  HBA_CMD_HEADER *cmdheader = (HBA_CMD_HEADER *)port->clb;
-  cmdheader += slot;
+  HBA_CMD_HEADER *cmdheader = ahci_command_headers(port) + slot;
   cmdheader->cfl = sizeof(FIS_REG_H2D) / sizeof(uint32_t); // Command FIS size
   cmdheader->w = 1;                                        // 写硬盘
   cmdheader->p = 1;
   cmdheader->c = 1;
-  cmdheader->prdtl = (uint16_t)((count - 1) >> 4) + 1; // PRDT entries count
+  cmdheader->prdtl =
+      (uint16_t)((sector_count - 1) >> 4) + 1; // PRDT entries count
 
-  HBA_CMD_TBL *cmdtbl = (HBA_CMD_TBL *)(cmdheader->ctba);
+  HBA_CMD_TBL *cmdtbl = ahci_command_table(port, slot);
   memset(cmdtbl, 0,
          sizeof(HBA_CMD_TBL) + (cmdheader->prdtl - 1) * sizeof(HBA_PRDT_ENTRY));
 
   // 8K bytes (16 sectors) per PRDT
   int i;
   for (i = 0; i < cmdheader->prdtl - 1; i++) {
-    flush_cache(buf);
-    cmdtbl->prdt_entry[i].dba = (uint32_t)buf;
-    cmdtbl->prdt_entry[i].dbau = 0;
-    cmdtbl->prdt_entry[i].dbc =
-        8 * 1024 - 1; // 8K bytes (this value should always be set to 1 less
-                      // than the actual value)
-    cmdtbl->prdt_entry[i].i = 1;
+    if (!ahci_prdt_map(&cmdtbl->prdt_entry[i], buf, 8 * 1024)) {
+      return false;
+    }
     buf += 4 * 1024; // 4K words
-    count -= 16;     // 16 sectors
+    remaining -= 16; // 16 sectors
   }
   // Last entry
-  cmdtbl->prdt_entry[i].dba = (uint32_t)buf;
-  cmdtbl->prdt_entry[i].dbc = (count << 9) - 1; // 512 bytes per sector
-  cmdtbl->prdt_entry[i].i = 1;
+  if (!ahci_prdt_map(&cmdtbl->prdt_entry[i], buf, remaining << 9)) {
+    return false;
+  }
 
   // Setup command
   FIS_REG_H2D *cmdfis = (FIS_REG_H2D *)(&cmdtbl->cfis);
@@ -701,8 +740,8 @@ bool ahci_write(HBA_PORT *port, uint32_t startl, uint32_t starth,
   cmdfis->lba4 = (uint8_t)starth;
   cmdfis->lba5 = (uint8_t)(starth >> 8);
 
-  cmdfis->countl = count & 0xFF;
-  cmdfis->counth = (count >> 8) & 0xFF;
+  cmdfis->countl = sector_count & 0xFF;
+  cmdfis->counth = (sector_count >> 8) & 0xFF;
 
   // The below loop waits until the port is no longer busy before issuing a new
   // command
@@ -714,6 +753,11 @@ bool ahci_write(HBA_PORT *port, uint32_t startl, uint32_t starth,
     return false;
   }
 
+  dma_sync_for_device(buf0, sector_count << 9);
+  dma_sync_for_device(cmdtbl, sizeof(HBA_CMD_TBL) +
+                                  (cmdheader->prdtl - 1) *
+                                      sizeof(HBA_PRDT_ENTRY));
+  dma_sync_for_device(cmdheader, sizeof(*cmdheader));
   port->ci = 1 << slot; // Issue command
 
   // Wait for completion
@@ -734,7 +778,6 @@ bool ahci_write(HBA_PORT *port, uint32_t startl, uint32_t starth,
     logk("Write disk error\n");
     return false;
   }
-  flush_cache(buf);
   return true;
 }
 // Find a free command list slot
@@ -750,60 +793,41 @@ int find_cmdslot(HBA_PORT *port) {
   logk("Cannot find free command list entry\n");
   return -1;
 }
-void page_set_attr(unsigned start, unsigned end, unsigned attr, unsigned pde);
-void port_rebase(HBA_PORT *port, int portno) {
+static bool port_rebase(HBA_PORT *port, unsigned portno) {
   stop_cmd(port); // Stop command engine
 
-  // Command list offset: 1K*portno
-  // Command list entry size = 32
-  // Command list entry maxim count = 32
-  // Command list maxim size = 32*32 = 1K per port
-  port->clb = ahci_ports_base_addr + (portno << 10);
-  port->clbu = 0;
-  memset((void *)(port->clb), 0, 1024);
+  HBA_CMD_HEADER *headers = ahci_command_headers(port);
+  dma_addr_t address;
+  if (!dma_map(headers, 1024, ahci_dma_limit(), &address)) {
+    return false;
+  }
+  port->clb = (uint32_t)address;
+  port->clbu = (uint32_t)(address >> 32);
+  memset(headers, 0, 1024);
 
-  // FIS offset: 32K+256*portno
-  // FIS entry size = 256 bytes per port
-  port->fb = ahci_ports_base_addr + (32 << 10) + (portno << 8);
-  port->fbu = 0;
-  memset((void *)(port->fb), 0, 256);
+  void *fis = ahci_ports_base + (32u << 10) + (portno << 8);
+  if (!dma_map(fis, 256, ahci_dma_limit(), &address)) {
+    return false;
+  }
+  port->fb = (uint32_t)address;
+  port->fbu = (uint32_t)(address >> 32);
+  memset(fis, 0, 256);
 
-  // Command table offset: 40K + 8K*portno
-  // Command table size = 256*32 = 8K per port
-  HBA_CMD_HEADER *cmdheader = (HBA_CMD_HEADER *)(port->clb);
-  for (int i = 0; i < 32; i++) {
-    cmdheader[i].prdtl = 8; // 8 prdt entries per command table
-                            // 256 bytes per command table, 64+16+48+16*8
-    // Command table offset: 40K + 8K*portno + cmdheader_index*256
-    cmdheader[i].ctba =
-        ahci_ports_base_addr + (40 << 10) + (portno << 13) + (i << 8);
-    cmdheader[i].ctbau = 0;
-    memset((void *)cmdheader[i].ctba, 0, 256);
+  for (unsigned slot = 0; slot < 32; slot++) {
+    HBA_CMD_TBL *table = ahci_command_table(port, slot);
+    if (!dma_map(table, 256, ahci_dma_limit(), &address)) {
+      return false;
+    }
+    headers[slot].prdtl = 8;
+    headers[slot].ctba = (uint32_t)address;
+    headers[slot].ctbau = (uint32_t)(address >> 32);
+    memset(table, 0, 256);
   }
 
+  dma_sync_for_device(headers, 1024);
+  dma_sync_for_device(fis, 256);
   start_cmd(port); // Start command engine
-}
-// 获取缓存行大小
-uint32_t get_cache_line_size() {
-  /* CPUID.01H:EBX[15:8] 是 CLFLUSH 行长度，单位为 8 字节。 */
-  uint32_t chunks = (x86_cpuid(1, 0).ebx >> 8) & 0xff;
-  return chunks != 0 ? chunks * 8 : 64;
-}
-
-#define PAGE_SIZE 4096
-int cache_line_size = 0;
-// 刷新缓存函数
-void flush_cache(void *addr) {
-  uintptr_t address = (uintptr_t)addr;
-
-  // 计算需要刷新的页的起始地址
-  uintptr_t page_start = address & ~(PAGE_SIZE - 1);
-
-  // 遍历并刷新整页的所有缓存行
-  for (uintptr_t cache_line = page_start; cache_line < page_start + PAGE_SIZE;
-       cache_line += cache_line_size) {
-    asm volatile("clflush (%0)" : : "r"(cache_line) : "memory");
-  }
+  return true;
 }
 void ahci_init() {
   const pci_device_t *controller = pci_find_class(0x01, 0x06);
@@ -812,15 +836,17 @@ void ahci_init() {
     return;
   }
   pci_bar_t abar;
-  if (!pci_read_bar(controller, 5, &abar) || abar.type == PCI_BAR_IO ||
-      abar.address > UINT_MAX) {
+  if (!pci_read_bar(controller, 5, &abar) || abar.type == PCI_BAR_IO) {
     logk("AHCI controller has an invalid ABAR\n");
     return;
   }
-  cache_line_size = get_cache_line_size();
-  logk("cache line size = %d\n", cache_line_size);
-  hba_mem_address = (HBA_MEM *)(uintptr_t)abar.address;
-  logk("HBA Address has been Mapped in %08x ", hba_mem_address);
+  hba_mem_address = arch_mmio_map(abar.address, 0x1100);
+  if (hba_mem_address == NULL) {
+    logk("AHCI controller ABAR cannot be mapped\n");
+    return;
+  }
+  logk("HBA Address has been Mapped in %08x ",
+       (uintptr_t)hba_mem_address);
   pci_command_enable(controller, PCI_COMMAND_MEMORY | PCI_COMMAND_BUS_MASTER);
 
   // 设置HBA中 GHC控制器的 AE（AHCI Enable）位，关闭AHCI控制器的IDE仿真模式
@@ -829,16 +855,25 @@ void ahci_init() {
 
   ahci_search_ports(hba_mem_address);
 
-  ahci_ports_base_addr = (uintptr_t)page_malloc(1048576);
-
+  ahci_ports_base = page_malloc(1048576);
   cache = page_malloc(1048576);
-  logk("AHCI port base address has been alloced in 0x%08x!\n",
-       ahci_ports_base_addr);
-  logk("The Useable Ports:");
-  for (int i = 0; i < port_total; i++) {
-    logk("%d ", ports[i]);
-    port_rebase(&(hba_mem_address->ports[ports[i]]), ports[i]);
+  if (ahci_ports_base == NULL || cache == NULL) {
+    logk("AHCI DMA allocation failed\n");
+    return;
   }
+  logk("AHCI port base address has been alloced in 0x%08x!\n",
+       (uintptr_t)ahci_ports_base);
+  logk("The Useable Ports:");
+  uint32_t ready_ports = 0;
+  for (uint32_t i = 0; i < port_total; i++) {
+    logk("%d ", ports[i]);
+    if (!port_rebase(&(hba_mem_address->ports[ports[i]]), ports[i])) {
+      logk("AHCI port %d DMA layout is not addressable\n", ports[i]);
+      continue;
+    }
+    ports[ready_ports++] = ports[i];
+  }
+  port_total = ready_ports;
   logk("\n");
 
   for (int i = 0; i < port_total; i++) {
@@ -859,14 +894,6 @@ void ahci_init() {
     drive_mapping[drive] = ports[i];
   }
 }
-void io_delay(uint32_t delay_cycles) {
-  volatile uint32_t i;
-
-  for (i = 0; i < delay_cycles; ++i) {
-    // 添加一些无用的操作来占用时间
-    asm volatile("nop");
-  }
-}
 static void ahci_vdisk_read(char drive, unsigned char *buffer,
                             unsigned int number, unsigned int lba) {
   uint8_t mapped_drive = (uint8_t)drive;
@@ -881,8 +908,6 @@ static void ahci_vdisk_read(char drive, unsigned char *buffer,
     for (;;)
       ;
   }
-  flush_cache(cache);
-  flush_cache(cache + 0x1000);
   memcpy(buffer, cache, number * 512);
 }
 void usleep(unsigned long long ns);
@@ -890,8 +915,6 @@ static void ahci_vdisk_write(char drive, unsigned char *buffer,
                              unsigned int number, unsigned int lba) {
   uint8_t mapped_drive = (uint8_t)drive;
   memcpy(cache, buffer, number * 512);
-  flush_cache(cache);
-  flush_cache(cache + 0x1000);
 
   int i;
   for (i = 0; i < 5; i++)

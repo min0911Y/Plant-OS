@@ -127,8 +127,8 @@ int main(int argc, char **argv) {
     return 1;
   }
   Draw_UI();
-  unsigned int stack = (unsigned int)malloc(4*1024 * 1024);
-  AddThread("mouse", (uintptr_t)&mouse_thread, stack + 4*1024 * 1024);
+  uintptr_t stack = (uintptr_t)malloc(4 * 1024 * 1024);
+  AddThread("mouse", (uintptr_t)&mouse_thread, stack + 4 * 1024 * 1024);
   while (1) {
     if (_kbhit()) {
       int c = getch();

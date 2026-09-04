@@ -1,12 +1,13 @@
-#include <arch/x86/interrupt.h>
 #include <calendar.h>
 #include <cmd.h>
 #include <dos.h>
 #include <irq.h>
 #include <limits.h>
+#include <math_util.h>
+#include <platform.h>
+#include <syscall.h>
 #include <user_space.h>
 
-unsigned div_round_up(unsigned num, unsigned size);
 
 static void keyboard_press(uint8_t data, uint32_t tid) {
   fifo8_put(get_task(tid)->Pkeyfifo, data);
@@ -20,9 +21,9 @@ static void user_thread_entry(void) {
   while (!current_task()->line) {
   }
 
-  unsigned *request = (unsigned *)current_task()->line;
-  unsigned esp = request[0];
-  unsigned eip = request[1];
+  uintptr_t *request = (uintptr_t *)current_task()->line;
+  uintptr_t esp = request[0];
+  uintptr_t eip = request[1];
   page_free_one(request);
 
   struct FIFO8 *key_fifo = page_malloc_one();
@@ -38,14 +39,14 @@ static void user_thread_entry(void) {
   }
 }
 
-static int user_range_ok(uint32_t addr, uint32_t size) {
+static int user_range_ok(uintptr_t addr, size_t size) {
   if (addr < USER_SPACE_START || addr > USER_HEAP_END) {
     return 0;
   }
   return size <= USER_HEAP_END - addr;
 }
 
-static char *copy_user_string(uint32_t addr, size_t *length_out) {
+static char *copy_user_string(uintptr_t addr, size_t *length_out) {
   if (!user_range_ok(addr, 1)) {
     return NULL;
   }
@@ -82,9 +83,9 @@ enum ipc_syscall_id {
   IPC_SYSCALL_COUNT,
 };
 
-typedef int (*ipc_syscall_handler_t)(uint32_t arg1, uint32_t arg2);
+typedef int (*ipc_syscall_handler_t)(uintptr_t arg1, uintptr_t arg2);
 
-static int ipc_syscall_send(uint32_t arg1, uint32_t arg2) {
+static int ipc_syscall_send(uintptr_t arg1, uintptr_t arg2) {
   (void)arg2;
   if (!user_range_ok(arg1, sizeof(ipc_user_msg_t))) {
     return IPC_ERR_INVAL;
@@ -92,7 +93,7 @@ static int ipc_syscall_send(uint32_t arg1, uint32_t arg2) {
 
   ipc_user_msg_t *message = (ipc_user_msg_t *)(uintptr_t)arg1;
   if (message->size &&
-      !user_range_ok((uint32_t)(uintptr_t)message->data, message->size)) {
+      !user_range_ok((uintptr_t)message->data, message->size)) {
     return IPC_ERR_INVAL;
   }
   return ipc_send(message->peer_tid, message->peer_generation, message->type,
@@ -100,7 +101,7 @@ static int ipc_syscall_send(uint32_t arg1, uint32_t arg2) {
                   message->timeout_ms);
 }
 
-static int ipc_syscall_receive(uint32_t arg1, uint32_t arg2) {
+static int ipc_syscall_receive(uintptr_t arg1, uintptr_t arg2) {
   (void)arg2;
   if (!user_range_ok(arg1, sizeof(ipc_user_msg_t))) {
     return IPC_ERR_INVAL;
@@ -108,7 +109,7 @@ static int ipc_syscall_receive(uint32_t arg1, uint32_t arg2) {
 
   ipc_user_msg_t *message = (ipc_user_msg_t *)(uintptr_t)arg1;
   if (message->size &&
-      !user_range_ok((uint32_t)(uintptr_t)message->data, message->size)) {
+      !user_range_ok((uintptr_t)message->data, message->size)) {
     return IPC_ERR_INVAL;
   }
 
@@ -126,7 +127,7 @@ static int ipc_syscall_receive(uint32_t arg1, uint32_t arg2) {
   return result;
 }
 
-static int ipc_syscall_peek(uint32_t arg1, uint32_t arg2) {
+static int ipc_syscall_peek(uintptr_t arg1, uintptr_t arg2) {
   (void)arg2;
   if (!user_range_ok(arg1, sizeof(ipc_user_msg_t))) {
     return IPC_ERR_INVAL;
@@ -145,13 +146,13 @@ static int ipc_syscall_peek(uint32_t arg1, uint32_t arg2) {
   return result;
 }
 
-static int ipc_syscall_pending(uint32_t arg1, uint32_t arg2) {
+static int ipc_syscall_pending(uintptr_t arg1, uintptr_t arg2) {
   (void)arg1;
   (void)arg2;
   return ipc_pending();
 }
 
-static int ipc_syscall_register(uint32_t arg1, uint32_t arg2) {
+static int ipc_syscall_register(uintptr_t arg1, uintptr_t arg2) {
   (void)arg2;
   if (!user_range_ok(arg1, IPC_NAME_MAX)) {
     return IPC_ERR_INVAL;
@@ -159,7 +160,7 @@ static int ipc_syscall_register(uint32_t arg1, uint32_t arg2) {
   return ipc_service_register((const char *)(uintptr_t)arg1);
 }
 
-static int ipc_syscall_unregister(uint32_t arg1, uint32_t arg2) {
+static int ipc_syscall_unregister(uintptr_t arg1, uintptr_t arg2) {
   (void)arg2;
   if (!user_range_ok(arg1, IPC_NAME_MAX)) {
     return IPC_ERR_INVAL;
@@ -167,7 +168,7 @@ static int ipc_syscall_unregister(uint32_t arg1, uint32_t arg2) {
   return ipc_service_unregister((const char *)(uintptr_t)arg1);
 }
 
-static int ipc_syscall_lookup(uint32_t arg1, uint32_t arg2) {
+static int ipc_syscall_lookup(uintptr_t arg1, uintptr_t arg2) {
   if (!user_range_ok(arg1, IPC_NAME_MAX) ||
       (arg2 && !user_range_ok(arg2, sizeof(uint32_t)))) {
     return IPC_ERR_INVAL;
@@ -181,7 +182,7 @@ static int ipc_syscall_lookup(uint32_t arg1, uint32_t arg2) {
   return tid;
 }
 
-static int ipc_syscall_generation(uint32_t arg1, uint32_t arg2) {
+static int ipc_syscall_generation(uintptr_t arg1, uintptr_t arg2) {
   (void)arg1;
   (void)arg2;
   return (int)current_task()->generation;
@@ -198,7 +199,7 @@ static const ipc_syscall_handler_t ipc_syscall_handlers[IPC_SYSCALL_COUNT] = {
     [IPC_SYSCALL_GENERATION] = ipc_syscall_generation,
 };
 
-static int ipc_syscall_dispatch(uint32_t id, uint32_t arg1, uint32_t arg2) {
+static int ipc_syscall_dispatch(uintptr_t id, uintptr_t arg1, uintptr_t arg2) {
   if (id >= IPC_SYSCALL_COUNT || ipc_syscall_handlers[id] == NULL) {
     return IPC_ERR_INVAL;
   }
@@ -259,7 +260,7 @@ enum syscall_id {
   SYSCALL_SIGNAL_HANDLER = 0x49,
   SYSCALL_FORK = 0x4a,
   SYSCALL_WAIT = 0x4b,
-  SYSCALL_SET_RT = 0x4c,
+  SYSCALL_RESERVED_LEGACY_TEST = 0x4c,
   SYSCALL_MOUSE_ENABLE = 0x4d,
   SYSCALL_MOUSE_PENDING = 0x4e,
   SYSCALL_MOUSE_READ = 0x4f,
@@ -287,87 +288,87 @@ enum syscall_id {
   SYSCALL_COUNT,
 };
 
-typedef void (*syscall_handler_t)(x86_interrupt_frame_t *frame);
+typedef void (*syscall_handler_t)(syscall_context_t *frame);
 
-static void syscall_version(x86_interrupt_frame_t *frame) {
-  frame->edx = 0x302e3762;
+static void syscall_version(syscall_context_t *frame) {
+  frame->argument2 = 0x302e3762;
 }
 
-static void syscall_print_character(x86_interrupt_frame_t *frame) {
-  printchar(frame->edx & 0xff);
+static void syscall_print_character(syscall_context_t *frame) {
+  printchar(frame->argument2 & 0xff);
 }
 
-static void syscall_legacy_graphics(x86_interrupt_frame_t *frame) {
+static void syscall_legacy_graphics(syscall_context_t *frame) {
   if (running_mode != POWERINTDOS) {
     return;
   }
 
-  switch (frame->ebx) {
+  switch (frame->argument0) {
   case 0x01:
-    SwitchToText8025();
+    platform_video_legacy_text_mode();
     break;
   case 0x02:
-    SwitchTo320X200X256();
+    platform_video_legacy_graphics_mode();
     break;
   case 0x03:
-    Draw_Char(frame->ecx, frame->edx, frame->esi, frame->edi);
+    Draw_Char(frame->argument1, frame->argument2, frame->argument3, frame->argument4);
     break;
   case 0x04:
-    PrintChineseChar(frame->ecx, frame->edx, frame->edi, frame->esi);
+    PrintChineseChar(frame->argument1, frame->argument2, frame->argument4, frame->argument3);
     break;
   case 0x05:
-    Draw_Box(frame->ecx, frame->edx, frame->esi, frame->edi, frame->ebp);
+    Draw_Box(frame->argument1, frame->argument2, frame->argument3, frame->argument4, frame->argument5);
     break;
   case 0x06:
-    Draw_Px(frame->ecx, frame->edx, frame->esi);
+    Draw_Px(frame->argument1, frame->argument2, frame->argument3);
     break;
   case 0x07:
-    Draw_Str(frame->ecx, frame->edx, (char *)(uintptr_t)frame->esi,
-             frame->edi);
+    Draw_Str(frame->argument1, frame->argument2, (char *)(uintptr_t)frame->argument3,
+             frame->argument4);
     break;
   case 0x08:
-    PrintChineseStr(frame->ecx, frame->edx, frame->edi,
-                    (unsigned char *)(uintptr_t)frame->esi);
+    PrintChineseStr(frame->argument1, frame->argument2, frame->argument4,
+                    (unsigned char *)(uintptr_t)frame->argument3);
     break;
   }
 }
 
-static void syscall_set_cursor(x86_interrupt_frame_t *frame) {
-  gotoxy(frame->edx, frame->ecx);
+static void syscall_set_cursor(syscall_context_t *frame) {
+  gotoxy(frame->argument2, frame->argument1);
 }
 
-static void syscall_print_string(x86_interrupt_frame_t *frame) {
-  print((char *)(uintptr_t)frame->edx);
+static void syscall_print_string(syscall_context_t *frame) {
+  print((char *)(uintptr_t)frame->argument2);
 }
 
-static void syscall_sleep(x86_interrupt_frame_t *frame) {
-  sleep(frame->edx);
+static void syscall_sleep(syscall_context_t *frame) {
+  sleep(frame->argument2);
 }
 
-static void syscall_heap_info(x86_interrupt_frame_t *frame) {
+static void syscall_heap_info(syscall_context_t *frame) {
   mtask *task = current_task();
-  if (frame->eax == SYSCALL_HEAP_ADDRESS) {
-    frame->edx = task->alloc_addr;
+  if (frame->value == SYSCALL_HEAP_ADDRESS) {
+    frame->argument2 = task->alloc_addr;
   } else {
-    frame->edx = task->alloc_size ? *task->alloc_size : 0;
+    frame->argument2 = task->alloc_size ? *task->alloc_size : 0;
   }
 }
 
-static void syscall_text_box(x86_interrupt_frame_t *frame) {
-  Text_Draw_Box(frame->ecx, frame->ebx, frame->esi, frame->edx,
-                (unsigned char)frame->edi);
+static void syscall_text_box(syscall_context_t *frame) {
+  Text_Draw_Box(frame->argument1, frame->argument0, frame->argument3, frame->argument2,
+                (unsigned char)frame->argument4);
 }
 
-static void syscall_beep(x86_interrupt_frame_t *frame) {
-  beep(frame->ebx, frame->ecx, frame->edx);
+static void syscall_beep(syscall_context_t *frame) {
+  beep(frame->argument0, frame->argument1, frame->argument2);
 }
 
-static void syscall_cursor_position(x86_interrupt_frame_t *frame) {
-  frame->ecx = get_y();
-  frame->edx = get_x();
+static void syscall_cursor_position(syscall_context_t *frame) {
+  frame->argument1 = get_y();
+  frame->argument2 = get_x();
 }
 
-static void syscall_mouse_event(x86_interrupt_frame_t *frame) {
+static void syscall_mouse_event(syscall_context_t *frame) {
   if (running_mode != POWERINTDOS) {
     return;
   }
@@ -380,7 +381,7 @@ static void syscall_mouse_event(x86_interrupt_frame_t *frame) {
   int background = *(char *)(task->TTY->vram + old_mouse_y *
                                                     task->TTY->xsize * 2 +
                             old_mouse_x * 2 + 1);
-  if (mdec.sleep == 1) {
+  if (mdec.sleeping == 1) {
     mouse_ready(&mdec);
   }
 
@@ -398,10 +399,10 @@ static void syscall_mouse_event(x86_interrupt_frame_t *frame) {
     if (task->TTY != now_tty() && task->TTY->using1 == 1) {
       continue;
     }
-    if (mdec.roll != MOUSE_ROLL_NONE) {
-      frame->ecx = task->mx;
-      frame->edx = task->my;
-      frame->esi = 3 + mdec.roll;
+    if (mdec.wheel != MOUSE_ROLL_NONE) {
+      frame->argument1 = task->mx;
+      frame->argument2 = task->my;
+      frame->argument3 = 3 + mdec.wheel;
       *(char *)(task->TTY->vram + task->my * task->TTY->xsize * 2 +
                 task->mx * 2 + 1) = background;
       task->mx = old_mouse_x;
@@ -433,17 +434,17 @@ static void syscall_mouse_event(x86_interrupt_frame_t *frame) {
     *(char *)(task->TTY->vram + task->my * task->TTY->xsize * 2 +
               task->mx * 2 + 1) = ~background;
 
-    if (mdec.btn & 0x01) {
-      frame->esi = 1;
-    } else if (mdec.btn & 0x02) {
-      frame->esi = 2;
-    } else if (mdec.btn & 0x04) {
-      frame->esi = 3;
+    if (mdec.buttons & 0x01) {
+      frame->argument3 = 1;
+    } else if (mdec.buttons & 0x02) {
+      frame->argument3 = 2;
+    } else if (mdec.buttons & 0x04) {
+      frame->argument3 = 3;
     } else {
       continue;
     }
-    frame->ecx = task->mx;
-    frame->edx = task->my;
+    frame->argument1 = task->mx;
+    frame->argument2 = task->my;
     break;
   }
 
@@ -453,40 +454,40 @@ static void syscall_mouse_event(x86_interrupt_frame_t *frame) {
   task->my = old_mouse_y;
 }
 
-static void syscall_mouse_supported(x86_interrupt_frame_t *frame) {
+static void syscall_mouse_supported(syscall_context_t *frame) {
   extern mtask *mouse_use_task;
-  frame->eax = running_mode == POWERINTDOS && mouse_use_task == NULL;
+  frame->value = running_mode == POWERINTDOS && mouse_use_task == NULL;
 }
 
-static void syscall_input(x86_interrupt_frame_t *frame) {
-  switch (frame->ebx) {
+static void syscall_input(syscall_context_t *frame) {
+  switch (frame->argument0) {
   case 0x01:
-    frame->edx = getch();
+    frame->argument2 = getch();
     break;
   case 0x02:
-    frame->edx = input_char_inSM();
+    frame->argument2 = input_char_inSM();
     break;
   case 0x03:
-    input((char *)(uintptr_t)frame->edx, frame->ecx);
+    input((char *)(uintptr_t)frame->argument2, frame->argument1);
     break;
   }
 }
 
-static void syscall_run_shell_command(x86_interrupt_frame_t *frame) {
+static void syscall_run_shell_command(syscall_context_t *frame) {
   size_t command_length;
-  char *command = copy_user_string(frame->edx, &command_length);
+  char *command = copy_user_string(frame->argument2, &command_length);
   if (command == NULL) {
-    frame->eax = -1;
+    frame->value = -1;
     return;
   }
 
-  frame->eax = run_shell_command(command, command_length);
+  frame->value = run_shell_command(command, command_length);
   free(command);
 }
 
 typedef int (*vfs_syscall_handler_t)(const vfs_syscall_request_t *request);
 
-static char *vfs_syscall_path(uint32_t address) {
+static char *vfs_syscall_path(uintptr_t address) {
   size_t length;
   return copy_user_string(address, &length);
 }
@@ -706,54 +707,54 @@ static const vfs_syscall_handler_t vfs_syscall_handlers[VFS_SYSCALL_COUNT] = {
     [VFS_SYSCALL_FORMAT] = vfs_syscall_format,
 };
 
-static void syscall_vfs(x86_interrupt_frame_t *frame) {
-  if (frame->ebx >= VFS_SYSCALL_COUNT ||
-      vfs_syscall_handlers[frame->ebx] == NULL ||
-      !user_range_ok(frame->ecx, sizeof(vfs_syscall_request_t))) {
-    frame->eax = VFS_ERROR_INVALID;
+static void syscall_vfs(syscall_context_t *frame) {
+  if (frame->argument0 >= VFS_SYSCALL_COUNT ||
+      vfs_syscall_handlers[frame->argument0] == NULL ||
+      !user_range_ok(frame->argument1, sizeof(vfs_syscall_request_t))) {
+    frame->value = VFS_ERROR_INVALID;
     return;
   }
   vfs_syscall_request_t request;
-  memcpy(&request, (const void *)(uintptr_t)frame->ecx, sizeof(request));
+  memcpy(&request, (const void *)(uintptr_t)frame->argument1, sizeof(request));
   if (request.size != sizeof(request)) {
-    frame->eax = VFS_ERROR_INVALID;
+    frame->value = VFS_ERROR_INVALID;
     return;
   }
-  frame->eax = vfs_syscall_handlers[frame->ebx](&request);
+  frame->value = vfs_syscall_handlers[frame->argument0](&request);
 }
 
-static void syscall_command_line(x86_interrupt_frame_t *frame) {
+static void syscall_command_line(syscall_context_t *frame) {
   mtask *task = current_task();
   if (task->line == NULL) {
-    frame->eax = -1;
+    frame->value = -1;
     return;
   }
   size_t length = strlen((const char *)task->line);
-  if (length >= INT_MAX || (frame->edx == 0 && frame->ecx != 0) ||
-      (frame->edx != 0 &&
-       !user_range_ok(frame->edx, frame->ecx))) {
-    frame->eax = -1;
+  if (length >= INT_MAX || (frame->argument2 == 0 && frame->argument1 != 0) ||
+      (frame->argument2 != 0 &&
+       !user_range_ok(frame->argument2, frame->argument1))) {
+    frame->value = -1;
     return;
   }
-  if (frame->edx == 0) {
-    frame->eax = length;
+  if (frame->argument2 == 0) {
+    frame->value = length;
     return;
   }
-  if (frame->ecx <= length) {
-    frame->eax = -2;
+  if (frame->argument1 <= length) {
+    frame->value = -2;
     return;
   }
-  memcpy((void *)(uintptr_t)frame->edx, (const void *)task->line, length + 1);
-  frame->eax = length;
+  memcpy((void *)(uintptr_t)frame->argument2, (const void *)task->line, length + 1);
+  frame->value = length;
 }
 
-static void syscall_keyboard_hit(x86_interrupt_frame_t *frame) {
-  frame->eax = kbhit();
+static void syscall_keyboard_hit(syscall_context_t *frame) {
+  frame->value = kbhit();
 }
 
-static void syscall_exit(x86_interrupt_frame_t *frame) {
+static void syscall_exit(syscall_context_t *frame) {
   mtask *task = current_task();
-  unsigned status = frame->ebx;
+  unsigned status = frame->argument0;
   if (!*(unsigned char *)USER_HEAP_END) {
     extern mtask *mouse_use_task;
     if (mouse_use_task == task) {
@@ -775,72 +776,78 @@ static void syscall_exit(x86_interrupt_frame_t *frame) {
   }
 }
 
-static void syscall_vbe_control(x86_interrupt_frame_t *frame) {
+static void syscall_vbe_control(syscall_context_t *frame) {
   if (running_mode != POWERINTDOS || !task_pin_current(0)) {
     return;
   }
 
-  if (frame->ebx == 0x01) {
-    frame->eax = SwitchVBEMode(frame->ecx);
-  } else if (frame->ebx == 0x02) {
-    frame->eax = check_vbe_mode(frame->ecx, (struct VBEINFO *)VBEINFO_ADDRESS);
-  } else if (frame->ebx == 0x05) {
-    unsigned framebuffer = set_mode(frame->ecx, frame->edx, 32);
-    frame->eax = framebuffer;
-    uint64_t framebuffer_bytes = (uint64_t)frame->ecx * frame->edx * 4;
-    if (framebuffer == UINT_MAX || (framebuffer & 0xfffu) != 0 ||
-        framebuffer_bytes == 0 || framebuffer_bytes > UINT_MAX ||
-        framebuffer > UINT_MAX - (unsigned)framebuffer_bytes) {
-      frame->eax = UINT_MAX;
+  if (frame->argument0 == 0x01) {
+    frame->value = platform_video_switch_mode((int)frame->argument1);
+  } else if (frame->argument0 == 0x02) {
+    frame->value = platform_video_check_mode((int)frame->argument1);
+  } else if (frame->argument0 == 0x05) {
+    platform_video_info_t info;
+    if (!platform_video_set_mode((uint32_t)frame->argument1,
+                                 (uint32_t)frame->argument2, 32, &info)) {
+      frame->value = UINT_MAX;
       return;
     }
-    unsigned count = div_round_up((unsigned)framebuffer_bytes, 0x1000);
-    for (unsigned i = 0; i < count; i++) {
-      unsigned address = framebuffer + i * 0x1000;
-      page_set_physics_attr(address, (void *)(uintptr_t)address,
-                            PG_P | PG_USU | PG_RWW | PG_SHARED);
+    uintptr_t framebuffer = info.framebuffer;
+    uint64_t framebuffer_bytes = (uint64_t)info.width * info.height * 4;
+    frame->value = framebuffer;
+    if (framebuffer == 0 || (framebuffer & 0xfffu) != 0 ||
+        framebuffer_bytes == 0 || framebuffer_bytes > UINT_MAX ||
+        framebuffer_bytes > UINT_MAX - 0xfffu ||
+        framebuffer > UINT_MAX - (uintptr_t)framebuffer_bytes) {
+      frame->value = UINT_MAX;
+      return;
+    }
+    size_t mapping_size =
+        (framebuffer_bytes + 0xfffu) & ~(size_t)0xfffu;
+    if (!arch_address_space_map_user_device(framebuffer, framebuffer,
+                                            mapping_size)) {
+      frame->value = UINT_MAX;
     }
   }
 }
 
-static void syscall_bios_video(x86_interrupt_frame_t *frame) {
+static void syscall_bios_video(syscall_context_t *frame) {
   if (running_mode != POWERINTDOS || !task_pin_current(0)) {
     return;
   }
-  if (frame->ebx == 0x01) {
-    SwitchToText8025_BIOS();
-    clear();
-  } else if (frame->ebx == 0x02) {
-    SwitchTo320X200X256_BIOS();
+  if (frame->argument0 == 0x01) {
+    platform_video_text_mode();
+  } else if (frame->argument0 == 0x02) {
+    platform_video_graphics_mode();
   }
 }
 
-static void syscall_task_control(x86_interrupt_frame_t *frame) {
+static void syscall_task_control(syscall_context_t *frame) {
   mtask *task = current_task();
-  switch (frame->ebx) {
+  switch (frame->argument0) {
   case 0x04:
-    send_ipc_message(frame->ecx, (void *)(uintptr_t)frame->edx, frame->esi,
+    send_ipc_message(frame->argument1, (void *)(uintptr_t)frame->argument2, frame->argument3,
                      asynchronous);
     break;
   case 0x05:
-    get_ipc_message((void *)(uintptr_t)frame->edx, frame->ecx);
+    get_ipc_message((void *)(uintptr_t)frame->argument2, frame->argument1);
     break;
   case 0x06:
-    frame->eax = ipc_message_len(frame->ecx);
+    frame->value = ipc_message_len(frame->argument1);
     break;
   case 0x07:
-    frame->eax = get_tid(task);
+    frame->value = get_tid(task);
     break;
   case 0x08:
-    frame->eax = have_msg();
+    frame->value = have_msg();
     break;
   case 0x09:
-    get_msg_all((void *)(uintptr_t)frame->edx);
+    get_msg_all((void *)(uintptr_t)frame->argument2);
     break;
   case 0x0a: {
     mtask *thread = create_thread_task((uintptr_t)user_thread_entry, 1);
     if (thread == NULL) {
-      frame->eax = -1;
+      frame->value = -1;
       return;
     }
     thread->alloc_addr = task->alloc_addr;
@@ -853,22 +860,22 @@ static void syscall_task_control(x86_interrupt_frame_t *frame) {
     task_set_name(thread, "thread");
     thread->mx = 0;
     thread->my = 0;
-    unsigned *request = page_malloc_one_no_mark();
+    uintptr_t *request = page_malloc_one_no_mark();
     if (request == NULL) {
       task_abort_creation(thread);
-      frame->eax = -1;
+      frame->value = -1;
       return;
     }
-    request[0] = frame->esi;
-    request[1] = frame->edx;
+    request[0] = frame->argument3;
+    request[1] = frame->argument2;
     thread->line = (char *)request;
     if (!task_publish(thread)) {
       task_abort_creation(thread);
       page_free_one(request);
-      frame->eax = -1;
+      frame->value = -1;
       return;
     }
-    frame->eax = thread->tid;
+    frame->value = thread->tid;
     break;
   }
   case 0x0b:
@@ -878,27 +885,27 @@ static void syscall_task_control(x86_interrupt_frame_t *frame) {
     task_unlock();
     break;
   case 0x0d: {
-    mtask *target = get_task(frame->ecx);
+    mtask *target = get_task(frame->argument1);
     if (target && target->kind == TASK_THREAD && target->tgid == task->tgid) {
-      task_kill(frame->ecx);
+      task_kill(frame->argument1);
     }
     break;
   }
   }
 }
 
-static void syscall_tty_color(x86_interrupt_frame_t *frame) {
-  if (frame->ebx == 0x01) {
-    frame->eax = current_task()->TTY->color;
-  } else if (frame->ebx == 0x02) {
-    current_task()->TTY->color = frame->ecx;
+static void syscall_tty_color(syscall_context_t *frame) {
+  if (frame->argument0 == 0x01) {
+    frame->value = current_task()->TTY->color;
+  } else if (frame->argument0 == 0x02) {
+    current_task()->TTY->color = frame->argument1;
   }
 }
 
-static void syscall_timer_control(x86_interrupt_frame_t *frame) {
+static void syscall_timer_control(syscall_context_t *frame) {
   mtask *task = current_task();
-  frame->eax = -1;
-  switch (frame->ebx) {
+  frame->value = -1;
+  switch (frame->argument0) {
   case 0x00: {
     if (task->timer != NULL) {
       break;
@@ -920,21 +927,21 @@ static void syscall_timer_control(x86_interrupt_frame_t *frame) {
     timer_init(timer, fifo, 1);
     timer->waiter = task;
     task->timer = timer;
-    frame->eax = 0;
+    frame->value = 0;
     break;
   }
   case 0x01:
     if (task->timer == NULL) {
       break;
     }
-    timer_settime(task->timer, frame->ecx);
-    frame->eax = 0;
+    timer_settime(task->timer, frame->argument1);
+    frame->value = 0;
     break;
   case 0x02:
     if (task->timer == NULL || task->timer->fifo == NULL) {
       break;
     }
-    frame->eax = fifo8_status(task->timer->fifo) != 0 &&
+    frame->value = fifo8_status(task->timer->fifo) != 0 &&
                  fifo8_get(task->timer->fifo) == 1;
     break;
   case 0x03:
@@ -946,64 +953,69 @@ static void syscall_timer_control(x86_interrupt_frame_t *frame) {
     page_free(task->timer->fifo, sizeof(struct FIFO8));
     timer_free(task->timer);
     task->timer = NULL;
-    frame->eax = 0;
+    frame->value = 0;
     break;
   }
 }
 
-static void syscall_rtc(x86_interrupt_frame_t *frame) {
-  switch (frame->ebx) {
+static void syscall_rtc(syscall_context_t *frame) {
+  switch (frame->argument0) {
   case 0x00:
-    frame->eax = get_hour_hex();
+    frame->value = get_hour_hex();
     break;
   case 0x01:
-    frame->eax = get_min_hex();
+    frame->value = get_min_hex();
     break;
   case 0x02:
-    frame->eax = get_sec_hex();
+    frame->value = get_sec_hex();
     break;
   case 0x03:
-    frame->eax = get_day_of_month();
+    frame->value = get_day_of_month();
     break;
   case 0x04:
-    frame->eax = get_day_of_week();
+    frame->value = get_day_of_week();
     break;
   case 0x05:
-    frame->eax = get_mon_hex();
+    frame->value = get_mon_hex();
     break;
   case 0x06:
-    frame->eax = get_year();
+    frame->value = get_year();
     break;
   }
 }
 
-static void syscall_framebuffer(x86_interrupt_frame_t *frame) {
+static void syscall_framebuffer(syscall_context_t *frame) {
   if (running_mode != POWERINTDOS) {
     return;
   }
 
-  struct VBEINFO *vbe = (struct VBEINFO *)VBEINFO_ADDRESS;
-  vram_t *framebuffer = (vram_t *)vbe->vram;
-  switch (frame->eax) {
+  platform_video_info_t info;
+  if (!platform_video_current_info(&info)) {
+    frame->value = UINT_MAX;
+    return;
+  }
+  vram_t *framebuffer = (vram_t *)info.framebuffer;
+  switch (frame->value) {
   case SYSCALL_DRAW_PIXEL:
-    SDraw_Px(framebuffer, frame->ebx, frame->ecx, frame->edx, vbe->xsize);
+    SDraw_Px(framebuffer, frame->argument0, frame->argument1, frame->argument2,
+             info.width);
     break;
   case SYSCALL_READ_PIXEL:
-    frame->eax = framebuffer[frame->ebx * vbe->xsize + frame->ecx];
+    frame->value = framebuffer[frame->argument0 * info.width + frame->argument1];
     break;
   case SYSCALL_COPY_FRAMEBUFFER:
-    memcpy((void *)(uintptr_t)frame->ebx, framebuffer,
-           vbe->xsize * vbe->ysize * sizeof(vram_t));
+    memcpy((void *)(uintptr_t)frame->argument0, framebuffer,
+           info.width * info.height * sizeof(vram_t));
     break;
   case SYSCALL_DRAW_BUFFER: {
-    int x = frame->ebx;
-    int y = frame->ecx;
-    int width = frame->edx;
-    int height = frame->esi;
-    unsigned *buffer = (unsigned *)(uintptr_t)frame->edi;
+    int x = frame->argument0;
+    int y = frame->argument1;
+    int width = frame->argument2;
+    int height = frame->argument3;
+    unsigned *buffer = (unsigned *)(uintptr_t)frame->argument4;
     for (int i = x; i < x + width; i++) {
       for (int j = y; j < y + height; j++) {
-        framebuffer[j * vbe->xsize + i] =
+        framebuffer[j * info.width + i] =
             buffer[(j - y) * width + (i - x)];
       }
     }
@@ -1011,49 +1023,49 @@ static void syscall_framebuffer(x86_interrupt_frame_t *frame) {
   }
   case SYSCALL_SCROLL_FRAMEBUFFER: {
     int destination_row = 0;
-    int source_row = frame->ebx;
-    for (; source_row < vbe->ysize; source_row++, destination_row++) {
-      for (int x = 0; x < vbe->xsize; x++) {
-        framebuffer[destination_row * vbe->xsize + x] =
-            framebuffer[source_row * vbe->xsize + x];
+    int source_row = frame->argument0;
+    for (; source_row < info.height; source_row++, destination_row++) {
+      for (int x = 0; x < info.width; x++) {
+        framebuffer[destination_row * info.width + x] =
+            framebuffer[source_row * info.width + x];
       }
     }
-    SDraw_Box(framebuffer, 0, destination_row, vbe->xsize, vbe->ysize, 0,
-              vbe->xsize);
+    SDraw_Box(framebuffer, 0, destination_row, info.width, info.height, 0,
+              info.width);
     break;
   }
   case SYSCALL_DRAW_BOX:
-    SDraw_Box(framebuffer, frame->ebx, frame->ecx, frame->edx, frame->esi,
-              frame->edi, vbe->xsize);
+    SDraw_Box(framebuffer, frame->argument0, frame->argument1, frame->argument2,
+              frame->argument3, frame->argument4, info.width);
     break;
   }
 }
 
-static void syscall_timestamp(x86_interrupt_frame_t *frame) {
-  frame->eax = calendar_to_unix_timestamp(
+static void syscall_timestamp(syscall_context_t *frame) {
+  frame->value = calendar_to_unix_timestamp(
       get_year(), get_mon_hex(), get_day_of_month(), get_hour_hex(),
       get_min_hex(), get_sec_hex());
 }
 
-static void syscall_uptime(x86_interrupt_frame_t *frame) {
-  frame->eax = timerctl.count * 10;
+static void syscall_uptime(syscall_context_t *frame) {
+  frame->value = timerctl.count * 10;
 }
 
-static void syscall_monotonic_ns(x86_interrupt_frame_t *frame) {
+static void syscall_monotonic_ns(syscall_context_t *frame) {
   uint64_t nanoseconds = monotonic_time_ns();
-  frame->eax = (uint32_t)nanoseconds;
-  frame->edx = (uint32_t)(nanoseconds >> 32);
+  frame->value = (uint32_t)nanoseconds;
+  frame->argument2 = (uint32_t)(nanoseconds >> 32);
 }
 
-static void syscall_reset_fpu(x86_interrupt_frame_t *frame) {
+static void syscall_reset_fpu(syscall_context_t *frame) {
   (void)frame;
-  x86_fpu_reset(current_task());
+  arch_fpu_reset(current_task());
 }
 
-static void syscall_keyboard_setup(x86_interrupt_frame_t *frame) {
+static void syscall_keyboard_setup(syscall_context_t *frame) {
   mtask *task = current_task();
   if (task->Pkeyfifo != NULL || task->Ukeyfifo != NULL) {
-    frame->eax = -1;
+    frame->value = -1;
     return;
   }
   struct FIFO8 *press_fifo = malloc(sizeof(*press_fifo));
@@ -1070,7 +1082,7 @@ static void syscall_keyboard_setup(x86_interrupt_frame_t *frame) {
     }
     free(release_fifo);
     free(press_fifo);
-    frame->eax = -1;
+    frame->value = -1;
     return;
   }
   fifo8_init(press_fifo, 4096, press_buffer);
@@ -1079,142 +1091,141 @@ static void syscall_keyboard_setup(x86_interrupt_frame_t *frame) {
   task->Ukeyfifo = release_fifo;
   task->keyboard_press = keyboard_press;
   task->keyboard_release = keyboard_release;
-  frame->eax = 0;
+  frame->value = 0;
 }
 
-static void syscall_keyboard_fifo(x86_interrupt_frame_t *frame) {
+static void syscall_keyboard_fifo(syscall_context_t *frame) {
   mtask *task = current_task();
-  switch (frame->eax) {
+  switch (frame->value) {
   case SYSCALL_KEY_PRESS_PENDING:
-    frame->eax = fifo8_status(task->Pkeyfifo);
+    frame->value = fifo8_status(task->Pkeyfifo);
     break;
   case SYSCALL_KEY_RELEASE_PENDING:
-    frame->eax = fifo8_status(task->Ukeyfifo);
+    frame->value = fifo8_status(task->Ukeyfifo);
     break;
   case SYSCALL_KEY_PRESS_READ:
-    frame->eax = fifo8_get(task->Pkeyfifo);
+    frame->value = fifo8_get(task->Pkeyfifo);
     break;
   case SYSCALL_KEY_RELEASE_READ:
-    frame->eax = fifo8_get(task->Ukeyfifo);
+    frame->value = fifo8_get(task->Ukeyfifo);
     break;
   }
 }
 
-static void syscall_grow_heap(x86_interrupt_frame_t *frame) {
+static void syscall_grow_heap(syscall_context_t *frame) {
   mtask *task = current_task();
-  uint32_t old_size = task->alloc_size ? *task->alloc_size : 0;
-  uint32_t start_addr = task->alloc_addr + old_size;
-  uint32_t request = (frame->ebx + 0xfffu) & 0xfffff000u;
-  if (task->alloc_size == NULL || (int32_t)frame->ebx <= 0 ||
-      request < frame->ebx || start_addr < task->alloc_addr ||
+  size_t old_size = task->alloc_size ? *task->alloc_size : 0;
+  uintptr_t start_addr = task->alloc_addr + old_size;
+  if (task->alloc_size == NULL || frame->argument0 == 0 ||
+      frame->argument0 > INT_MAX) {
+    frame->value = -1;
+    return;
+  }
+  size_t requested = (size_t)frame->argument0;
+  size_t request = (requested + 0xfffu) & ~(size_t)0xfffu;
+  if (request < requested || start_addr < task->alloc_addr ||
       start_addr >= USER_HEAP_END || request > USER_HEAP_END - start_addr) {
-    frame->eax = -1;
+    frame->value = -1;
     return;
   }
 
-  for (uint32_t offset = 0; offset < request; offset += 0x1000) {
+  for (uintptr_t offset = 0; offset < request; offset += 0x1000u) {
     if (!page_link(start_addr + offset)) {
-      frame->eax = -1;
+      frame->value = -1;
       return;
     }
   }
   *task->alloc_size = old_size + request;
-  frame->eax = 0;
+  frame->value = 0;
 }
 
-static void syscall_read_env(x86_interrupt_frame_t *frame) {
-  char *value = env_read((char *)(uintptr_t)frame->ebx);
+static void syscall_read_env(syscall_context_t *frame) {
+  char *value = env_read((char *)(uintptr_t)frame->argument0);
   if (value) {
-    strcpy((char *)(uintptr_t)frame->ecx, value);
-    frame->eax = 1;
+    strcpy((char *)(uintptr_t)frame->argument1, value);
+    frame->value = 1;
   } else {
-    frame->eax = 0;
+    frame->value = 0;
   }
 }
 
-static void syscall_execute(x86_interrupt_frame_t *frame) {
-  frame->eax = os_execute((char *)(uintptr_t)frame->ebx,
-                          (char *)(uintptr_t)frame->ecx);
+static void syscall_execute(syscall_context_t *frame) {
+  frame->value = os_execute((char *)(uintptr_t)frame->argument0,
+                          (char *)(uintptr_t)frame->argument1);
 }
 
-static void syscall_clear(x86_interrupt_frame_t *frame) {
+static void syscall_clear(syscall_context_t *frame) {
   (void)frame;
   clear();
 }
 
-static void syscall_memory_info(x86_interrupt_frame_t *frame) {
-  if (frame->eax == SYSCALL_MEMORY_SIZE) {
-    frame->eax = memsize;
+static void syscall_memory_info(syscall_context_t *frame) {
+  if (frame->value == SYSCALL_MEMORY_SIZE) {
+    frame->value = memsize;
     return;
   }
 
-  frame->eax = page_used_count(memsize);
+  frame->value = page_used_count(memsize);
 }
 
-static void syscall_tty_cursor(x86_interrupt_frame_t *frame) {
-  if (frame->eax == SYSCALL_CURSOR_START) {
+static void syscall_tty_cursor(syscall_context_t *frame) {
+  if (frame->value == SYSCALL_CURSOR_START) {
     tty_start_curor_moving(current_task()->TTY);
   } else {
     tty_stop_cursor_moving(current_task()->TTY);
   }
 }
 
-static void syscall_tty_size(x86_interrupt_frame_t *frame) {
-  if (frame->eax == SYSCALL_TTY_WIDTH) {
-    frame->eax = current_task()->TTY->xsize;
+static void syscall_tty_size(syscall_context_t *frame) {
+  if (frame->value == SYSCALL_TTY_WIDTH) {
+    frame->value = current_task()->TTY->xsize;
   } else {
-    frame->eax = current_task()->TTY->ysize;
+    frame->value = current_task()->TTY->ysize;
   }
 }
 
-static void syscall_log(x86_interrupt_frame_t *frame) {
-  logk((char *)(uintptr_t)frame->ebx);
+static void syscall_log(syscall_context_t *frame) {
+  logk((char *)(uintptr_t)frame->argument0);
 }
 
-static void syscall_signal_handler(x86_interrupt_frame_t *frame) {
-  if (frame->ebx >= sizeof(current_task()->handler) /
+static void syscall_signal_handler(syscall_context_t *frame) {
+  if (frame->argument0 >= sizeof(current_task()->handler) /
                         sizeof(current_task()->handler[0])) {
-    frame->eax = -1;
+    frame->value = -1;
     return;
   }
-  unsigned old_handler = current_task()->handler[frame->ebx];
-  set_signal_handler(frame->ebx, frame->ecx);
-  frame->eax = old_handler;
+  unsigned old_handler = current_task()->handler[frame->argument0];
+  set_signal_handler(frame->argument0, frame->argument1);
+  frame->value = old_handler;
 }
 
-static void syscall_fork(x86_interrupt_frame_t *frame) {
-  frame->eax = task_fork();
+static void syscall_fork(syscall_context_t *frame) {
+  frame->value = task_fork();
 }
 
-static void syscall_wait(x86_interrupt_frame_t *frame) {
-  frame->eax = waittid(frame->ebx);
+static void syscall_wait(syscall_context_t *frame) {
+  frame->value = waittid(frame->argument0);
 }
 
-static void syscall_set_rt(x86_interrupt_frame_t *frame) {
-  extern unsigned m_eip, m_cr3;
-  m_eip = frame->ebx;
-  m_cr3 = current_task()->pde;
-}
-
-static void syscall_mouse_enable(x86_interrupt_frame_t *frame) {
+static void syscall_mouse_enable(syscall_context_t *frame) {
   extern mtask *mouse_use_task;
   if (mouse_use_task != NULL && mouse_use_task != current_task()) {
-    frame->eax = -1;
+    frame->value = -1;
     return;
   }
   mouse_ready(&mdec);
-  frame->eax = 0;
+  frame->value = 0;
 }
 
-static void syscall_mouse_data(x86_interrupt_frame_t *frame) {
-  if (frame->eax == SYSCALL_MOUSE_PENDING) {
-    frame->eax = fifo8_status(task_get_mouse_fifo(current_task()));
+static void syscall_mouse_data(syscall_context_t *frame) {
+  if (frame->value == SYSCALL_MOUSE_PENDING) {
+    frame->value = fifo8_status(task_get_mouse_fifo(current_task()));
   } else {
-    frame->eax = fifo8_get(task_get_mouse_fifo(current_task()));
+    frame->value = fifo8_get(task_get_mouse_fifo(current_task()));
   }
 }
 
-static void syscall_yield(x86_interrupt_frame_t *frame) {
+static void syscall_yield(syscall_context_t *frame) {
   (void)frame;
   irq_state_t state = irq_save();
   if (current_task()->ready == 0) {
@@ -1225,36 +1236,36 @@ static void syscall_yield(x86_interrupt_frame_t *frame) {
   irq_restore(state);
 }
 
-static void syscall_tty_object(x86_interrupt_frame_t *frame) {
-  switch (frame->eax) {
+static void syscall_tty_object(syscall_context_t *frame) {
+  switch (frame->value) {
   case SYSCALL_TTY_ALLOC:
-    frame->eax = (uintptr_t)fartty_alloc(
-        (void *)(uintptr_t)frame->ebx, frame->ecx, current_task()->pde,
-        frame->edx, frame->esi);
+    frame->value = (uintptr_t)fartty_alloc(
+        (void *)(uintptr_t)frame->argument0, frame->argument1, current_task()->address_space,
+        frame->argument2, frame->argument3);
     break;
   case SYSCALL_TTY_SET:
-    tty_set(get_task(frame->ebx), (struct tty *)(uintptr_t)frame->ecx);
+    tty_set(get_task(frame->argument0), (struct tty *)(uintptr_t)frame->argument1);
     break;
   case SYSCALL_TTY_FREE:
-    tty_free((struct tty *)(uintptr_t)frame->ebx);
+    tty_free((struct tty *)(uintptr_t)frame->argument0);
     break;
   }
 }
 
-static void syscall_return_to_app(x86_interrupt_frame_t *frame) {
-  current_task()->ret_to_app = frame->ebx;
+static void syscall_return_to_app(syscall_context_t *frame) {
+  current_task()->ret_to_app = frame->argument0;
 }
 
-static void syscall_use_keyboard(x86_interrupt_frame_t *frame) {
+static void syscall_use_keyboard(syscall_context_t *frame) {
   extern int disable_flag;
   extern mtask *keyboard_use_task;
   if (keyboard_use_task != NULL && keyboard_use_task != current_task()) {
-    frame->eax = -1;
+    frame->value = -1;
     return;
   }
   disable_flag = 1;
   keyboard_use_task = current_task();
-  frame->eax = 0;
+  frame->value = 0;
 }
 
 enum input_wait_event {
@@ -1282,10 +1293,10 @@ static uint32_t input_pending_events(const mtask *task, uint32_t requested) {
   return pending;
 }
 
-static void syscall_input_wait(x86_interrupt_frame_t *frame) {
+static void syscall_input_wait(syscall_context_t *frame) {
   extern mtask *keyboard_use_task;
   extern mtask *mouse_use_task;
-  uint32_t requested = frame->ebx;
+  uint32_t requested = frame->argument0;
   mtask *task = current_task();
   if (requested == 0 || (requested & ~INPUT_WAIT_ALL) != 0 ||
       ((requested & INPUT_WAIT_MOUSE) && mouse_use_task != task) ||
@@ -1294,7 +1305,7 @@ static void syscall_input_wait(x86_interrupt_frame_t *frame) {
       ((requested & INPUT_WAIT_MOUSE) && task->mousefifo == NULL) ||
       ((requested & INPUT_WAIT_KEY_PRESS) && task->Pkeyfifo == NULL) ||
       ((requested & INPUT_WAIT_KEY_RELEASE) && task->Ukeyfifo == NULL)) {
-    frame->eax = -1;
+    frame->value = -1;
     return;
   }
 
@@ -1302,7 +1313,7 @@ static void syscall_input_wait(x86_interrupt_frame_t *frame) {
     irq_state_t interrupt_state = irq_save();
     uint32_t pending = input_pending_events(task, requested);
     if (pending != 0) {
-      frame->eax = pending;
+      frame->value = pending;
       irq_restore(interrupt_state);
       return;
     }
@@ -1316,8 +1327,8 @@ enum shared_memory_operation {
   SHARED_MEMORY_UNMAP = 0x02,
 };
 
-static bool shared_memory_range_ok(uint32_t address, uint32_t size,
-                                   uint32_t lower, uint32_t upper) {
+static bool shared_memory_range_ok(uintptr_t address, size_t size,
+                                   uintptr_t lower, uintptr_t upper) {
   if (size == 0 || size > upper - lower ||
       ((address | size) & 0xfffu) != 0 || address < lower) {
     return false;
@@ -1325,48 +1336,48 @@ static bool shared_memory_range_ok(uint32_t address, uint32_t size,
   return address <= upper - size;
 }
 
-static void syscall_shared_memory(x86_interrupt_frame_t *frame) {
+static void syscall_shared_memory(syscall_context_t *frame) {
   bool success = false;
-  if (frame->ebx == SHARED_MEMORY_MAP_TO) {
-    if (!shared_memory_range_ok(frame->edi, frame->ebp, USER_SPACE_START,
+  if (frame->argument0 == SHARED_MEMORY_MAP_TO) {
+    if (!shared_memory_range_ok(frame->argument4, frame->argument5, USER_SPACE_START,
                                 USER_HEAP_END) ||
-        !shared_memory_range_ok(frame->esi, frame->ebp, USER_HEAP_END,
+        !shared_memory_range_ok(frame->argument3, frame->argument5, USER_HEAP_END,
                                 USER_SHARED_END)) {
-      frame->eax = -1;
+      frame->value = -1;
       return;
     }
 
     irq_state_t state = irq_save();
-    mtask *target = get_task(frame->ecx);
+    mtask *target = get_task(frame->argument1);
     if (target != NULL && target->state != DIED && !target->on_cpu &&
-        target->generation == frame->edx && target->pde != 0) {
-      success = page_share_range_pde(frame->edi, frame->esi, frame->ebp,
-                                     current_task()->pde, target->pde);
+        target->generation == frame->argument2 && target->address_space != 0) {
+      success = arch_address_space_share(frame->argument4, frame->argument3, frame->argument5,
+                                     current_task()->address_space, target->address_space);
     }
     irq_restore(state);
-  } else if (frame->ebx == SHARED_MEMORY_UNMAP) {
-    if (!shared_memory_range_ok(frame->esi, frame->ebp, USER_HEAP_END,
+  } else if (frame->argument0 == SHARED_MEMORY_UNMAP) {
+    if (!shared_memory_range_ok(frame->argument3, frame->argument5, USER_HEAP_END,
                                 USER_SHARED_END)) {
-      frame->eax = -1;
+      frame->value = -1;
       return;
     }
     irq_state_t state = irq_save();
-    success = page_unmap_shared_range_pde(frame->esi, frame->ebp,
-                                           current_task()->pde);
+    success = arch_address_space_unmap_shared(frame->argument3, frame->argument5,
+                                           current_task()->address_space);
     irq_restore(state);
   }
-  frame->eax = success ? 0 : -1;
+  frame->value = success ? 0 : -1;
 }
 
-static void syscall_task_level(x86_interrupt_frame_t *frame) {
+static void syscall_task_level(syscall_context_t *frame) {
   irq_state_t state = irq_save();
-  mtask *task = get_task(frame->ebx);
+  mtask *task = get_task(frame->argument0);
   if (task == NULL) {
     irq_restore(state);
     return;
   }
 
-  if (frame->eax == SYSCALL_TASK_LEVEL_HIGH) {
+  if (frame->value == SYSCALL_TASK_LEVEL_HIGH) {
     if (task->urgent) {
       irq_restore(state);
       return;
@@ -1380,23 +1391,23 @@ static void syscall_task_level(x86_interrupt_frame_t *frame) {
   irq_restore(state);
 }
 
-static void syscall_module(x86_interrupt_frame_t *frame) {
-  switch (frame->eax) {
+static void syscall_module(syscall_context_t *frame) {
+  switch (frame->value) {
   case SYSCALL_MODULE_LOAD:
-    frame->eax = module_load((const char *)(uintptr_t)frame->ebx);
+    frame->value = module_load((const char *)(uintptr_t)frame->argument0);
     break;
   case SYSCALL_MODULE_UNLOAD:
-    frame->eax = module_unload((const char *)(uintptr_t)frame->ebx);
+    frame->value = module_unload((const char *)(uintptr_t)frame->argument0);
     break;
   case SYSCALL_MODULE_LIST:
-    frame->eax = module_list((module_handle_t *)(uintptr_t)frame->ebx,
-                             frame->ecx);
+    frame->value = module_list((module_handle_t *)(uintptr_t)frame->argument0,
+                             frame->argument1);
     break;
   }
 }
 
-static void syscall_ipc(x86_interrupt_frame_t *frame) {
-  frame->eax = ipc_syscall_dispatch(frame->ebx, frame->ecx, frame->edx);
+static void syscall_ipc(syscall_context_t *frame) {
+  frame->value = ipc_syscall_dispatch(frame->argument0, frame->argument1, frame->argument2);
 }
 
 typedef struct {
@@ -1416,7 +1427,7 @@ typedef struct {
   char path[NET_SOCKET_LOCAL_PATH_MAX];
 } socket_user_sockaddr_un_t;
 
-static int socket_parse_user_address(uint32_t pointer, uint32_t length,
+static int socket_parse_user_address(uintptr_t pointer, uint32_t length,
                                      net_socket_address_t *address) {
   if (address == NULL || length < sizeof(uint16_t) ||
       !user_range_ok(pointer, length)) {
@@ -1662,66 +1673,67 @@ static const socket_syscall_handler_t
         [NET_SOCKET_SYSCALL_SET_OPTION] = socket_syscall_set_option,
 };
 
-static void syscall_socket(x86_interrupt_frame_t *frame) {
-  if (frame->ebx >= NET_SOCKET_SYSCALL_COUNT ||
-      socket_syscall_handlers[frame->ebx] == NULL ||
-      !user_range_ok(frame->ecx, sizeof(net_socket_syscall_request_t))) {
-    frame->eax = NET_SOCKET_ERR_INVAL;
+static void syscall_socket(syscall_context_t *frame) {
+  if (frame->argument0 >= NET_SOCKET_SYSCALL_COUNT ||
+      socket_syscall_handlers[frame->argument0] == NULL ||
+      !user_range_ok(frame->argument1, sizeof(net_socket_syscall_request_t))) {
+    frame->value = NET_SOCKET_ERR_INVAL;
     return;
   }
   net_socket_syscall_request_t *request =
-      (net_socket_syscall_request_t *)(uintptr_t)frame->ecx;
-  frame->eax = socket_syscall_handlers[frame->ebx](current_task()->tgid,
+      (net_socket_syscall_request_t *)(uintptr_t)frame->argument1;
+  frame->value = socket_syscall_handlers[frame->argument0](current_task()->tgid,
                                                     request);
 }
 
-static void syscall_task_snapshot(x86_interrupt_frame_t *frame) {
-  if (!user_range_ok(frame->edx, sizeof(uint32_t)) ||
-      (frame->ecx != 0 &&
-       (frame->ecx > UINT_MAX / sizeof(task_info_t) ||
-        !user_range_ok(frame->ebx, frame->ecx * sizeof(task_info_t))))) {
-    frame->eax = -1;
+static void syscall_task_snapshot(syscall_context_t *frame) {
+  if (!user_range_ok(frame->argument2, sizeof(uint32_t)) ||
+      (frame->argument1 != 0 &&
+       (frame->argument1 > UINT_MAX / sizeof(task_info_t) ||
+        !user_range_ok(frame->argument0, frame->argument1 * sizeof(task_info_t))))) {
+    frame->value = -1;
     return;
   }
-  frame->eax = task_snapshot((task_info_t *)(uintptr_t)frame->ebx, frame->ecx,
-                             (uint32_t *)(uintptr_t)frame->edx);
+  frame->value = task_snapshot((task_info_t *)(uintptr_t)frame->argument0,
+                             (uint32_t)frame->argument1,
+                             (uint32_t *)(uintptr_t)frame->argument2);
 }
 
-static void syscall_cpu_info(x86_interrupt_frame_t *frame) {
-  frame->eax = smp_online_cpu_count();
-  frame->edx = smp_current_cpu();
+static void syscall_cpu_info(syscall_context_t *frame) {
+  frame->value = smp_online_cpu_count();
+  frame->argument2 = smp_current_cpu();
 }
 
-static void syscall_tty_input_notify(x86_interrupt_frame_t *frame) {
-  frame->eax = tty_notify_input((struct tty *)(uintptr_t)frame->ebx) ? 0 : -1;
+static void syscall_tty_input_notify(syscall_context_t *frame) {
+  frame->value = tty_notify_input((struct tty *)(uintptr_t)frame->argument0) ? 0 : -1;
 }
 
-static void syscall_perf_control(x86_interrupt_frame_t *frame) {
-  if (!user_range_ok(frame->ebx, sizeof(perf_control_request_t))) {
-    frame->eax = PERF_ERR_INVALID;
+static void syscall_perf_control(syscall_context_t *frame) {
+  if (!user_range_ok(frame->argument0, sizeof(perf_control_request_t))) {
+    frame->value = PERF_ERR_INVALID;
     return;
   }
 
   perf_control_request_t *request =
-      (perf_control_request_t *)(uintptr_t)frame->ebx;
+      (perf_control_request_t *)(uintptr_t)frame->argument0;
   if (request->size != sizeof(*request) ||
       request->operation >= PERF_CONTROL_COUNT) {
-    frame->eax = PERF_ERR_INVALID;
+    frame->value = PERF_ERR_INVALID;
     return;
   }
 
   switch ((perf_control_operation_t)request->operation) {
   case PERF_CONTROL_START:
-    frame->eax = perf_start(PERF_SESSION_MANUAL);
+    frame->value = perf_start(PERF_SESSION_MANUAL);
     break;
   case PERF_CONTROL_STOP:
-    frame->eax = perf_stop_and_dump("perf-stop");
+    frame->value = perf_stop_and_dump("perf-stop");
     break;
   case PERF_CONTROL_STATUS:
-    frame->eax = PERF_OK;
+    frame->value = PERF_OK;
     break;
   default:
-    frame->eax = PERF_ERR_INVALID;
+    frame->value = PERF_ERR_INVALID;
     break;
   }
   perf_get_status(&request->status);
@@ -1781,7 +1793,6 @@ static const syscall_handler_t syscall_handlers[SYSCALL_COUNT] = {
     [SYSCALL_SIGNAL_HANDLER] = syscall_signal_handler,
     [SYSCALL_FORK] = syscall_fork,
     [SYSCALL_WAIT] = syscall_wait,
-    [SYSCALL_SET_RT] = syscall_set_rt,
     [SYSCALL_MOUSE_ENABLE] = syscall_mouse_enable,
     [SYSCALL_MOUSE_PENDING] = syscall_mouse_data,
     [SYSCALL_MOUSE_READ] = syscall_mouse_data,
@@ -1807,10 +1818,9 @@ static const syscall_handler_t syscall_handlers[SYSCALL_COUNT] = {
     [SYSCALL_INPUT_WAIT] = syscall_input_wait,
 };
 
-void x86_syscall_dispatch(x86_interrupt_frame_t *frame) {
-  irq_enable();
-  if (frame->eax >= SYSCALL_COUNT || syscall_handlers[frame->eax] == NULL) {
+void syscall_dispatch(syscall_context_t *frame) {
+  if (frame->value >= SYSCALL_COUNT || syscall_handlers[frame->value] == NULL) {
     return;
   }
-  syscall_handlers[frame->eax](frame);
+  syscall_handlers[frame->value](frame);
 }

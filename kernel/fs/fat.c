@@ -1190,12 +1190,12 @@ bool fat_init_fs(vfs_t *vfs, uint8_t disk_number) {
 
   uint32_t sec = (uint32_t)cache_sectors;
   get_dm(vfs).ADR_DISKIMG =
-      (unsigned int)malloc((int)cache_allocation_size);
+      (uintptr_t)malloc((int)cache_allocation_size);
   if (get_dm(vfs).ADR_DISKIMG == 0) {
     goto fail;
   }
 
-  disk_read(0, sec, (void *)get_dm(vfs).ADR_DISKIMG, disk_number);
+  disk_read(0, sec, (void *)(uintptr_t)get_dm(vfs).ADR_DISKIMG, disk_number);
 
   get_dm(vfs).fat = malloc(get_dm(vfs).FatMaxTerms * sizeof(int));
   get_dm(vfs).FatClustnoFlags = malloc(get_dm(vfs).FatMaxTerms * sizeof(char));
@@ -1215,7 +1215,8 @@ bool fat_init_fs(vfs_t *vfs, uint8_t disk_number) {
     goto fail;
   }
   memcpy((void *)get_dm(vfs).root_directory,
-         (void *)get_dm(vfs).ADR_DISKIMG + get_dm(vfs).RootDictAddress,
+         (void *)(uintptr_t)get_dm(vfs).ADR_DISKIMG +
+             get_dm(vfs).RootDictAddress,
          get_dm(vfs).RootMaxFiles * 32);
   get_dm(vfs).directory_list = (struct List *)NewList();
   get_dm(vfs).directory_clustno_list = (struct List *)NewList();
@@ -1916,7 +1917,7 @@ static void fat_delete_fs(struct vfs_mount *vfs) {
   if (fat_state(vfs) == NULL) {
     return;
   }
-  free((void *)get_dm(vfs).ADR_DISKIMG);
+  free((void *)(uintptr_t)get_dm(vfs).ADR_DISKIMG);
   free(get_dm(vfs).fat);
   free(get_dm(vfs).FatClustnoFlags);
   free(get_dm(vfs).root_directory);

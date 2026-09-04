@@ -1,7 +1,5 @@
 // 多任务重构 -- mtask.c (区别与以前的多任务)
 #include <arch.h>
-#include <arch/x86/control.h>
-#include <arch/x86/interrupt.h>
 #include <dos.h>
 #include <irq.h>
 #include <limits.h>
@@ -12,8 +10,6 @@
 #define TASK_ID_NONE ((uint32_t)-1)
 #define TASK_KILLED_STATUS ((unsigned)-1)
 #define TASK_SLOT_CHUNK_SIZE 64u
-void free_pde(unsigned addr);
-unsigned pde_clone(unsigned addr);
 void gc(unsigned tid);
 static void task_slot_reset(mtask *task, uint32_t tid);
 static void task_slot_release(mtask *task);
@@ -40,6 +36,7 @@ static task_registry_t task_registry;
 static scheduler_cpu_t scheduler_cpus[SMP_MAX_CPUS];
 static uint32_t scheduler_cpu_total = 1;
 static uint32_t scheduler_active;
+static uint64_t scheduler_ticks;
 
 static bool task_slot_in_use(const mtask *task) {
   return task != NULL && task->state != EMPTY && task->state != WILL_EMPTY &&
@@ -187,11 +184,12 @@ static void scheduler_place_task(mtask *task, uint32_t cpu) {
   smp_send_reschedule(cpu);
 }
 
-static bool task_pin_address_space(unsigned pde, uint32_t cpu) {
+static bool task_pin_address_space(arch_address_space_t address_space,
+                                   uint32_t cpu) {
   mtask *current = current_task();
   for (uint32_t tid = 0; tid < task_registry.slot_count; tid++) {
     mtask *task = task_slot_at(tid);
-    if (!task_slot_in_use(task) || task->pde != pde) {
+    if (!task_slot_in_use(task) || task->address_space != address_space) {
       continue;
     }
     if (task->on_cpu && task != current) {
@@ -201,7 +199,7 @@ static bool task_pin_address_space(unsigned pde, uint32_t cpu) {
 
   for (uint32_t tid = 0; tid < task_registry.slot_count; tid++) {
     mtask *task = task_slot_at(tid);
-    if (!task_slot_in_use(task) || task->pde != pde) {
+    if (!task_slot_in_use(task) || task->address_space != address_space) {
       continue;
     }
     task->sched_flags |= TASK_SCHED_PINNED;
@@ -302,7 +300,7 @@ void scheduler_tick(void) {
     }
   }
   cpu->need_resched = 1;
-  if (cpu_index == 0 && global_time % 10 == 0) {
+  if (cpu_index == 0 && ++scheduler_ticks % 10 == 0) {
     scheduler_balance();
   }
 }
@@ -361,9 +359,9 @@ void task_next(void) {
   if (next->user_mode == 1) {
     arch_task_set_kernel_stack(next->top);
   }
-  x86_fpu_flush_cpu();
+  arch_fpu_flush_cpu();
 
-  arch_task_switch(&current->context, next->context, next->pde, &cpu->current,
+  arch_task_switch(&current->context, next->context, next->address_space, &cpu->current,
                    next);
 }
 
@@ -372,7 +370,7 @@ static mtask *create_task_impl(uintptr_t entry, unsigned weight,
   if (share_pde && scheduler_active) {
     irq_state_t state = irq_save();
     bool pinned =
-        task_pin_address_space(current_task()->pde, smp_current_cpu());
+        task_pin_address_space(current_task()->address_space, smp_current_cpu());
     irq_restore(state);
     if (!pinned) {
       return NULL;
@@ -406,21 +404,18 @@ static mtask *create_task_impl(uintptr_t entry, unsigned weight,
   t->user_mode = 0;                           // 设置是否是user_mode
   bool owns_pde = false;
   if (!scheduler_active) {                    // 还没启用多任务
-    t->pde = PDE_ADDRESS;                     // 所以先用预设好的页表
-    t->times = PDE_ADDRESS;
+    t->address_space = arch_address_space_kernel();
   } else if (share_pde) {
-    t->pde = current_task()->pde;
-    t->times = t->pde;
-    pde_retain(t->pde);
+    t->address_space = current_task()->address_space;
+    arch_address_space_retain(t->address_space);
     owns_pde = true;
   } else {
-    t->pde = pde_clone(current_task()->pde); // 启用了就复制一个
-    if (t->pde == 0) {
+    t->address_space = arch_address_space_clone(current_task()->address_space); // 启用了就复制一个
+    if (t->address_space == 0) {
       page_free(stack_base, STACK_SIZE);
       task_slot_release(t);
       return NULL;
     }
-    t->times = t->pde;
     owns_pde = true;
   }
   t->top = esp_alloced; // r0的esp
@@ -439,7 +434,7 @@ static mtask *create_task_impl(uintptr_t entry, unsigned weight,
     }
     if (t->fs_context == NULL) {
       if (owns_pde) {
-        free_pde(t->pde);
+        arch_address_space_release(t->address_space);
       }
       page_free(stack_base, STACK_SIZE);
       task_slot_release(t);
@@ -478,7 +473,7 @@ mtask *get_task(unsigned tid) {
   }
   return task;
 }
-void task_to_user_mode(unsigned eip, unsigned esp) {
+void task_to_user_mode(uintptr_t eip, uintptr_t esp) {
   mtask *task = current_task();
   struct user_runtime_layout layout;
   if (!user_runtime_layout_calculate(USER_SPACE_START, 0, 0, false, eip,
@@ -488,25 +483,18 @@ void task_to_user_mode(unsigned eip, unsigned esp) {
     return;
   }
   (void)layout;
-  x86_interrupt_frame_t iframe;
-
-  x86_user_frame_init(&iframe, eip, esp);
-  iframe.gs = 0;
   task->user_mode = 1;
   arch_task_set_kernel_stack(task->top);
-  // task_exit(0);
-  // change_page_task_id(current_task()->tid, iframe->esp - 64 * 1024, 64 *
-  // 1024);
   kernel_lock_leave();
-  x86_return_to_user(&iframe);
+  arch_task_enter_user(eip, esp);
 }
 
-unsigned task_address_space_owner(unsigned pde) {
+unsigned task_address_space_owner(arch_address_space_t address_space) {
   mtask *fallback = NULL;
 
   for (uint32_t i = 0; i < task_registry.slot_count; i++) {
     mtask *task = task_slot_at(i);
-    if (!task_slot_in_use(task) || task->pde != pde) {
+    if (!task_slot_in_use(task) || task->address_space != address_space) {
       continue;
     }
     if (task->kind == TASK_PROCESS && task->tid == task->tgid) {
@@ -582,13 +570,14 @@ static void task_clear_external_refs(mtask *task) {
 static void task_release_resources(mtask *task) {
   unsigned tid = task->tid;
 
-  x86_fpu_reset(task);
+  arch_fpu_reset(task);
   task_clear_external_refs(task);
   if (task == current_task()) {
-    x86_cr3_write(PDE_ADDRESS);
+    arch_address_space_activate(arch_address_space_kernel());
   }
-  if (task->pde && task->pde != PDE_ADDRESS) {
-    free_pde(task->pde);
+  if (task->address_space &&
+      task->address_space != arch_address_space_kernel()) {
+    arch_address_space_release(task->address_space);
   }
   gc(tid);
   if (task->Pkeyfifo) {
@@ -631,9 +620,8 @@ static void task_release_resources(mtask *task) {
   task->wait_generation = 0;
   task->wait_reason = WAIT_REASON_NONE;
   task->ready = 0;
-  task->pde = 0;
+  task->address_space = 0;
   task->sigint_up = 0;
-  task->times = 0;
   task->signal = 0;
   task->signal_disable = 0;
   task->keyboard_press = NULL;
@@ -765,9 +753,7 @@ void task_kill(unsigned tid) {
   finish_task(task, TASK_KILLED_STATUS, waitable);
   if (is_current) {
     task_next();
-    for (;;) {
-      asm volatile("cli; hlt");
-    }
+    arch_halt();
   }
   irq_restore(interrupt_state);
 }
@@ -822,19 +808,17 @@ int into_mtask() {
   (void)irq_save();
   scheduler_active = 1;
   init_task->on_cpu = 1;
-  arch_task_start(init_task->context, init_task->pde,
+  arch_task_start(init_task->context, init_task->address_space,
                   &scheduler_cpus[0].current, init_task);
 }
 
 __attribute__((noreturn)) void scheduler_start_secondary(uint32_t cpu) {
   mtask *idle = scheduler_cpus[cpu].idle;
   if (!scheduler_active || idle == NULL) {
-    for (;;) {
-      asm volatile("cli; hlt");
-    }
+    arch_halt();
   }
   idle->on_cpu = 1;
-  arch_task_start(idle->context, idle->pde, &scheduler_cpus[cpu].current,
+  arch_task_start(idle->context, idle->address_space, &scheduler_cpus[cpu].current,
                   idle);
 }
 
@@ -866,7 +850,7 @@ bool task_pin_current(uint32_t cpu) {
   }
   mtask *task = current_task();
   irq_state_t state = irq_save();
-  bool pinned = task_pin_address_space(task->pde, cpu);
+  bool pinned = task_pin_address_space(task->address_space, cpu);
   if (!pinned) {
     irq_restore(state);
     return false;
@@ -1106,9 +1090,7 @@ void task_exit(unsigned status) {
   task->terminate_status = status;
   task_finish_pending(task);
   task_next();
-  for (;;) {
-    asm volatile("cli; hlt");
-  }
+  arch_halt();
 }
 int waittid(uint32_t tid) {
   mtask *self = current_task();
@@ -1244,16 +1226,6 @@ void roc() {
   for (;;)
     ;
 }
-static void build_fork_stack(mtask *task) {
-  uintptr_t addr = task->top;
-  addr -= sizeof(x86_interrupt_frame_t);
-  x86_interrupt_frame_t *iframe = (x86_interrupt_frame_t *)addr;
-  iframe->eax = 0;
-  addr -= sizeof(arch_task_context_t);
-  task->context = (arch_task_context_t *)addr;
-  arch_task_context_init(task->context,
-                         (uintptr_t)arch_task_interrupt_return);
-}
 int task_fork() {
   mtask *parent = current_task();
   mtask *child = task_slot_claim(false);
@@ -1263,7 +1235,7 @@ int task_fork() {
   uint32_t tid = child->tid;
   uint32_t generation = child->generation;
   irq_state_t state = irq_save();
-  x86_fpu_flush_cpu();
+  arch_fpu_flush_cpu();
   memcpy(child, parent, sizeof(mtask));
   child->tid = tid;
   child->generation = generation;
@@ -1309,7 +1281,7 @@ int task_fork() {
   child->line = NULL;
   child->signal = 0;
   if (parent->alloced && parent->alloc_size) {
-    child->alloc_size = malloc(sizeof(uint32_t));
+    child->alloc_size = malloc(sizeof(*child->alloc_size));
     if (child->alloc_size == NULL) {
       page_free((void *)stack, STACK_SIZE);
       task_slot_release(child);
@@ -1346,8 +1318,8 @@ int task_fork() {
     irq_restore(state);
     return -1;
   }
-  child->pde = pde_clone(parent->pde);
-  if (child->pde == 0) {
+  child->address_space = arch_address_space_clone(parent->address_space);
+  if (child->address_space == 0) {
     vfs_context_release(child->fs_context);
     child->fs_context = NULL;
     release_task_fifos(child);
@@ -1364,7 +1336,7 @@ int task_fork() {
   child->tgid = tid;
   child->kind = TASK_PROCESS;
   child->tid = tid;
-  build_fork_stack(child);
+  arch_task_fork_context_init(child);
   if (!task_publish(child)) {
     task_abort_creation(child);
     irq_restore(state);

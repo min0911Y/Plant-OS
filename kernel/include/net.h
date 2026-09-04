@@ -70,9 +70,9 @@ typedef struct net_socket_syscall_request {
   int32_t type;
   int32_t protocol;
   int32_t backlog;
-  uint32_t address;
+  uintptr_t address;
   uint32_t address_length;
-  uint32_t buffer;
+  uintptr_t buffer;
   uint32_t length;
   uint32_t flags;
 } net_socket_syscall_request_t;

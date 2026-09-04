@@ -34,7 +34,7 @@ typedef struct {
   uint8_t kind;
   uint8_t depth;
   uint8_t reserved;
-  uint32_t pc[PERF_STACK_MAX_DEPTH];
+  uintptr_t pc[PERF_STACK_MAX_DEPTH];
 } perf_stack_t;
 
 static volatile perf_state_t perf_state = PERF_STATE_IDLE;
@@ -47,26 +47,28 @@ static perf_stack_t perf_stacks[PERF_STACK_CAPACITY];
 extern uint8_t __kernel_text_start[];
 extern uint8_t __kernel_text_end[];
 
-static bool perf_kernel_text_address(uint32_t address) {
+static bool perf_kernel_text_address(uintptr_t address) {
   return address >= (uintptr_t)__kernel_text_start &&
          address < (uintptr_t)__kernel_text_end;
 }
 
-static bool perf_stack_frame_address(uint32_t address, uint32_t stack_top) {
-  if (stack_top < TASK_KERNEL_STACK_SIZE || (address & 3) != 0) {
+static bool perf_stack_frame_address(uintptr_t address, uintptr_t stack_top) {
+  if (stack_top < TASK_KERNEL_STACK_SIZE ||
+      (address & (sizeof(uintptr_t) - 1)) != 0) {
     return false;
   }
-  uint32_t stack_bottom = stack_top - TASK_KERNEL_STACK_SIZE;
-  return address >= stack_bottom && address <= stack_top - 2 * sizeof(uint32_t);
+  uintptr_t stack_bottom = stack_top - TASK_KERNEL_STACK_SIZE;
+  return address >= stack_bottom &&
+         address <= stack_top - 2 * sizeof(uintptr_t);
 }
 
-static void perf_unwind(perf_stack_t *stack, uint32_t frame_pointer,
-                        uint32_t stack_top) {
+static void perf_unwind(perf_stack_t *stack, uintptr_t frame_pointer,
+                        uintptr_t stack_top) {
   while (stack->depth < PERF_STACK_MAX_DEPTH &&
          perf_stack_frame_address(frame_pointer, stack_top)) {
-    const uint32_t *frame = (const uint32_t *)(uintptr_t)frame_pointer;
-    uint32_t next = frame[0];
-    uint32_t return_address = frame[1];
+    const uintptr_t *frame = (const uintptr_t *)frame_pointer;
+    uintptr_t next = frame[0];
+    uintptr_t return_address = frame[1];
 
     if (!perf_kernel_text_address(return_address)) {
       return;
@@ -89,7 +91,11 @@ static uint32_t perf_stack_hash(const perf_stack_t *stack) {
     hash = (hash ^ metadata[i]) * 16777619u;
   }
   for (uint32_t i = 0; i < stack->depth; i++) {
-    hash = (hash ^ stack->pc[i]) * 16777619u;
+    uintptr_t address = stack->pc[i];
+    hash = (hash ^ (uint32_t)address) * 16777619u;
+#if __SIZEOF_POINTER__ > 4
+    hash = (hash ^ (uint32_t)(address >> 32)) * 16777619u;
+#endif
   }
   return hash;
 }
@@ -145,11 +151,11 @@ static void perf_puts(const char *string) {
   }
 }
 
-static void perf_put_hex32(uint32_t value) {
+static void perf_put_address(uintptr_t value) {
   static const char hex[] = "0123456789abcdef";
 
   perf_puts("0x");
-  for (int shift = 28; shift >= 0; shift -= 4) {
+  for (int shift = (int)(sizeof(value) * 8) - 4; shift >= 0; shift -= 4) {
     write_serial(hex[(value >> shift) & 0xf]);
   }
 }
@@ -181,7 +187,7 @@ static void perf_dump_stack(const perf_stack_t *stack) {
   perf_put_u32(stack->depth);
   for (uint32_t i = 0; i < stack->depth; i++) {
     write_serial(' ');
-    perf_put_hex32(stack->pc[i]);
+    perf_put_address(stack->pc[i]);
   }
   write_serial('\n');
 }
@@ -262,9 +268,9 @@ int perf_stop_and_dump(const char *reason) {
   perf_puts(" dropped=");
   perf_put_u32(perf_dropped);
   perf_puts(" text_start=");
-  perf_put_hex32((uintptr_t)__kernel_text_start);
+  perf_put_address((uintptr_t)__kernel_text_start);
   perf_puts(" text_end=");
-  perf_put_hex32((uintptr_t)__kernel_text_end);
+  perf_put_address((uintptr_t)__kernel_text_end);
   write_serial('\n');
 
   for (uint32_t i = 0; i < PERF_STACK_CAPACITY; i++) {

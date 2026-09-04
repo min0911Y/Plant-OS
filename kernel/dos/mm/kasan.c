@@ -115,12 +115,12 @@ static void kasan_raw_fill(void *addr, int val, uint32_t size) {
   pattern |= pattern << 8;
   pattern |= pattern << 16;
 
-  asm volatile("cld; rep stosl"
-               : "+D"(addr), "+c"(count)
-               : "a"(pattern)
-               : "memory");
+  uint32_t *wide = addr;
+  while (count-- != 0) {
+    *wide++ = pattern;
+  }
 
-  p = (unsigned char *)addr;
+  p = (unsigned char *)wide;
   while (tail--) {
     *p++ = byte;
   }
@@ -420,10 +420,7 @@ void kasan_report(const void *addr, uint32_t size, int write,
            info->total_size, info->type, state);
   }
 
-  (void)irq_save();
-  for (;;) {
-    asm volatile("hlt");
-  }
+  arch_halt();
 }
 
 void __asan_load1_noabort(uintptr_t addr) {

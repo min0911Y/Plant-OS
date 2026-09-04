@@ -1,4 +1,5 @@
 ﻿#include <io.h>
+#include <platform.h>
 #include <string.h>
 // 画空心圆
 void Draw_Circle_Hollow_32(unsigned char* vram,
@@ -146,7 +147,7 @@ void PrintChineseStr(int x, int y, char color, unsigned char* str) {
   }
 }
 void Draw_Px(int x, int y, char color) {
-  unsigned char* vram = (unsigned char*)0xA0000;
+  unsigned char* vram = platform_graphics_vram();
   unsigned char* p;
   p = vram + (y * 320 + x);
   *p = color;
@@ -195,7 +196,7 @@ void Draw_Char(int x, int y, char c, char color) {
   unsigned char* font;
   font = ascfont;
   font += c * 16;
-  unsigned char* vram1 = (unsigned char*)(0xA0000);
+  unsigned char* vram1 = platform_graphics_vram();
   for (int i = 0; i < 16; i++) {
     for (int j = 0; j < 8; j++) {
       if (font[i] & (0x80 >> j)) {

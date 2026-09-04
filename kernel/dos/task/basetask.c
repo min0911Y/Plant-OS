@@ -4,9 +4,6 @@
 int init_ok_flag = 0;
 char *shell_data;
 unsigned shell_size;
-int rtc_init(void);
-void init_devfs(void);
-void ahci_init(void);
 static char find_system_drive(void) {
   static const char *const boot_files[] = {"init.bin", "psh.bin", "sys.cfg"};
   char path[300];
@@ -41,7 +38,7 @@ static char find_system_drive(void) {
 void idle() {
   kernel_lock_leave();
   for (;;) {
-    asm volatile("sti; hlt" ::: "memory");
+    arch_cpu_idle();
   }
 }
 void init() {
@@ -59,10 +56,9 @@ void init() {
   ide_initialize();
   printk("init ahci\n");
   ahci_init();
-  // init_palette();
-  boot_module_t initramfs;
+  const boot_module_t *initramfs = &arch_boot_info()->initramfs;
   char system_drive;
-  if (arch_boot_initramfs(&initramfs)) {
+  if (initramfs->size != 0) {
     if (!vfs_mount_disk(BOOT_INITRAMFS_DRIVE, BOOT_INITRAMFS_DRIVE)) {
       Panic_K("unable to mount initramfs");
     }

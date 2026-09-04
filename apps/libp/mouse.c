@@ -8,7 +8,6 @@
 #include <rand.h>
 #include <time.h>
 #include <limits.h>
-#include <math.h>
 #define issignalingf_inline(x) 0
 #define issignaling_inline(x) 0
 static inline float eval_as_float(float x)
@@ -20,10 +19,9 @@ float __math_invalidf(float x)
 {
 	return (x - x) / (x - x);
 }
-#define fp_barrierf fp_barrierf
 static inline float fp_barrierf(float x)
 {
-	asm volatile ("" : : : "memory");
+	__atomic_signal_fence(__ATOMIC_SEQ_CST);
 	return x;
 }
 
@@ -43,11 +41,6 @@ float __math_divzerof(uint32_t sign)
 {
 	return fp_barrierf(sign ? -1.0f : 1.0f) / 0.0f;
 }
-typedef unsigned int uintmax_t;
-typedef uintmax_t uintptr_t;
-typedef int intmax_t;
-
-#define SZ_4K 0x1000
 int GetMouse_x(int mouse)
 {
     unsigned short high = ((short *)(&mouse))[1];

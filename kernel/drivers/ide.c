@@ -1,7 +1,9 @@
 #include <arch/x86/io.h>
 #include <dos.h>
+#include <dma.h>
 #include <drivers.h>
 #include <irq.h>
+#include <limits.h>
 #include <pci.h>
 
 #define ATA_SR_BSY 0x80u
@@ -104,18 +106,12 @@ static int ide_active_channel = -1;
 
 static inline void ide_read_data32(uint16_t port, void *buffer,
                                    uint32_t dwords) {
-  asm volatile("cld; rep insl"
-               : "+D"(buffer), "+c"(dwords)
-               : "d"(port)
-               : "memory");
+  x86_port_read32s(port, buffer, dwords);
 }
 
 static inline void ide_write_data16(uint16_t port, const void *buffer,
                                     uint32_t words) {
-  asm volatile("cld; rep outsw"
-               : "+S"(buffer), "+c"(words)
-               : "d"(port)
-               : "memory");
+  x86_port_write16s(port, buffer, words);
 }
 
 static uint8_t ide_register_read(uint8_t channel, uint8_t reg) {
@@ -271,7 +267,11 @@ static bool ide_dma_build_prdt(ide_channel_t *channel, uint32_t bytes) {
     return false;
   }
   memset(channel->prdt, 0, 4096);
-  uint32_t address = (uint32_t)(uintptr_t)channel->dma_buffer;
+  dma_addr_t mapped;
+  if (!dma_map(channel->dma_buffer, bytes, UINT_MAX, &mapped)) {
+    return false;
+  }
+  uint32_t address = (uint32_t)mapped;
   uint32_t remaining = bytes;
   unsigned int count = 0;
   while (remaining != 0) {
@@ -288,6 +288,7 @@ static bool ide_dma_build_prdt(ide_channel_t *channel, uint32_t bytes) {
     count++;
   }
   channel->prdt[count - 1].flags = IDE_PRD_END;
+  dma_sync_for_device(channel->prdt, count * sizeof(channel->prdt[0]));
   return true;
 }
 
@@ -371,9 +372,14 @@ static uint8_t ide_dma_transfer(uint8_t direction, uint8_t drive,
 
   if (direction == ATA_WRITE) {
     memcpy(channel->dma_buffer, buffer, bytes);
+    dma_sync_for_device(channel->dma_buffer, bytes);
   }
   uint16_t bus_master = channel->bus_master_base;
   uint8_t bus_master_command = direction == ATA_READ ? IDE_BM_READ : 0;
+  dma_addr_t prdt_address;
+  if (!dma_map(channel->prdt, 4096, UINT_MAX, &prdt_address)) {
+    return 2;
+  }
   irq_state_t state = irq_save();
   ide_active_channel = device->channel;
   channel->dma_active = true;
@@ -386,11 +392,10 @@ static uint8_t ide_dma_transfer(uint8_t direction, uint8_t drive,
   uint8_t bus_master_status = x86_port_read8(bus_master + IDE_BM_STATUS);
   x86_port_write8(bus_master + IDE_BM_STATUS,
                    bus_master_status | IDE_BM_ERROR | IDE_BM_INTERRUPT);
-  x86_port_write32(bus_master + IDE_BM_PRDT,
-                   (uint32_t)(uintptr_t)channel->prdt);
+  x86_port_write32(bus_master + IDE_BM_PRDT, (uint32_t)prdt_address);
   x86_port_write8(bus_master + IDE_BM_COMMAND, bus_master_command);
 
-  asm volatile("" ::: "memory");
+  __atomic_thread_fence(__ATOMIC_RELEASE);
   ide_register_write(device->channel, ATA_REG_CONTROL, 0);
   if (device->type == IDE_ATAPI) {
     ide_write_data16(channel->command_base, packet, 6);
@@ -428,8 +433,9 @@ static uint8_t ide_dma_transfer(uint8_t direction, uint8_t drive,
   if (failed) {
     return 2;
   }
-  asm volatile("" ::: "memory");
+  __atomic_thread_fence(__ATOMIC_ACQUIRE);
   if (direction == ATA_READ) {
+    dma_sync_for_cpu(channel->dma_buffer, bytes);
     memcpy(buffer, channel->dma_buffer, bytes);
   } else if (device->type == IDE_ATA) {
     ide_register_write(device->channel, ATA_REG_CONTROL, 2);
@@ -522,7 +528,7 @@ void ide_irq(void) {
       channel->dma_active = false;
       channel->dma_done = true;
       ide_active_channel = -1;
-      asm volatile("" ::: "memory");
+      __atomic_thread_fence(__ATOMIC_RELEASE);
       if (channel->dma_waiter != NULL) {
         task_run(channel->dma_waiter);
       }
@@ -534,6 +540,11 @@ void ide_irq(void) {
 }
 
 void ide_initialize(void) {
+  if (!irq_register_handler(14, ide_irq) ||
+      !irq_register_handler(15, ide_irq)) {
+    logk("ide: unable to register interrupts\n");
+    return;
+  }
   memset(ide_channels, 0, sizeof(ide_channels));
   memset(ide_devices, 0, sizeof(ide_devices));
   ide_channels[ATA_PRIMARY].command_base = 0x1f0;

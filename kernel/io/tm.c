@@ -1,5 +1,5 @@
-#include <arch/x86/io.h>
 #include <dos.h>
+#include <platform.h>
 
 typedef uint32_t text_pair_t __attribute__((may_alias));
 
@@ -26,11 +26,8 @@ void MoveCursor_TextMode(struct tty *res, int x, int y) {
   if (!res->cur_moving)
     return;
   uint16_t position = (uint16_t)(y * res->xsize + x);
-  if (res->vram == 0xb8000) {
-    x86_port_write8(0x3d4, 0x0e);
-    x86_port_write8(0x3d5, position >> 8);
-    x86_port_write8(0x3d4, 0x0f);
-    x86_port_write8(0x3d5, position);
+  if (platform_is_text_vram(res->vram)) {
+    platform_text_cursor_set(position);
   }
 }
 
@@ -115,60 +112,10 @@ void Draw_Box_TextMode(struct tty *res, int x, int y, int x1, int y1,
                        unsigned char color) {
   for (int i = y; i < y1; i++) {
     for (int j = x; j < x1; j++) {
-      *(unsigned char *)(res->vram + i * 160 + j * 2 + 1) = color;
+      *(unsigned char *)(res->vram + (i * res->xsize + j) * 2 + 1) = color;
     }
   }
 }
-void SwitchShell_TextMode(int i) {
-  // extern struct List *tty_list;
-  // extern struct tty *tty_default;
-  // struct tty *t = (struct tty *)list_get(i, tty_list)->val;
-  // struct tty *n = NULL;
-  // for (int j = 1; list_get(j, tty_list) != 0; j++) {
-  //   n = (struct tty *)list_get(j, tty_list)->val;
-  //   if (n->vram == 0xb8000) {
-  //     break;
-  //   } else {
-  //     n = NULL;
-  //   }
-  // }
-  // if (n == NULL) {
-  //   n = tty_default;
-  // }
-  // if (n == t) {
-  //   return;
-  // }
-  // // 交换
-  // unsigned char *buf = page_malloc(160 * 25);
-  // memcpy(buf, t->vram, 160 * 25);
-  // memcpy(t->vram, n->vram, 160 * 25);
-  // memcpy(n->vram, buf, 160 * 25);
-  // for (int j = 1; get_task(j) != 0; j++) {
-  //   mtask *task = get_task(j);
-  //   if (task->TTY == t && (strcmp("Shell", task->name) == 0 ||
-  //                          (task->app == 1 && task->forever == 0))) {
-  //     task->sleep = 0;
-  //     if (task->fifosleep == 3) {
-  //       task->fifosleep = 0;
-  //     }
-  //   } else if ((task->TTY == n || task->TTY->using1 != 1) &&
-  //              (strcmp("Shell", task->name) == 0 ||
-  //               (task->app == 1 && task->forever == 0))) {
-  //     if (task->fifosleep == 0) {
-  //       task->fifosleep = 3;
-  //     }
-  //   }
-  // }
-  // page_free(buf, 160 * 25);
-  // buf = t->vram;
-  // t->vram = n->vram;
-  // n->vram = buf;
-  // t->MoveCursor(t, t->x, t->y);
-}
 bool now_tty_TextMode(struct tty *res) {
-  if (res->vram == 0xb8000) {
-    return true;
-  } else {
-    return false;
-  }
+  return platform_is_text_vram(res->vram);
 }

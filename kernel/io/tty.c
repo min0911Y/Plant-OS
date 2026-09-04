@@ -1,4 +1,5 @@
 #include <dos.h>
+#include <platform.h>
 struct List *tty_list;
 struct tty *tty_default;
 void t_putchar(struct tty *res,char ch);
@@ -72,7 +73,8 @@ bool init_tty(void) {
     return false;
   }
   tty_default =
-      tty_alloc((void *)0xb8000, 80, 25, putchar_TextMode, MoveCursor_TextMode,
+      tty_alloc(platform_text_vram(), 80, 25, putchar_TextMode,
+                MoveCursor_TextMode,
                 clear_TextMode, screen_ne_TextMode, Draw_Box_TextMode,
                 default_tty_fifo_status, default_tty_fifo_get);
   if (tty_default == NULL) {
@@ -158,9 +160,9 @@ struct tty *tty_set_default(struct tty *res) {
   }
   return NULL;
 }
-void tty_set_reserved(struct tty *res, unsigned int reserved1,
-                      unsigned int reserved2, unsigned int reserved3,
-                      unsigned int reserved4) {
+void tty_set_reserved(struct tty *res, uintptr_t reserved1,
+                      uintptr_t reserved2, uintptr_t reserved3,
+                      uintptr_t reserved4) {
   res->reserved[0] = reserved1;
   res->reserved[1] = reserved2;
   res->reserved[2] = reserved3;

@@ -18,7 +18,7 @@
 ## 启动与运行模型
 
 - `kernel/boot/` 生成现有磁盘启动扇区；`loader/` 生成 `loader/out/dosldr.bin`，链接地址为 `0x100000`，入口为 `loader_main`；加载器再寻找并装载 `kernel.bin`。这条链继续由 `boot.img`/`img_run` 使用。
-- 内核生成 `kernel/obj/kernel.bin`，链接地址为 `0x280000`。ELF 入口是 `kernel/arch/x86/boot_entry.asm` 的 `x86_boot_entry`：它同时接受现有 DOSLDR 入口状态和 Limine Multiboot2 状态，建立固定的平坦 GDT/内核栈后调用 `KernelMain`（`kernel/dos/init/main.c`）。Multiboot2 header 必须保留在文件前 32 KiB 内，链接布局由 `kernel/arch/x86/kernel.ld` 固定，并断言内核不覆盖 `0x400000` 的 bootstrap 页表。
+- 内核生成 `kernel/obj/kernel.bin`，链接地址为 `0x280000`。ELF 入口是 `kernel/arch/x86/i386/boot_entry.asm` 的 `x86_boot_entry`：它同时接受现有 DOSLDR 入口状态和 Limine Multiboot2 状态，建立固定的平坦 GDT/内核栈后调用 `KernelMain`（`kernel/dos/init/main.c`）。Multiboot2 header 必须保留在文件前 32 KiB 内，链接布局由 `kernel/arch/x86/i386/kernel.ld` 固定，并断言内核不覆盖 `0x400000` 的 bootstrap 页表。
 - Limine LiveCD 默认直接加载 `kernel.bin` 和一个 FAT initramfs module，不经过 DOSLDR。x86 早期入口依据 Multiboot2 memory map 把 module 搬到 KASAN shadow 之后的首个可用物理区；分页初始化后必须立刻经正式 page API 保留这些页，内存探测不得改写 module。initramfs 注册为可写但不持久化的 `R:` 虚拟盘，系统启动只挂载该盘作为根。Limine 菜单的第二项只 chainload 第一块硬盘上的现有 Plant OS 磁盘引导器。
 - 用户程序统一链接到 `0x70000000`，链接入口为 `Main`。`apps/libp/entry.c` 或 `apps/libp/cppstart.cpp` 完成运行时初始化后调用应用自己的 `main(argc, argv)`。
 - 内核与应用共享的是项目自定义 ABI，不是 Linux ABI。地址、结构体布局、寄存器约定和中断号都可能是兼容性边界；不要随意改成宿主平台惯例。
@@ -26,8 +26,8 @@
 ## 目录地图
 
 - `kernel/boot/`：启动汇编。
-- `kernel/dos/`：内核初始化、内存管理、任务、IPC、系统调用和底层 CPU 支持。
-- `kernel/drivers/`：存储、网络、输入、显示、声音、PCI、时钟等驱动。
+- `kernel/dos/`：内核初始化、任务、IPC、系统调用和与硬件无关的内核服务。
+- `kernel/drivers/`：存储、网络和设备类别适配；PC 总线、输入、显示、声音、时钟等实现位于 `kernel/platform/pc/`。
 - `kernel/fs/`：FAT、PFS、ISO9660、VFS、ELF 加载及路径/文件实现。
 - `kernel/io/`：文本/图形显示、TTY、输入栈和日志。
 - `kernel/net/`：lwIP 2.2.1（`third_party/lwip`）、`net_stack.c` 的链路/DHCP 生命周期和 `socket.c` 的用户态 socket 端点实现；网卡帧适配位于 `kernel/drivers/network.c`。
@@ -45,8 +45,16 @@
 - PS/2 控制器与鼠标协商期间保持 IRQ1/IRQ12 屏蔽，命令必须使用单调时间 deadline 并逐条消费 ACK/设备 ID，完成同步初始化后才解屏蔽；不得恢复固定次数忙等或让 IRQ 与轮询方竞争响应字节。GUI 输入线程通过 `input_wait()`/`SYSCALL_INPUT_WAIT`（`0x64`）一次等待鼠标、按键按下与松开 FIFO，使用 `WAIT_REASON_INPUT` 发布等待并由对应 IRQ 的 ready 握手唤醒；不得用多个 pending syscall 加 `api_yield()` 轮询。
 - `kernel/mst/`、`kernel/std/`、`kernel/modules/`：MST 脚本、基础运行库和可加载模块。
 - `kernel/include/`：内核公共声明；很多模块通过 `dos.h`、`define.h` 等大头文件耦合。
-- `kernel/include/arch/x86/`：x86 专属的中断帧、入口和其他架构 ABI 声明；通用内核头文件不应重新定义这些布局。
-- `kernel/arch/x86/`：x86 专属实现，内核里所有 x86 汇编入口（异常、中断/系统调用 stub、BIOS 实模式切换、任务上下文、用户态返回）都在此目录，`kernel/` 其余子目录不再包含 `.asm`（`kernel/boot/` 的启动扇区除外）。GDT、IDT、TSS、selector 和 BIOS 实模式切换所需的临时 descriptor 由此目录私有持有；通用内核代码的新临界区通过 `irq_state_t`、`irq_save()`、`irq_restore()` 接口访问中断状态，其 x86 `pushfl/cli/sti` 实现也放在此目录。
+- `kernel/include/arch/x86/`：共享 x86 声明（例如 CPUID 与端口 I/O）；当前 i386 的中断帧、入口和其他 ABI 声明位于 `kernel/include/arch/x86/i386/`，通用内核头文件不应重新定义这些布局。
+- `kernel/arch/x86/common/`：可由 x86 变体共享的中断控制器实现；`kernel/arch/x86/i386/`：当前 32 位后端，包括启动入口、异常/系统调用 stub、BIOS 实模式切换、任务上下文、分页和用户态返回。`kernel/platform/pc/` 保存 PC 固件与设备实现，VBE 的 BIOS 线布局仅在该目录私有的 `vbe.h` 中定义，高层视频访问统一走 `platform_video_*` 接口。通用内核代码通过 `arch.h`、`platform.h`、`irq.h` 等接口访问这些后端，不直接依赖具体布局；x86 汇编入口均位于架构目录，`kernel/boot/` 的启动扇区除外。GDT、IDT、TSS、selector 和 BIOS 实模式切换所需的临时 descriptor 由 i386 后端私有持有；通用内核代码的新临界区通过 `irq_state_t`、`irq_save()`、`irq_restore()` 接口访问中断状态。
+
+### 当前多架构边界
+
+- 当前可构建目标是 `ARCH=i386`、`PLATFORM=pc`。标准顺序为 `make -C apps ARCH=i386`、`make -C loader`、`make -C kernel ARCH=i386`；未完成的架构必须由构建文件明确报错。
+- i386 专属代码集中在 `kernel/arch/x86/i386/`，可共享的 x86 代码集中在 `kernel/arch/x86/common/`，PC 设备实现集中在 `kernel/platform/pc/`。新增通用内核逻辑应依赖架构/平台接口，而不是重新引入 x86 内联汇编、固定指针宽度或 PC 端口常量。
+- 用户态运行库的汇编入口和 x87 数学原语位于 `apps/libp/arch/i386/`；仅供架构回归程序使用的汇编也按应用放在对应的 `arch/i386/` 子目录（例如 `apps/fputest/arch/i386/`）。
+- `x86_64` 目前只是后续扩展方向，仓库没有 `kernel64` 或兼容后端；在完整实现寄存器帧、页表、上下文、链接和启动 ABI 前，不得添加伪实现或兼容层。
+- Limine LiveCD 通过 Multiboot2 直接加载 `/boot/kernel.bin` 与 FAT initramfs；DOSLDR 仅保留给现有磁盘启动链、格式化资源和菜单 chainload，不是 LiveCD 的默认内核加载器。
 <!-- 过时：`interrupt_disable/get_interrupt_state/set_interrupt_state` 在 `kernel/dos/task/lock.c` 中实现并从 `dos.h` 暴露。 -->
 <!-- 过时：GDT/IDT 地址、descriptor/TSS 布局和 `set_segmdesc`/`set_gatedesc`/`load_*` 从 `define.h`、`dos.h` 暴露给通用代码。 -->
 - `kernel/res/`：打包进镜像的资源；资源是否进入镜像由 `kernel/Makefile` 中显式的 `mcopy` 命令决定。
@@ -71,9 +79,9 @@
 干净工作区的标准构建顺序是：
 
 ```sh
-make -C apps
+make -C apps ARCH=i386
 make -C loader
-make -C kernel
+make -C kernel ARCH=i386
 ```
 
 顺序很重要：
@@ -88,14 +96,14 @@ make -C kernel
 
 ```sh
 # 已经完成过一次 apps 全量构建后，重编单个应用
-make -C apps/rpctest
+make -C apps/rpctest ARCH=i386
 
 # 只重编加载器
 make -C loader
 
 # 已存在 kernel/obj 时，快速检查某个内核子系统
-make -C kernel/dos/task
-make -C kernel/drivers
+make -C kernel/dos/task ARCH=i386
+make -C kernel/drivers ARCH=i386
 ```
 
 最终仍应运行与改动范围相称的上层构建，因为对象列表、链接和镜像打包都由显式规则控制。
@@ -166,14 +174,14 @@ python3 scripts/kernel-perf.py \
 - `apps/include/syscall.h`
 - `apps/include/ipc.h`
 - `apps/include/rpc.h`
-- `apps/libp/syscall.asm`
+- `apps/libp/arch/i386/syscall.asm`
 - `apps/libp/ipc.c`
 - `apps/libp/rpc.c`
 
 用户指针来自 `0x70000000` 以上的用户地址空间。新增系统调用时必须复用现有的用户地址/长度验证方式，不能直接把用户指针当作可信内核指针。涉及阻塞、超时或任务退出时，还要检查等待原因、唤醒路径、时钟中断和孤儿/资源清理。
 
 - 顶层系统调用与 IPC 子操作使用“语义化枚举 + designated initializer 处理表”分派。固定 ABI 编号表以枚举的 `COUNT` 作为容量，保留既有编号但不保留旧的 `if/else` 分派兼容层。
-- `input_wait(events)` 的 event mask 与 `SYSCALL_INPUT_WAIT` 编号必须在内核、`apps/include/syscall.h` 和 `apps/libp/syscall.asm` 同步；它只允许当前鼠标/键盘 owner 等待已经初始化的 FIFO，检查 FIFO 与发布等待必须处于同一关中断临界区并循环处理 ready 竞态。
+- `input_wait(events)` 的 event mask 与 `SYSCALL_INPUT_WAIT` 编号必须在内核、`apps/include/syscall.h` 和对应架构的 `apps/libp/arch/i386/syscall.asm` 同步；它只允许当前鼠标/键盘 owner 等待已经初始化的 FIFO，检查 FIFO 与发布等待必须处于同一关中断临界区并循环处理 ready 竞态。
 - `clock()`/`SYSCALL_UPTIME` 保持既有毫秒 ABI；高分辨率单调时间使用 `monotonic_ns()`/`SYSCALL_MONOTONIC_NS`，按 i386 64 位返回约定由 `EDX:EAX` 返回纳秒。内核优先稳定读取 64 位 HPET counter 并用完整 femtosecond period 换算，HPET 不可用时才退回 10ms tick；不得把 HPET MMIO 指针暴露给用户态或改变旧 `clock()` 的单位。
 - 表处理函数应对应真实的 API 或同一职责域；不要为了减少函数体行数创建只转发一次的无意义包装。
 - GUI 进程是名为 `gui` 的 RPC 服务。用户态 GUI API 只使用不透明 `window_t` 句柄和 `gui_rpc.h` 的定长协议，禁止恢复 `int 0x72`、`set_custom_handler`、跨页执行 GUI 函数或向客户端暴露 GUI 内部指针。创建窗口时由 GUI 通过带 tid/generation 校验的共享映射一次性提供 framebuffer 与单生产者/单消费者事件队列；像素写入、事件/键盘轮询必须直接访问该共享区域。`window_refresh` 在共享 damage 状态中合并矩形，只在从空闲变为待处理时发送无应答 RPC；该通知使用 `IPC_DELIVER_NOW`，接收端正因 IPC 等待时内核直接交接时间片，避免等下一个时钟 tick。该标志只用于短小、无锁的低延迟单向通知，不能在中断上下文或持有会阻塞的锁时使用。`0xf0100000..0xf1000000` 是客户端 GUI 映射保留区，关闭窗口前由客户端解除映射。
@@ -185,37 +193,37 @@ python3 scripts/kernel-perf.py \
 
 ### 内核架构边界
 
-- x86 中断帧、汇编入口和寄存器约定放在 `kernel/include/arch/x86/` 及对应 x86 实现中。通用任务、系统调用和信号代码通过架构头访问，不在 `define.h` 重复声明布局。
-- x86 的 0..31 异常统一通过 `kernel/arch/x86/exceptions.asm` 构造规范化 frame，并由 `x86_exception_dispatch` 按只读描述表分派。只有 `#NM` 的 lazy-FPU 恢复和合法的写时复制 `#PF` 可以返回；普通用户异常依据保存的 `CS.RPL` 终止当前任务，NMI、双重故障、机器检查及所有内核异常必须 fail-stop。
+- x86 中断帧、汇编入口和寄存器约定放在 `kernel/include/arch/x86/i386/` 及对应 i386 实现中；共享 x86 声明保留在 `kernel/include/arch/x86/`。通用任务、系统调用和信号代码通过架构头访问，不在 `define.h` 重复声明布局。
+- x86 的 0..31 异常统一通过 `kernel/arch/x86/i386/exceptions.asm` 构造规范化 frame，并由 `x86_exception_dispatch` 按只读描述表分派。只有 `#NM` 的 lazy-FPU 恢复和合法的写时复制 `#PF` 可以返回；普通用户异常依据保存的 `CS.RPL` 终止当前任务，NMI、双重故障、机器检查及所有内核异常必须 fail-stop。
 <!-- 过时：异常入口分散在 `kernel/dos/asm/errors.asm`，通过 FS 猜测用户态、改写 CatchEIP 或在汇编中单独处理/自旋。 -->
-- x86 控制寄存器访问统一使用 `kernel/include/arch/x86/control.h` 的固定宽度 inline 接口和 `X86_CR0_*` 位定义；写 CR0/CR3 必须带 `memory` clobber，页故障地址通过 `x86_cr2_read` 获取。
+- x86 控制寄存器访问统一使用 `kernel/include/arch/x86/i386/control.h` 的固定宽度 inline 接口和 `X86_CR0_*` 位定义；写 CR0/CR3 必须带 `memory` clobber，页故障地址通过 `x86_cr2_read` 获取。
 <!-- 过时：CR0 位定义放在 `define.h`，并同时保留 `get_cr0/set_cr0` 与 `load_cr0/store_cr0` 多套实现。 -->
-- x87 状态与每 CPU owner 统一由 `kernel/arch/x86/fpu.c` 管理，任务结构只保存 `x86_fpu_state_t` 与状态是否已初始化。任务实际切离 CPU 前必须调用 `x86_fpu_flush_cpu()`：只有当前 CPU 的真实 owner 才执行 `FNSAVE`，随后清空 owner 并置 TS，保证所有 `on_cpu == 0` 的任务状态都已落入任务结构、可直接跨 CPU 迁移。`#NM` 通过 `CLTS` 后恢复或初始化当前任务并登记 owner；CPU 初始化保持 CR0.EM 清零、CR0.MP/NE/TS 置位。fork、显式 reset 和任务回收必须使用该架构接口，不得直接改状态标志或在调度器、异常处理器中散落 `FNSAVE`/`FRSTOR`/CR0 FPU 位操作。
+- x87 状态与每 CPU owner 统一由 `kernel/arch/x86/i386/fpu.c` 管理，任务结构只保存 `x86_fpu_state_t` 与状态是否已初始化。任务实际切离 CPU 前必须调用 `x86_fpu_flush_cpu()`：只有当前 CPU 的真实 owner 才执行 `FNSAVE`，随后清空 owner 并置 TS，保证所有 `on_cpu == 0` 的任务状态都已落入任务结构、可直接跨 CPU 迁移。`#NM` 通过 `CLTS` 后恢复或初始化当前任务并登记 owner；CPU 初始化保持 CR0.EM 清零、CR0.MP/NE/TS 置位。fork、显式 reset 和任务回收必须使用该架构接口，不得直接改状态标志或在调度器、异常处理器中散落 `FNSAVE`/`FRSTOR`/CR0 FPU 位操作。
 - x86 port I/O 统一使用 `kernel/include/arch/x86/io.h` 的 `x86_port_read8/16/32` 与 `x86_port_write8/16/32`；动态 port（特别是 PCI BAR）必须先验证是 I/O 空间、整个寄存器窗口不超过 `uint16_t` 范围，然后才显式收窄；数据宽度必须与硬件寄存器一致。这些 inline asm 都是 `volatile`，使用 `Nd` port/累加器约束并带 `memory` clobber；`x86_io_wait()` 只通过向 `0x80` 写入一个 8-bit 零实现，仅用于 PIC 初始化和明确需要该 legacy delay 的软盘控制器轮询。
 - VGA 文本 TTY 的滚屏只能搬移前 `ysize - 1` 行并单独清空末行，优先使用对齐的 32-bit 顺序访问；禁止恢复逐列跨行复制、逐字节搬移或读取第 `ysize` 行之外显存的实现。
 <!-- 过时：port I/O、中断开关、EFLAGS 和文本光标通过 `kernel/dos/asm/i386.asm` 的 `io_*`/`ASM_call` 全局 wrapper 访问。 -->
 - 普通临界区必须成对使用 `irq_save()`/`irq_restore()` 保留调用者 IF 状态；等待路径要在关中断时发布等待状态并调用 `task_next()`，切回后才 restore。`irq_enable()` 只用于首次启动、明确允许抢占的 syscall 入口、任务终止后等待调度以及需主动开中断等待硬件 IRQ 的路径；不得用它代替临界区 restore。新内核任务可能由中断内的调度切入，因此确实要允许硬件 IRQ 的 bootstrap 入口（例如 `init()`）必须自己显式 enable，不得依赖下游驱动的等待函数偶然开中断。`x86_eflags_read/write` 只用于 AC 位等必须直接修改 EFLAGS 的 CPU 探测，不用于中断保护。
-- `kernel/dos/asm/` 已整体退役：x86 中断/系统调用入口 stub 位于 `kernel/arch/x86/interrupt_entries.asm`，其余 legacy 汇编（`memtest_sub`、`gensound`、CPUID `get_cpu*`、`init_page`、`check`、`init_float`、`__init_PIT`、v86 与内核侧 `return_to_app` trampoline、`setjmp`/`longjmp`）已改写为 C 或删除，不得恢复。用户态的信号返回 trampoline 由 `apps/libp` 自己提供并通过 `set_rt` 注册，内核不再复制代码页。`interrupt_entries.asm` 中每个 stub 仍是逐份复制的 push/pop 样板，后续应作为独立任务收敛为宏或统一的 IRQ dispatch。
+- `kernel/dos/asm/` 已整体退役：x86 中断/系统调用入口 stub 位于 `kernel/arch/x86/i386/interrupt_entries.asm`，其余 legacy 汇编（`memtest_sub`、`gensound`、CPUID `get_cpu*`、`init_page`、`check`、`init_float`、`__init_PIT`、v86 与内核侧 `return_to_app` trampoline、`setjmp`/`longjmp`）已改写为 C 或删除，不得恢复。用户态的信号返回 trampoline 由 `apps/libp` 自己提供并通过 `set_rt` 注册，内核不再复制代码页。入口样板使用汇编宏集中生成，并由 `kernel/arch/x86/common/interrupt_controller.c` 提供共享的中断控制器逻辑。
 <!-- 过时：`kernel/dos/asm/i386.asm` 保留 `memtest_sub`、`gensound`、CPUID `get_cpu*`、`init_page`、`check`、v86/返回 trampoline 和 FPU 相关 legacy 实现，后续拆分作为独立任务。 -->
 - CPUID 统一使用 `kernel/include/arch/x86/cpuid.h` 的 `x86_cpuid(leaf, subleaf)`，返回值 `x86_cpuid_t` 的字段顺序即 eax/ebx/ecx/edx，可直接按小端字节流复制（brand string 即依赖此性质）。EBX 必须写成输出约束交给编译器保存，不得再出现私有的 `cpuid` 内联包装或破坏 C ABI 的汇编版本。
-- PC speaker 完全由 `kernel/drivers/beep.c` 用 `arch/x86/io.h` 直接编程 PIT channel 2 与 port `0x61`，时长通过 `sleep()` 计时；不得回到基于 port `0x61` refresh 位的忙等或汇编实现。
-- 物理内存探测在 `kernel/dos/mm/mem.c` 内用 C 完成：先用 AC 位区分 386/486，再在一次 `irq_save()`/`irq_restore()` 临界区内 read-modify-write 设置并清除 `X86_CR0_CD|X86_CR0_NW`，探测本身用 `volatile uint32_t` 写-取反-回读并恢复原值，步长从 1GiB 逐次缩到 1/4（最小 4KiB）。该文件用 `KERNEL_NOKASAN_CFLAGS` 编译，探测循环不得引入 KASAN 插桩或打印。
-- 分页由 `init_page()`（`kernel/dos/mm/page.c`）一次完成：构造 PDE/PTE 与页管理器后自己写 CR3 并以 read-modify-write 置 `X86_CR0_PG|X86_CR0_WP`；调用方不得再单独补写 WP，也不得恢复 `C_init_page` + 汇编 wrapper 的两段式实现。
+- PC speaker 完全由 `kernel/platform/pc/beep.c` 用 `arch/x86/io.h` 直接编程 PIT channel 2 与 port `0x61`，时长通过 `sleep()` 计时；不得回到基于 port `0x61` refresh 位的忙等或汇编实现。
+- 物理内存探测在 `kernel/arch/x86/i386/memory.c` 内用 C 完成：先用 AC 位区分 386/486，再在一次 `irq_save()`/`irq_restore()` 临界区内 read-modify-write 设置并清除 `X86_CR0_CD|X86_CR0_NW`，探测本身用 `volatile uint32_t` 写-取反-回读并恢复原值，步长从 1GiB 逐次缩到 1/4（最小 4KiB）。该文件用 `KERNEL_NOKASAN_CFLAGS` 编译，探测循环不得引入 KASAN 插桩或打印。
+- 分页由 `init_page()`（`kernel/arch/x86/i386/page.c`）一次完成：构造 PDE/PTE 与页管理器后自己写 CR3 并以 read-modify-write 置 `X86_CR0_PG|X86_CR0_WP`；调用方不得再单独补写 WP，也不得恢复 `C_init_page` + 汇编 wrapper 的两段式实现。
 - 高地址 bootstrap 页表是仅内核可见、未逐地址空间计入引用数的隐式共享映射。任何遍历任意物理页目录/页表的路径（包括 `pde_clone`、`free_pde`、共享映射和 `page_get_*_pde`）必须在保存中断状态后临时切到 `PDE_ADDRESS` 的恒等映射，再恢复调用者 CR3；禁止在当前用户页表下直接把高端物理页表地址当线性地址解引用。任何路径要在原本不含 `PG_USU` 的 PDE 中建立用户映射，必须先分配并清零私有页表，禁止原地添加 user/write 位或修改该全局页表。exec 装载准备只处理同时 present+user 的 PDE，并丢弃继承的 `PG_SHARED` PTE；不得把设备映射或 GUI 共享页降级成只读映射后留给新程序。用户页映射统一经 `page_prepare_user_table` 完成页表分离，不得恢复已删除的 `page_links`/`page_link_share` 旁路。
-- 内核入口的 boot ABI 检查是 `arch_boot_verify()`（`kernel/arch/x86/descriptor_tables.c`），只校验 CS 等于内核代码 selector，失败时直写文本 VRAM 并 `cli; hlt` 停机；不得依赖 loader 的 IDT 或 `int 0x36` 打印。段寄存器在 `arch_interrupt_init` 里紧跟 `lgdt` 重新载入内核数据段 selector，`do_init_seg_register` 这类独立入口不再存在。
+- 内核入口的 boot ABI 检查是 `arch_boot_verify()`（`kernel/arch/x86/i386/descriptor_tables.c`），只校验 CS 等于内核代码 selector，失败时直写文本 VRAM 并 `cli; hlt` 停机；不得依赖 loader 的 IDT 或 `int 0x36` 打印。段寄存器在 `arch_interrupt_init` 里紧跟 `lgdt` 重新载入内核数据段 selector，`do_init_seg_register` 这类独立入口不再存在。
 - 分页启用后必须永久设置 `X86_CR0_WP`，使 ring0 写只读用户页也触发 `#PF` 并进入 COW；后续 CR0 修改必须使用 read-modify-write 保留 WP，不得写入会清除该位的固定值。
-- descriptor table 与任务状态的通用入口是 `arch_interrupt_init`、`arch_task_state_init` 和 `arch_task_set_kernel_stack`；GDT/IDT/TSS 的地址、limit、布局、selector、access bits 及 `lgdt`/`lidt`/`ltr` 只能出现在 `kernel/arch/x86/` 私有实现中。首次 GDT/IDT 构造和活动 descriptor 更新必须全程保存并关闭中断；IDT 必须先完整构造全部 256 个有效入口再执行 `lidt`，`0xff` 默认入口必须可直接安全返回且不发送错误 EOI。
-- 驱动通过 `interrupt_register_entry(vector, entry)` 注册函数入口；该 API 只创建 DPL0 interrupt gate，并在保存中断状态的短临界区更新 IDT。DPL3 gate 只允许由架构初始化为既有的 syscall、custom syscall 和 net API 向量创建，驱动不得自行开放用户态调用权限。PCI 驱动取得 `uint8_t` IRQ 后必须先调用 `irq_is_valid`，成功后才能计算 vector、配置路由或解屏蔽；底层 mask/config API 对非法 IRQ 安全返回。
+- descriptor table 与任务状态的通用入口是 `arch_interrupt_init`、`arch_task_state_init` 和 `arch_task_set_kernel_stack`；GDT/IDT/TSS 的地址、limit、布局、selector、access bits 及 `lgdt`/`lidt`/`ltr` 只能出现在 `kernel/arch/x86/i386/` 私有实现中。首次 GDT/IDT 构造和活动 descriptor 更新必须全程保存并关闭中断；IDT 必须先完整构造全部 256 个有效入口再执行 `lidt`，`0xff` 默认入口必须可直接安全返回且不发送错误 EOI。
+- 驱动通过 `irq_register_handler(irq, handler)`（`kernel/dos/hal/interrupt.c`）注册 IRQ 处理函数；该 API 只维护硬件 IRQ 到处理函数的表，DPL0 gate 仍由 i386 IDT 初始化统一创建。DPL3 gate 只允许由架构初始化为既有的 syscall、custom syscall 和 net API 向量创建，驱动不得自行开放用户态调用权限。PCI 驱动取得 `uint8_t` IRQ 后必须先调用 `irq_is_valid`，成功后才能计算 vector、配置路由或解屏蔽；底层 mask/config API 对非法 IRQ 安全返回。
 <!-- 过时：驱动把整数地址传给本地 handler helper，或通过 `ADR_IDT`、`set_gatedesc` 直接改写 IDT 并自行选择 selector/DPL。 -->
-- 内核 BIOS 调用统一使用 `arch/x86/bios.h` 的 `x86_bios_interrupt`；调用方不得准备或清理 GDT 临时项，也不得直接调用底层 raw 汇编入口。实模式软件中断全程保持硬件中断关闭，禁止在 raw bridge 中执行 `sti`：APIC/IOAPIC 向量没有实模式处理与 Local APIC EOI 路径，提前开中断会在 KVM 下留下 in-service 向量并阻塞同优先级设备 IRQ。
+- 内核 BIOS 调用统一使用 `kernel/include/arch/x86/i386/bios.h` 的 `x86_bios_interrupt`；调用方不得准备或清理 GDT 临时项，也不得直接调用底层 raw 汇编入口。实模式软件中断全程保持硬件中断关闭，禁止在 raw bridge 中执行 `sti`：APIC/IOAPIC 向量没有实模式处理与 Local APIC EOI 路径，提前开中断会在 KVM 下留下 in-service 向量并阻塞同优先级设备 IRQ。
 - 汇编保存顺序与 C 结构布局构成内核内部 ABI。修改任一侧时同步检查任务初始栈、fork、signal、IDT 注册和最终 `iret` 恢复路径。
-- x86 软件任务上下文统一使用 `arch/x86/task.h` 的 `arch_task_context_t`；调度器通过 `arch_task_switch`/`arch_task_start` 显式传入当前 context 槽、下一 context、CR3 和 scheduler current 槽/任务。架构汇编不得读取 `mtask` 字段偏移或全局 `current`；fork 中断帧通过 `arch_task_interrupt_return` 恢复。
+- x86 软件任务上下文统一使用 `kernel/include/arch/x86/i386/task.h` 的 `arch_task_context_t`；调度器通过 `arch_task_switch`/`arch_task_start` 显式传入当前 context 槽、下一 context、CR3 和 scheduler current 槽/任务。架构汇编不得读取 `mtask` 字段偏移或全局 `current`；fork 中断帧通过 `arch_task_interrupt_return` 恢复。
 - `task_next()` 在没有其他 runnable 任务或选出的 next 就是 current 时必须直接返回，禁止调用 `arch_task_switch` 自切换；自切换会先覆盖当前 context 槽、再加载调用前取得的旧 context 指针，造成内核栈回退和返回地址损坏。
 <!-- 过时：`define.h` 定义通用 `stack_frame`，`mtask->esp`/`pde` 依赖 0/4 字节固定偏移，切换汇编直接读全局 `current`，fork 通过 `handlers.asm` 的拼写错误入口 `interrput_exit` 恢复。 -->
 - SMP 调度器启动必须在所有 per-CPU idle 与 bootstrap task 发布完成后关中断发布 `scheduler_active`，再由 BSP 单独直接启动 bootstrap task，不能先进入 idle 或让 BSP/AP 并发执行首次 context start。显式 bootstrap 入口只请求 AP release，真正的 release 必须由 BSP 最外层 kernel lock 在 owner 清零后提交，禁止在仍持有大内核锁时唤醒 AP。AP 只启动自己的 idle，通用 task bootstrap 不承担 SMP release 等一次性全局职责。
 - 大内核自旋锁使用 test-and-test-and-set：锁被占用时只读 owner 并执行 `pause`，观察到空闲后才尝试一次 locked compare-exchange；禁止在等待循环的每次迭代都执行 `lock cmpxchg`，否则 VirtualBox 等虚拟化环境会因总线锁争用导致锁持有者饥饿。
 - online 但尚未 release 的 AP 必须在本地 APIC 已启用、定时器尚未启动的状态下用 `sti; hlt; cli` 休眠；BSP 提交 release 后通过专用 `X86_VECTOR_SMP_WAKE` IPI 唤醒，wake handler 只发送 Local APIC EOI，不获取 kernel lock 或进入调度器。AP 醒来确认 release 后才初始化本地定时器并启动 idle，禁止恢复 `pause` 忙等 parked AP。
-- 正在运行的内核 C 栈上切换用户态时，C 只在安全的本地对象中完成 frame 构造，最后一步调用 `kernel/arch/x86/user_return.asm` 的 noreturn helper；helper 先 `cli`，在当前 ring0 栈真实 `sub`/复制完整 frame，再原子恢复寄存器并 `iretd`。不得在 C 中把“当前 ESP 减 frame 大小”当作已预留空间。
+- 正在运行的内核 C 栈上切换用户态时，C 只在安全的本地对象中完成 frame 构造，最后一步调用 `kernel/arch/x86/i386/user_return.asm` 的 noreturn helper；helper 先 `cli`，在当前 ring0 栈真实 `sub`/复制完整 frame，再原子恢复寄存器并 `iretd`。不得在 C 中把“当前 ESP 减 frame 大小”当作已预留空间。
 <!-- 过时：用户态切换函数进入时立即在 `task->top - sizeof(frame)` 写入最终中断帧。 -->
 <!-- 过时：C 内联 helper 只计算 `ESP - sizeof(frame)` 后直接写入，未实际调整栈指针保留空间。 -->
 - 任务创建需显式记录本路径是否 clone/retain 了 PDE；失败回滚只释放自己拥有的 PDE，启动任务共享的 `PDE_ADDRESS` 不得释放。fork 只能在 PDE、VFS、FIFO 等全部构造成功后发布为 `RUNNING`。
@@ -223,7 +231,7 @@ python3 scripts/kernel-perf.py \
 - 任务槽由 `kernel/dos/task/mtask.c` 的稳定地址分块注册表按需扩容，TID 不再受 255 个静态数组槽限制；跨子系统扫描统一使用任务迭代器，不得重新暴露或假定连续的全局 `mtask[]`。物理页 owner 与引用计数均为 32 位，fork/COW/共享映射不得把 TID 或引用数收窄到 8 位；页元数据末端必须通过静态断言保持在 KASAN shadow 之前。
 <!-- 过时：`create_task_impl` 在调用方写入 line、TTY 和启动参数前直接设为 `RUNNING`。 -->
 - 用户态 ELF/shell heap、stack 和 `0xf0000000` 映射必须逐页检查 `page_link`；任一失败在写用户地址或进入 `iretd` 前终止任务，由任务退出统一回收已标记的部分映射。
-- 物理页引用计数和 fallback owner 仅由 `kernel/dos/mm/page.c` 的正式接口维护，外部代码不得直接读写 `PAGE_INFO.count/task_id`。`task_id` 仅在 `count == 1` 时可表示独占 owner；引用从 1 增到 2 前必须清空 owner，共享页降回 1 仍保持无 owner。任务退出的 `gc` 只回收 `count == 1` 且 owner 匹配的独占页，不能把仍有引用的共享页强制归零；retain 溢出和 release 下溢属于 fatal 不变量错误。
+- 物理页引用计数和 fallback owner 仅由 `kernel/arch/x86/i386/page.c` 的正式接口维护，外部代码不得直接读写 `PAGE_INFO.count/task_id`。`task_id` 仅在 `count == 1` 时可表示独占 owner；引用从 1 增到 2 前必须清空 owner，共享页降回 1 仍保持无 owner。任务退出的 `gc` 只回收 `count == 1` 且 owner 匹配的独占页，不能把仍有引用的共享页强制归零；retain 溢出和 release 下溢属于 fatal 不变量错误。
 <!-- 过时：`task_id` 可在页面变为共享后继续代表创建者，任务退出时 `gc` 通过循环递减把该 owner 的页面引用强制清零。 -->
 - 用户态 ELF loader 接收真实 image size，完整验证 Ehdr/phdr/PT_LOAD、文件范围、用户虚拟范围、对齐、溢出和 executable entry。装载严格分两阶段：全部 segment 页映射成功后才复制文件数据和清零 BSS；共享物理页的相邻 segment 不重复 `page_link`。不得恢复无 size 的 `elf32_get_max_vaddr/load_elf` 接口。
 - 用户程序保持 `.text`/公开链接基址 `0x70000000`。通用链接参数使用 `-N -Ttext 0x70000000`，避免 GNU ld 额外生成低于用户边界的 header PT_LOAD；因此现阶段会出现 RWX LOAD 警告，而 loader 仍要求所有 segment/page 均不低于 `USER_SPACE_START`，entry 必须落在带 `PF_X` 的 load segment 内。
@@ -231,7 +239,7 @@ python3 scripts/kernel-perf.py \
 
 ### SMP 与多核调度
 
-- x86 SMP 拓扑来自 ACPI MADT；`kernel/arch/x86/smp_trampoline.asm` 的实模式 trampoline 固定复制到物理地址 `0x6000`，AP 通过 INIT-SIPI-SIPI 进入共享分页内核。BSP 必须排在逻辑 CPU 0，APIC ID 与逻辑 CPU 编号不得混用；xAPIC ICR 使用 8-bit destination field，x2APIC ICR 使用高 32 位完整 destination ID。
+- x86 SMP 拓扑来自 ACPI MADT；`kernel/arch/x86/i386/smp_trampoline.asm` 的实模式 trampoline 固定复制到物理地址 `0x6000`，AP 通过 INIT-SIPI-SIPI 进入共享分页内核。BSP 必须排在逻辑 CPU 0，APIC ID 与逻辑 CPU 编号不得混用；xAPIC ICR 使用 8-bit destination field，x2APIC ICR 使用高 32 位完整 destination ID。
 - 每个在线 CPU 拥有独立 TSS、ring0 栈指针、当前任务、idle 任务、最小虚拟运行时间和重调度状态；共享 GDT 为每 CPU 使用不同 TSS descriptor。AP 在启用自己的 Local APIC/x2APIC 后才能读取当前 CPU ID，随后加载 TSS 并等待调度器发布 idle 任务。
 - 调度器采用每 CPU 运行队列语义、CFS 风格加权虚拟运行时间和周期负载均衡：普通任务权重为 1，交互/高优先级任务提高权重，唤醒任务获得有界的 wakeup boost；CPU 0 每 100ms 在最忙和最空闲 CPU 间迁移一个未运行且未固定的任务。不得恢复按 TID 全局轮转、全局 `current` 或单个全局 idle task。
 - CPU 本地时钟均为 100Hz：BSP 继续负责全局 timer、网络 timeout 与 IPC timeout；AP 使用 TSC-deadline，缺失时校准 Local APIC periodic timer。每个 CPU 的时钟只累计本 CPU 当前任务的运行时间并触发本地调度，AP 不得重复推进全局时间和全局 timer 链。

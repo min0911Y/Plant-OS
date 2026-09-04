@@ -11,7 +11,7 @@ extern "C" {
 #define RAND_MAX 32767
 void *malloc(size_t size);
 void free(void *p);
-void *realloc(void *ptr, uint32_t size);
+void *realloc(void *ptr, size_t size);
 void qsort (void *, size_t, size_t, int (*)(const void *, const void *));
 char *getenv(const char *name);
 int setenv(const char *name, const char *value, int overwrite);
@@ -26,6 +26,9 @@ void atexit(void (*func)(void));
 void *calloc(size_t num, size_t size);
 void abort(void);
 void exit(unsigned status);
+void _exit(unsigned status);
+void sleep(int time);
+int system(char *command);
 #define EXIT_SUCCESS 0
 #define EXIT_FAILURE 1
 #ifdef __cplusplus

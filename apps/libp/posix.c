@@ -47,7 +47,7 @@ int open(const char *path, int flags, ...) {
     vfs_flags |= VFS_OPEN_APPEND;
   }
   vfs_syscall_request_t request = {0};
-  request.arguments.open.path = (uint32_t)(uintptr_t)path;
+  request.arguments.open.path = (uintptr_t)path;
   request.arguments.open.flags = vfs_flags;
   return vfs_result(vfs_invoke(VFS_SYSCALL_OPEN, &request));
 }
@@ -75,7 +75,7 @@ ssize_t write(int descriptor, const void *buffer, size_t count) {
   }
   vfs_syscall_request_t request = {0};
   request.arguments.io.descriptor = descriptor;
-  request.arguments.io.buffer = (uint32_t)(uintptr_t)buffer;
+  request.arguments.io.buffer = (uintptr_t)buffer;
   request.arguments.io.length = count;
   return vfs_result(vfs_invoke(VFS_SYSCALL_WRITE, &request));
 }
@@ -91,7 +91,7 @@ ssize_t read(int descriptor, void *buffer, size_t count) {
   }
   vfs_syscall_request_t request = {0};
   request.arguments.io.descriptor = descriptor;
-  request.arguments.io.buffer = (uint32_t)(uintptr_t)buffer;
+  request.arguments.io.buffer = (uintptr_t)buffer;
   request.arguments.io.length = count;
   return vfs_result(vfs_invoke(VFS_SYSCALL_READ, &request));
 }
@@ -129,8 +129,8 @@ int stat(const char *path, struct stat *status) {
   }
   vfs_file_stat_t vfs_status;
   vfs_syscall_request_t request = {0};
-  request.arguments.stat.path = (uint32_t)(uintptr_t)path;
-  request.arguments.stat.status = (uint32_t)(uintptr_t)&vfs_status;
+  request.arguments.stat.path = (uintptr_t)path;
+  request.arguments.stat.status = (uintptr_t)&vfs_status;
   int result = vfs_result(vfs_invoke(VFS_SYSCALL_STAT, &request));
   if (result == 0) {
     stat_from_vfs(&vfs_status, status);
@@ -146,7 +146,7 @@ int fstat(int descriptor, struct stat *status) {
   vfs_file_stat_t vfs_status;
   vfs_syscall_request_t request = {0};
   request.arguments.fstat.descriptor = descriptor;
-  request.arguments.fstat.status = (uint32_t)(uintptr_t)&vfs_status;
+  request.arguments.fstat.status = (uintptr_t)&vfs_status;
   int result = vfs_result(vfs_invoke(VFS_SYSCALL_FSTAT, &request));
   if (result == 0) {
     stat_from_vfs(&vfs_status, status);
@@ -160,19 +160,19 @@ int mkdir(const char *path, ...) {
     return -1;
   }
   vfs_syscall_request_t request = {0};
-  request.arguments.path.path = (uint32_t)(uintptr_t)path;
+  request.arguments.path.path = (uintptr_t)path;
   return vfs_result(vfs_invoke(VFS_SYSCALL_MKDIR, &request));
 }
 
 int rmdir(const char *path) {
   vfs_syscall_request_t request = {0};
-  request.arguments.path.path = (uint32_t)(uintptr_t)path;
+  request.arguments.path.path = (uintptr_t)path;
   return vfs_result(vfs_invoke(VFS_SYSCALL_RMDIR, &request));
 }
 
 int chdir(const char *path) {
   vfs_syscall_request_t request = {0};
-  request.arguments.path.path = (uint32_t)(uintptr_t)path;
+  request.arguments.path.path = (uintptr_t)path;
   return vfs_result(vfs_invoke(VFS_SYSCALL_CHDIR, &request));
 }
 
@@ -209,7 +209,7 @@ int api_current_drive(void) {
 int format(unsigned disk, char *filesystem) {
   vfs_syscall_request_t request = {0};
   request.arguments.format.disk = disk;
-  request.arguments.format.filesystem = (uint32_t)(uintptr_t)filesystem;
+  request.arguments.format.filesystem = (uintptr_t)filesystem;
   return vfs_result(vfs_invoke(VFS_SYSCALL_FORMAT, &request));
 }
 
