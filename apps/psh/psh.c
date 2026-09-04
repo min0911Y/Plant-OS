@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <mst.h>
+#include <perf.h>
 #include <pl_readline.h>
 #include <runtime_args.h>
 #include <stdint.h>
@@ -202,8 +203,65 @@ static const struct simple_command simple_commands[] = {
 
 static const char *const argument_commands[] = {
     "dir", "del", "cd", "mkfile", "type", "remount_drive",
-    "color", "mkdir", "insmod", "rmmod", "format",
+    "color", "mkdir", "insmod", "rmmod", "format", "perf",
 };
+
+static int control_profiler(int argc, char **argv) {
+  static const char *const state_names[] = {"unavailable", "idle", "running",
+                                            "dumping"};
+  perf_control_operation_t operation;
+
+  if (argc != 2) {
+    printf("perf <start|stop|status>\n");
+    return 1;
+  }
+  if (strcmp(argv[1], "start") == 0) {
+    operation = PERF_CONTROL_START;
+  } else if (strcmp(argv[1], "stop") == 0) {
+    operation = PERF_CONTROL_STOP;
+  } else if (strcmp(argv[1], "status") == 0) {
+    operation = PERF_CONTROL_STATUS;
+  } else {
+    printf("perf <start|stop|status>\n");
+    return 1;
+  }
+
+  perf_control_request_t request = {
+      .size = sizeof(request),
+      .operation = operation,
+  };
+  int result = perf_control(&request);
+  if (result == PERF_ERR_UNAVAILABLE ||
+      request.status.state == PERF_STATE_UNAVAILABLE) {
+    printf("Kernel profiler is unavailable; rebuild with PERF=1.\n");
+    return 1;
+  }
+  if (result == PERF_ERR_STATE) {
+    printf("Profiler is %s.\n",
+           operation == PERF_CONTROL_START ? "already running"
+                                           : "not running");
+    return 1;
+  }
+  if (result != PERF_OK) {
+    printf("Unable to control profiler (error %d).\n", result);
+    return 1;
+  }
+
+  if (operation == PERF_CONTROL_START) {
+    printf("Kernel profiling started.\n");
+  } else if (operation == PERF_CONTROL_STOP) {
+    printf("Kernel profile written to the serial log.\n");
+  } else {
+    unsigned state_count = sizeof(state_names) / sizeof(state_names[0]);
+    const char *state = request.status.state < state_count
+                            ? state_names[request.status.state]
+                            : "invalid";
+    printf("Profiler: %s, samples=%u, stacks=%u/%u, dropped=%u.\n", state,
+           request.status.samples, request.status.stacks,
+           request.status.capacity, request.status.dropped);
+  }
+  return 0;
+}
 
 static int execute_external_command(int argc, char **argv, int *ok) {
   size_t name_length = strlen(argv[0]);
@@ -410,6 +468,8 @@ static int run_command(int argc, char **argv) {
              normalized_drive);
       return 1;
     }
+  } else if (strcmp("perf", argv[0]) == 0) {
+    return control_profiler(argc, argv);
   } else if (argc == 1 && strlen(argv[0]) == 2 && argv[0][1] == ':') {
     if (!vfs_check_mount(argv[0][0])) {
       if (!vfs_mount(argv[0][0], argv[0][0])) {

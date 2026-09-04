@@ -67,40 +67,19 @@ void drivers_idehdd_write(unsigned int LBA, unsigned int number,
                           unsigned short *buffer);
 struct IDEHardDiskInfomationBlock *drivers_idehdd_info();
 // keyboard.c
-void wait_KBC_sendready(void);
-void init_keyboard(void);
+bool ps2_wait_input_empty(void);
+bool init_keyboard(void);
 int getch();
 int input_char_inSM();
 void inthandler21(int *esp);
 int kbhit();
 // mouse.c
-void enable_mouse(struct MOUSE_DEC *mdec);
+bool enable_mouse(struct MOUSE_DEC *mdec);
 void mouse_sleep(struct MOUSE_DEC *mdec);
 void mouse_ready(struct MOUSE_DEC *mdec);
 int mouse_decode(struct MOUSE_DEC *mdec, unsigned char dat);
 void mouseinput();
 void inthandler2c(int *esp);
-// pci.c
-uint32_t read_pci(uint8_t bus, uint8_t device, uint8_t function,
-                  uint8_t registeroffset);
-void write_pci(uint8_t bus, uint8_t device, uint8_t function,
-               uint8_t registeroffset, uint32_t value);
-uint32_t pci_read_command_status(uint8_t bus, uint8_t slot, uint8_t func);
-void pci_write_command_status(uint8_t bus, uint8_t slot, uint8_t func,
-                              uint32_t value);
-uint8_t pci_get_drive_irq(uint8_t bus, uint8_t slot, uint8_t func);
-uint32_t pci_get_port_base(uint8_t bus, uint8_t slot, uint8_t func);
-bool pci_find_class(uint8_t base_class, uint8_t sub_class, uint8_t *bus,
-                    uint8_t *slot, uint8_t *function);
-void PCI_GET_DEVICE(uint16_t vendor_id, uint16_t device_id, uint8_t *bus,
-                    uint8_t *slot, uint8_t *func);
-void pci_config(unsigned int Bus, unsigned int f, unsigned int equipment,
-                       unsigned int adder);
-uint32_t read_bar_n(uint8_t bus, uint8_t device, uint8_t function,
-                    uint8_t bar_n);
-void init_PCI(unsigned int adder_Base);
-void PCI_ClassCode_Print(
-    struct pci_config_space_public *pci_config_space_puclic);
 // pic.c
 void init_pic(void);
 void pic_disable(void);

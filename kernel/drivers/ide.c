@@ -2,6 +2,7 @@
 #include <dos.h>
 #include <drivers.h>
 #include <irq.h>
+#include <pci.h>
 
 #define ATA_SR_BSY 0x80u
 #define ATA_SR_DF 0x20u
@@ -185,25 +186,21 @@ static bool ide_wait(uint8_t channel, bool require_drq, bool require_idle) {
 }
 
 static bool ide_pci_bus_master_initialize(void) {
-  uint8_t bus;
-  uint8_t slot;
-  uint8_t function;
-  if (!pci_find_class(0x01, 0x01, &bus, &slot, &function)) {
+  const pci_device_t *controller = pci_find_class(0x01, 0x01);
+  if (controller == NULL) {
     logk("ide: PCI controller unavailable\n");
     return false;
   }
-  uint32_t class = read_pci(bus, slot, function, 0x08);
-  uint8_t programming_interface = (class >> 8) & 0xffu;
-  uint32_t bar4 = read_pci(bus, slot, function, 0x20);
-  uint32_t base = bar4 & ~3u;
-  if ((programming_interface & 0x80u) == 0 ||
-      (programming_interface & 0x05u) != 0 || (bar4 & 1u) == 0 || base == 0 ||
-      base > 0xfff0u) {
+  pci_bar_t bus_master;
+  if ((controller->programming_interface & 0x80u) == 0 ||
+      (controller->programming_interface & 0x05u) != 0 ||
+      !pci_read_bar(controller, 4, &bus_master) ||
+      bus_master.type != PCI_BAR_IO || bus_master.address > 0xfff0u) {
     logk("ide: PCI bus-master DMA unavailable\n");
     return false;
   }
-  uint32_t command = read_pci(bus, slot, function, 0x04) & 0xffffu;
-  write_pci(bus, slot, function, 0x04, command | 0x05u);
+  uint32_t base = bus_master.address;
+  pci_command_enable(controller, PCI_COMMAND_IO | PCI_COMMAND_BUS_MASTER);
   ide_channels[ATA_PRIMARY].bus_master_base = (uint16_t)base;
   ide_channels[ATA_SECONDARY].bus_master_base = (uint16_t)(base + 8u);
   logk("ide: bus-master DMA io=%04x\n", base);

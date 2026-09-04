@@ -16,7 +16,7 @@ GLOBAL TaskLock,TaskUnlock,SubThread,set_mode,VBEDraw_Px,VBEGet_Px,VBEGetBuffer,
 GLOBAL tty_start_cur_moving,tty_stop_cur_moving,logk
 GLOBAL tty_get_xsize,tty_get_ysize,mouse_support,signal,fork,waittid,do_test,mouse_enable,mouse_dat_status,mouse_dat_get,api_yield,return_to_app,set_rt,shared_memory_map_to,shared_memory_unmap,task_set_level_higher,task_set_level_normal,use_keyboard
 GLOBAL module_load,module_unload,module_list
-GLOBAL api_task_snapshot,cpu_count,cpu_current
+GLOBAL api_task_snapshot,cpu_count,cpu_current,perf_control,input_wait
 [SECTION .text]
 return_to_app:
   popa
@@ -849,10 +849,8 @@ init_float:
 	popad
 	ret
 start_keyboard_message:
-	pushad
 	mov eax,0x30
 	int 36h
-	popad
 	ret
 key_press_status:
 	mov eax,0x31
@@ -1139,4 +1137,20 @@ cpu_current:
 	mov eax,0x61
 	int 0x36
 	mov eax,edx
+	ret
+
+perf_control:
+	push ebx
+	mov ebx,[esp + 8]
+	mov eax,0x63
+	int 0x36
+	pop ebx
+	ret
+
+input_wait:
+	push ebx
+	mov ebx,[esp + 8]
+	mov eax,0x64
+	int 0x36
+	pop ebx
 	ret

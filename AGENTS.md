@@ -42,6 +42,7 @@
 <!-- 过时：`psh -c` 把 `argv[2..]` 用裸空格拼接成字符串，再交给 shell 的第二套解析器。 -->
 - `apps/psh` 与 `apps/lua` 的交互行编辑统一使用 `apps/third_party/pl_readline` 及其共享 Plant OS 按键适配；适配层必须把 `KEY_INPUT_*` 方向键及 Enter、Backspace、Tab 映射为库按键，只丢弃 `getch()` 返回的 `0` 与其他无字符控制值，不能再把它们写进命令行或恢复另一套本地编辑器。psh 的补全词表只含内建命令，首词统一用 `PL_COLOR_CYAN` 染色，文件路径暂不参与补全；Lua REPL 只使用行编辑与历史，以 `PL_ENABLE_INTELLISENSE=0` 配合普通重绘对象，不链接补全和高亮代码。该移植版将内部 `pl_list_*` 名称空间化以避开 MST 的链表 API，并依赖文本与高文本 TTY 保持标准 CR 和 `CSI K` 语义。
 - 标准 PS/2 键盘扫描码只投递给当前前台 TTY 上拥有有效 key FIFO 的进程；TTY 所有权是唯一前台判据，不再额外依赖容易滞后的 `state` 或 `fifosleep`。同步前台子进程运行时父 shell 通过清空 TTY 明确交出前台，子进程退出后恢复 TTY 即恢复输入。`getch()`/`input_char_inSM()` 必须使用 `WAIT_REASON_KEYBOARD` 阻塞并由 IRQ 唤醒，禁止在持有 kernel lock 时忙等；ready 握手必须覆盖扫描码在发布等待前到达的竞态。不得重新广播给所有 `RUNNING` 任务，尤其不能向每 CPU idle task 的空 FIFO 写入。
+- PS/2 控制器与鼠标协商期间保持 IRQ1/IRQ12 屏蔽，命令必须使用单调时间 deadline 并逐条消费 ACK/设备 ID，完成同步初始化后才解屏蔽；不得恢复固定次数忙等或让 IRQ 与轮询方竞争响应字节。GUI 输入线程通过 `input_wait()`/`SYSCALL_INPUT_WAIT`（`0x64`）一次等待鼠标、按键按下与松开 FIFO，使用 `WAIT_REASON_INPUT` 发布等待并由对应 IRQ 的 ready 握手唤醒；不得用多个 pending syscall 加 `api_yield()` 轮询。
 - `kernel/mst/`、`kernel/std/`、`kernel/modules/`：MST 脚本、基础运行库和可加载模块。
 - `kernel/include/`：内核公共声明；很多模块通过 `dos.h`、`define.h` 等大头文件耦合。
 - `kernel/include/arch/x86/`：x86 专属的中断帧、入口和其他架构 ABI 声明；通用内核头文件不应重新定义这些布局。
@@ -50,6 +51,7 @@
 <!-- 过时：GDT/IDT 地址、descriptor/TSS 布局和 `set_segmdesc`/`set_gatedesc`/`load_*` 从 `define.h`、`dos.h` 暴露给通用代码。 -->
 - `kernel/res/`：打包进镜像的资源；资源是否进入镜像由 `kernel/Makefile` 中显式的 `mcopy` 命令决定。
 - `loader/`：独立的加载器，包含自己的驱动、文件系统和基础库实现。不要假设它能直接复用内核实现。
+- 内核 PCI API 位于 `kernel/include/pci.h`：`pci_initialize()` 只进行一次基于 multifunction function 与 PCI-to-PCI bridge 的拓扑枚举，动态设备表保存结构化 BDF/class 信息，IDE、AHCI、PCnet 与 RTL8139 均通过 `pci_find_*` 查询并使用统一 BAR/command API。不得恢复 `PCI_ADDR_BASE` 原始配置空间镜像、扫描全部 256×32×8 function，或在具体驱动中再次穷举 PCI 空间。
 - DOSLDR 的软驱驱动必须区分控制器、介质与可读块设备：无控制器或无介质时仍以 `VDISK_TYPE_UNAVAILABLE` 保留 A: 槽位，保证后续保留槽与首块 IDE 磁盘继续落在 B:/C:，但 `DiskReady()` 只能对具有读回调的 `VDISK_TYPE_BLOCK` 返回真。FDC disk-change 位必须通过强制步进/重新校准后复检来判定介质；无介质直接返回并清零失败读缓冲，禁止递归重进 `fdc_rw`。所有 IRQ 等待必须有界，介质移除后注销软驱，不能无限忙等或继续把陈旧 DMA 缓冲当作有效扇区。
 - `apps/include/`：用户态头文件和公开 ABI。
 - `apps/libp/`：用户态 C/C++ 启动代码、系统调用、内存/标准库、IPC/RPC 等基础库。
@@ -58,7 +60,7 @@
 <!-- 过时：`kernel/a.iso`、`kernel/cd.iso` 和 `kernel/iso/psh.bin` 属于当前启动链使用的 ISO 镜像与运行时程序。 -->
 - `font/`、`kernel/res/` 包含当前镜像使用的运行时二进制资源；`kernel/iso/` 中只有 `modules/*` 被当前 `kernel/Makefile` 打包，其余内容是未接入当前 32 位 `Mimg` 流程的旧 ISO 暂存资源。不要重新提交 `a.iso`、`cd.iso` 或 `iso/psh.bin` 等旧生成物。
 - `chat/`、`netgobang/`、`fattools/` 是宿主侧辅助/演示程序，不属于内核或 Plant OS 用户态 ABI。
-- `scripts/kernel-perf.py` 用于把串口性能采样转换为 folded stacks；`scripts/build_rootfs.sh` 当前引用已不存在的 `kernel64`，不是 32 位主构建流程的一部分。
+- `scripts/kernel-perf.py` 严格解析内核输出的 version 2 聚合采样，可从同一串口日志选择任意完整采样段，并直接生成 folded stacks 与无外部依赖的交互式 SVG 火焰图。SVG 栈帧点击缩放时必须按新宽度重新布局并重算标签，悬停详情保留完整名称，`Reset Zoom`/`Esc` 恢复原图；不得退回只把整张图等比放大、标签仍固定截断的静态实现。`scripts/build_rootfs.sh` 当前引用已不存在的 `kernel64`，不是 32 位主构建流程的一部分。
 - `scripts/build-livecd.sh` 从当前 `boot.img` 提取通用运行时文件，使用当前 `kernel.bin` 与 `apps/out/*.bin` 覆盖构建产物后生成 FAT initramfs；`boot.bin`、`boot32.bin`、`boot_pfs.bin` 与规范名称 `DOSLDR.bin` 必须作为 FAT/PFS 格式化及硬盘安装资源保留，但不得把 DOSLDR 或整个 `boot.img` 配置为 Limine 默认启动 module。应用默认位于根目录，`doom.bin` 与 `doom1.wad` 位于 `/games`，`apps/lite-1.11/data` 整体复制到 `/data`，不得手工枚举其 core、fonts、plugins、user 子目录。TCC 文件沿用 `tcc.img` 布局：`apps/include` 完整复制到 `/tcc/include`，静态库放入 `/tcc/lib`，`libtcc1.a` 单独放入 `/tcc/inst`，`apps/tcc` 构建的 `crti.obj` 作为 `/tcc/crt/crti.o` 供 LiveCD 直接链接，根目录的 `crti.c` 继续供 `tccinst.bin` 使用。脚本最后用固定校验值的 Limine 12.6.1 构造 BIOS ISO。
 - LiveCD 的 `setup.mst` 不使用静态文件清单：initramfs 首次填充后，`scripts/build-livecd.sh` 必须通过 `mshortname` 从镜像本身取得每个路径的真实 FAT 别名，再自动生成覆盖全部目录和文件的清单并写回镜像。每个条目记录源 FAT 短路径、PFS 原路径和 FAT 8.3 目标路径；`DOSLDR.bin` 必须是第一个文件条目，`kernel.bin` 与 `setup.mst` 本身也必须包含。`setup1.bin` 从当前源盘复制到 C:，继续允许用户选择 FAT/PFS：FAT 使用清单短名，PFS 保留原名，不得因存在长文件名而强制 PFS，也不得恢复 A:/多软盘 `next` 流程。
 
@@ -103,11 +105,12 @@ make -C kernel/drivers
 ```sh
 make -C kernel KASAN=1
 make -C kernel PERF=1
-make -C kernel BENCH=0
+make -C kernel BENCH=1
 make -C kernel MEMTEST=0 MEMSIZE_MB=512
 ```
 
-- `PERF=1` 会启用性能采样并保留 frame pointer。
+- `PERF=1` 会启用内核 CPU 采样、保留 frame pointer 并关闭 sibling-call 优化；`PERF_STACKS` 可调整固定哈希表槽数，必须是至少为 4 的 2 次幂，默认 4096。`kernel/obj/.build-config` 跟踪会影响代码生成的诊断开关，在普通、KASAN、PERF 等配置间切换时必须依靠它重编对象，不得退回复用不同编译参数旧对象的做法。
+- 启动 timer benchmark 默认关闭；只有显式 `BENCH=1` 才比较 PIT 与 TSC-deadline。benchmark 结果不参与运行时计时，不得恢复无消费者的 `base_count`、普通启动忙等或关闭 benchmark 后反而等待 100 tick 的 fallback。
 - `MEMTEST=0` 必须同时提供 `MEMSIZE_MB`。
 - 这些命令仍依赖已经构建好的应用和加载器产物。
 
@@ -126,7 +129,8 @@ make -C kernel MEMTEST=0 MEMSIZE_MB=512
 - SMP FPU 保存、恢复、fork 快照与迁移回归使用 `fputest.bin`：它按 CPU 数创建多个独立进程，在 x87 栈保留哨兵值后连续主动让出 CPU，并校验多次切换及 fork 两侧的完整状态；成功时串口输出 `FPUTEST PASS`。
 
 <!-- 过时：旧文档中的 kernel64 构建、运行和 rootfs 流程；当前仓库只有 kernel/ 下的 32 位内核。 -->
-- 性能采样后可运行：
+- PERF 内核在启动早期自动开始 boot session，并持续采样到用户明确执行 `perf stop`；禁止再根据进入 `psh.bin` 或其他程序猜测启动完成并自动停止。psh 的 `perf start`、`perf status`、`perf stop` 通过 `SYSCALL_PERF_CONTROL`（`0x63`）控制会话，`stop` 总是结束当前活动 session 并把结果写入串口，停止后可再次 `start`。IRQ 采样路径只允许使用固定聚合表，不得分配、阻塞或输出日志；聚合键保留 CPU、TID/generation 与内核调用栈，用户态时间统一记录为 `[user]`。内核 `PERF_BEGIN version=2` 格式必须携带 linker 提供的内核文本边界供宿主校验；该格式、`apps/include/perf.h` 的定长控制 ABI 和宿主解析器必须同步修改，不保留 version 1 原始逐样本格式兼容层。
+- 性能采样的完整说明见 `doc/performance.md`；最简转换命令为：
 
 ```sh
 python3 scripts/kernel-perf.py \
@@ -148,6 +152,7 @@ python3 scripts/kernel-perf.py \
 - socket 阻塞调用通过 `WAIT_REASON_SOCKET` 的 waiter 和 lwIP callback 唤醒，连接/接收超时由 `net_socket_tick()` 检查；不得退化为反复 `task_next()` 或 `MSG_DONTWAIT + sleep()` 轮询。PCnet/RTL8139 IRQ 入口只保存一份规范的寄存器/段 frame；网卡 IRQ 在 lwIP input 完全返回并发送 EOI 后，只有本次收包确实唤醒 socket waiter、设置了 `mtask_run_now` 时才调用一次 `task_next()`，不得恢复双重 `pusha`/段保存、在 lwIP callback 内切换任务或让普通无等待者流量触发额外调度。RAW 接收必须复制完整 IPv4 packet 后再让 lwIP 继续处理，不能借用会被协议栈改写的 pbuf。
 - `network=enable` 仅启动以太网和异步 lwIP DHCP；`lo` 不依赖网卡或租约，地址可在租约完成前为零，不能把网络启动改回阻塞式 DHCP 或持久化旧的 `ip/gateway/submask/dns` 环境变量。
 - 网络验证优先使用 `nettest.bin`：`nettest.bin loopback` 在无需网卡/DHCP 时验证 HPET 单调时间能在一个 10ms tick 内前进、`127.0.0.1` 的 UDP/TCP/ICMP，以及通过 `monotonic_ns()` 测得的 ICMP RTT 小于 10ms；完整模式再验证跨进程 `AF_LOCAL` stream、`AF_LOCAL` datagram、DHCP、QEMU user-net 网关 UDP/ICMP，以及可选 TCP echo。`ping.bin <host-or-ipv4> [count]` 通过 `getaddrinfo` 使用 lwIP DNS，`ping.bin localhost` 和 `ping.bin 127.0.0.1` 不等待 DHCP，适合验证回环 raw ICMP；RTT 使用 HPET 单调纳秒时间，统一按三位小数毫秒显示，低于 1 微秒时显示 `time<0.001 ms`。自动验证时临时修改 `sys.cfg` 与 `init.mst`，结束后立即恢复，仍禁止 `sendkey`。
+- `curl.bin` 是用户态纯 HTTP/1.1 客户端，只复用公开 socket/DNS API，不在内核增加 HTTP 实现；支持 `-i`、`-I`、`-L`、`-o`、`-X`、`-d`、`-H`，响应体按 chunked、Content-Length 或连接关闭进行流式传输。只接受 HTTP URL，重定向到 HTTPS 或其他协议必须明确失败。
 
 ### 系统调用、IPC 和 RPC
 
@@ -168,6 +173,7 @@ python3 scripts/kernel-perf.py \
 用户指针来自 `0x70000000` 以上的用户地址空间。新增系统调用时必须复用现有的用户地址/长度验证方式，不能直接把用户指针当作可信内核指针。涉及阻塞、超时或任务退出时，还要检查等待原因、唤醒路径、时钟中断和孤儿/资源清理。
 
 - 顶层系统调用与 IPC 子操作使用“语义化枚举 + designated initializer 处理表”分派。固定 ABI 编号表以枚举的 `COUNT` 作为容量，保留既有编号但不保留旧的 `if/else` 分派兼容层。
+- `input_wait(events)` 的 event mask 与 `SYSCALL_INPUT_WAIT` 编号必须在内核、`apps/include/syscall.h` 和 `apps/libp/syscall.asm` 同步；它只允许当前鼠标/键盘 owner 等待已经初始化的 FIFO，检查 FIFO 与发布等待必须处于同一关中断临界区并循环处理 ready 竞态。
 - `clock()`/`SYSCALL_UPTIME` 保持既有毫秒 ABI；高分辨率单调时间使用 `monotonic_ns()`/`SYSCALL_MONOTONIC_NS`，按 i386 64 位返回约定由 `EDX:EAX` 返回纳秒。内核优先稳定读取 64 位 HPET counter 并用完整 femtosecond period 换算，HPET 不可用时才退回 10ms tick；不得把 HPET MMIO 指针暴露给用户态或改变旧 `clock()` 的单位。
 - 表处理函数应对应真实的 API 或同一职责域；不要为了减少函数体行数创建只转发一次的无意义包装。
 - GUI 进程是名为 `gui` 的 RPC 服务。用户态 GUI API 只使用不透明 `window_t` 句柄和 `gui_rpc.h` 的定长协议，禁止恢复 `int 0x72`、`set_custom_handler`、跨页执行 GUI 函数或向客户端暴露 GUI 内部指针。创建窗口时由 GUI 通过带 tid/generation 校验的共享映射一次性提供 framebuffer 与单生产者/单消费者事件队列；像素写入、事件/键盘轮询必须直接访问该共享区域。`window_refresh` 在共享 damage 状态中合并矩形，只在从空闲变为待处理时发送无应答 RPC；该通知使用 `IPC_DELIVER_NOW`，接收端正因 IPC 等待时内核直接交接时间片，避免等下一个时钟 tick。该标志只用于短小、无锁的低延迟单向通知，不能在中断上下文或持有会阻塞的锁时使用。`0xf0100000..0xf1000000` 是客户端 GUI 映射保留区，关闭窗口前由客户端解除映射。
@@ -186,6 +192,7 @@ python3 scripts/kernel-perf.py \
 <!-- 过时：CR0 位定义放在 `define.h`，并同时保留 `get_cr0/set_cr0` 与 `load_cr0/store_cr0` 多套实现。 -->
 - x87 状态与每 CPU owner 统一由 `kernel/arch/x86/fpu.c` 管理，任务结构只保存 `x86_fpu_state_t` 与状态是否已初始化。任务实际切离 CPU 前必须调用 `x86_fpu_flush_cpu()`：只有当前 CPU 的真实 owner 才执行 `FNSAVE`，随后清空 owner 并置 TS，保证所有 `on_cpu == 0` 的任务状态都已落入任务结构、可直接跨 CPU 迁移。`#NM` 通过 `CLTS` 后恢复或初始化当前任务并登记 owner；CPU 初始化保持 CR0.EM 清零、CR0.MP/NE/TS 置位。fork、显式 reset 和任务回收必须使用该架构接口，不得直接改状态标志或在调度器、异常处理器中散落 `FNSAVE`/`FRSTOR`/CR0 FPU 位操作。
 - x86 port I/O 统一使用 `kernel/include/arch/x86/io.h` 的 `x86_port_read8/16/32` 与 `x86_port_write8/16/32`；动态 port（特别是 PCI BAR）必须先验证是 I/O 空间、整个寄存器窗口不超过 `uint16_t` 范围，然后才显式收窄；数据宽度必须与硬件寄存器一致。这些 inline asm 都是 `volatile`，使用 `Nd` port/累加器约束并带 `memory` clobber；`x86_io_wait()` 只通过向 `0x80` 写入一个 8-bit 零实现，仅用于 PIC 初始化和明确需要该 legacy delay 的软盘控制器轮询。
+- VGA 文本 TTY 的滚屏只能搬移前 `ysize - 1` 行并单独清空末行，优先使用对齐的 32-bit 顺序访问；禁止恢复逐列跨行复制、逐字节搬移或读取第 `ysize` 行之外显存的实现。
 <!-- 过时：port I/O、中断开关、EFLAGS 和文本光标通过 `kernel/dos/asm/i386.asm` 的 `io_*`/`ASM_call` 全局 wrapper 访问。 -->
 - 普通临界区必须成对使用 `irq_save()`/`irq_restore()` 保留调用者 IF 状态；等待路径要在关中断时发布等待状态并调用 `task_next()`，切回后才 restore。`irq_enable()` 只用于首次启动、明确允许抢占的 syscall 入口、任务终止后等待调度以及需主动开中断等待硬件 IRQ 的路径；不得用它代替临界区 restore。新内核任务可能由中断内的调度切入，因此确实要允许硬件 IRQ 的 bootstrap 入口（例如 `init()`）必须自己显式 enable，不得依赖下游驱动的等待函数偶然开中断。`x86_eflags_read/write` 只用于 AC 位等必须直接修改 EFLAGS 的 CPU 探测，不用于中断保护。
 - `kernel/dos/asm/` 已整体退役：x86 中断/系统调用入口 stub 位于 `kernel/arch/x86/interrupt_entries.asm`，其余 legacy 汇编（`memtest_sub`、`gensound`、CPUID `get_cpu*`、`init_page`、`check`、`init_float`、`__init_PIT`、v86 与内核侧 `return_to_app` trampoline、`setjmp`/`longjmp`）已改写为 C 或删除，不得恢复。用户态的信号返回 trampoline 由 `apps/libp` 自己提供并通过 `set_rt` 注册，内核不再复制代码页。`interrupt_entries.asm` 中每个 stub 仍是逐份复制的 push/pop 样板，后续应作为独立任务收敛为宏或统一的 IRQ dispatch。

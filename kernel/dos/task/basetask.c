@@ -1,7 +1,7 @@
 #include <dos.h>
 #include <irq.h>
+#include <pci.h>
 int init_ok_flag = 0;
-extern unsigned int PCI_ADDR_BASE;
 char *shell_data;
 unsigned shell_size;
 int rtc_init(void);
@@ -49,8 +49,9 @@ void init() {
   irq_enable();
   logk("init task has been started!\n");
 
-  PCI_ADDR_BASE = (unsigned int)page_malloc(1 * 1024 * 1024);
-  init_PCI(PCI_ADDR_BASE);
+  if (!pci_initialize()) {
+    Panic_K("unable to enumerate PCI devices");
+  }
   init_floppy();
   rtc_init();
   init_devfs();

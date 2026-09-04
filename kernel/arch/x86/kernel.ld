@@ -15,9 +15,11 @@ SECTIONS
 
   .text ALIGN(0x1000) :
   {
+    __kernel_text_start = .;
     KEEP(*(.multiboot2))
     KEEP(*(.text.boot))
     *(.text .text.* .gnu.linkonce.t.*)
+    __kernel_text_end = .;
   } :text
 
   .rodata ALIGN(0x1000) :

@@ -2,17 +2,44 @@
 KERNEL_UBSAN_FLAGS =
 KERNEL_KASAN_FLAGS =
 KERNEL_FRAME_POINTER_FLAGS = -fomit-frame-pointer
+KERNEL_PERF_ENABLED := $(if $(filter 1,$(PERF)),1,0)
+KERNEL_KASAN_ENABLED := $(if $(filter 1,$(KASAN)),1,0)
+KERNEL_BENCH_ENABLED := $(if $(filter 1,$(BENCH)),1,0)
+KERNEL_MEMTEST_ENABLED := $(if $(filter 0,$(MEMTEST)),0,1)
+KERNEL_PERF_STACKS := $(if $(PERF_STACKS),$(PERF_STACKS),4096)
+KERNEL_CFLAGS_FILE := $(abspath $(lastword $(MAKEFILE_LIST)))
+KERNEL_BUILD_FILES := $(KERNEL_CFLAGS_FILE) $(dir $(KERNEL_CFLAGS_FILE))cdef.mk
+KERNEL_CONFIG_STAMP := $(dir $(KERNEL_CFLAGS_FILE))obj/.build-config
+KERNEL_BUILD_CONFIG := \
+	PERF=$(KERNEL_PERF_ENABLED) KASAN=$(KERNEL_KASAN_ENABLED) \
+	BENCH=$(KERNEL_BENCH_ENABLED) MEMTEST=$(KERNEL_MEMTEST_ENABLED) \
+	MEMSIZE_MB=$(if $(filter 0,$(KERNEL_MEMTEST_ENABLED)),$(MEMSIZE_MB),) \
+	PERF_STACKS=$(if $(filter 1,$(KERNEL_PERF_ENABLED)),$(KERNEL_PERF_STACKS),)
+
+.PHONY: kernel_config_force
+kernel_config_force:
+
+$(KERNEL_CONFIG_STAMP): kernel_config_force
+	@mkdir -p $(dir $@)
+	@temporary="$@.$$$$"; \
+	printf '%s\n' '$(KERNEL_BUILD_CONFIG)' > "$$temporary"; \
+	if ! cmp -s "$$temporary" "$@"; then \
+		mv "$$temporary" "$@"; \
+	else \
+		rm -f "$$temporary"; \
+	fi
+
 ifeq ($(KASAN),1)
 KERNEL_KASAN_FLAGS = -DKERNEL_KASAN -fsanitize=kernel-address
 endif
 
 ifeq ($(PERF),1)
-CDEFS += -DKERNEL_PERF
-KERNEL_FRAME_POINTER_FLAGS = -fno-omit-frame-pointer
+CDEFS += -DKERNEL_PERF -DKERNEL_PERF_STACK_CAPACITY=$(KERNEL_PERF_STACKS)
+KERNEL_FRAME_POINTER_FLAGS = -fno-omit-frame-pointer -fno-optimize-sibling-calls
 endif
 
-ifeq ($(BENCH),0)
-CDEFS += -DKERNEL_DISABLE_BOOT_BENCH
+ifeq ($(BENCH),1)
+CDEFS += -DKERNEL_ENABLE_BOOT_BENCH
 endif
 
 ifeq ($(MEMTEST),0)
@@ -40,4 +67,6 @@ KERNEL_COMMON_CXXFLAGS = \
 
 KERNEL_PACKED_BITFIELD_FLAGS = -Wno-packed-bitfield-compat
 
-kernel_depfiles = $(patsubst %.o,%.d,$(filter %.o,$1))
+kernel_depfiles = \
+	$(eval $(filter %.o %.obj,$1): $(KERNEL_CONFIG_STAMP) $(KERNEL_BUILD_FILES)) \
+	$(patsubst %.o,%.d,$(filter %.o,$1))

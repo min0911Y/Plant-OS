@@ -1,5 +1,25 @@
 #include <arch/x86/io.h>
 #include <dos.h>
+
+typedef uint32_t text_pair_t __attribute__((may_alias));
+
+static void text_fill(uint16_t *cells, int count, uint16_t value) {
+  if (((uintptr_t)cells & (sizeof(text_pair_t) - 1)) == 0) {
+    text_pair_t pair = value | (uint32_t)value << 16;
+    text_pair_t *wide = (text_pair_t *)cells;
+    for (int index = 0; index < count / 2; index++) {
+      wide[index] = pair;
+    }
+    if (count & 1) {
+      cells[count - 1] = value;
+    }
+    return;
+  }
+  for (int index = 0; index < count; index++) {
+    cells[index] = value;
+  }
+}
+
 void MoveCursor_TextMode(struct tty *res, int x, int y) {
   res->x = x;
   res->y = y;
@@ -54,30 +74,40 @@ void putchar_TextMode(struct tty *res, int c) {
 }
 
 void screen_ne_TextMode(struct tty *res) {
-  for (int i = 0; i < res->xsize * 2; i += 2) {
-    for (int j = 0; j < res->ysize; j++) {
-      *(unsigned char *)(res->vram + j * res->xsize * 2 + i) =
-          *(unsigned char *)(res->vram + (j + 1) * res->xsize * 2 + i);
-      *(unsigned char *)(res->vram + j * res->xsize * 2 + i + 1) =
-          *(unsigned char *)(res->vram + (j + 1) * res->xsize * 2 + i + 1);
+  if (res->xsize <= 0 || res->ysize <= 0) {
+    return;
+  }
+  uint16_t *cells = res->vram;
+  int visible_cells = res->xsize * (res->ysize - 1);
+  uint16_t *source = cells + res->xsize;
+  if ((((uintptr_t)cells | (uintptr_t)source) &
+       (sizeof(text_pair_t) - 1)) == 0) {
+    text_pair_t *destination_wide = (text_pair_t *)cells;
+    const text_pair_t *source_wide = (const text_pair_t *)source;
+    for (int index = 0; index < visible_cells / 2; index++) {
+      destination_wide[index] = source_wide[index];
+    }
+    if (visible_cells & 1) {
+      cells[visible_cells - 1] = source[visible_cells - 1];
+    }
+  } else {
+    for (int index = 0; index < visible_cells; index++) {
+      cells[index] = source[index];
     }
   }
-  for (int i = 0; i < res->xsize * 2; i += 2) {
-    *(unsigned char *)(res->vram + (res->ysize - 1) * res->xsize * 2 + i) = ' ';
-    *(unsigned char *)(res->vram + (res->ysize - 1) * res->xsize * 2 + i + 1) =
-        res->color;
-  }
+  uint16_t blank = (uint16_t)res->color << 8 | ' ';
+  text_fill(cells + visible_cells, res->xsize, blank);
   res->gotoxy(res, 0, res->ysize - 1);
   res->Raw_y++;
 }
 
 void clear_TextMode(struct tty *res) {
-  for (int i = 0; i < res->xsize * 2; i += 2) {
-    for (int j = 0; j < res->ysize; j++) {
-      *(unsigned char *)(res->vram + j * res->xsize * 2 + i) = ' ';
-      *(unsigned char *)(res->vram + j * res->xsize * 2 + i + 1) = res->color;
-    }
+  if (res->xsize <= 0 || res->ysize <= 0) {
+    return;
   }
+  uint16_t *cells = res->vram;
+  uint16_t blank = (uint16_t)res->color << 8 | ' ';
+  text_fill(cells, res->xsize * res->ysize, blank);
   res->gotoxy(res, 0, 0);
   res->Raw_y = 0;
 }

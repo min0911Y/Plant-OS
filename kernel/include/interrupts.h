@@ -1,7 +1,6 @@
 #ifndef _INTERRUPTS_H
 #define _INTERRUPTS_H
 #include <ctypes.h>
-#include <perf.h>
 
 typedef void (*interrupt_entry_t)(void);
 
@@ -14,7 +13,6 @@ bool irq_is_valid(unsigned irq);
 #define IRQ_POLARITY_HIGH 0
 #define IRQ_POLARITY_LOW 1
 // inthandler.c
-void inthandler20(int cs, perf_irq_frame_t *frame);
 void inthandler21(int *esp);
 void inthandler2c(int *esp);
 // pic.c

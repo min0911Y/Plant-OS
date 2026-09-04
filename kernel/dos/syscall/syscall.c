@@ -282,6 +282,8 @@ enum syscall_id {
   SYSCALL_TASK_SNAPSHOT = 0x60,
   SYSCALL_CPU_INFO = 0x61,
   SYSCALL_TTY_INPUT_NOTIFY = 0x62,
+  SYSCALL_PERF_CONTROL = 0x63,
+  SYSCALL_INPUT_WAIT = 0x64,
   SYSCALL_COUNT,
 };
 
@@ -1049,16 +1051,35 @@ static void syscall_reset_fpu(x86_interrupt_frame_t *frame) {
 }
 
 static void syscall_keyboard_setup(x86_interrupt_frame_t *frame) {
-  (void)frame;
   mtask *task = current_task();
-  task->Pkeyfifo = malloc(sizeof(struct FIFO8));
-  task->Ukeyfifo = malloc(sizeof(struct FIFO8));
+  if (task->Pkeyfifo != NULL || task->Ukeyfifo != NULL) {
+    frame->eax = -1;
+    return;
+  }
+  struct FIFO8 *press_fifo = malloc(sizeof(*press_fifo));
+  struct FIFO8 *release_fifo = malloc(sizeof(*release_fifo));
   unsigned char *press_buffer = page_malloc(4096);
   unsigned char *release_buffer = page_malloc(4096);
-  fifo8_init(task->Pkeyfifo, 4096, press_buffer);
-  fifo8_init(task->Ukeyfifo, 4096, release_buffer);
+  if (press_fifo == NULL || release_fifo == NULL || press_buffer == NULL ||
+      release_buffer == NULL) {
+    if (press_buffer != NULL) {
+      page_free(press_buffer, 4096);
+    }
+    if (release_buffer != NULL) {
+      page_free(release_buffer, 4096);
+    }
+    free(release_fifo);
+    free(press_fifo);
+    frame->eax = -1;
+    return;
+  }
+  fifo8_init(press_fifo, 4096, press_buffer);
+  fifo8_init(release_fifo, 4096, release_buffer);
+  task->Pkeyfifo = press_fifo;
+  task->Ukeyfifo = release_fifo;
   task->keyboard_press = keyboard_press;
   task->keyboard_release = keyboard_release;
+  frame->eax = 0;
 }
 
 static void syscall_keyboard_fifo(x86_interrupt_frame_t *frame) {
@@ -1234,6 +1255,60 @@ static void syscall_use_keyboard(x86_interrupt_frame_t *frame) {
   disable_flag = 1;
   keyboard_use_task = current_task();
   frame->eax = 0;
+}
+
+enum input_wait_event {
+  INPUT_WAIT_MOUSE = 1u << 0,
+  INPUT_WAIT_KEY_PRESS = 1u << 1,
+  INPUT_WAIT_KEY_RELEASE = 1u << 2,
+  INPUT_WAIT_ALL = INPUT_WAIT_MOUSE | INPUT_WAIT_KEY_PRESS |
+                   INPUT_WAIT_KEY_RELEASE,
+};
+
+static uint32_t input_pending_events(const mtask *task, uint32_t requested) {
+  uint32_t pending = 0;
+  if ((requested & INPUT_WAIT_MOUSE) && task->mousefifo != NULL &&
+      fifo8_status(task->mousefifo) != 0) {
+    pending |= INPUT_WAIT_MOUSE;
+  }
+  if ((requested & INPUT_WAIT_KEY_PRESS) && task->Pkeyfifo != NULL &&
+      fifo8_status(task->Pkeyfifo) != 0) {
+    pending |= INPUT_WAIT_KEY_PRESS;
+  }
+  if ((requested & INPUT_WAIT_KEY_RELEASE) && task->Ukeyfifo != NULL &&
+      fifo8_status(task->Ukeyfifo) != 0) {
+    pending |= INPUT_WAIT_KEY_RELEASE;
+  }
+  return pending;
+}
+
+static void syscall_input_wait(x86_interrupt_frame_t *frame) {
+  extern mtask *keyboard_use_task;
+  extern mtask *mouse_use_task;
+  uint32_t requested = frame->ebx;
+  mtask *task = current_task();
+  if (requested == 0 || (requested & ~INPUT_WAIT_ALL) != 0 ||
+      ((requested & INPUT_WAIT_MOUSE) && mouse_use_task != task) ||
+      ((requested & (INPUT_WAIT_KEY_PRESS | INPUT_WAIT_KEY_RELEASE)) &&
+       keyboard_use_task != task) ||
+      ((requested & INPUT_WAIT_MOUSE) && task->mousefifo == NULL) ||
+      ((requested & INPUT_WAIT_KEY_PRESS) && task->Pkeyfifo == NULL) ||
+      ((requested & INPUT_WAIT_KEY_RELEASE) && task->Ukeyfifo == NULL)) {
+    frame->eax = -1;
+    return;
+  }
+
+  for (;;) {
+    irq_state_t interrupt_state = irq_save();
+    uint32_t pending = input_pending_events(task, requested);
+    if (pending != 0) {
+      frame->eax = pending;
+      irq_restore(interrupt_state);
+      return;
+    }
+    task_fall_blocked_reason(WAITING, WAIT_REASON_INPUT);
+    irq_restore(interrupt_state);
+  }
 }
 
 enum shared_memory_operation {
@@ -1621,6 +1696,37 @@ static void syscall_tty_input_notify(x86_interrupt_frame_t *frame) {
   frame->eax = tty_notify_input((struct tty *)(uintptr_t)frame->ebx) ? 0 : -1;
 }
 
+static void syscall_perf_control(x86_interrupt_frame_t *frame) {
+  if (!user_range_ok(frame->ebx, sizeof(perf_control_request_t))) {
+    frame->eax = PERF_ERR_INVALID;
+    return;
+  }
+
+  perf_control_request_t *request =
+      (perf_control_request_t *)(uintptr_t)frame->ebx;
+  if (request->size != sizeof(*request) ||
+      request->operation >= PERF_CONTROL_COUNT) {
+    frame->eax = PERF_ERR_INVALID;
+    return;
+  }
+
+  switch ((perf_control_operation_t)request->operation) {
+  case PERF_CONTROL_START:
+    frame->eax = perf_start(PERF_SESSION_MANUAL);
+    break;
+  case PERF_CONTROL_STOP:
+    frame->eax = perf_stop_and_dump("perf-stop");
+    break;
+  case PERF_CONTROL_STATUS:
+    frame->eax = PERF_OK;
+    break;
+  default:
+    frame->eax = PERF_ERR_INVALID;
+    break;
+  }
+  perf_get_status(&request->status);
+}
+
 static const syscall_handler_t syscall_handlers[SYSCALL_COUNT] = {
     [SYSCALL_VERSION] = syscall_version,
     [SYSCALL_PRINT_CHARACTER] = syscall_print_character,
@@ -1697,6 +1803,8 @@ static const syscall_handler_t syscall_handlers[SYSCALL_COUNT] = {
     [SYSCALL_TASK_SNAPSHOT] = syscall_task_snapshot,
     [SYSCALL_CPU_INFO] = syscall_cpu_info,
     [SYSCALL_TTY_INPUT_NOTIFY] = syscall_tty_input_notify,
+    [SYSCALL_PERF_CONTROL] = syscall_perf_control,
+    [SYSCALL_INPUT_WAIT] = syscall_input_wait,
 };
 
 void x86_syscall_dispatch(x86_interrupt_frame_t *frame) {

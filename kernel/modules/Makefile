@@ -14,7 +14,8 @@ dirs:
 	mkdir -p $(OUTDIR)
 	mkdir -p $(MODDIR)
 
-$(OUTDIR)/hello.o: hello/hello.c Makefile | dirs
+$(OUTDIR)/hello.o: hello/hello.c Makefile $(KERNEL_CONFIG_STAMP) \
+                      $(KERNEL_BUILD_FILES) | dirs
 	gcc $(MODULE_CFLAGS) -c hello/hello.c -o $(OUTDIR)/hello.o
 
 $(MODDIR)/hello.mod: $(OUTDIR)/hello.o | dirs

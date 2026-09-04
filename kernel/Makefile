@@ -172,6 +172,7 @@ Mimg : make_dir $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $
 		mcopy -i ./disk.img $(APPSOUTPATH)fputest.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)lua.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)ping.bin ::
+		mcopy -i ./disk.img $(APPSOUTPATH)curl.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)ps.bin ::
 
 		mcopy -i ./disk.img $(RESPATH)init.mst ::
@@ -216,6 +217,7 @@ Mimg : make_dir $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $
 		mcopy -i boot.img $(APPSOUTPATH)copydir.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)nettest.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)ping.bin ::
+		mcopy -i boot.img $(APPSOUTPATH)curl.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)dktest.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)rpctest.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)guitest.bin ::
@@ -242,93 +244,6 @@ Mimg : make_dir $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $
 		mcopy -i boot.img $(RESPATH)coin.wav ::/other
 
 
-		mmd -i $(IMGPATH)Disk2.img bin
-		mcopy -i $(IMGPATH)Disk2.img $(APPSOUTPATH)aigobang.bin ::/bin
-		mcopy -i $(IMGPATH)Disk2.img $(APPSOUTPATH)lua.bin ::/bin
-		mcopy -i $(IMGPATH)Disk2.img $(APPSOUTPATH)snake.bin ::/bin
-		mcopy -i $(IMGPATH)Disk2.img $(APPSOUTPATH)randnum.bin ::/bin
-		mcopy -i $(IMGPATH)Disk2.img $(APPSOUTPATH)bf.bin ::/bin
-		mcopy -i $(IMGPATH)Disk2.img $(APPSOUTPATH)copy.bin ::/bin
-		mcopy -i $(IMGPATH)Disk2.img $(APPSOUTPATH)basic.bin ::/bin
-		mcopy -i $(IMGPATH)Disk2.img $(APPSOUTPATH)cal.bin ::/bin
-
-		mcopy -i $(IMGPATH)Disk2.img $(APPSOUTPATH)editor.bin ::/bin
-		mcopy -i $(IMGPATH)Disk2.img $(RESPATH)editor.mst ::
-		
-
-		mmd -i $(IMGPATH)Disk3.img bin
-		mcopy -i $(IMGPATH)Disk3.img $(APPSOUTPATH)minizip.bin ::/bin
-		mcopy -i $(IMGPATH)Disk3.img $(APPSOUTPATH)miniunz.bin ::/bin
-		mcopy -i $(IMGPATH)Disk3.img $(APPSOUTPATH)image.bin ::/bin
-		mcopy -i $(IMGPATH)Disk3.img $(APPSOUTPATH)c4.bin ::/bin
-		mcopy -i $(IMGPATH)Disk3.img $(APPSOUTPATH)clock.bin ::/bin
-		mcopy -i $(IMGPATH)Disk3.img $(APPSOUTPATH)luac.bin ::/bin
-		mcopy -i $(IMGPATH)Disk3.img $(APPSOUTPATH)mmake.bin ::/bin
-		
-		mmd -i $(IMGPATH)res.img res
-		mcopy -i $(IMGPATH)res.img $(RESPATH)hello.nas ::/res
-		mcopy -i $(IMGPATH)res.img $(RESPATH)coin.wav ::/res
-		mcopy -i $(IMGPATH)res.img $(RESPATH)test.wav ::/res
-		mcopy -i $(IMGPATH)res.img $(RESPATH)desktop.jpg ::/res
-		mcopy -i $(IMGPATH)res.img $(RESPATH)huaji.jpg ::/res
-		mcopy -i $(IMGPATH)res.img $(RESPATH)load.jpg ::/res
-		mcopy -i $(IMGPATH)res.img $(RESPATH)io.bas ::/res
-		mcopy -i $(IMGPATH)res.img $(RESPATH)th.svg ::/res
-		mcopy -i $(IMGPATH)res.img $(RESPATH)shot1.png ::/res
-		mcopy -i $(IMGPATH)res.img $(RESPATH)test.htm ::/res
-		mcopy -i $(IMGPATH)res.img $(RESPATH)test1.htm ::/res
-		mcopy -i $(IMGPATH)res.img $(RESPATH)yee.bmp ::/res
-		mcopy -i $(IMGPATH)res.img $(RESPATH)fib.lua ::/res
-		mcopy -i $(IMGPATH)res.img $(RESPATH)guess.lua ::/res
-		mcopy -i $(IMGPATH)res.img $(RESPATH)gobang.lua ::/res
-		mcopy -i $(IMGPATH)res.img $(RESPATH)bainian.lua ::/res
-		mcopy -i $(IMGPATH)res.img $(RESPATH)student.lua ::/res
-		mcopy -i $(IMGPATH)res.img $(RESPATH)json.lua ::/res
-		mcopy -i $(IMGPATH)res.img $(RESPATH)asm.lua ::/res
-		mcopy -i $(IMGPATH)res.img $(RESPATH)chinese.txt ::/res
-		mcopy -i $(IMGPATH)res.img $(RESPATH)bf.txt ::/res
-		mcopy -i $(IMGPATH)res.img ../apps/c4/c4.c ::/res
-		
-		mmd -i $(IMGPATH)tcc.img tcc
-		mmd -i $(IMGPATH)tcc.img tcc/lib
-		mmd -i $(IMGPATH)tcc.img tcc/crt
-		mmd -i $(IMGPATH)tcc.img tcc/include
-		mmd -i $(IMGPATH)tcc.img tcc/inst
-		mcopy -i $(IMGPATH)tcc.img $(APPSOUTPATH)tcc.bin ::
-		mcopy -i $(IMGPATH)tcc.img $(APPSOUTPATH)tccinst.bin ::
-		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)tcc/tcc/crti.c ::
-		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)libs/libp.a ::/tcc/lib
-		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)libs/libtcc1.a ::/tcc/inst
-		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)libs/libabi.a ::/tcc/lib
-		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/arg.h ::/tcc/include
-		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/assert.h ::/tcc/include
-		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/ctype.h ::/tcc/include
-		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/ctypes.h ::/tcc/include
-		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/errno.h ::/tcc/include
-		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/fcntl.h ::/tcc/include
-		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/features.h ::/tcc/include
-		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/inttypes.h ::/tcc/include
-		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/limits.h ::/tcc/include
-		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/locale.h ::/tcc/include
-		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/math.h ::/tcc/include
-		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/socket.h ::/tcc/include
-		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/rand.h ::/tcc/include
-		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/setjmp.h ::/tcc/include
-		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/stdarg.h ::/tcc/include
-		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/stdbool.h ::/tcc/include
-		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/stddef.h ::/tcc/include
-		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/stdint.h ::/tcc/include
-		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/stdio.h ::/tcc/include
-		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/stdlib.h ::/tcc/include
-		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/string.h ::/tcc/include
-		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/syscall.h ::/tcc/include
-		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/time.h ::/tcc/include
-		mcopy -i $(IMGPATH)tcc.img $(APPSPATH)include/task.h ::/tcc/include
-
-		mcopy -i $(IMGPATH)nasm.img $(BIDPATH)nasm.zip ::
-		mcopy -i $(IMGPATH)doom1.img $(RESPATH)001doom.bin ::
-		mcopy -i $(IMGPATH)doom1.img $(APPSOUTPATH)doomcpy.bin ::
-		mcopy -i $(IMGPATH)doom2.img $(RESPATH)002doom.bin ::
 # 运行程序
 
 img_run :

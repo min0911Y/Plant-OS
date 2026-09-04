@@ -1,8 +1,7 @@
-#ifndef KERNEL_PERF_H
-#define KERNEL_PERF_H
+#ifndef PLANT_OS_PERF_H
+#define PLANT_OS_PERF_H
 
 #include <ctypes.h>
-#include <stddef.h>
 
 typedef enum {
   PERF_STATE_UNAVAILABLE,
@@ -10,11 +9,6 @@ typedef enum {
   PERF_STATE_RUNNING,
   PERF_STATE_DUMPING,
 } perf_state_t;
-
-typedef enum {
-  PERF_SESSION_BOOT,
-  PERF_SESSION_MANUAL,
-} perf_session_t;
 
 typedef struct {
   uint32_t state;
@@ -37,16 +31,6 @@ typedef struct {
   perf_status_t status;
 } perf_control_request_t;
 
-#ifdef __cplusplus
-static_assert(sizeof(perf_status_t) == 20, "perf status ABI size");
-static_assert(sizeof(perf_control_request_t) == 28,
-              "perf control request ABI size");
-#else
-_Static_assert(sizeof(perf_status_t) == 20, "perf status ABI size");
-_Static_assert(sizeof(perf_control_request_t) == 28,
-               "perf control request ABI size");
-#endif
-
 enum {
   PERF_OK = 0,
   PERF_ERR_UNAVAILABLE = -1,
@@ -54,10 +38,21 @@ enum {
   PERF_ERR_INVALID = -3,
 };
 
-int perf_start(perf_session_t session);
-int perf_stop_and_dump(const char *reason);
-void perf_get_status(perf_status_t *status);
-void perf_sample(uintptr_t instruction_pointer, uintptr_t frame_pointer,
-                 bool user_mode);
+#ifdef __cplusplus
+static_assert(sizeof(perf_status_t) == 20, "perf status ABI size");
+static_assert(sizeof(perf_control_request_t) == 28,
+              "perf control request ABI size");
+extern "C" {
+#else
+_Static_assert(sizeof(perf_status_t) == 20, "perf status ABI size");
+_Static_assert(sizeof(perf_control_request_t) == 28,
+               "perf control request ABI size");
+#endif
+
+int perf_control(perf_control_request_t *request);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

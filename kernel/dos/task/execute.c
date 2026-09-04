@@ -21,30 +21,6 @@ extern unsigned shell_size;
 unsigned div_round_up(unsigned num, unsigned size);
 void task_to_user_mode_shell(void);
 
-#ifdef KERNEL_PERF
-static int task_is_boot_shell_name(const char *filename) {
-  const char *suffix;
-  unsigned len;
-
-  if (filename == NULL) {
-    return 0;
-  }
-
-  len = strlen(filename);
-  if (len < 7) {
-    return 0;
-  }
-
-  suffix = filename + len - 7;
-  return (suffix[0] == 'p' || suffix[0] == 'P') &&
-         (suffix[1] == 's' || suffix[1] == 'S') &&
-         (suffix[2] == 'h' || suffix[2] == 'H') && suffix[3] == '.' &&
-         (suffix[4] == 'b' || suffix[4] == 'B') &&
-         (suffix[5] == 'i' || suffix[5] == 'I') &&
-         (suffix[6] == 'n' || suffix[6] == 'N');
-}
-#endif
-
 static inline unsigned page_entry_addr(uint32_t entry) {
   return entry & PAGE_ENTRY_ADDR_MASK;
 }
@@ -291,9 +267,6 @@ void task_to_user_mode_shell() {
   *(unsigned char *)(USER_HEAP_END) = 1;
   task->user_mode = 1;
   arch_task_set_kernel_stack(task->top);
-#ifdef KERNEL_PERF
-  perf_boot_stop_and_dump("shell-iret");
-#endif
 
   x86_interrupt_frame_t iframe;
   x86_user_frame_init(&iframe, user_eip, layout.stack_top);
@@ -373,11 +346,6 @@ void task_to_user_mode_elf(char *filename) {
   }
   task->user_mode = 1;
   arch_task_set_kernel_stack(task->top);
-#ifdef KERNEL_PERF
-  if (task_is_boot_shell_name(filename)) {
-    perf_boot_stop_and_dump("psh-iret");
-  }
-#endif
 
   x86_interrupt_frame_t iframe;
   x86_user_frame_init(&iframe, user_eip, layout.stack_top);

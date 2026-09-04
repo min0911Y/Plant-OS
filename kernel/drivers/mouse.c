@@ -3,66 +3,66 @@
 #include <drivers.h>
 #define KEYCMD_SENDTO_MOUSE 0xd4
 #define MOUSECMD_ENABLE 0xf4
-typedef unsigned char byte;
+#define MOUSECMD_SAMPLE_RATE 0xf3
+#define MOUSECMD_DEVICE_ID 0xf2
+#define MOUSE_RESPONSE_ACK 0xfa
+#define PS2_STATUS_OUTPUT_FULL 0x01
+#define PS2_STATUS_MOUSE_DATA 0x20
+#define PS2_IO_TIMEOUT_NS 100000000ull
 mtask *mouse_use_task = NULL;
-void mouse_wait(byte a_type) // unsigned char
-{
-  unsigned int _time_out = 100000; // unsigned int
-  if (a_type == 0) {
-    while (_time_out--) // Data
-    {
-      if ((x86_port_read8(0x64) & 1) == 1) {
-        return;
-      }
+static uint8_t mouse_packet_bytes;
+
+static bool mouse_read(uint8_t *value) {
+  uint64_t started = monotonic_time_ns();
+  while (monotonic_time_ns() - started < PS2_IO_TIMEOUT_NS) {
+    uint8_t status = x86_port_read8(PORT_KEYSTA);
+    if ((status & PS2_STATUS_OUTPUT_FULL) == 0) {
+      continue;
     }
-    return;
-  } else {
-    while (_time_out--) // Signal
-    {
-      if ((x86_port_read8(0x64) & 2) == 0) {
-        return;
-      }
+    uint8_t data = x86_port_read8(PORT_KEYDAT);
+    if (status & PS2_STATUS_MOUSE_DATA) {
+      *value = data;
+      return true;
     }
-    return;
   }
+  return false;
 }
 
-void mouse_write(byte a_write) // unsigned char
-{
-  // Wait to be able to send a command
-  mouse_wait(1);
-  // Tell the mouse we are sending a command
-  x86_port_write8(0x64, 0xD4);
-  // Wait for the final part
-  mouse_wait(1);
-  // Finally write
-  x86_port_write8(0x60, a_write);
-}
-
-byte mouse_read() {
-  // Get's response from mouse
-  mouse_wait(0);
-  return x86_port_read8(0x60);
-}
-lock_t mouse_l;
-void mouse_reset() { mouse_write(0xff); }
-void enable_mouse(struct MOUSE_DEC *mdec) {
-  lock_init(&mouse_l);
-  /* 激活鼠标 */
-  wait_KBC_sendready();
+static bool mouse_command(uint8_t command) {
+  if (!ps2_wait_input_empty()) {
+    return false;
+  }
   x86_port_write8(PORT_KEYCMD, KEYCMD_SENDTO_MOUSE);
-  wait_KBC_sendready();
-  x86_port_write8(PORT_KEYDAT, MOUSECMD_ENABLE);
+  if (!ps2_wait_input_empty()) {
+    return false;
+  }
+  x86_port_write8(PORT_KEYDAT, command);
+  uint8_t response;
+  return mouse_read(&response) && response == MOUSE_RESPONSE_ACK;
+}
+
+lock_t mouse_l;
+bool enable_mouse(struct MOUSE_DEC *mdec) {
+  static const uint8_t wheel_sample_rates[] = {200, 100, 80};
+  lock_init(&mouse_l);
   mdec->phase = 1;
-  mouse_write(0xf3);
-  mouse_write(200);
-  mouse_write(0xf3);
-  mouse_write(100);
-  mouse_write(0xf3);
-  mouse_write(80);
-  mouse_write(0xf2);
-  logk("mouseId=%d\n", mouse_read());
-  return; /* 顺利的话，键盘控制器会返回ACK(0xfa) */
+  if (!mouse_command(MOUSECMD_ENABLE)) {
+    return false;
+  }
+  for (size_t index = 0;
+       index < sizeof(wheel_sample_rates) / sizeof(wheel_sample_rates[0]);
+       index++) {
+    if (!mouse_command(MOUSECMD_SAMPLE_RATE) ||
+        !mouse_command(wheel_sample_rates[index])) {
+      return false;
+    }
+  }
+  uint8_t device_id;
+  if (!mouse_command(MOUSECMD_DEVICE_ID) || !mouse_read(&device_id)) {
+    return false;
+  }
+  logk("mouseId=%d\n", device_id);
+  return true;
 }
 
 void mouse_sleep(struct MOUSE_DEC *mdec) {
@@ -73,6 +73,7 @@ void mouse_sleep(struct MOUSE_DEC *mdec) {
 
 void mouse_ready(struct MOUSE_DEC *mdec) {
   mouse_use_task = current_task();
+  mouse_packet_bytes = 0;
   mdec->sleep = 0;
   return;
 }
@@ -117,40 +118,26 @@ int mouse_decode(struct MOUSE_DEC *mdec, unsigned char dat) {
   }
   return -1;
 }
-// int a = 1;
 unsigned m_cr3 = 0;
 unsigned m_eip = 0;
-unsigned times = 0;
 void inthandler2c(int *esp) {
-  // logk("2c\n");
-  unsigned char data;
   (void)esp;
   send_eoi(12);
-  data = x86_port_read8(PORT_KEYDAT);
-  times++;
-  if (times == 4) {
-    times = 0;
-    if (mouse_use_task != NULL &&
-        (!mouse_use_task->fifosleep || mouse_use_task->state == 1)) {
-      //   logk("put %08x\n",task_get_mouse_fifo(mouse_use_task));
-      fifo8_put(task_get_mouse_fifo(mouse_use_task), data);
-
-      if (current_task() != mouse_use_task) {
-      //   logk("SET 1\n");
-        mouse_use_task->weight = 5;
-        mouse_use_task->ready = 1;
-        mouse_use_task->urgent = 1;
-        mtask_run_now(mouse_use_task);
-        task_next();
-      } else {
-      }
-    }
-  } else {
-    if (mouse_use_task != NULL &&
-        (!mouse_use_task->fifosleep || mouse_use_task->state == 1)) {
-      //   logk("put %08x\n",task_get_mouse_fifo(mouse_use_task));
-      fifo8_put(task_get_mouse_fifo(mouse_use_task), data);
-    }
+  uint8_t data = x86_port_read8(PORT_KEYDAT);
+  mtask *task = mouse_use_task;
+  if (task == NULL || task_get_mouse_fifo(task) == NULL) {
+    return;
   }
-  return;
+  fifo8_put(task_get_mouse_fifo(task), data);
+  mouse_packet_bytes = (mouse_packet_bytes + 1) & 3u;
+  if (mouse_packet_bytes != 0) {
+    return;
+  }
+
+  task->weight = 5;
+  task_run(task);
+  if (current_task() != task) {
+    mtask_run_now(task);
+    task_next();
+  }
 }

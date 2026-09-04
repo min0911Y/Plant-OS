@@ -4,6 +4,7 @@
 #define KEYSTA_SEND_NOTREADY 0x02
 #define KEYCMD_WRITE_MODE 0x60
 #define KBC_MODE 0x47
+#define PS2_IO_TIMEOUT_NS 100000000ull
 static int caps_lock, shift, e0_flag = 0, ctrl = 0;
 char keytable[0x54] = { // 按下Shift
     0,    0x01, '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_',  '+',
@@ -19,23 +20,26 @@ char keytable1[0x54] = { // 未按下Shift
     0,    '\\', 'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/', 0,    '*',
     0,    ' ',  0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,    0,
     0,    '7',  '8', '9', '-', '4', '5', '6', '+', '1', '2', '3', '0',  '.'};
-void wait_KBC_sendready(void) {
-  /* 等待键盘控制电路准备完毕 */
-  for (;;) {
+bool ps2_wait_input_empty(void) {
+  uint64_t started = monotonic_time_ns();
+  while (monotonic_time_ns() - started < PS2_IO_TIMEOUT_NS) {
     if ((x86_port_read8(PORT_KEYSTA) & KEYSTA_SEND_NOTREADY) == 0) {
-      break;
+      return true;
     }
   }
-  return;
+  return false;
 }
 
-void init_keyboard(void) {
-  /* 初始化键盘控制电路 */
-  wait_KBC_sendready();
+bool init_keyboard(void) {
+  if (!ps2_wait_input_empty()) {
+    return false;
+  }
   x86_port_write8(PORT_KEYCMD, KEYCMD_WRITE_MODE);
-  wait_KBC_sendready();
+  if (!ps2_wait_input_empty()) {
+    return false;
+  }
   x86_port_write8(PORT_KEYDAT, KBC_MODE);
-  return;
+  return true;
 }
 int getch() {
   unsigned char ch;

@@ -201,7 +201,7 @@ void VBESetBuffer(int x,int y,int w,int h,void *buffer);
 void VBEDraw_Box(int x, int y, int x1, int y1, int color);
 char get_cons_color();
 void set_cons_color(uint8_t c);
-void start_keyboard_message();
+int start_keyboard_message(void);
 uint8_t key_press_status();
 uint8_t key_up_status();
 uint8_t get_key_press();
@@ -229,6 +229,14 @@ int waittid(unsigned tid);
 int mouse_enable();
 int mouse_dat_status();
 int mouse_dat_get();
+typedef enum {
+  INPUT_WAIT_MOUSE = 1u << 0,
+  INPUT_WAIT_KEY_PRESS = 1u << 1,
+  INPUT_WAIT_KEY_RELEASE = 1u << 2,
+  INPUT_WAIT_ALL = INPUT_WAIT_MOUSE | INPUT_WAIT_KEY_PRESS |
+                   INPUT_WAIT_KEY_RELEASE,
+} input_wait_event_t;
+int input_wait(uint32_t events);
 void api_yield(void);
 tty_t tty_alloc(void *vram,unsigned handle,unsigned xsize,unsigned ysize);
 void tty_set(unsigned tid,tty_t tty);

@@ -72,8 +72,8 @@ static window_t *window_at(gmouse_t *gmouse) {
 
 void gmouse(gmouse_t *gmouse) {
   mdec.phase = 1;
-  start_keyboard_message();
-  if (mouse_enable() != 0 || use_keyboard() != 0) {
+  if (start_keyboard_message() != 0 || mouse_enable() != 0 ||
+      use_keyboard() != 0) {
     logkf("GUI input devices are already owned\n");
     _exit((unsigned)-1);
   }
@@ -82,11 +82,9 @@ void gmouse(gmouse_t *gmouse) {
   unsigned new = 0;
   unsigned old = 0;
   for (;;) {
-    // logkf("%d\n",mouse_dat_status());
-    if (mouse_dat_status() == 0 && key_press_status() == 0 &&
-        key_up_status() == 0) {
-      api_yield();
-      continue;
+    if (input_wait(INPUT_WAIT_ALL) < 0) {
+      logkf("GUI input wait failed\n");
+      _exit((unsigned)-1);
     }
     TaskLock();
     if (mouse_dat_status() != 0) {

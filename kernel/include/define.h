@@ -182,8 +182,10 @@ enum WAIT_REASON {
   WAIT_REASON_TASK_GROUP_LOCK,
   WAIT_REASON_IPC,
   WAIT_REASON_SOCKET,
-  WAIT_REASON_KEYBOARD
+  WAIT_REASON_KEYBOARD,
+  WAIT_REASON_INPUT
 };
+enum { TASK_KERNEL_STACK_SIZE = 1024u * 1024u };
 typedef struct mtask {
   arch_task_context_t *context;
   uintptr_t entry;
@@ -638,32 +640,6 @@ struct MOUSE_DEC {
   int x, y, btn;
   int sleep;
   char roll;
-};
-struct pci_config_space_public {
-  unsigned short VendorID;
-  unsigned short DeviceID;
-  unsigned short Command;
-  unsigned short Status;
-  unsigned char RevisionID;
-  unsigned char ProgIF;
-  unsigned char SubClass;
-  unsigned char BaseClass;
-  unsigned char CacheLineSize;
-  unsigned char LatencyTimer;
-  unsigned char HeaderType;
-  unsigned char BIST;
-  unsigned int BaseAddr[6];
-  unsigned int CardbusCIS;
-  unsigned short SubVendorID;
-  unsigned short SubSystemID;
-  unsigned int ROMBaseAddr;
-  unsigned char CapabilitiesPtr;
-  unsigned char Reserved[3];
-  unsigned int Reserved1;
-  unsigned char InterruptLine;
-  unsigned char InterruptPin;
-  unsigned char MinGrant;
-  unsigned char MaxLatency;
 };
 typedef struct {
   unsigned short offset;

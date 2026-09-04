@@ -22,13 +22,10 @@ typedef struct signal_frame {
 
 // TODO: 给GUI接管
 void signal_deal(void) {
-  if (!current_task()) {
-    return;
-  }
-  if (current_task()->signal_disable) {
-    return;
-  }
   mtask *task = current_task();
+  if (task == NULL || task->tid == NULL_TID || task->signal_disable) {
+    return;
+  }
   if (task->signal & SIGMASK(SIGINT)) {
     task->signal &= ~SIGMASK(SIGINT);
     if (task->handler[SIGINT]) {

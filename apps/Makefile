@@ -30,6 +30,7 @@ default : Makefile
 	make -r -C clock
 	make -r -C nettest
 	make -r -C ping
+	make -r -C curl
 	make -r -C ps
 	make -r -C editor
 	make -r -C lua

@@ -1,4 +1,5 @@
 #include <arch/x86/io.h>
+#include <arch/x86/interrupt.h>
 #include <dos.h>
 #include <irq.h>
 #include <limits.h>
@@ -182,10 +183,10 @@ void sleep(unsigned long long milliseconds) {
 uint32_t mt2flag = 0;
 int g = 0;
 uint64_t global_time = 0;
-void inthandler20(int cs, perf_irq_frame_t *frame) {
+void inthandler20(int cs, x86_interrupt_frame_t *frame) {
   (void)cs;
 #ifdef KERNEL_PERF
-  perf_sample_irq(frame);
+  perf_sample(frame->eip, frame->ebp, (frame->cs & 3) == 3);
 #else
   (void)frame;
 #endif

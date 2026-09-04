@@ -3,6 +3,7 @@
 #include <dos.h>
 #include <drivers.h>
 #include <net_link.h>
+#include <pci.h>
 
 #define RTL8139_VENDOR_ID 0x10ec
 #define RTL8139_DEVICE_ID 0x8139
@@ -44,14 +45,6 @@ static uint8_t rtl8139_transmit_buffers[RTL8139_TX_BUFFERS]
                                       [RTL8139_TX_BUFFER_BYTES]
     __attribute__((aligned(16)));
 static uint8_t rtl8139_wrapped_frame[RTL8139_FRAME_MAX];
-
-static bool rtl8139_probe(uint8_t *bus, uint8_t *device, uint8_t *function) {
-  *bus = 0xff;
-  *device = 0xff;
-  *function = 0xff;
-  PCI_GET_DEVICE(RTL8139_VENDOR_ID, RTL8139_DEVICE_ID, bus, device, function);
-  return *bus != 0xff;
-}
 
 static uint16_t rtl8139_read16(uint16_t offset) {
   return x86_port_read16(rtl8139.io_base + offset);
@@ -102,18 +95,17 @@ static bool rtl8139_receive(void) {
 }
 
 bool rtl8139_link_start(net_link_receive_t receive, uint8_t mac[6]) {
-  uint8_t bus;
-  uint8_t device;
-  uint8_t function;
-  if (receive == NULL || mac == NULL ||
-      !rtl8139_probe(&bus, &device, &function)) {
+  const pci_device_t *device =
+      pci_find_device(RTL8139_VENDOR_ID, RTL8139_DEVICE_ID);
+  if (receive == NULL || mac == NULL || device == NULL) {
     logk("rtl8139: PCI device not found\n");
     return false;
   }
 
-  uint32_t port = pci_get_port_base(bus, device, function);
-  uint8_t irq = pci_get_drive_irq(bus, device, function);
-  if (port == 0 || port > 0xffffu - RTL8139_CONFIG1 || !irq_is_valid(irq)) {
+  uint32_t port = 0;
+  uint8_t irq = pci_interrupt_line(device);
+  if (!pci_find_io_bar(device, &port) || port > 0xffffu - RTL8139_CONFIG1 ||
+      !irq_is_valid(irq)) {
     logk("rtl8139: invalid I/O port=%08x irq=%d\n", port, irq);
     return false;
   }
@@ -125,10 +117,8 @@ bool rtl8139_link_start(net_link_receive_t receive, uint8_t mac[6]) {
   rtl8139.next_transmit = 0;
   rtl8139.active = false;
 
-  uint32_t command_status = pci_read_command_status(bus, device, function);
-  command_status = (command_status & 0xffff0000u) |
-                   ((command_status & 0xffffu) | 0x0007u);
-  pci_write_command_status(bus, device, function, command_status);
+  pci_command_enable(device, PCI_COMMAND_IO | PCI_COMMAND_MEMORY |
+                                 PCI_COMMAND_BUS_MASTER);
 
   irq_mask_set(irq);
   x86_port_write8(rtl8139.io_base + RTL8139_CONFIG1, 0);

@@ -17,7 +17,6 @@ extern struct ide_device {
 // struct TASK *sr1, *sr2;
 // struct TASK normal;
 unsigned int memsize;
-unsigned int PCI_ADDR_BASE;
 struct MOUSE_DEC mdec;
 extern unsigned char *IVT;
 void disable_sb16(void);
@@ -25,13 +24,12 @@ void init_mount_disk(void);
 int getReadyDisk();
 void init_devfs();
 void init_vfs();
-unsigned base_count;
 
 #ifdef KERNEL_DISABLE_MEMTEST
 #define KERNEL_MEMSIZE_BYTES ((unsigned int)KERNEL_MEMSIZE_MB * 1024U * 1024U)
 #endif
 
-#ifndef KERNEL_DISABLE_BOOT_BENCH
+#ifdef KERNEL_ENABLE_BOOT_BENCH
 static unsigned bench_loops_one_tick(void) {
   unsigned loops = 0;
   unsigned c = timerctl.count;
@@ -84,36 +82,17 @@ static void bench_timer_modes(void) {
              diff_pct >= 0 ? "tsc" : "tsc slower");
       logk("sysinit: timer bench diff_pct=%d\n", diff_pct);
     }
-
-    if (apic_timer_use_tsc_deadline()) {
-      base_count = tsc_base;
-    } else {
-      base_count = pit_base;
+    if (!apic_timer_use_tsc_deadline()) {
+      WARNING_K("unable to restore TSC-deadline timer after benchmark");
     }
   } else {
     pit_base = bench_loops_avg(rounds);
-    base_count = pit_base;
     printk("bench pit base=%08x\n", pit_base);
     logk("sysinit: timer bench pit_only=%08x\n", pit_base);
   }
 
-  logk("sysinit: timer bench done base_count=%08x mode=%s\n", base_count,
+  logk("sysinit: timer bench done mode=%s\n",
        apic_timer_uses_tsc_deadline() ? "tsc-deadline" : "pit");
-}
-#else
-static unsigned calibrate_base_count_fallback(void) {
-  unsigned loops = 0;
-  unsigned c = timerctl.count;
-
-  while (timerctl.count == c) {
-  }
-
-  c = timerctl.count;
-  while (timerctl.count - c < 100) {
-    loops++;
-  }
-
-  return loops / 100 ? loops / 100 : 1;
 }
 #endif
 
@@ -148,14 +127,12 @@ void sysinit(void) {
 
   irq_enable();
 #ifdef KERNEL_PERF
-  perf_boot_start();
+  perf_start(PERF_SESSION_BOOT);
 #endif
 
   if (!apic_timer_uses_tsc_deadline()) {
     irq_mask_clear(0);  // pit (timer)
   }
-  irq_mask_clear(1);  // keyboard
-  irq_mask_clear(12); // mouse
   x86_fpu_init_cpu();
 
   fifo8_init(&keyfifo, 32, (unsigned char *)keybuf);
@@ -164,11 +141,17 @@ void sysinit(void) {
   fifo8_init(&mousefifo_sr1, 128, (unsigned char *)mousebuf_sr1);
   fifo8_init(&keyfifo_sr2, 32, (unsigned char *)keybuf_sr2);
   fifo8_init(&mousefifo_sr2, 128, (unsigned char *)mousebuf_sr2);
-  init_keyboard();
-  enable_mouse(&mdec);
+  if (!init_keyboard()) {
+    WARNING_K("PS/2 keyboard initialization timed out");
+  }
+  if (!enable_mouse(&mdec)) {
+    WARNING_K("PS/2 mouse initialization timed out");
+  }
   logk("sysinit: enable_mouse done\n");
   mouse_sleep(&mdec);
   logk("sysinit: mouse_sleep done\n");
+  irq_mask_clear(1);  // keyboard
+  irq_mask_clear(12); // mouse
 
   logk("sysinit: kernel heap start\n");
   if (!kernel_heap_initialize()) {
@@ -268,18 +251,9 @@ void sysinit(void) {
   logk("sysinit: SetDrive done\n");
 
   printk("Hello Plant OS Kernel\n");
-#ifndef KERNEL_DISABLE_BOOT_BENCH
+#ifdef KERNEL_ENABLE_BOOT_BENCH
   bench_timer_modes();
-#else
-  base_count = calibrate_base_count_fallback();
-  printk("boot timer benchmark disabled\n");
-  printk("base count fallback %08x (%s)\n", base_count,
-         apic_timer_uses_tsc_deadline() ? "tsc-deadline" : "pit");
-  logk("sysinit: timer bench disabled base_count=%08x mode=%s\n", base_count,
-       apic_timer_uses_tsc_deadline() ? "tsc-deadline" : "pit");
 #endif
-  printk("base count is %08x (%s)\n", base_count,
-         apic_timer_uses_tsc_deadline() ? "tsc-deadline" : "pit");
   smp_start_aps();
   printk("smp online=%d/%d\n", smp_online_cpu_count(), smp_cpu_count());
   logk("sysinit: into_mtask start\n");

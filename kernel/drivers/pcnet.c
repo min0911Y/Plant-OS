@@ -3,6 +3,7 @@
 #include <dos.h>
 #include <drivers.h>
 #include <net_link.h>
+#include <pci.h>
 
 #define PCNET_VENDOR_ID 0x1022
 #define PCNET_DEVICE_ID 0x2000
@@ -133,26 +134,18 @@ static bool pcnet_receive(void) {
   }
 }
 
-static bool pcnet_probe(uint8_t *bus, uint8_t *device, uint8_t *function) {
-  *bus = 0xff;
-  *device = 0xff;
-  *function = 0xff;
-  PCI_GET_DEVICE(PCNET_VENDOR_ID, PCNET_DEVICE_ID, bus, device, function);
-  return *bus != 0xff;
-}
-
 bool pcnet_link_start(net_link_receive_t receive, uint8_t mac[6]) {
-  uint8_t bus;
-  uint8_t device;
-  uint8_t function;
-  if (receive == NULL || mac == NULL || !pcnet_probe(&bus, &device, &function)) {
+  const pci_device_t *device =
+      pci_find_device(PCNET_VENDOR_ID, PCNET_DEVICE_ID);
+  if (receive == NULL || mac == NULL || device == NULL) {
     logk("pcnet: PCI device not found\n");
     return false;
   }
 
-  uint32_t port = pci_get_port_base(bus, device, function);
-  uint8_t irq = pci_get_drive_irq(bus, device, function);
-  if (port == 0 || port > 0xffffu - PCNET_BDP || !irq_is_valid(irq)) {
+  uint32_t port = 0;
+  uint8_t irq = pci_interrupt_line(device);
+  if (!pci_find_io_bar(device, &port) || port > 0xffffu - PCNET_BDP ||
+      !irq_is_valid(irq)) {
     logk("pcnet: invalid I/O port=%08x irq=%d\n", port, irq);
     return false;
   }
@@ -164,10 +157,8 @@ bool pcnet_link_start(net_link_receive_t receive, uint8_t mac[6]) {
   pcnet.next_transmit = 0;
   pcnet.active = false;
 
-  uint32_t command_status = pci_read_command_status(bus, device, function);
-  command_status = (command_status & 0xffff0000u) |
-                   ((command_status & 0xffffu) | 0x0007u);
-  pci_write_command_status(bus, device, function, command_status);
+  pci_command_enable(device, PCI_COMMAND_IO | PCI_COMMAND_MEMORY |
+                                 PCI_COMMAND_BUS_MASTER);
 
   irq_mask_set(irq);
   x86_port_read16(pcnet.io_base + PCNET_RESET);

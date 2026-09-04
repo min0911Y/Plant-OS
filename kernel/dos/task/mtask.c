@@ -7,7 +7,7 @@
 #include <limits.h>
 #include <smp.h>
 #include <user_space.h>
-#define STACK_SIZE 1024 * 1024
+#define STACK_SIZE TASK_KERNEL_STACK_SIZE
 #define REAPER_TID 0u
 #define TASK_ID_NONE ((uint32_t)-1)
 #define TASK_KILLED_STATUS ((unsigned)-1)

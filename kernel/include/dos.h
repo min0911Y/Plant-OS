@@ -26,7 +26,6 @@ void timer_cancel_for_task(mtask *task);
 void timer_free(struct TIMER *timer);
 void timer_init(struct TIMER *timer, struct FIFO8 *fifo, unsigned char data);
 void timer_settime(struct TIMER *timer, unsigned int timeout);
-void inthandler20(int cs, perf_irq_frame_t *frame);
 // mtask.c
 typedef struct {
   uint32_t next_tid;

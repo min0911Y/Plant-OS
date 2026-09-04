@@ -2,6 +2,8 @@
 
 #include <arch/x86/cpuid.h>
 #include <dos.h>
+#include <limits.h>
+#include <pci.h>
 
 static uint8_t *cache;
 #define SATA_SIG_ATA 0x00000101   // SATA drive
@@ -397,7 +399,7 @@ typedef struct SATA_Ident {
   unsigned short words236_254[19];    /* Reserved */
   unsigned short integrity;           /* Cheksum, Signature */
 } SATA_ident_t;
-static uint32_t ahci_bus, ahci_slot, ahci_func, port, ahci_ports_base_addr;
+static uint32_t port, ahci_ports_base_addr;
 static uint32_t drive_mapping[0xff];
 static uint32_t ports[32];
 static uint32_t port_total = 0;
@@ -804,40 +806,22 @@ void flush_cache(void *addr) {
   }
 }
 void ahci_init() {
-  int i, j, k;
-  int flag = 0;
-  for (i = 0; i < 255; i++) {
-    for (j = 0; j < 32; j++) {
-      for (k = 0; k < 8; k++) {
-        uint32_t p = read_pci(i, j, k, 0x8);
-        uint16_t *reg =
-            (uint16_t *)(void *)&p; // reg[0] ---> P & R, reg[1] ---> Sub Class Class Code
-        uint8_t *codes =
-            (uint8_t *)&reg[1]; // codes[0] --> Sub Class Code  codes[1] Class Code
-        if (codes[1] == 0x1 && codes[0] == 0x6) {
-          ahci_bus = i;
-          ahci_slot = j;
-          ahci_func = k;
-          flag = 1;
-          goto OK;
-        }
-      }
-    }
-  }
-OK:
-  if (!flag) {
+  const pci_device_t *controller = pci_find_class(0x01, 0x06);
+  if (controller == NULL) {
     logk("Couldn't find AHCI Controller\n");
+    return;
+  }
+  pci_bar_t abar;
+  if (!pci_read_bar(controller, 5, &abar) || abar.type == PCI_BAR_IO ||
+      abar.address > UINT_MAX) {
+    logk("AHCI controller has an invalid ABAR\n");
     return;
   }
   cache_line_size = get_cache_line_size();
   logk("cache line size = %d\n", cache_line_size);
-  hba_mem_address = (HBA_MEM *)read_bar_n(ahci_bus, ahci_slot, ahci_func, 5);
+  hba_mem_address = (HBA_MEM *)(uintptr_t)abar.address;
   logk("HBA Address has been Mapped in %08x ", hba_mem_address);
-  // 设置允许中断产生
-  uint32_t conf = pci_read_command_status(ahci_bus, ahci_slot, ahci_func);
-  conf &= 0xffff0000;
-  conf |= 0x7;
-  pci_write_command_status(ahci_bus, ahci_slot, ahci_func, conf);
+  pci_command_enable(controller, PCI_COMMAND_MEMORY | PCI_COMMAND_BUS_MASTER);
 
   // 设置HBA中 GHC控制器的 AE（AHCI Enable）位，关闭AHCI控制器的IDE仿真模式
   hba_mem_address->ghc |= (1 << 31);
@@ -851,13 +835,13 @@ OK:
   logk("AHCI port base address has been alloced in 0x%08x!\n",
        ahci_ports_base_addr);
   logk("The Useable Ports:");
-  for (i = 0; i < port_total; i++) {
+  for (int i = 0; i < port_total; i++) {
     logk("%d ", ports[i]);
     port_rebase(&(hba_mem_address->ports[ports[i]]), ports[i]);
   }
   logk("\n");
 
-  for (i = 0; i < port_total; i++) {
+  for (int i = 0; i < port_total; i++) {
     SATA_ident_t buf;
     int a = ahci_identify(&(hba_mem_address->ports[ports[i]]), &buf);
     if (!a) {
