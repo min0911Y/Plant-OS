@@ -23,7 +23,7 @@ SOURCES := $(wildcard $(ARCH_DIR)/*.c) arch/x86/common/interrupt_controller.c \
 	dos/init/main.c dos/init/init.c dos/init/kernelc.c dos/mm/heap.c \
 	$(wildcard dos/task/*.c dos/hal/*.c dos/tools/*.c) dos/syscall/syscall.c \
 	dos/perf/perf.c dos/mm/kasan.c \
-	io/tty.c io/screen.c io/input.c io/is.c io/log.c io/draw.c io/sheet.c \
+	io/input_device.c io/tty.c io/screen.c io/input.c io/is.c io/log.c io/draw.c io/sheet.c \
 	io/fartty.c io/flanterm.c $(FLANTERM)/flanterm.c $(FLANTERM)/flanterm_backends/fb.c \
 	$(filter-out fs/iniReader.c,$(wildcard fs/*.c)) $(wildcard mst/*.c cmd/*.c drivers/*.c) modules/loader.c \
 	std/std.c std/format.c std/linux_style_file.c \

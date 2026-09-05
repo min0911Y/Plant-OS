@@ -29,7 +29,6 @@ typedef vram_t color_t;
 #define get_tid(task) task->tid
 #define POWERINTDOS 0
 #define HIGHTEXTMODE 1
-extern mouse_decoder_t mdec;
 extern int gmx, gmy;
 extern unsigned char *font, *ascfont, *hzkfont;
 extern struct TIMERCTL timerctl;
@@ -143,7 +142,8 @@ enum WAIT_REASON {
   WAIT_REASON_IPC,
   WAIT_REASON_SOCKET,
   WAIT_REASON_KEYBOARD,
-  WAIT_REASON_INPUT
+  WAIT_REASON_INPUT,
+  WAIT_REASON_USB
 };
 enum { TASK_KERNEL_STACK_SIZE = 1024u * 1024u };
 typedef struct mtask {
@@ -437,12 +437,14 @@ typedef enum {
 } vdisk_type_t;
 
 typedef struct {
-  void (*Read)(char drive, unsigned char *buffer, unsigned int number,
+  bool (*Read)(char drive, unsigned char *buffer, unsigned int number,
                unsigned int lba);
-  void (*Write)(char drive, unsigned char *buffer, unsigned int number,
+  bool (*Write)(char drive, unsigned char *buffer, unsigned int number,
                 unsigned int lba);
   vdisk_type_t flag;
-  unsigned int size; // 大小
+  uint64_t size; // Capacity in bytes.
+  bool (*Sync)(char drive);
+  bool owns_serialization;
   unsigned int max_transfer_sectors;
   char DriveName[50];
 } vdisk;

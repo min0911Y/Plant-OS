@@ -236,6 +236,10 @@ void arch_interrupt_init(void) {
   }
   x86_interrupt_entry_set(0x36, x86_syscall_entry,
                           X86_USER_ACCESS(X86_ACCESS_INTERRUPT_GATE));
+  for (unsigned i = 0; i < X86_MESSAGE_VECTOR_COUNT; i++) {
+    x86_interrupt_entry_set(X86_MESSAGE_VECTOR_FIRST + i, x86_message_entries[i],
+                            X86_ACCESS_INTERRUPT_GATE);
+  }
   x86_interrupt_entry_set(X86_VECTOR_RESCHEDULE, x86_reschedule_entry,
                           X86_ACCESS_INTERRUPT_GATE);
   x86_interrupt_entry_set(X86_VECTOR_SMP_WAKE, x86_smp_wake_entry,

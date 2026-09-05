@@ -12,6 +12,7 @@ extern x86_syscall_dispatch
 
 global null_inthandler
 global x86_irq_entries
+global x86_message_entries
 global x86_reschedule_entry
 global x86_smp_wake_entry
 global x86_syscall_entry
@@ -69,6 +70,13 @@ x86_irq_entry_%1:
 %assign irq irq + 1
 %endrep
 
+; Must match X86_MESSAGE_VECTOR_FIRST/END in interrupt_controller.h.
+%assign irq 0x40
+%rep 0xf0 - 0x40
+  X86_IRQ_ENTRY irq
+%assign irq irq + 1
+%endrep
+
 x86_reschedule_entry:
   X86_FRAME_SAVE
   call kernel_lock_enter
@@ -87,6 +95,13 @@ section .rodata align=4
 x86_irq_entries:
 %assign irq 0
 %rep 24
+  dd x86_irq_entry_%+irq
+%assign irq irq + 1
+%endrep
+
+x86_message_entries:
+%assign irq 0x40
+%rep 0xf0 - 0x40
   dd x86_irq_entry_%+irq
 %assign irq irq + 1
 %endrep

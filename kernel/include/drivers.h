@@ -69,13 +69,8 @@ int getch();
 int input_char_inSM();
 int kbhit();
 // mouse.c
-bool enable_mouse(mouse_decoder_t *mdec);
-void mouse_sleep(mouse_decoder_t *mdec);
-void mouse_ready(mouse_decoder_t *mdec);
-int mouse_decode(mouse_decoder_t *mdec, unsigned char dat);
+bool enable_mouse(void);
 void mouseinput();
-// sb16.c
-void disable_sb16(void);
 // pic.c
 void init_pic(void);
 void pic_disable(void);
@@ -120,15 +115,17 @@ int logout_vdisk(char drive);
 int rw_vdisk(char drive, unsigned int lba, unsigned char *buffer,
              unsigned int number, int read);
 bool have_vdisk(char drive);
+bool disk_sync(char drive);
+bool disk_writable(char drive);
 vdisk_type_t vdisk_type(char drive);
 char first_vdisk(void);
 char next_vdisk(char drive);
 // timer.c
 void sleep(unsigned long long s);
 // ide.c
-void ide_read_sectors(unsigned char drive, unsigned char numsects,
+bool ide_read_sectors(unsigned char drive, unsigned char numsects,
                       unsigned int lba, unsigned short es, void *buffer);
-void ide_write_sectors(unsigned char drive, unsigned char numsects,
+bool ide_write_sectors(unsigned char drive, unsigned char numsects,
                        unsigned int lba, unsigned short es, void *buffer);
 void ide_initialize(void);
 // ahci.c

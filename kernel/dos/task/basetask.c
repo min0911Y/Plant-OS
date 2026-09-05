@@ -1,6 +1,7 @@
 #include <dos.h>
 #include <irq.h>
 #include <pci.h>
+#include <usb.h>
 int init_ok_flag = 0;
 char *shell_data;
 unsigned shell_size;
@@ -96,6 +97,7 @@ void init() {
       WARNING_K("network: Ethernet unavailable; loopback remains available");
     }
   }
+  xhci_initialize();
 #if defined(KERNEL_ARCH_I386)
   if (strcmp("HIGHTEXTMODE", env_read("video_mode")) == 0) {
     running_mode = SwitchToHighTextMode() ? HIGHTEXTMODE : POWERINTDOS;
@@ -128,7 +130,9 @@ void init() {
   init_ok_flag = 1;
   extern struct tty *tty_default;
   tty_set(current_task(), tty_default);
+#ifndef KERNEL_USB_DEBUG
   clear();
+#endif
   vfs_stat_t shell_status;
   fp = fopen("psh.bin", "rb");
   if (fp == NULL || vfs_stat(current_task()->fs_context, "psh.bin",

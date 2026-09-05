@@ -30,6 +30,7 @@
 #define PG_RWW 2u
 #define PG_USU 4u
 #define PG_PCD 16u
+#define PG_DEVICE 512u
 #define PG_SHARED 1024u
 #define PAGE_PRESENT_RW_FLAGS (PG_P | PG_RWW)
 #define PAGE_USER_PRESENT_FLAGS (PG_P | PG_USU)
@@ -810,10 +811,47 @@ void init_page(const boot_info_t *boot_info) {
   arch_address_space_activate(arch_address_space_kernel());
   x86_cr0_write(x86_cr0_read() | X86_CR0_PG | X86_CR0_WP);
 }
+
+void *arch_mmio_map(uint64_t physical_address, size_t size) {
+  if (size == 0 || physical_address > UINT_MAX ||
+      size - 1 > UINT_MAX - (uintptr_t)physical_address) {
+    return NULL;
+  }
+  uintptr_t first = (uintptr_t)physical_address & PAGE_ENTRY_ADDR_MASK;
+  uintptr_t last = ((uintptr_t)physical_address + size - 1) & PAGE_ENTRY_ADDR_MASK;
+  page_table_access_t access = page_table_access_begin();
+  /* A process can replace a bootstrap PDE with its private user table.
+   * Never hide those user mappings behind a physical identity alias. */
+  for (unsigned index = DIDX(first); index <= DIDX(last); index++) {
+    uint32_t kernel = ((uint32_t *)I386_KERNEL_PAGE_DIRECTORY)[index];
+    uint32_t active = ((uint32_t *)access.active_address_space)[index];
+    if (page_entry_addr(active) != page_entry_addr(kernel) ||
+        page_entry_has_any(active, PG_USU)) {
+      page_table_access_end(&access);
+      return NULL;
+    }
+  }
+  uint32_t *entries = (uint32_t *)I386_KERNEL_PAGE_TABLES;
+  bool changed = false;
+  for (unsigned index = IDX(first); index <= IDX(last); index++) {
+    uint32_t flags = PAGE_PRESENT_RW_FLAGS | PG_PCD | PG_DEVICE;
+    if (page_entry_addr(entries[index]) != PAGE(index) ||
+        !page_entry_has_all(entries[index], flags)) {
+      entries[index] = page_entry_make(PAGE(index), flags);
+      changed = true;
+    }
+  }
+  if (changed && access.active_address_space == arch_address_space_kernel()) {
+    arch_address_space_activate(arch_address_space_kernel());
+  }
+  page_table_access_end(&access);
+  return (void *)(uintptr_t)physical_address;
+}
+
 void pf_set(uintptr_t memsize) {
   uint32_t *pte = (uint32_t *)I386_KERNEL_PAGE_TABLES;
   for (int i = 0; pte != (uint32_t *)I386_KERNEL_PAGE_TABLES_END; pte++, i++) {
-    if (i >= (int)(memsize / PAGE_SIZE_BYTES) &&
+    if (!page_entry_has_any(*pte, PG_DEVICE) && i >= (int)(memsize / PAGE_SIZE_BYTES) &&
         i <= (int)(PAGE_KERNEL_BASE / PAGE_SIZE_BYTES)) {
       *pte = 0;
     }

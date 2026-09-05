@@ -25,6 +25,17 @@ qemu-system-x86_64 -accel tcg -cpu max -smp 4 -m 1024 \
 
 UEFI 启动可使用 `/usr/share/OVMF/OVMF_CODE_4M.fd` 和一份可写的 `OVMF_VARS_4M.fd` 副本，分别作为只读/可写 pflash drive。ISO 使用 EFI 分区及 El Torito 元数据；不能通过键盘注入绕过 Limine 的卷识别错误。
 
+Limine MP 请求声明支持 x2APIC，允许启动器保留固件已启用、甚至锁定的
+x2APIC 模式。缺失该声明会触发启动器的
+`kernel does not support x2APIC and x2APIC cannot be disabled` PANIC，
+此时尚未进入 Plant OS 内核。内核已有 MSR 形式的 x2APIC 后端，仅在
+xAPIC 模式下映射 LAPIC MMIO；不需要为此关闭 BIOS 中的 x2APIC。
+
+回归可运行 `python3 scripts/test-x86_64.py --apic x2apic --firmware bios`
+和 `--apic x2apic --firmware uefi`；`--apic xapic` 验证另一条路径。
+脚本同时核对 Limine 的交接标志和内核 APIC 模式，QEMU 不支持指定特性时
+直接失败，不把静默降级后的测试算作 x2APIC 验证。
+
 ## 启动、地址空间与 ABI
 
 | 项目 | i386 | x86_64 |

@@ -52,7 +52,6 @@ typedef struct {
 
 typedef struct {
   uint16_t io_base;
-  uint8_t irq;
   uint8_t next_receive;
   uint8_t next_transmit;
   bool active;
@@ -60,7 +59,7 @@ typedef struct {
 } pcnet_state_t;
 
 static pcnet_state_t pcnet;
-static void pcnet_interrupt(void);
+static bool pcnet_interrupt(unsigned irq);
 static pcnet_init_block_t pcnet_init_block __attribute__((aligned(16)));
 static pcnet_descriptor_t
     pcnet_receive_descriptors[PCNET_RING_COUNT] __attribute__((aligned(16)));
@@ -187,14 +186,13 @@ bool pcnet_link_start(net_link_receive_t receive, uint8_t mac[6]) {
   }
 
   pcnet.io_base = (uint16_t)port;
-  pcnet.irq = irq;
   pcnet.receive = receive;
   pcnet.next_receive = 0;
   pcnet.next_transmit = 0;
   pcnet.active = false;
 
-  pci_command_enable(device, PCI_COMMAND_IO | PCI_COMMAND_MEMORY |
-                                 PCI_COMMAND_BUS_MASTER);
+  pci_command_update(
+      device, PCI_COMMAND_IO | PCI_COMMAND_MEMORY | PCI_COMMAND_BUS_MASTER, 0);
 
   irq_mask_set(irq);
   x86_port_read16(pcnet.io_base + PCNET_RESET);
@@ -218,7 +216,7 @@ bool pcnet_link_start(net_link_receive_t receive, uint8_t mac[6]) {
   pcnet_write_csr(PCNET_CSR4, pcnet_read_csr(PCNET_CSR4) | 0x0c00);
   pcnet_write_csr(PCNET_CSR0, 0x0042);
 
-  if (!irq_register_handler(irq, pcnet_interrupt)) {
+  if (!irq_register_handler(irq, pcnet_interrupt, IRQ_SHARED)) {
     logk("pcnet: unable to register IRQ %d\n", irq);
     return false;
   }
@@ -257,17 +255,12 @@ int pcnet_link_transmit(const uint8_t *frame, uint16_t length) {
   return 0;
 }
 
-static void pcnet_interrupt(void) {
+static bool pcnet_interrupt(unsigned irq) {
   bool reschedule = false;
   uint16_t status = pcnet_read_csr(PCNET_CSR0);
   pcnet_write_csr(PCNET_CSR0, status);
   if (pcnet.active && (status & 0x0400) != 0) {
     reschedule = pcnet_receive();
   }
-  if (pcnet.active) {
-    send_eoi(pcnet.irq);
-  }
-  if (reschedule) {
-    task_next();
-  }
+  return reschedule;
 }

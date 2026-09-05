@@ -1,4 +1,5 @@
 #include <arch/x86/x86_64/cpu.h>
+#include <arch/x86/interrupt_controller.h>
 #include <dos.h>
 #include <irq.h>
 #include <page_fault.h>
@@ -135,6 +136,9 @@ void x64_interrupt_dispatch(x64_interrupt_frame_t *frame) {
     irq_dispatch(vector - 0x20);
     if (vector <= 0x21)
       signal_deal();
+  } else if (vector >= X86_MESSAGE_VECTOR_FIRST &&
+             vector < X86_MESSAGE_VECTOR_END) {
+    irq_dispatch(vector);
   }
   kernel_lock_leave();
 }

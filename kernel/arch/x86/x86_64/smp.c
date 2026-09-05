@@ -19,6 +19,9 @@ void smp_topology_init(void) {
   x64_cpus[0].online = 1;
   if (!mp)
     return;
+  logk("smp: Limine handoff mode=%s cpus=%llu bsp=%u\n",
+       mp->flags & LIMINE_MP_RESPONSE_X86_64_X2APIC ? "x2apic" : "xapic",
+       (unsigned long long)mp->cpu_count, mp->bsp_lapic_id);
   if (mp->cpu_count > SMP_MAX_CPUS) {
     Panic_K("Limine CPU count exceeds scheduler capacity");
     arch_halt();

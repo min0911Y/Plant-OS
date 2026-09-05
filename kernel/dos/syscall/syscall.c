@@ -1,6 +1,7 @@
 #include <cmd.h>
 #include <dos.h>
 #include <framebuffer.h>
+#include <input_device.h>
 #include <irq.h>
 #include <limits.h>
 #include <math_util.h>
@@ -404,33 +405,32 @@ static void syscall_mouse_event(syscall_context_t *frame) {
   mtask *task = current_task();
   int old_mouse_x = task->mx;
   int old_mouse_y = task->my;
-  int buffer_x = task->mx * 8;
-  int buffer_y = task->my * 16;
+  int64_t buffer_x = (int64_t)task->mx * 8;
+  int64_t buffer_y = (int64_t)task->my * 16;
   int background = *(char *)(task->TTY->vram + old_mouse_y *
                                                     task->TTY->xsize * 2 +
                             old_mouse_x * 2 + 1);
-  if (mdec.sleeping == 1) {
-    mouse_ready(&mdec);
+
+  if (mouse_use_task == NULL) {
+    mouse_ready();
   }
 
+  mouse_event_t event;
   for (;;) {
-    if (fifo8_status(task_get_mouse_fifo(task)) == 0) {
-      task_next();
+    if (!input_mouse_read(&event)) {
+      task_fall_blocked_reason(WAITING, WAIT_REASON_INPUT);
       signal_deal();
       continue;
     }
 
-    int data = fifo8_get(task_get_mouse_fifo(task));
-    if (mouse_decode(&mdec, data) == 0) {
-      continue;
-    }
     if (task->TTY != now_tty() && task->TTY->using1 == 1) {
       continue;
     }
-    if (mdec.wheel != MOUSE_ROLL_NONE) {
+    if (event.wheel != MOUSE_ROLL_NONE) {
       frame->argument1 = task->mx;
       frame->argument2 = task->my;
-      frame->argument3 = 3 + mdec.wheel;
+      frame->argument3 =
+          3 + (event.wheel > 0 ? MOUSE_ROLL_UP : MOUSE_ROLL_DOWN);
       *(char *)(task->TTY->vram + task->my * task->TTY->xsize * 2 +
                 task->mx * 2 + 1) = background;
       task->mx = old_mouse_x;
@@ -440,8 +440,8 @@ static void syscall_mouse_event(syscall_context_t *frame) {
 
     old_mouse_x = task->mx;
     old_mouse_y = task->my;
-    buffer_x += mdec.x;
-    buffer_y += mdec.y;
+    buffer_x += event.x;
+    buffer_y += event.y;
     if (buffer_x > (task->TTY->xsize - 1) * 8) {
       buffer_x = (task->TTY->xsize - 1) * 8;
     } else if (buffer_x < 0) {
@@ -462,11 +462,11 @@ static void syscall_mouse_event(syscall_context_t *frame) {
     *(char *)(task->TTY->vram + task->my * task->TTY->xsize * 2 +
               task->mx * 2 + 1) = ~background;
 
-    if (mdec.buttons & 0x01) {
+    if (event.buttons & 0x01) {
       frame->argument3 = 1;
-    } else if (mdec.buttons & 0x02) {
+    } else if (event.buttons & 0x02) {
       frame->argument3 = 2;
-    } else if (mdec.buttons & 0x04) {
+    } else if (event.buttons & 0x04) {
       frame->argument3 = 3;
     } else {
       continue;
@@ -486,7 +486,7 @@ static void syscall_mouse_event(syscall_context_t *frame) {
 }
 
 static void syscall_mouse_supported(syscall_context_t *frame) {
-  extern mtask *mouse_use_task;
+
   frame->value = running_mode == POWERINTDOS && mouse_use_task == NULL;
 }
 
@@ -787,9 +787,9 @@ static void syscall_exit(syscall_context_t *frame) {
   mtask *task = current_task();
   unsigned status = frame->argument0;
   if (!*(unsigned char *)USER_HEAP_END) {
-    extern mtask *mouse_use_task;
+
     if (mouse_use_task == task) {
-      mouse_sleep(&mdec);
+      mouse_sleep();
     }
   } else {
     mtask *parent = task->ptid == 0 || task->ptid == (uint32_t)-1
@@ -1284,20 +1284,30 @@ static void syscall_wait(syscall_context_t *frame) {
 }
 
 static void syscall_mouse_enable(syscall_context_t *frame) {
-  extern mtask *mouse_use_task;
+
   if (mouse_use_task != NULL && mouse_use_task != current_task()) {
     frame->value = -1;
     return;
   }
-  mouse_ready(&mdec);
+  mouse_ready();
   frame->value = 0;
 }
 
 static void syscall_mouse_data(syscall_context_t *frame) {
+  struct FIFO8 *fifo = current_task()->mousefifo;
   if (frame->value == SYSCALL_MOUSE_PENDING) {
-    frame->value = fifo8_status(task_get_mouse_fifo(current_task()));
-  } else {
-    frame->value = fifo8_get(task_get_mouse_fifo(current_task()));
+    frame->value =
+        fifo == NULL ? 0 : fifo8_status(fifo) / sizeof(mouse_event_t);
+    return;
+  }
+  if (!user_range_ok(frame->argument0, sizeof(mouse_event_t))) {
+    frame->value = -1;
+    return;
+  }
+  mouse_event_t event;
+  frame->value = input_mouse_read(&event);
+  if (frame->value != 0) {
+    memcpy((void *)frame->argument0, &event, sizeof(event));
   }
 }
 
@@ -1333,13 +1343,12 @@ static void syscall_return_to_app(syscall_context_t *frame) {
 }
 
 static void syscall_use_keyboard(syscall_context_t *frame) {
-  extern int disable_flag;
-  extern mtask *keyboard_use_task;
+
   if (keyboard_use_task != NULL && keyboard_use_task != current_task()) {
     frame->value = -1;
     return;
   }
-  disable_flag = 1;
+
   keyboard_use_task = current_task();
   frame->value = 0;
 }
@@ -1355,7 +1364,7 @@ enum input_wait_event {
 static uint32_t input_pending_events(const mtask *task, uint32_t requested) {
   uint32_t pending = 0;
   if ((requested & INPUT_WAIT_MOUSE) && task->mousefifo != NULL &&
-      fifo8_status(task->mousefifo) != 0) {
+      fifo8_status(task->mousefifo) >= (int)sizeof(mouse_event_t)) {
     pending |= INPUT_WAIT_MOUSE;
   }
   if ((requested & INPUT_WAIT_KEY_PRESS) && task->Pkeyfifo != NULL &&
@@ -1370,8 +1379,7 @@ static uint32_t input_pending_events(const mtask *task, uint32_t requested) {
 }
 
 static void syscall_input_wait(syscall_context_t *frame) {
-  extern mtask *keyboard_use_task;
-  extern mtask *mouse_use_task;
+
   uint32_t requested = frame->argument0;
   mtask *task = current_task();
   if (requested == 0 || (requested & ~INPUT_WAIT_ALL) != 0 ||

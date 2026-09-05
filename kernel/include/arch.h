@@ -13,12 +13,14 @@
 #include <stddef.h>
 
 struct mtask;
+struct irq_message;
 
 void arch_boot_verify(void);
 const boot_info_t *arch_boot_info(void);
 uintptr_t arch_memory_detect(const boot_info_t *boot_info);
 void arch_interrupt_init(void);
 void arch_interrupt_init_secondary(void);
+bool arch_irq_message(unsigned irq, struct irq_message *message);
 void arch_task_state_init(void);
 void arch_task_set_kernel_stack(uintptr_t stack_top);
 void arch_task_context_init(arch_task_context_t *context, uintptr_t entry);

@@ -929,7 +929,10 @@ int format(char drive) {
   if (!DiskReady(drive)) {
     return 0;
   }
-  uint32_t disk_size = disk_Size(drive);
+  uint64_t disk_size = disk_Size(drive);
+  if (disk_size / 512 > UINT_MAX) {
+    return 0;
+  }
   uint32_t total_sectors = disk_size / 512;
   if (total_sectors < 32) {
     return 0;

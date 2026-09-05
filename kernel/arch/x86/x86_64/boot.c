@@ -23,7 +23,8 @@ REQUEST static volatile struct limine_paging_mode_request paging = {
     .max_mode = LIMINE_PAGING_MODE_X86_64_4LVL,
     .min_mode = LIMINE_PAGING_MODE_X86_64_4LVL};
 REQUEST volatile struct limine_mp_request x64_mp_request = {
-    .id = LIMINE_MP_REQUEST_ID};
+    .id = LIMINE_MP_REQUEST_ID,
+    .flags = LIMINE_MP_REQUEST_X86_64_X2APIC};
 __attribute__((
     used,
     section(".limine_requests_end"))) static volatile uint64_t requests_end[] =

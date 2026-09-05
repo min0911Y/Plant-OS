@@ -1,5 +1,7 @@
 #ifndef __GUI_H__
 #define __GUI_H__
+#include <input_event.h>
+extern mouse_event_t mouse_event;
 typedef unsigned int vram_t;
 typedef vram_t color_t;
 #include "list.h"
@@ -84,13 +86,6 @@ struct desktop {
   void (*draw)(desktop_t *desktop, int x, int y, int x1, int y1, color_t color);
   void (*puts)(desktop_t *desktop, char *s, int x, int y, color_t color);
 };
-struct MOUSE_DEC {
-  unsigned char buf[4], phase;
-  int x, y, btn;
-  int sleep;
-  char roll;
-};
-extern struct MOUSE_DEC mdec;
 desktop_t *create_desktop(int xsize, int ysize, unsigned tid);
 desktop_t *get_now_desktop();
 

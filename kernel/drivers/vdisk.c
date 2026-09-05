@@ -3,6 +3,7 @@
 #include <limits.h>
 int getReadyDisk(); // init.c
 vdisk vdisk_ctl[26];
+static bool disk_failed[26];
 static unsigned char *drive_name[16] = {NULL, NULL, NULL, NULL, NULL, NULL,
                                         NULL, NULL, NULL, NULL, NULL, NULL,
                                         NULL, NULL, NULL, NULL};
@@ -80,6 +81,9 @@ static unsigned int disk_drive_slot(char drive) {
   if (indx < 0 || indx >= 26 || !vdisk_ctl[indx].flag) {
     return 16;
   }
+  if (vdisk_ctl[indx].owns_serialization) {
+    return 16;
+  }
   if (vdisk_ctl[indx].DriveName[0] != 0) {
     unsigned int code = GetDriveCode((unsigned char *)vdisk_ctl[indx].DriveName);
     if (code < 16) {
@@ -107,11 +111,13 @@ int init_vdisk() {
 }
 int register_vdisk_at(char drive, vdisk vd) {
   int index = drive - 'A';
-  if (index < 0 || index >= 26 || vdisk_ctl[index].flag) {
+  if (index < 0 || index >= 26 || vdisk_ctl[index].flag ||
+      !vfs_disk_reusable(drive)) {
     return 0;
   }
   vdisk_ctl[index] = vd;
-  if (vd.DriveName[0] != 0) {
+  disk_failed[index] = false;
+  if (vd.DriveName[0] != 0 && !vd.owns_serialization) {
     SetDrive((unsigned char *)vdisk_ctl[index].DriveName);
   }
   return drive;
@@ -132,7 +138,8 @@ int logout_vdisk(char drive) {
     return 0; // 失败
   }
   if (vdisk_ctl[indx].flag) {
-    vdisk_ctl[indx].flag = VDISK_TYPE_NONE; // 设置为没有
+    vdisk_ctl[indx].flag = VDISK_TYPE_NONE;
+    vfs_disk_removed(drive);
     return 1;                 // 成功
   } else {
     return 0; // 失败
@@ -140,20 +147,25 @@ int logout_vdisk(char drive) {
 }
 int rw_vdisk(char drive, unsigned int lba, unsigned char *buffer,
              unsigned int number, int read) {
-  int indx = drive - ('A');
-  if (indx < 0 || indx >= 26) {
-    return 0; // 失败
+  unsigned index = (unsigned)(drive - 'A');
+  if (index >= 26 || !vdisk_ctl[index].flag || disk_failed[index]) {
+    return false;
   }
-  if (vdisk_ctl[indx].flag) {
-    if (read) {
-      vdisk_ctl[indx].Read(drive, buffer, number, lba);
-    } else {
-      vdisk_ctl[indx].Write(drive, buffer, number, lba);
-    }
-    return 1; // 成功
-  } else {
-    return 0; // 失败
+  vdisk *disk = &vdisk_ctl[index];
+  unsigned unit = disk->flag == VDISK_TYPE_OPTICAL ? 2048 : 512;
+  bool (*operation)(char, unsigned char *, unsigned, unsigned) =
+      read ? disk->Read : disk->Write;
+  if (operation == NULL || number > UINT_MAX / unit ||
+      (disk->flag == VDISK_TYPE_BLOCK &&
+       (uint64_t)lba + number > disk->size / unit)) {
+    disk_failed[index] = true;
+    return false;
   }
+  bool success = operation(drive, buffer, number, lba);
+  if (!success) {
+    disk_failed[index] = true;
+  }
+  return success;
 }
 bool have_vdisk(char drive) {
   int indx = drive - 'A';
@@ -271,24 +283,41 @@ static unsigned int disk_transfer_sectors(char drive) {
   return vdisk_ctl[index].max_transfer_sectors;
 }
 
-void disk_read(unsigned int lba, unsigned int number, void *buffer,
-               char drive) {
-  if (have_vdisk(drive)) {
-    unsigned int drive_code = disk_drive_slot(drive);
-    if (DriveSemaphoreTake(drive_code)) {
-      unsigned int limit = disk_transfer_sectors(drive);
-      for (unsigned int i = 0; i < number;) {
-        unsigned int sectors = number - i < limit ? number - i : limit;
-        rw_vdisk(drive, lba + i, (unsigned char *)buffer + i * 512, sectors,
-                 1);
-        i += sectors;
-        scheduler_preempt_if_needed();
-      }
-      DriveSemaphoreGive(drive_code);
-    }
+static bool disk_transfer(unsigned lba, unsigned number, void *buffer,
+                          char drive, bool read, unsigned unit) {
+  if (!DiskReady(drive) || (number != 0 && buffer == NULL) ||
+      number > UINT_MAX / unit) {
+    return false;
   }
+  unsigned code = disk_drive_slot(drive);
+  if (!DriveSemaphoreTake(code)) {
+    return false;
+  }
+  bool success = true;
+  unsigned limit = disk_transfer_sectors(drive);
+  for (unsigned i = 0; i < number;) {
+    unsigned sectors = number - i < limit ? number - i : limit;
+    if (lba > UINT_MAX - i ||
+        !rw_vdisk(drive, lba + i, (uint8_t *)buffer + i * unit, sectors,
+                  read)) {
+      success = false;
+      break;
+    }
+    i += sectors;
+    scheduler_preempt_if_needed();
+  }
+  DriveSemaphoreGive(code);
+  if (!success && read) {
+    memset(buffer, 0, number * unit);
+  }
+  return success;
 }
-unsigned int disk_Size(char drive) {
+
+bool disk_read(unsigned lba, unsigned number, void *buffer, char drive) {
+  return vdisk_type(drive) == VDISK_TYPE_BLOCK &&
+         disk_transfer(lba, number, buffer, drive, true, 512);
+}
+uint64_t disk_Size(char drive) {
   unsigned char drive1 = drive;
   if (have_vdisk(drive1)) {
     int indx = drive1 - 'A';
@@ -300,46 +329,39 @@ unsigned int disk_Size(char drive) {
 
   return 0;
 }
-bool DiskReady(char drive) { return have_vdisk(drive); }
-int getReadyDisk() { return 0; }
-void disk_write(unsigned int lba, unsigned int number, void *buffer,
-                char drive) {
-//  printk("%d\n",lba);
-  if (have_vdisk(drive)) {
-    unsigned int drive_code = disk_drive_slot(drive);
-    if (DriveSemaphoreTake(drive_code)) {
-      unsigned int limit = disk_transfer_sectors(drive);
-      for (unsigned int i = 0; i < number;) {
-        unsigned int sectors = number - i < limit ? number - i : limit;
-        rw_vdisk(drive, lba + i, (unsigned char *)buffer + i * 512, sectors,
-                 0);
-        i += sectors;
-        scheduler_preempt_if_needed();
-      }
-      DriveSemaphoreGive(drive_code);
-    }
-  }
+bool DiskReady(char drive) {
+  return have_vdisk(drive) && !disk_failed[drive - 'A'];
 }
-bool CDROM_Read(unsigned int lba, unsigned int number, void *buffer,
-                char drive) {
-  if (have_vdisk(drive)) {
-    int indx = drive - ('A');
-    if(vdisk_ctl[indx].flag != VDISK_TYPE_OPTICAL) {
-      return false;
-    }
-    unsigned int drive_code = disk_drive_slot(drive);
-    if (DriveSemaphoreTake(drive_code)) {
-      unsigned int limit = disk_transfer_sectors(drive);
-      for (unsigned int i = 0; i < number;) {
-        unsigned int sectors = number - i < limit ? number - i : limit;
-        rw_vdisk(drive, lba + i, (unsigned char *)buffer + i * 2048, sectors,
-                 1);
-        i += sectors;
-        scheduler_preempt_if_needed();
-      }
-      DriveSemaphoreGive(drive_code);
-    }
-    return  true;
+int getReadyDisk() { return 0; }
+bool disk_write(unsigned lba, unsigned number, void *buffer, char drive) {
+  return vdisk_type(drive) == VDISK_TYPE_BLOCK &&
+         disk_transfer(lba, number, buffer, drive, false, 512);
+}
+
+bool CDROM_Read(unsigned lba, unsigned number, void *buffer, char drive) {
+  return vdisk_type(drive) == VDISK_TYPE_OPTICAL &&
+         disk_transfer(lba, number, buffer, drive, true, 2048);
+}
+
+bool disk_sync(char drive) {
+  if (!DiskReady(drive)) {
+    return false;
   }
-  return false;
+  vdisk *disk = &vdisk_ctl[drive - 'A'];
+  if (disk->Sync == NULL) {
+    return true;
+  }
+  unsigned code = disk_drive_slot(drive);
+  if (!DriveSemaphoreTake(code)) {
+    return false;
+  }
+  bool success = disk->Sync(drive);
+  DriveSemaphoreGive(code);
+  disk_failed[drive - 'A'] |= !success;
+  return success;
+}
+
+bool disk_writable(char drive) {
+  return DiskReady(drive) && vdisk_ctl[drive - 'A'].flag == VDISK_TYPE_BLOCK &&
+         vdisk_ctl[drive - 'A'].Write != NULL;
 }

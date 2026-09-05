@@ -24,24 +24,28 @@ static bool initramfs_span(unsigned int lba, unsigned int sectors,
   return true;
 }
 
-static void initramfs_read(char drive, unsigned char *buffer,
+static bool initramfs_read(char drive, unsigned char *buffer,
                            unsigned int sectors, unsigned int lba) {
   (void)drive;
   uint32_t offset;
   uint32_t size;
   if (initramfs_span(lba, sectors, &offset, &size)) {
     memcpy(buffer, (const void *)(initramfs.address + offset), size);
+    return true;
   }
+  return false;
 }
 
-static void initramfs_write(char drive, unsigned char *buffer,
+static bool initramfs_write(char drive, unsigned char *buffer,
                             unsigned int sectors, unsigned int lba) {
   (void)drive;
   uint32_t offset;
   uint32_t size;
   if (initramfs_span(lba, sectors, &offset, &size)) {
     memcpy((void *)(initramfs.address + offset), buffer, size);
+    return true;
   }
+  return false;
 }
 
 bool boot_initramfs_register(const boot_module_t *module) {

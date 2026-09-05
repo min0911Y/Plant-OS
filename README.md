@@ -76,7 +76,7 @@ If you want to run Doom, after the build:
 1. You can binary concat `kernel/img/doom1.img` and `kernel/img/doom2.img`. After that, run in `kernel` directory:
 
 ```cmd
-qemu-system-i386 -net nic,model=pcnet -net user -serial stdio -device sb16 -device floppy -fda ./img/Powerint_DOS_386.img -drive id=disk,file=disk.img,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -hdb <YOUR-DOOM-HARD-DISK-FILE-NAME> -boot a -m 512 -enable-kvm
+qemu-system-i386 -net nic,model=pcnet -net user -serial stdio -device floppy -fda ./img/Powerint_DOS_386.img -drive id=disk,file=disk.img,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -hdb <YOUR-DOOM-HARD-DISK-FILE-NAME> -boot a -m 512 -enable-kvm
 ```
 
 2. You can also use `doomcpy` provided by PlantOS, see [doomcpy.c](apps/doomcpy/doomcpy.c).

@@ -23,8 +23,7 @@ fattools/fattools
 # /kernel
 kernel/*.img
 kernel/*.log
-kernel/plant-os-livecd.iso
-kernel/plant-os-x86_64.iso
+kernel/plant-os-*.iso
 kernel/disk.vhd
 kernel/obj
 kernel/img

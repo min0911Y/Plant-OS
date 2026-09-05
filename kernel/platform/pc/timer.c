@@ -1,14 +1,15 @@
 #include <arch/x86/io.h>
 #include <dos.h>
+#include <input_device.h>
 #include <irq.h>
 #include <limits.h>
 struct TIMERCTL timerctl;
 #define TIMER_FLAGS_ALLOC 1 /* 已配置状态 */
 #define TIMER_FLAGS_USING 2 /* 定时器运行中 */
-static void timer_interrupt(void);
+static bool timer_interrupt(unsigned irq);
 
 void init_pit(void) {
-  if (!irq_register_handler(0, timer_interrupt)) {
+  if (!irq_register_handler(0, timer_interrupt, IRQ_EXCLUSIVE)) {
     Panic_K("unable to register timer interrupt");
     return;
   }
@@ -180,19 +181,18 @@ void sleep(unsigned long long milliseconds) {
   timer_free(timer);
 }
 
-static void timer_interrupt(void) {
-   //logk("*");
+static bool timer_interrupt(unsigned irq) {
+  // logk("*");
   // printk("CS:EIP=%04x:%08x\n",current_task()->tss.cs,esp[-10]);
-  send_eoi(0);
   apic_timer_on_interrupt();
   if (smp_current_cpu() != 0) {
     scheduler_tick();
-    task_next();
-    return;
+    return true;
   }
   struct TIMER *timer;
 
   timerctl.count++;
+  input_keyboard_tick();
   net_stack_tick();
   net_socket_tick();
   ipc_tick(); /* 唤醒等到超时的 IPC 等待者 */
@@ -201,8 +201,7 @@ static void timer_interrupt(void) {
   if (timer == NULL) {
     timerctl.next = 0xffffffff;
     scheduler_tick();
-    task_next();
-    return;
+    return true;
   }
   for (;;) {
     /* 因为timers的定时器都处于运行状态，所以不确认flags */
@@ -219,5 +218,5 @@ static void timer_interrupt(void) {
   timerctl.next = timer->timeout;
 
   scheduler_tick();
-  task_next();
+  return true;
 }

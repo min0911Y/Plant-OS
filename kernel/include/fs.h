@@ -132,6 +132,8 @@ bool vfs_register_fs(const vfs_filesystem_t *filesystem);
 bool vfs_mount_disk(uint8_t disk_number, uint8_t drive);
 bool vfs_mount_all_disks(void);
 bool vfs_unmount_disk(uint8_t drive);
+bool vfs_disk_reusable(uint8_t disk);
+void vfs_disk_removed(uint8_t disk);
 bool vfs_check_mount(uint8_t drive);
 int vfs_format(uint8_t disk_number, const char *filesystem_name);
 void *vfs_mount_data(struct vfs_mount *mount);

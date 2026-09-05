@@ -11,7 +11,7 @@ mtask *waiter = NULL;
 mtask *floppy_use = NULL;
 void reset(void);
 void wait_floppy_interrupt(void);
-static void floppy_interrupt(void);
+static bool floppy_interrupt(unsigned irq);
 void recalibrate(void);
 typedef struct DrvGeom {
   unsigned char heads;
@@ -69,23 +69,31 @@ int fdc_rw(int block, unsigned char *blockbuff, int read,
            unsigned long nosectors);
 
 #define SECTORS_ONCE 4
-static void Read(char drive, unsigned char *buffer, unsigned int number,
+static bool Read(char drive, unsigned char *buffer, unsigned int number,
                  unsigned int lba) {
   floppy_use = current_task();
   for (int i = 0; i < number; i += SECTORS_ONCE) {
     int sectors = ((number - i) >= SECTORS_ONCE) ? SECTORS_ONCE : (number - i);
-    fdc_rw(lba + i, buffer + i * 512, 1, sectors);
+    if (!fdc_rw(lba + i, buffer + i * 512, 1, sectors) || floppy_io_failed) {
+      floppy_use = NULL;
+      return false;
+    }
   }
   floppy_use = NULL;
+  return true;
 }
-static void Write(char drive, unsigned char *buffer, unsigned int number,
+static bool Write(char drive, unsigned char *buffer, unsigned int number,
                   unsigned int lba) {
   floppy_use = current_task();
   for (int i = 0; i < number; i += SECTORS_ONCE) {
     int sectors = ((number - i) >= SECTORS_ONCE) ? SECTORS_ONCE : (number - i);
-    fdc_rw(lba + i, buffer + i * 512, 0, sectors);
+    if (!fdc_rw(lba + i, buffer + i * 512, 0, sectors) || floppy_io_failed) {
+      floppy_use = NULL;
+      return false;
+    }
   }
   floppy_use = NULL;
+  return true;
 }
 void init_floppy() {
 #ifndef __NO_FLOPPY__
@@ -97,7 +105,7 @@ void init_floppy() {
     return;
   }
   // 设置软盘驱动器的中断服务程序
-  if (!irq_register_handler(6, floppy_interrupt)) {
+  if (!irq_register_handler(6, floppy_interrupt, IRQ_EXCLUSIVE)) {
     printk("floppy: invalid interrupt entry\n");
     return;
   }
@@ -133,16 +141,16 @@ void init_floppy() {
   register_vdisk_at('A', vd);
 #endif
 }
-static void floppy_interrupt(void) {
+static bool floppy_interrupt(unsigned irq) {
   /**
    * 软盘中断服务程序（C语言），这个中断的入口在nasmfunc.asm中
    * */
 
   floppy_int_count =
       1; // 设置中断计数器为1，代表中断已经发生（或者是系统已经收到了中断）
-  send_eoi(6);
   // task_run(waiter);
   //  task_next();
+  return false;
 }
 void set_waiter(mtask *t) {
   while (waiter)

@@ -32,6 +32,7 @@ default : Makefile
 	make -r -C Maze
 	make -r -C clock
 	make -r -C nettest
+	make -r -C usbtest
 	make -r -C ping
 	make -r -C curl
 	make -r -C ps

@@ -449,17 +449,19 @@ void apic_init(void) {
   if (!lapic_base_phys) {
     lapic_base_phys = 0xfee00000u;
   }
-  lapic_mmio = arch_mmio_map(lapic_base_phys, 0x400);
-  if (lapic_mmio == NULL) {
-    logk("apic: LAPIC MMIO cannot be mapped\n");
-    return;
-  }
-
   uint64_t apic_base = rdmsr64(IA32_APIC_BASE_MSR);
   apic_base |= APIC_BASE_MSR_ENABLE;
-  if (cpu_has_x2apic()) {
+  /* Firmware may have locked x2APIC on. Adopt the live mode before any
+   * LAPIC access; the x2APIC register interface does not use MMIO. */
+  x2apic_enabled = (apic_base & APIC_BASE_MSR_X2APIC) != 0 || cpu_has_x2apic();
+  if (x2apic_enabled) {
     apic_base |= APIC_BASE_MSR_X2APIC;
-    x2apic_enabled = 1;
+  } else {
+    lapic_mmio = arch_mmio_map(lapic_base_phys, 0x400);
+    if (lapic_mmio == NULL) {
+      logk("apic: LAPIC MMIO cannot be mapped\n");
+      return;
+    }
   }
   wrmsr64(IA32_APIC_BASE_MSR, apic_base);
 
@@ -490,6 +492,19 @@ void apic_init(void) {
 int apic_ready(void) { return apic_enabled; }
 
 int apic_x2apic_enabled(void) { return x2apic_enabled; }
+
+bool arch_irq_message(unsigned irq, struct irq_message *message) {
+  /* Standard MSI encodes an 8-bit physical destination even with x2APIC.
+   * Larger IDs require interrupt remapping; never truncate or broadcast. */
+  if (!apic_enabled || bsp_lapic_id >= 255 || message == NULL ||
+      irq < X86_MESSAGE_VECTOR_FIRST || irq >= X86_MESSAGE_VECTOR_END) {
+    return false;
+  }
+  *message = (irq_message_t){.address = 0xfee00000u | (bsp_lapic_id << 12),
+                             .data = irq,
+                             .irq = irq};
+  return true;
+}
 
 int apic_timer_uses_tsc_deadline(void) {
   return apic_tsc_deadline_enabled[smp_current_cpu()] != 0;

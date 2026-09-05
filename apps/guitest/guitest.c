@@ -122,6 +122,67 @@ static int gui_test_mouse(void) {
   return observed == 15 ? 0 : 41;
 }
 
+static int gui_test_usb_keyboard(void) {
+  window_t window = create_window("USB keyboard test", 64, 64, 256, 192);
+  if (window == NULL)
+    return 50;
+  window_start_recv_keyboard(window);
+  static const uint8_t presses[] = {0x1e, 0x2a, 0x30, 0xe0, 0x4b, 0x0e};
+  static const uint8_t releases[] = {0x9e, 0xb0, 0xaa, 0xe0, 0xcb, 0x8e};
+  unsigned p = 0, r = 0;
+  logkf("USBKEY READY\n");
+  uint64_t deadline = monotonic_ns() + 15000000000ull;
+  while ((p < sizeof(presses) || r < sizeof(releases)) &&
+         monotonic_ns() < deadline) {
+    if (window_get_key_press_status(window)) {
+      int code = window_get_key_press_data(window);
+      if (p >= sizeof(presses) || code != presses[p++])
+        return 51;
+    }
+    if (window_get_key_up_status(window)) {
+      int code = window_get_key_up_data(window);
+      if (r >= sizeof(releases) || code != releases[r++])
+        return 52;
+    }
+    sleep(5);
+  }
+  if (p != sizeof(presses) || r != sizeof(releases))
+    return 53;
+  logkf("USBKEY REPEAT_READY\n");
+  deadline = monotonic_ns() + 15000000000ull;
+  unsigned repeated = 0;
+  bool released = false;
+  while (!released && monotonic_ns() < deadline) {
+    while (window_get_key_press_status(window)) {
+      if (window_get_key_press_data(window) != 0x2e)
+        return 54;
+      repeated++;
+    }
+    if (window_get_key_up_status(window)) {
+      if (window_get_key_up_data(window) != 0xae)
+        return 55;
+      released = true;
+    }
+    sleep(5);
+  }
+  if (!released || repeated < 2)
+    return 56;
+  logkf("USBKEY HOLD_READY\n");
+  deadline = monotonic_ns() + 15000000000ull;
+  while (!window_get_key_press_status(window) && monotonic_ns() < deadline)
+    sleep(5);
+  if (window_get_key_press_data(window) != 0x2a)
+    return 57;
+  logkf("USBKEY REMOVE_READY\n");
+  while (!window_get_key_up_status(window) && monotonic_ns() < deadline)
+    sleep(5);
+  if (window_get_key_up_data(window) != 0xaa)
+    return 58;
+  close_window(window);
+  logkf("USBKEY PASS: keys, modifiers, arrows, repeat, unplug release\n");
+  return 0;
+}
+
 static int gui_test_basic(void) {
   window_t window = create_window("GUI RPC test", 48, 48, 64, 64);
   if (window == NULL) {
@@ -436,13 +497,19 @@ int main(int argc, char **argv) {
   if (result != 0) {
     return result;
   }
-  if (argc == 2 && strcmp(argv[1], "mouse") == 0) {
+  if (argc == 2 &&
+      (strcmp(argv[1], "mouse") == 0 || strcmp(argv[1], "usb") == 0)) {
     result = gui_test_mouse();
     if (result != 0) {
       return result;
     }
   }
 
+  if (argc == 2 && strcmp(argv[1], "usb") == 0) {
+    result = gui_test_usb_keyboard();
+    if (result != 0)
+      return result;
+  }
   logkf("GUITEST PASS gui_pid=%d\n", gui_pid);
   return 0;
 }

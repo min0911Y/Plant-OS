@@ -7,6 +7,7 @@
 extern "C" {
 #endif
 #include <ctypes.h>
+#include <input_event.h>
 enum { SYSCALL_SIGNAL_RETURN = 0x65 };
 #define T_DrawBox(x, y, w, h, c) Text_Draw_Box((y), (x), (h) + y, (w) + x, (c))
 typedef enum { FLE, DIR, RDO, HID, SYS } ftype;
@@ -231,7 +232,7 @@ int fork();
 int waittid(unsigned tid);
 int mouse_enable();
 int mouse_dat_status();
-int mouse_dat_get();
+int mouse_read(mouse_event_t *event);
 typedef enum {
   INPUT_WAIT_MOUSE = 1u << 0,
   INPUT_WAIT_KEY_PRESS = 1u << 1,

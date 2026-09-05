@@ -15,7 +15,7 @@ GLOBAL haveMsg,PhyMemGetByte,GetMessageAll,PhyMemSetByte,api_heapsize
 GLOBAL get_hour_hex,get_min_hex,get_sec_hex,get_day_of_month,get_day_of_week,get_mon_hex,get_year,AddThread,init_float
 GLOBAL TaskLock,TaskUnlock,SubThread,set_mode,VBEDraw_Px,VBEGet_Px,VBEGetBuffer,VBESetBuffer,roll,VBEDraw_Box
 GLOBAL tty_start_cur_moving,tty_stop_cur_moving,logk
-GLOBAL tty_get_xsize,tty_get_ysize,mouse_support,signal,fork,waittid,mouse_enable,mouse_dat_status,mouse_dat_get,api_yield,return_to_app,set_rt,shared_memory_map_to,shared_memory_unmap,task_set_level_higher,task_set_level_normal,use_keyboard
+GLOBAL tty_get_xsize,tty_get_ysize,mouse_support,signal,fork,waittid,mouse_enable,mouse_dat_status,mouse_read,api_yield,return_to_app,set_rt,shared_memory_map_to,shared_memory_unmap,task_set_level_higher,task_set_level_normal,use_keyboard
 GLOBAL module_load,module_unload,module_list
 GLOBAL api_task_snapshot,cpu_count,cpu_current,perf_control,input_wait
 [SECTION .text]
@@ -983,9 +983,12 @@ mouse_dat_status:
 	mov eax,0x4e
 	int 0x36
 	ret
-mouse_dat_get:
+mouse_read:
+	push ebx
+	mov ebx,[esp+8]
 	mov eax,0x4f
 	int 0x36
+	pop ebx
 	ret
 api_yield:
 	mov eax,0x50

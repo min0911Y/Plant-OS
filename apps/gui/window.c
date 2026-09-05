@@ -84,13 +84,13 @@ void w_drop() {
     // 移动
     int oldx;
     oldx = backup_w->x;
-    backup_w->x += mdec.x;
-    backup_w->y += mdec.y;
+    backup_w->x += mouse_event.x;
+    backup_w->y += mouse_event.y;
     backup_w->x = (backup_w->x + 2) & ~3;
     sheet_slide(backup_w->sht, backup_w->x, backup_w->y);
     int x = (backup_w->x + 2) & ~3;
     x -= oldx;
-    mdec.x = x;
+    mouse_event.x = x;
   } else {
     drop = NULL;
   }
@@ -102,8 +102,8 @@ void handle_left_window(window_t *window, gmouse_t *gmouse) {
   if (Collision(window->x + 3, window->y + 3, window->xsize - 37, 20, gmouse->x,
                 gmouse->y)) {
     // 移动
-    window->x += mdec.x;
-    window->y += mdec.y;
+    window->x += mouse_event.x;
+    window->y += mouse_event.y;
     backup_w = window;
     backup_gmouse = gmouse;
     drop = w_drop;

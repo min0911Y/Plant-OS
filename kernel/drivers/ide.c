@@ -182,7 +182,7 @@ static bool ide_wait(uint8_t channel, bool require_drq, bool require_idle) {
 }
 
 static bool ide_pci_bus_master_initialize(void) {
-  const pci_device_t *controller = pci_find_class(0x01, 0x01);
+  const pci_device_t *controller = pci_find_class(0x01, 0x01, NULL);
   if (controller == NULL) {
     logk("ide: PCI controller unavailable\n");
     return false;
@@ -196,7 +196,7 @@ static bool ide_pci_bus_master_initialize(void) {
     return false;
   }
   uint32_t base = bus_master.address;
-  pci_command_enable(controller, PCI_COMMAND_IO | PCI_COMMAND_BUS_MASTER);
+  pci_command_update(controller, PCI_COMMAND_IO | PCI_COMMAND_BUS_MASTER, 0);
   ide_channels[ATA_PRIMARY].bus_master_base = (uint16_t)base;
   ide_channels[ATA_SECONDARY].bus_master_base = (uint16_t)(base + 8u);
   logk("ide: bus-master DMA io=%04x\n", base);
@@ -463,9 +463,8 @@ static void ide_report_error(uint8_t drive, uint8_t error) {
        device != NULL && device->present ? device->model : "unknown");
 }
 
-void ide_read_sectors(unsigned char drive, unsigned char sectors,
-                      unsigned int lba, unsigned short selector,
-                      void *buffer) {
+bool ide_read_sectors(unsigned char drive, unsigned char sectors,
+                      unsigned int lba, unsigned short selector, void *buffer) {
   (void)selector;
   uint8_t error = 0;
   if (drive >= 4 || !ide_devices[drive].present || sectors == 0 ||
@@ -479,9 +478,10 @@ void ide_read_sectors(unsigned char drive, unsigned char sectors,
     unlock(&ide_controller_lock);
   }
   ide_report_error(drive, error);
+  return error == 0;
 }
 
-void ide_write_sectors(unsigned char drive, unsigned char sectors,
+bool ide_write_sectors(unsigned char drive, unsigned char sectors,
                        unsigned int lba, unsigned short selector,
                        void *buffer) {
   (void)selector;
@@ -497,19 +497,22 @@ void ide_write_sectors(unsigned char drive, unsigned char sectors,
     unlock(&ide_controller_lock);
   }
   ide_report_error(drive, error);
+  return error == 0;
 }
 
-static void ide_vdisk_read(char drive, unsigned char *buffer,
+static bool ide_vdisk_read(char drive, unsigned char *buffer,
                            unsigned int sectors, unsigned int lba) {
-  ide_read_sectors((uint8_t)(drive - 'C'), (uint8_t)sectors, lba, 0, buffer);
+  return ide_read_sectors((uint8_t)(drive - 'C'), (uint8_t)sectors, lba, 0,
+                          buffer);
 }
 
-static void ide_vdisk_write(char drive, unsigned char *buffer,
+static bool ide_vdisk_write(char drive, unsigned char *buffer,
                             unsigned int sectors, unsigned int lba) {
-  ide_write_sectors((uint8_t)(drive - 'C'), (uint8_t)sectors, lba, 0, buffer);
+  return ide_write_sectors((uint8_t)(drive - 'C'), (uint8_t)sectors, lba, 0,
+                           buffer);
 }
 
-void ide_irq(void) {
+bool ide_irq(unsigned irq) {
   int active = ide_active_channel;
   if (active >= 0 && active < 2) {
     ide_channel_t *channel = &ide_channels[active];
@@ -536,12 +539,12 @@ void ide_irq(void) {
       (void)ide_register_read(active, ATA_REG_STATUS);
     }
   }
-  send_eoi(active == ATA_SECONDARY ? 15 : 14);
+  return false;
 }
 
 void ide_initialize(void) {
-  if (!irq_register_handler(14, ide_irq) ||
-      !irq_register_handler(15, ide_irq)) {
+  if (!irq_register_handler(14, ide_irq, IRQ_EXCLUSIVE) ||
+      !irq_register_handler(15, ide_irq, IRQ_EXCLUSIVE)) {
     logk("ide: unable to register interrupts\n");
     return;
   }
@@ -592,7 +595,7 @@ void ide_initialize(void) {
     disk.Write = ide_vdisk_write;
     disk.flag = device->type == IDE_ATAPI ? VDISK_TYPE_OPTICAL
                                           : VDISK_TYPE_BLOCK;
-    disk.size = device->sectors * IDE_ATA_SECTOR_BYTES;
+    disk.size = (uint64_t)device->sectors * IDE_ATA_SECTOR_BYTES;
     disk.max_transfer_sectors =
         device->type == IDE_ATAPI ? IDE_DMA_MAX_ATAPI_SECTORS
                                   : IDE_DMA_MAX_ATA_SECTORS;

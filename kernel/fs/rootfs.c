@@ -1,22 +1,15 @@
 #include <dos.h>
 
-static void dev_read(char drive, unsigned char *buffer, unsigned int number,
+static bool dev_read(char drive, unsigned char *buffer, unsigned int number,
                      unsigned int lba) {
   (void)drive;
   (void)lba;
   if (buffer == NULL || number == 0) {
-    return;
+    return false;
   }
   memset(buffer, 0, number * 512);
   *(uint32_t *)buffer = 1;
-}
-
-static void dev_write(char drive, unsigned char *buffer, unsigned int number,
-                      unsigned int lba) {
-  (void)drive;
-  (void)buffer;
-  (void)number;
-  (void)lba;
+  return true;
 }
 
 static bool dev_check(uint8_t disk_number) {
@@ -82,7 +75,7 @@ void init_devfs(void) {
   vdisk disk = {0};
   strcpy(disk.DriveName, "dev");
   disk.Read = dev_read;
-  disk.Write = dev_write;
+  disk.Write = NULL;
   disk.size = 114514;
   disk.flag = VDISK_TYPE_BLOCK;
   register_vdisk_at('B', disk);

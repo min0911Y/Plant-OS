@@ -32,7 +32,6 @@
 
 typedef struct {
   uint16_t io_base;
-  uint8_t irq;
   uint16_t receive_offset;
   uint8_t next_transmit;
   bool active;
@@ -42,7 +41,7 @@ typedef struct {
 } rtl8139_state_t;
 
 static rtl8139_state_t rtl8139;
-static void rtl8139_interrupt(void);
+static bool rtl8139_interrupt(unsigned irq);
 static uint8_t rtl8139_receive_buffer[RTL8139_RX_BUFFER_BYTES]
     __attribute__((aligned(16)));
 static uint8_t rtl8139_transmit_buffers[RTL8139_TX_BUFFERS]
@@ -133,7 +132,6 @@ bool rtl8139_link_start(net_link_receive_t receive, uint8_t mac[6]) {
   }
 
   rtl8139.io_base = (uint16_t)port;
-  rtl8139.irq = irq;
   rtl8139.receive = receive;
   rtl8139.receive_offset = 0;
   rtl8139.next_transmit = 0;
@@ -143,8 +141,8 @@ bool rtl8139_link_start(net_link_receive_t receive, uint8_t mac[6]) {
     return false;
   }
 
-  pci_command_enable(device, PCI_COMMAND_IO | PCI_COMMAND_MEMORY |
-                                 PCI_COMMAND_BUS_MASTER);
+  pci_command_update(
+      device, PCI_COMMAND_IO | PCI_COMMAND_MEMORY | PCI_COMMAND_BUS_MASTER, 0);
 
   irq_mask_set(irq);
   x86_port_write8(rtl8139.io_base + RTL8139_CONFIG1, 0);
@@ -166,7 +164,7 @@ bool rtl8139_link_start(net_link_receive_t receive, uint8_t mac[6]) {
   x86_port_write16(rtl8139.io_base + RTL8139_IMR, 0x0005);
   x86_port_write8(rtl8139.io_base + RTL8139_CMD, 0x0c);
 
-  if (!irq_register_handler(irq, rtl8139_interrupt)) {
+  if (!irq_register_handler(irq, rtl8139_interrupt, IRQ_SHARED)) {
     logk("rtl8139: unable to register IRQ %d\n", irq);
     return false;
   }
@@ -203,17 +201,12 @@ int rtl8139_link_transmit(const uint8_t *frame, uint16_t length) {
   return 0;
 }
 
-static void rtl8139_interrupt(void) {
+static bool rtl8139_interrupt(unsigned irq) {
   bool reschedule = false;
   uint16_t status = rtl8139_read16(RTL8139_ISR);
   x86_port_write16(rtl8139.io_base + RTL8139_ISR, status);
   if (rtl8139.active && (status & 0x0001) != 0) {
     reschedule = rtl8139_receive();
   }
-  if (rtl8139.active) {
-    send_eoi(rtl8139.irq);
-  }
-  if (reschedule) {
-    task_next();
-  }
+  return reschedule;
 }

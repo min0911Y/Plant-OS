@@ -53,10 +53,11 @@ OBJS_BOOTPACK = $(OUTPATH)boot_entry.obj $(OUTPATH)boot.o \
 				$(OUTPATH)mouse.o $(OUTPATH)acpi.o $(OUTPATH)is.o $(OUTPATH)descriptor_tables.o $(OUTPATH)arg.o \
 				$(OUTPATH)other.o $(OUTPATH)floppy.o $(OUTPATH)dma.o $(OUTPATH)init.o $(OUTPATH)main.o \
 				$(OUTPATH)init_platform.o \
+				$(OUTPATH)usb.o $(OUTPATH)xhci.o $(OUTPATH)usb_hub.o $(OUTPATH)usb_hid.o $(OUTPATH)usb_storage.o $(OUTPATH)input_device.o \
 				$(OUTPATH)std.o $(OUTPATH)format.o $(OUTPATH)sheet.o $(OUTPATH)vbe.o $(OUTPATH)cmos.o $(OUTPATH)pci.o $(OUTPATH)fat.o \
 				$(OUTPATH)beep.o $(OUTPATH)syscall.o $(OUTPATH)fifo.o $(OUTPATH)list.o $(OUTPATH)input.o $(OUTPATH)keyboard.o \
 				$(OUTPATH)pcnet.o $(OUTPATH)ipc.o $(OUTPATH)tty.o $(OUTPATH)page.o $(OUTPATH)serial.o $(OUTPATH)log.o \
-				$(OUTPATH)path.o $(OUTPATH)draw.o $(OUTPATH)httm.o $(OUTPATH)interrupt_controller.o $(OUTPATH)bmp.o $(OUTPATH)sb16.o \
+				$(OUTPATH)path.o $(OUTPATH)draw.o $(OUTPATH)httm.o $(OUTPATH)interrupt_controller.o $(OUTPATH)bmp.o \
 				$(OUTPATH)lock.o $(OUTPATH)executable.o $(OUTPATH)md5.o $(OUTPATH)libcpp.o $(OUTPATH)rand.o \
 				$(OUTPATH)time.o $(OUTPATH)net_stack.o $(OUTPATH)socket.o $(OUTPATH)lwip_port.o $(OUTPATH)lwip_core_init.o $(OUTPATH)lwip_core_def.o \
 				$(OUTPATH)lwip_core_dns.o $(OUTPATH)lwip_core_inet_chksum.o $(OUTPATH)lwip_core_ip.o $(OUTPATH)lwip_core_mem.o \
@@ -98,7 +99,7 @@ livecd: default
 livecd_run: livecd
 	$(QEMU_SYSTEM) -enable-kvm -cpu host -smp $(QEMU_CPUS) \
 		-netdev user,id=net0 -device pcnet,netdev=net0 -serial stdio \
-		-device sb16 -drive file=./boot.img,format=raw,if=ide \
+		-drive file=./boot.img,format=raw,if=ide \
 		-cdrom ./$(LIVECD_ISO) -boot d -m 4096
 
 # 镜像文件生成
@@ -239,6 +240,7 @@ Mimg : make_dir $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $
 		mcopy -i boot.img $(APPSOUTPATH)my_basic.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)copydir.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)nettest.bin ::
+		mcopy -i boot.img $(APPSOUTPATH)usbtest.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)ping.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)curl.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)dktest.bin ::
@@ -284,7 +286,7 @@ img_run :
 	$(MAKE) -C $(MSTPATH)
 	$(MAKE) -C modules
 	$(MAKE) Mimg
-	$(QEMU_SYSTEM) -enable-kvm -cpu host -smp $(QEMU_CPUS) -netdev user,id=net0 -device pcnet,netdev=net0 -serial stdio -device sb16 -device floppy -hda ./boot.img  \
+	$(QEMU_SYSTEM) -enable-kvm -cpu host -smp $(QEMU_CPUS) -netdev user,id=net0 -device pcnet,netdev=net0 -serial stdio -device floppy -hda ./boot.img  \
 	 -hdb disk.img \
 	 -boot c -m 4096
 full : make_dir
@@ -301,7 +303,7 @@ full : make_dir
 	$(MAKE) -C $(MSTPATH)
 	$(MAKE) Mimg
 run:
-	$(QEMU_SYSTEM) -d in_asm -no-reboot -smp $(QEMU_CPUS) -netdev user,id=net0 -device pcnet,netdev=net0 -serial stdio -device sb16 -device floppy -fda ./img/Powerint_DOS_386.img -drive id=disk,file=disk.img,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -hdb ./img/Disk2.img -hdc ./img/Disk3.img -hdd ./img/res.img -boot a -m 512
+	$(QEMU_SYSTEM) -d in_asm -no-reboot -smp $(QEMU_CPUS) -netdev user,id=net0 -device pcnet,netdev=net0 -serial stdio -device floppy -fda ./img/Powerint_DOS_386.img -drive id=disk,file=disk.img,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -hdb ./img/Disk2.img -hdc ./img/Disk3.img -hdd ./img/res.img -boot a -m 512
 full_run:
 	$(MAKE) -C $(ARCHPATH) ARCH=$(ARCH)
 	$(MAKE) -C $(DOSPATH)
@@ -314,7 +316,7 @@ full_run:
 	$(MAKE) -C $(NETPATH)
 	$(MAKE) -C $(APPSPATH)
 	$(MAKE) Mimg
-	$(QEMU_SYSTEM) -smp $(QEMU_CPUS) -netdev user,id=net0 -device pcnet,netdev=net0 -serial stdio -device sb16 -device floppy -fda ./img/Powerint_DOS_386.img -drive id=disk,file=disk.img,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -hdb ./img/Disk2.img -hdc ./img/Disk3.img -hdd ./img/res.img -boot a -m 512 -enable-kvm -cpu host
+	$(QEMU_SYSTEM) -smp $(QEMU_CPUS) -netdev user,id=net0 -device pcnet,netdev=net0 -serial stdio -device floppy -fda ./img/Powerint_DOS_386.img -drive id=disk,file=disk.img,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -hdb ./img/Disk2.img -hdc ./img/Disk3.img -hdd ./img/res.img -boot a -m 512 -enable-kvm -cpu host
 clean :
 	rm -r ./obj
 	rm -r ./img

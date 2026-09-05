@@ -1,8 +1,8 @@
 /* MOUNT.C : 映射文件为disk */
 #include <dos.h>
-static void MountDiskRead(char drive, unsigned char *buffer,
+static bool MountDiskRead(char drive, unsigned char *buffer,
                           unsigned int number, unsigned int lba);
-static void MountDiskWrite(char drive, unsigned char *buffer,
+static bool MountDiskWrite(char drive, unsigned char *buffer,
                            unsigned int number, unsigned int lba);
 typedef struct {
   char drive;
@@ -55,25 +55,23 @@ void unmount(char drive) {
     }
   }
 }
-static void MountDiskRead(char drive, unsigned char *buffer,
+static bool MountDiskRead(char drive, unsigned char *buffer,
                           unsigned int number, unsigned int lba) {
-  for (int i = 0; i < 255; i++) {
+  for (unsigned i = 0; i < 255; i++) {
     if (md[i].flag && md[i].drive == drive) {
-      if (fseek(md[i].fp, lba * 512, SEEK_SET) == 0) {
-        fread(buffer, 512, number, md[i].fp);
-      }
-      return;
+      return fseek(md[i].fp, lba * 512, SEEK_SET) == 0 &&
+             fread(buffer, 512, number, md[i].fp) == number;
     }
   }
+  return false;
 }
-static void MountDiskWrite(char drive, unsigned char *buffer,
+static bool MountDiskWrite(char drive, unsigned char *buffer,
                            unsigned int number, unsigned int lba) {
-  for (int i = 0; i < 255; i++) {
+  for (unsigned i = 0; i < 255; i++) {
     if (md[i].flag && md[i].drive == drive) {
-      if (fseek(md[i].fp, lba * 512, SEEK_SET) == 0) {
-        fwrite(buffer, 512, number, md[i].fp);
-      }
-      return;
+      return fseek(md[i].fp, lba * 512, SEEK_SET) == 0 &&
+             fwrite(buffer, 512, number, md[i].fp) == number;
     }
   }
+  return false;
 }

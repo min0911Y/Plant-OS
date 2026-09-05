@@ -77,7 +77,7 @@ make full_run
 
 <!-- 过时内容（2026-06-09：kernel64 已删除 AHCI/IDE 旧驱动路径，现代块设备测试请使用 NVMe）：
 ```cmd
-qemu-system-i386 -net nic,model=pcnet -net user -serial stdio -device sb16 -device floppy -fda ./img/Powerint_DOS_386.img -drive id=disk,file=disk.img,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -hdb <YOUR-DOOM-HARD-DISK-FILE-NAME> -boot a -m 512 -enable-kvm
+qemu-system-i386 -net nic,model=pcnet -net user -serial stdio -device floppy -fda ./img/Powerint_DOS_386.img -drive id=disk,file=disk.img,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -hdb <YOUR-DOOM-HARD-DISK-FILE-NAME> -boot a -m 512 -enable-kvm
 ```
 -->
 ```cmd

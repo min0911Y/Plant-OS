@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Boot Plant's x86 regressions through init.mst; use QMP only to test GUI input."""
+"""Boot Plant's x86 regressions through init.mst; exercise devices through QMP."""
 
 import argparse
 import json
@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import shutil
 import socket
+import struct
 import subprocess
 import tempfile
 import time
@@ -68,6 +69,107 @@ class QMP:
         return width, height, pixels
 
 
+def prepare_pci_fixture(qmp_path, gdb_path, qtest_path, kernel, ahci_no_irq=False):
+    """Pause before device work, then alter only the selected QEMU fixture."""
+    symbols = subprocess.check_output(["nm", "-n", str(kernel)], text=True)
+    symbol = "ahci_execute" if ahci_no_irq else "xhci_initialize"
+    match = re.search(rf"^([0-9a-f]+) [tT] {symbol}$", symbols, re.M)
+    if not match:
+        raise RuntimeError(f"{symbol} symbol missing")
+    address = int(match[1], 16)
+    deadline = time.monotonic() + 10
+    while not all(path.exists() for path in (qmp_path, gdb_path, qtest_path)):
+        if time.monotonic() >= deadline:
+            raise RuntimeError("QEMU debug sockets unavailable")
+        time.sleep(0.02)
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as debugger:
+        debugger.settimeout(60)
+        debugger.connect(str(gdb_path))
+        stream = debugger.makefile("rb")
+
+        def packet(command):
+            data = command.encode()
+            debugger.sendall(b"$" + data + f"#{sum(data) & 255:02x}".encode())
+            while True:
+                prefix = stream.read(1)
+                if not prefix:
+                    raise RuntimeError("GDB connection closed")
+                if prefix == b"$":
+                    break
+            reply = bytearray()
+            while True:
+                byte = stream.read(1)
+                if not byte:
+                    raise RuntimeError("GDB packet truncated")
+                if byte == b"#":
+                    break
+                reply += byte
+            checksum = stream.read(2)
+            if len(checksum) != 2 or int(checksum, 16) != (sum(reply) & 255):
+                raise RuntimeError("GDB checksum mismatch")
+            debugger.sendall(b"+")
+            return reply.decode()
+
+        if packet(f"Z1,{address:x},1") != "OK" or not packet("c").startswith(("T05", "S05")):
+            raise RuntimeError(f"did not stop at {symbol}")
+        qmp = QMP(qmp_path)
+        try:
+            buses = qmp.execute("query-pci")
+            devices = []
+            identifiers = {"ahci-test"} if ahci_no_irq else {"usb2", "usb3"}
+            pending = list(buses)
+            while pending:
+                entry = pending.pop()
+                if isinstance(entry, list):
+                    pending.extend(entry)
+                elif isinstance(entry, dict):
+                    if entry.get("qdev_id") in identifiers:
+                        devices.append(entry)
+                    pending.extend(value for value in entry.values()
+                                   if isinstance(value, (dict, list)))
+            if len(devices) != len(identifiers):
+                raise RuntimeError("fixture PCI functions missing")
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as qtest:
+                qtest.settimeout(5)
+                qtest.connect(str(qtest_path))
+                io = qtest.makefile("rwb")
+
+                def request(command):
+                    io.write(command.encode() + b"\n")
+                    io.flush()
+                    reply = io.readline().decode().strip()
+                    if not reply.startswith("OK"):
+                        raise RuntimeError(f"qtest {command}: {reply}")
+                    return reply.split()[1:]
+
+                saved = int(request("inl 0xcf8")[0], 0)
+                try:
+                    for device in devices:
+                        if ahci_no_irq:
+                            abar = next(region["address"] for region in device["regions"] if region["bar"] == 5)
+                            ghc = int(request(f"readl {abar + 4:#x}")[0], 0)
+                            if not ghc & 2:
+                                raise RuntimeError("AHCI interrupt delivery was not enabled")
+                            request(f"writel {abar + 4:#x} {ghc & ~2:#x}")
+                            if int(request(f"readl {abar + 4:#x}")[0], 0) & 2:
+                                raise RuntimeError("AHCI interrupt fault injection failed")
+                            print("AHCI fixture: disabled GHC interrupt delivery before IDENTIFY", flush=True)
+                            continue
+                        bus, slot, function = device["bus"], device["slot"], device["function"]
+                        selector = 0x8000003c | bus << 16 | slot << 11 | function << 8
+                        request(f"outl 0xcf8 {selector:#x}")
+                        request("outb 0xcfc 0xff")
+                        if int(request("inb 0xcfc")[0], 0) != 255:
+                            raise RuntimeError("PCI Interrupt Line write did not stick")
+                        print(f"USB fixture {bus:02x}:{slot:02x}.{function}: PCI IRQ=255", flush=True)
+                finally:
+                    request(f"outl 0xcf8 {saved:#x}")
+        finally:
+            qmp.close()
+        if packet(f"z1,{address:x},1") != "OK" or packet("D") != "OK":
+            raise RuntimeError("could not resume QEMU after PCI fixture setup")
+
+
 def exercise_mouse(qmp_path, origin, target, output):
     qmp = QMP(qmp_path)
     try:
@@ -80,12 +182,13 @@ def exercise_mouse(qmp_path, origin, target, output):
         qmp.close()
 
 
-def exercise_console(qmp_path, output):
+def exercise_console(qmp_path, output, origin=None):
     qmp = QMP(qmp_path)
     try:
         width, height, _ = qmp.screenshot(output / "console-desktop.ppm")
         # Focus the initial console, whose text is initially behind the toolbox.
-        qmp.move(700 - width // 2, 500 - height // 2)
+        origin = origin or (width // 2, height // 2)
+        qmp.move(700 - origin[0], 500 - origin[1])
         qmp.press("btn", button="left")
 
         def cell_rows(label, row, columns):
@@ -125,12 +228,101 @@ def exercise_console(qmp_path, output):
         qmp.close()
 
 
+def exercise_usb(qmp_path, serial, guest, deadline, keyboard_bus, keyboard_port, hubs):
+    qmp = QMP(qmp_path)
+
+    def wait_for(pattern, count=1):
+        while time.monotonic() < deadline and guest.poll() is None:
+            text = serial.read_text(errors="replace")
+            if re.search(r"PANIC|xhci: .*failed|xhci: .*timeout|completion error", text):
+                raise RuntimeError(f"USB failure; see {serial}")
+            matches = re.findall(pattern, text, re.M)
+            if len(matches) >= count:
+                return matches
+            time.sleep(0.02)
+        raise RuntimeError(f"USB timeout waiting for {pattern}; see {serial}")
+
+    try:
+        for speed in ("full", "high", "super"):
+            wait_for(rf"^usb: .* speed={speed} .* enumerated$")
+        # USB audio advertises a 64-byte EP0 at full speed. This forces
+        # Evaluate Context to update the initial 8-byte control packet size.
+        wait_for(r"^usb: .* port=3 .* speed=full .* usb=0100 .* enumerated$")
+        controllers = wait_for(r"^xhci: (\S+) .* ready$", 2)
+        if len(set(controllers)) != 2:
+            raise RuntimeError("USB test requires two independent xHCI controllers")
+        # Each detach/attach submits Disable Slot, Enable Slot and Address
+        # Device. 100 cycles cross both command and event ring boundaries.
+        full = r"^usb: .* speed=full id=0627:0001 .* enumerated$"
+        wait_for(full, 2)
+        text = serial.read_text(errors="replace")
+        connected = len(re.findall(full, text, re.M))
+        removed = (r"^usb-hub: .* port=1 disconnected$" if hubs else
+                   r"^usb: .* port=1 disconnected$")
+        disconnected = len(re.findall(removed, text, re.M))
+        for cycle in range(100):
+            qmp.execute("device_del", id="usb-keyboard")
+            wait_for(removed, disconnected + cycle + 1)
+            qmp.execute("device_add", driver="usb-kbd", id="usb-keyboard",
+                        bus=keyboard_bus, port=keyboard_port, usb_version=1)
+            wait_for(full, connected + cycle + 1)
+            if (cycle + 1) % 25 == 0:
+                print(f"USB hotplug {cycle + 1}/100", flush=True)
+        if hubs:
+            # Removing a hub also removes its QEMU child devices; the guest
+            # must tear down all descendant slots before releasing the hub.
+            text = serial.read_text(errors="replace")
+            root_removed = r"^usb: .* port=7 disconnected$"
+            removed_count = len(re.findall(root_removed, text, re.M))
+            active = r"^usb-hub: .* ports=8 .* active$"
+            active_count = len(re.findall(active, text, re.M))
+            keyboard = r"^usb: .* port=7 .* route=00012 .* enumerated$"
+            mouse = r"^usb: .* port=7 .* route=00042 .* enumerated$"
+            keyboard_count = len(re.findall(keyboard, text, re.M))
+            mouse_count = len(re.findall(mouse, text, re.M))
+            qmp.execute("device_del", id="usb-hub-root")
+            wait_for(root_removed, removed_count + 1)
+            qmp.execute("device_add", driver="usb-hub", id="usb-hub-root",
+                        bus=keyboard_bus, port="3", **{"port-power": True})
+            qmp.execute("device_add", driver="usb-hub", id="usb-hub-child",
+                        bus=keyboard_bus, port="3.2", **{"port-power": True})
+            qmp.execute("device_add", driver="usb-kbd", id="usb-keyboard",
+                        bus=keyboard_bus, port=keyboard_port, usb_version=1)
+            qmp.execute("device_add", driver="usb-mouse", bus=keyboard_bus, port="3.2.4")
+            wait_for(active, active_count + 2)
+            wait_for(keyboard, keyboard_count + 1)
+            wait_for(mouse, mouse_count + 1)
+            print("USBHUB PASS: two tiers, port power, routes, subtree reconnect", flush=True)
+        print("USBTEST PASS: full/high/super-speed descriptors, EP0 resize, "
+              "two controllers, 100 hotplugs, command/event ring wrap", flush=True)
+    finally:
+        qmp.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--arch", choices=("x86_64", "i386"), default="x86_64")
     parser.add_argument("--firmware", choices=("bios", "uefi"), default="bios")
+    parser.add_argument("--machine", choices=("pc", "q35"), default="pc",
+                        help="QEMU chipset; q35 exercises ACPI MCFG/ECAM configuration access")
     parser.add_argument("--memory", type=int, default=1024, help="guest RAM in MiB")
     parser.add_argument("--cpus", type=int, default=4)
+    parser.add_argument("--apic", choices=("xapic", "x2apic"),
+                        help="require a QEMU APIC mode and verify the boot handoff")
+    parser.add_argument("--usb-debug", action="store_true",
+                        help="build USB screen diagnostics and bounded HID report traces")
+    parser.add_argument("--usb-irq", choices=("auto", "msix", "msi", "intx"), default="auto",
+                        help="select the QEMU xHCI interrupt capabilities and verify the chosen mode")
+    parser.add_argument("--usb-no-intx", action="store_true",
+                        help="set both xHCI PCI Interrupt Line bytes to 255 before driver initialization")
+    parser.add_argument("--usb-root-bus", type=lambda value: int(value, 0), default=0,
+                        help="place USB behind an independent Q35 PCIe root (e.g. 0x80)")
+    parser.add_argument("--usb-hubs", action="store_true",
+                        help="attach keyboard/mouse through two hubs on a mixed USB2/USB3 controller")
+    parser.add_argument("--ahci", action="store_true",
+                        help="validate SATA reads, writes, flush and 48-bit capacity on two AHCI ports")
+    parser.add_argument("--ahci-no-irq", action="store_true",
+                        help="suppress AHCI command IRQs and verify bounded boot-time failure")
     parser.add_argument("--timeout", type=int, default=120)
     gui_mode = parser.add_mutually_exclusive_group()
     gui_mode.add_argument("--capacity", action="store_true", help="also cross the 255-task boundary")
@@ -139,15 +331,25 @@ def main():
     gui_mode.add_argument("--sdl", action="store_true", help="validate SDL2 shared surfaces, renderer, fonts and input")
     gui_mode.add_argument("--desktop-app", choices=("lite", "nk"), help="capture and close an SDL desktop application")
     gui_mode.add_argument("--tools", action="store_true", help="run C4 pointer/VM, NASM object and JavaScript regressions")
+    gui_mode.add_argument("--usb", action="store_true", help="validate xHCI enumeration, USB speeds, hotplug and ring wrap")
     parser.add_argument("--out", type=Path, default=Path("/tmp/plant-x86_64-smoke"))
     parser.add_argument("--ovmf", type=Path, default=Path("/usr/share/OVMF"))
     args = parser.parse_args()
     if args.arch == "i386" and args.firmware == "uefi":
         parser.error("the i386 LiveCD uses BIOS")
+    if (args.usb_no_intx or args.usb_irq != "auto" or args.usb_root_bus or args.usb_hubs) and not args.usb:
+        parser.error("USB fixture options require --usb")
+    if args.usb_no_intx and args.usb_irq == "intx":
+        parser.error("--usb-no-intx requires MSI or MSI-X")
+    if args.usb_root_bus and (args.machine != "q35" or not 1 <= args.usb_root_bus <= 253):
+        parser.error("--usb-root-bus requires Q35 and a bus number from 1 to 253")
+    if args.ahci_no_irq and not args.ahci:
+        parser.error("--ahci-no-irq requires --ahci")
     repo = Path(__file__).resolve().parent.parent
     output = args.out.resolve()
     output.mkdir(parents=True, exist_ok=True)
     native = args.arch == "x86_64"
+    kernel_options = [f"USB_DEBUG={int(args.usb_debug)}"]
     commands = (["archtest.bin", "cpptest.bin", "simdtest.bin"] if native else ["fputest.bin"]) + [
         "timetest.bin", "exc_test.bin", "rpctest.bin", "dktest.bin", "nettest.bin loopback",
         "guitest.bin capacity" if args.capacity else "guitest.bin mouse" if args.mouse else "guitest.bin",
@@ -190,15 +392,44 @@ def main():
                     "lua.bin -e " + verify,
                     "duktape.bin -e a=[];for(i=0;i<1000;i++)a.push({v:i});if(a[999].v!==999){throw(1);}"]
         expected = []
+    if args.usb:
+        commands = ["nettest.bin", "usbtest.bin", "guitest.bin usb"]
+        expected = ["USBSTORAGE PASS", "USBKEY PASS", "GUIMOUSE PASS events=15", "GUITEST PASS"]
+    if args.ahci:
+        if args.machine != "q35" or args.usb:
+            parser.error("--ahci requires --machine q35 and is run separately from --usb")
+        sata_test = (
+            'check=function(d,i)'
+            'p=d..[[:/]];f=assert(io.open(p..[[ahcitag.txt]],[[rb]]));'
+            'assert(f:read([[*a]])==tostring(i));assert(f:close());'
+            's=string.rep(string.char(64+i),131072)..[[tail123]];'
+            'f=assert(io.open(p..[[seed.bin]],[[rb]]));assert(f:read([[*a]])==s);assert(f:close());'
+            'f=assert(io.open(p..[[written.bin]],[[w+]]));assert(f:write(s));'
+            'assert(f:seek([[set]],513)==513);assert(f:write([[SATA]]));assert(f:flush());'
+            'assert(f:seek([[set]],0)==0);'
+            'assert(f:read([[*a]])==s:sub(1,513)..[[SATA]]..s:sub(518));assert(f:close());'
+            'end;check([[C]],1);check([[D]],2)')
+        commands = ["psh.bin -c remount_drive C:", "psh.bin -c remount_drive D:",
+                    "lua.bin -e " + sata_test] + commands
+        if args.ahci_no_irq:
+            commands = []
+            expected = ["ahci: port=0 command=ec completion=0", "command timeout or error",
+                        "ahci: controllers=2 disks=0 initialization complete"]
     iso = repo / "kernel" / ("plant-os-x86_64.iso" if native else "plant-os-livecd.iso")
     init = repo / "kernel/res/init.mst"
     original = init.read_bytes()
+    config = repo / "kernel/res/sys.cfg"
+    original_config = config.read_bytes() if args.usb else None
     def mst_quote(text):
         return '"' + text.replace('\\', '\\\\').replace('"', '\\"') + '"'
     actions = [f'  {{"action" = "run" "command_line" = {mst_quote(command)}}}'
                for command in commands + ["psh.bin"]]
     with (output / "build.log").open("w") as build_log:
         try:
+            if original_config is not None:
+                configured, count = re.subn(rb'"network"\s*=\s*"[^"]*"',
+                                           b'"network" = "enable"', original_config)
+                config.write_bytes(configured if count else configured + b'\n"network" = "enable"\n')
             init.write_text('"todo" = [\n' + ',\n'.join(actions) + '\n]\n')
             subprocess.run(["make", "-C", str(repo / "apps"), f"ARCH={args.arch}",
                             *(["-j8"] if native else [])],
@@ -206,13 +437,20 @@ def main():
             if not native:
                 subprocess.run(["make", "-C", str(repo / "loader")],
                                stdout=build_log, stderr=subprocess.STDOUT, check=True)
-            subprocess.run(["make", "-C", str(repo / "kernel"), f"ARCH={args.arch}", "livecd", "-j8"],
+            subprocess.run(["make", "-C", str(repo / "kernel"), f"ARCH={args.arch}",
+                            *kernel_options, "livecd", "-j8"],
                            stdout=build_log, stderr=subprocess.STDOUT, check=True)
         finally:
             init.write_bytes(original)
+            if original_config is not None:
+                config.write_bytes(original_config)
     serial = output / "serial.log"
     serial.write_bytes(b"")
-    command = ["qemu-system-x86_64", "-accel", "tcg", "-cpu", "max", "-smp", str(args.cpus),
+    cpu = "max"
+    if args.apic:
+        cpu += "," + ("+" if args.apic == "x2apic" else "-") + "x2apic,enforce"
+    command = ["qemu-system-x86_64", "-accel", "tcg", "-cpu", cpu, "-smp", str(args.cpus),
+               "-machine", args.machine + (",i8042=off" if args.usb else ""),
                "-m", str(args.memory), "-rtc", "base=2026-09-05T04:05:06,clock=vm", "-cdrom", str(iso),
                "-boot", "d", "-display", "none", "-serial", f"file:{serial}",
                "-monitor", "none", "-no-reboot", "-no-shutdown", "-netdev", "user,id=net0",
@@ -221,6 +459,80 @@ def main():
         with tempfile.TemporaryDirectory(prefix="plant-ovmf-") as temporary:
             qmp_path = Path(temporary) / "qmp.sock"
             command += ["-qmp", f"unix:{qmp_path},server=on,wait=off"]
+            gdb_path = Path(temporary) / "gdb.sock"
+            qtest_path = Path(temporary) / "qtest.sock"
+            if args.usb_no_intx or args.ahci_no_irq:
+                command += ["-S", "-gdb", f"unix:{gdb_path},server=on,wait=off",
+                            "-qtest", f"unix:{qtest_path},server=on,wait=off",
+                            "-qtest-log", str(output / "qtest.log")]
+            usb_images = []
+            ahci_images = []
+            if args.ahci:
+                command += ["-device", "ich9-ahci,id=ahci-test"]
+                sizes = (64 * 1024 * 1024,) if args.ahci_no_irq else (64 * 1024 * 1024, 160 * 1024 * 1024 * 1024)
+                for index, size in enumerate(sizes):
+                    disk = Path(temporary) / f"ahci-{index}.img"
+                    with disk.open("wb") as stream:
+                        stream.truncate(size)
+                    subprocess.run(["mformat", "-i", str(disk), "-T", "131072", "::"], check=True)
+                    tag = Path(temporary) / "ahcitag.txt"
+                    tag.write_text(str(index + 1))
+                    seed = Path(temporary) / "seed.bin"
+                    payload = bytes([65 + index]) * 131072 + b"tail123"
+                    seed.write_bytes(payload)
+                    subprocess.run(["mcopy", "-i", str(disk), str(tag), "::/ahcitag.txt"], check=True)
+                    subprocess.run(["mcopy", "-i", str(disk), str(seed), "::/seed.bin"], check=True)
+                    command += ["-drive", f"id=sata{index},file={disk},format=raw,if=none",
+                                "-device", f"ide-hd,drive=sata{index},bus=ahci-test.{index}"]
+                    expected_bytes = payload[:513] + b"SATA" + payload[517:]
+                    ahci_images.append((disk, expected_bytes))
+            if args.usb:
+                keyboard_bus = "usb3.0" if args.usb_hubs else "usb2.0"
+                keyboard_port = "3.2.1" if args.usb_hubs else "1"
+                mouse_port = "3.2.4" if args.usb_hubs else "4"
+                capabilities = {"auto": "", "msix": ",msi=off,msix=on",
+                                "msi": ",msi=on,msix=off", "intx": ",msi=off,msix=off"}[args.usb_irq]
+                usb2_bus = usb3_bus = ""
+                if args.usb_root_bus:
+                    command += ["-device", f"pxb-pcie,id=usb-root,bus_nr={args.usb_root_bus}",
+                                "-device", "pcie-root-port,id=usb-port2,bus=usb-root,chassis=1",
+                                "-device", "pcie-root-port,id=usb-port3,bus=usb-root,chassis=2"]
+                    usb2_bus, usb3_bus = ",bus=usb-port2", ",bus=usb-port3"
+                command += ["-device", "qemu-xhci,id=usb2,p2=4,p3=0" + capabilities + usb2_bus,
+                            "-device", f"qemu-xhci,id=usb3,p2={4 if args.usb_hubs else 0},p3=4" + capabilities + usb3_bus]
+                if args.usb_hubs:
+                    command += ["-device", "usb-hub,id=usb-hub-root,bus=usb3.0,port=3,port-power=on",
+                                "-device", "usb-hub,id=usb-hub-child,bus=usb3.0,port=3.2,port-power=on"]
+                command += ["-device", f"usb-kbd,id=usb-keyboard,bus={keyboard_bus},port={keyboard_port},usb_version=1",
+                            "-device", f"usb-mouse,bus={keyboard_bus},port={mouse_port}",
+                            "-audiodev", "none,id=usb-audio",
+                            "-device", "usb-audio,audiodev=usb-audio,bus=usb2.0,port=3"]
+                fixtures = (("high", "usb2.0", 2, 2048, 512),
+                            ("super", "usb3.0", 1, 0, 512),
+                            ("native4k", "usb3.0", 2, 0, 4096))
+                for name, bus, port, first, block_size in fixtures:
+                    disk = Path(temporary) / f"usb-{name}.img"
+                    sectors = 131072
+                    with disk.open("wb") as stream:
+                        stream.truncate(sectors * 512)
+                        if first:
+                            mbr = bytearray(512)
+                            mbr[450] = 0x0c
+                            struct.pack_into("<II", mbr, 454, first, sectors - first)
+                            mbr[510:512] = b"\x55\xaa"
+                            stream.seek(0)
+                            stream.write(mbr)
+                    image = f"{disk}@@{first * 512}"
+                    subprocess.run(["mformat", "-i", image, "-T", str(sectors - first),
+                                    *(["-F"] if first else []), "::"], check=True)
+                    tag = Path(temporary) / "usbtag.txt"
+                    tag.write_text(name)
+                    subprocess.run(["mcopy", "-i", image, str(tag), "::/usbtag.txt"], check=True)
+                    usb_images.append((name, image))
+                    command += ["-blockdev", json.dumps({"driver": "raw", "node-name": f"usb-{name}",
+                                "file": {"driver": "file", "filename": str(disk)}}),
+                                "-device", f"usb-storage,id=device-{name},bus={bus},port={port},"
+                                           f"drive=usb-{name},logical_block_size={block_size},physical_block_size={block_size}"]
             if args.firmware == "uefi":
                 variables = Path(temporary) / "vars.fd"
                 shutil.copyfile(args.ovmf / "OVMF_VARS_4M.fd", variables)
@@ -229,15 +541,70 @@ def main():
             with (output / "qemu.log").open("w") as qemu_log:
                 guest = subprocess.Popen(command, stdout=qemu_log, stderr=subprocess.STDOUT)
                 try:
+                    if args.usb_no_intx or args.ahci_no_irq:
+                        kernel = repo / "kernel/obj" / ("x86_64/kernel.bin" if native else "kernel.bin")
+                        prepare_pci_fixture(qmp_path, gdb_path, qtest_path, kernel, args.ahci_no_irq)
                     deadline = time.monotonic() + args.timeout
                     mouse_sent = False
                     frames_checked = set()
                     app_started = None
                     app_closed = False
+                    usb_steps = set()
                     while time.monotonic() < deadline and guest.poll() is None:
                         text = serial.read_text(errors="replace") if serial.exists() else ""
                         if re.search(r"PANIC|x86_64 exception .*cs=8", text):
                             raise RuntimeError(f"kernel failure; see {serial}")
+                        if args.apic and "init.bin started" in text:
+                            markers = [f"apic: enabled {args.apic} "]
+                            if native:
+                                markers.append(f"smp: Limine handoff mode={args.apic} cpus={args.cpus} ")
+                            if any(marker not in text for marker in markers):
+                                raise RuntimeError(f"APIC mode/handoff mismatch; see {serial}")
+                        if args.machine == "q35" and "init.bin started" in text:
+                            if not re.search(r"pci: segment=0000 bus=00 access=ECAM", text):
+                                raise RuntimeError(f"Q35 did not use MCFG/ECAM; see {serial}")
+                        if args.usb:
+                            if re.search(r"usb-hub: .*failed|usb: interface .*class=09 unavailable", text):
+                                raise RuntimeError(f"hub enumeration failure; see {serial}")
+                            for marker in ("USBSTORAGE REMOVE_READY", "USBSTORAGE REINSERT_READY",
+                                           "USBKEY READY", "USBKEY REPEAT_READY", "USBKEY HOLD_READY",
+                                           "USBKEY REMOVE_READY", "USBKEY PASS"):
+                                if marker not in text or marker in usb_steps:
+                                    continue
+                                qmp = QMP(qmp_path)
+                                try:
+                                    if marker == "USBSTORAGE REMOVE_READY":
+                                        qmp.execute("device_del", id="device-high")
+                                    elif marker == "USBSTORAGE REINSERT_READY":
+                                        qmp.execute("device_add", driver="usb-storage", id="device-high",
+                                                    bus="usb2.0", port="2", drive="usb-high")
+                                    elif marker == "USBKEY READY":
+                                        qmp.press("key", key={"type": "qcode", "data": "a"})
+                                        qmp.chord("shift", "b")
+                                        qmp.press("key", key={"type": "qcode", "data": "left"})
+                                        qmp.press("key", key={"type": "qcode", "data": "backspace"})
+                                    elif marker == "USBKEY REPEAT_READY":
+                                        for down in (True, False):
+                                            qmp.execute("input-send-event", events=[
+                                                {"type": "key", "data": {"down": down,
+                                                 "key": {"type": "qcode", "data": "c"}}}])
+                                            if down: time.sleep(0.8)
+                                    elif marker == "USBKEY HOLD_READY":
+                                        qmp.execute("input-send-event", events=[
+                                            {"type": "key", "data": {"down": True,
+                                             "key": {"type": "qcode", "data": "shift"}}}])
+                                    elif marker == "USBKEY REMOVE_READY":
+                                        qmp.execute("device_del", id="usb-keyboard")
+                                    else:
+                                        qmp.execute("device_add", driver="usb-kbd", id="usb-keyboard",
+                                                    bus=keyboard_bus, port=keyboard_port, usb_version=1)
+                                        time.sleep(0.5)
+                                        qmp.execute("input-send-event", events=[
+                                            {"type": "key", "data": {"down": False,
+                                             "key": {"type": "qcode", "data": "shift"}}}])
+                                    usb_steps.add(marker)
+                                finally:
+                                    qmp.close()
                         if args.console and "GMOUSE ID =" in text:
                             exercise_console(qmp_path, output)
                             print(f"{args.arch} {args.firmware} GUICONSOLE PASS: prompt, echo, backspace, scroll; {output}")
@@ -320,7 +687,7 @@ def main():
                             finally:
                                 qmp.close()
                         mouse = re.search(r"GUIMOUSE READY origin=(\d+),(\d+) target=(\d+),(\d+)", text)
-                        if args.mouse and mouse and not mouse_sent:
+                        if (args.mouse or args.usb) and mouse and not mouse_sent:
                             origin = tuple(map(int, mouse.group(1, 2)))
                             target = tuple(map(int, mouse.group(3, 4)))
                             exercise_mouse(qmp_path, origin, target, output)
@@ -337,6 +704,50 @@ def main():
                             missing = [marker for marker in expected if marker not in text]
                             if missing:
                                 raise RuntimeError(f"missing {missing}; see {serial}")
+                            if args.usb:
+                                modes = re.findall(r"^xhci: (\S+) .* transport=(\w+) ready$", text, re.M)
+                                expected_mode = "msix" if args.usb_irq == "auto" else args.usb_irq
+                                if len(modes) != 2 or any(mode != expected_mode for _, mode in modes):
+                                    raise RuntimeError(f"USB interrupt mode mismatch: {modes}")
+                                if args.usb_root_bus:
+                                    if any(int(bdf.split(":")[-2], 16) <= args.usb_root_bus for bdf, _ in modes):
+                                        raise RuntimeError(f"USB controllers are not below the independent root: {modes}")
+                                    marker = f"pci: ECAM discovery entry segment=0000 bus={args.usb_root_bus:02x} "
+                                    if marker not in text:
+                                        raise RuntimeError("independent PCI root was not discovered")
+                                if args.usb_no_intx and len(re.findall(r"^usb: PCI .*prog-if=30 irq=255$", text, re.M)) != 2:
+                                    raise RuntimeError("xHCI did not observe both missing INTx routes")
+                                exercise_console(qmp_path, output, (128, 128))
+                                print("USBCONSOLE PASS: shell echo, backspace, scrolling", flush=True)
+                                exercise_usb(qmp_path, serial, guest, deadline,
+                                             keyboard_bus, keyboard_port, args.usb_hubs)
+                                # Read from the backing images after guest exit, independently
+                                # of its page cache and USB driver.
+                                guest.terminate()
+                                guest.wait(timeout=5)
+                                for name, image in usb_images:
+                                    destination = output / f"usb-{name}-data.bin"
+                                    subprocess.run(["mcopy", "-o", "-i", image, "::/usbdata.bin",
+                                                    str(destination)], check=True)
+                                    expected_bytes = bytearray(((i * 37) ^ (i >> 8) ^ 0x5a) & 255
+                                                               for i in range(128 * 1024))
+                                    expected_bytes[513:516] = b"USB"
+                                    if destination.read_bytes() != expected_bytes:
+                                        raise RuntimeError(f"USB persistent write mismatch: {name}")
+                                print("USB persistence PASS: host verified all three backing images", flush=True)
+                            if args.ahci and not args.ahci_no_irq:
+                                if "sectors=335544320 lba=48 ready" not in text:
+                                    raise RuntimeError("AHCI did not preserve the large disk's 48-bit capacity")
+                                guest.terminate()
+                                guest.wait(timeout=5)
+                                for index, (disk, expected_bytes) in enumerate(ahci_images):
+                                    destination = output / f"ahci-{index}-written.bin"
+                                    subprocess.run(["mcopy", "-o", "-i", str(disk), "::/written.bin", str(destination)], check=True)
+                                    if destination.read_bytes() != expected_bytes:
+                                        raise RuntimeError(f"AHCI backing image mismatch: {index}")
+                                print("AHCI persistence PASS: two ports, read/write/flush, unaligned write, 48-bit capacity", flush=True)
+                            elif args.ahci_no_irq:
+                                print("AHCI timeout PASS: lost IRQ did not stall startup", flush=True)
                             print(f"{args.arch} {args.firmware} PASS: {args.cpus} CPUs, {args.memory} MiB; {serial}")
                             return
                         time.sleep(0.2)
@@ -353,7 +764,7 @@ def main():
         with (output / "restore.log").open("w") as restore_log:
             restore = ([str(repo / "scripts/build-livecd.sh"), str(iso), args.arch]
                        if native else ["make", "-C", str(repo / "kernel"),
-                                       "ARCH=i386", "livecd", "-j8"])
+                                       "ARCH=i386", *kernel_options, "livecd", "-j8"])
             subprocess.run(restore,
                            stdout=restore_log, stderr=subprocess.STDOUT, check=True)
 

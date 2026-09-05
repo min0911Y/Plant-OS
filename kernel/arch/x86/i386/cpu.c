@@ -36,14 +36,6 @@ void arch_dma_sync_for_cpu(const void *address, size_t size) {
   asm volatile("" : : : "memory");
 }
 
-void *arch_mmio_map(uint64_t physical_address, size_t size) {
-  if (physical_address > UINT_MAX ||
-      (size != 0 && size - 1 > UINT_MAX - (uintptr_t)physical_address)) {
-    return NULL;
-  }
-  return (void *)(uintptr_t)physical_address;
-}
-
 void arch_cpu_idle(void) { asm volatile("sti; hlt" : : : "memory"); }
 
 void arch_cpu_relax(void) { asm volatile("pause" : : : "memory"); }

@@ -1,10 +1,12 @@
 // 多任务重构 -- mtask.c (区别与以前的多任务)
 #include <arch.h>
 #include <dos.h>
+#include <input_device.h>
 #include <irq.h>
 #include <limits.h>
 #include <platform.h>
 #include <smp.h>
+#include <usb.h>
 #define STACK_SIZE TASK_KERNEL_STACK_SIZE
 #define REAPER_TID 0u
 #define TASK_ID_NONE ((uint32_t)-1)
@@ -142,7 +144,7 @@ static bool init_task(void) {
   memset(&task_registry, 0, sizeof(task_registry));
   return task_registry_grow();
 }
-extern mtask *mouse_use_task;
+
 static uint32_t scheduler_load(uint32_t cpu) {
   uint32_t load = 0;
   for (uint32_t i = 0; i < task_registry.slot_count; i++) {
@@ -514,8 +516,6 @@ static void task_clear_external_refs(mtask *task) {
 #if defined(KERNEL_ARCH_X86_64)
   platform_video_release_owner(task);
 #endif
-  extern mtask *keyboard_use_task;
-  extern int disable_flag;
 
   mtask *leader = get_task(task->tgid);
   if (leader && leader->group_lock_owner == task->tid) {
@@ -537,11 +537,10 @@ static void task_clear_external_refs(mtask *task) {
     }
   }
   if (mouse_use_task == task) {
-    mouse_sleep(&mdec);
+    mouse_sleep();
   }
   if (keyboard_use_task == task) {
     keyboard_use_task = NULL;
-    disable_flag = 0;
   }
   timer_cancel_for_task(task);
 #if defined(KERNEL_ARCH_I386)
@@ -552,11 +551,11 @@ static void task_clear_external_refs(mtask *task) {
   if (task->kind == TASK_PROCESS && task->tid == task->tgid) {
     net_socket_task_cleanup(task->tgid);
   }
-  sb16_remove_task(task);
   vdisk_remove_task(task->tid);
 }
 
 static void task_release_resources(mtask *task) {
+  usb_cancel_task(task->tid, task->generation);
   unsigned tid = task->tid;
 
   arch_fpu_reset(task);

@@ -9,14 +9,9 @@ enum {
   MOUSE_ROLL_DOWN = 2,
 };
 
-typedef struct mouse_decoder {
-  uint8_t packet[4];
-  uint8_t phase;
-  int x;
-  int y;
-  int buttons;
-  int sleeping;
-  int wheel;
-} mouse_decoder_t;
+typedef struct {
+  int32_t x, y, wheel;
+  uint32_t buttons;
+} mouse_event_t;
 
 #endif

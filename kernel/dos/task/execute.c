@@ -1,6 +1,7 @@
 #include <arch.h>
 #include <dos.h>
 #include <executable.h>
+#include <input_device.h>
 #include <irq.h>
 #include <limits.h>
 #include <math_util.h>
@@ -135,9 +136,9 @@ void task_to_user_mode_shell() {
   uintptr_t image_end;
   if (!arch_executable_validate(p, shell_size, &user_eip, &image_end) ||
       image_end > (uintptr_t)-1 - (PAGE_SIZE_BYTES - 1)) {
-    extern mtask *mouse_use_task;
+
     if (mouse_use_task == current_task()) {
-      mouse_sleep(&mdec);
+      mouse_sleep();
     }
     task_exit(-1);
     for (;;)
@@ -205,9 +206,9 @@ void task_to_user_mode_elf(char *filename) {
   if (!arch_executable_validate(p, executable_size, &user_eip, &image_end) ||
       image_end > (uintptr_t)-1 - (PAGE_SIZE_BYTES - 1)) {
     page_free(p, executable_size);
-    extern mtask *mouse_use_task;
+
     if (mouse_use_task == task) {
-      mouse_sleep(&mdec);
+      mouse_sleep();
     }
     task_exit(-1);
     for (;;)
@@ -251,8 +252,8 @@ int os_execute(char *filename, char *line) {
   if (filename == NULL || line == NULL) {
     return -1;
   }
-  extern mtask *mouse_use_task;
-  mtask *backup = mouse_use_task;
+
+  bool mouse_owned = mouse_use_task == current_task();
   char *fm = (char *)malloc(strlen(filename) + 1);
   char *p1 = malloc(strlen(line) + 1);
   uintptr_t *r = page_malloc_one_no_mark();
@@ -285,7 +286,9 @@ int os_execute(char *filename, char *line) {
   t->tty_session = current_task()->tty_session;
   int o = current_task()->fifosleep;
   t->line = (char *)r;
+  irq_state_t state = irq_save();
   if (!task_publish(t)) {
+    irq_restore(state);
     task_abort_creation(t);
     free(p1);
     free(fm);
@@ -295,6 +298,10 @@ int os_execute(char *filename, char *line) {
   current_task()->sigint_up = 0;
   current_task()->TTY = NULL;
   current_task()->fifosleep = 1;
+  if (mouse_owned) {
+    mouse_sleep();
+  }
+  irq_restore(state);
 
   unsigned status = waittid(t->tid);
   current_task()->fifosleep = o;
@@ -304,11 +311,8 @@ int os_execute(char *filename, char *line) {
   current_task()->TTY = current_task()->tty_session == tty_backup
                             ? tty_backup
                             : current_task()->tty_session;
-  if (backup) {
-    mouse_ready(&mdec);
-    mouse_use_task = backup;
-  } else {
-    mouse_sleep(&mdec);
+  if (mouse_owned && mouse_use_task == NULL) {
+    mouse_ready();
   }
   current_task()->sigint_up = old;
 

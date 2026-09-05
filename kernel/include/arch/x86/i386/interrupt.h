@@ -3,6 +3,7 @@
 
 #include <ctypes.h>
 #include <stddef.h>
+#include <arch/x86/interrupt_controller.h>
 
 enum {
   X86_EXCEPTION_COUNT = 32,
@@ -78,6 +79,7 @@ typedef void (*x86_interrupt_entry_t)(void);
 void null_inthandler(void);
 extern void (*const x86_exception_entries[X86_EXCEPTION_COUNT])(void);
 extern void (*const x86_irq_entries[X86_IRQ_COUNT])(void);
+extern void (*const x86_message_entries[X86_MESSAGE_VECTOR_COUNT])(void);
 void x86_exception_dispatch(x86_exception_frame_t *frame);
 void x86_irq_dispatch(unsigned irq, x86_interrupt_frame_t *frame);
 void x86_syscall_entry(void);

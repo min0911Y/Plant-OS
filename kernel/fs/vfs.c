@@ -86,6 +86,14 @@ static struct vfs_cache_page *vfs_cache_hash[VFS_CACHE_HASH_BUCKETS];
 static uint32_t vfs_cache_pages;
 static uint32_t vfs_cache_limit;
 
+/* A failed block transaction poisons the volume until device registration
+ * replaces it. Never publish cached data or successful metadata results after
+ * transport failure, even for a filesystem that performed several block I/Os.
+ */
+static int vfs_mount_status(const struct vfs_mount *mount, int status) {
+  return DiskReady(mount->disk_number) ? status : VFS_ERROR_IO;
+}
+
 static bool vfs_normalize_drive(uint8_t drive, uint8_t *normalized) {
   if (drive >= 'a' && drive <= 'z') {
     drive -= 'a' - 'A';
@@ -251,8 +259,9 @@ static struct vfs_cache_page *vfs_cache_load(struct vfs_dentry *dentry,
   if (length > VFS_CACHE_PAGE_SIZE) {
     length = VFS_CACHE_PAGE_SIZE;
   }
-  int read = dentry->mount->filesystem->read(
-      dentry->mount, &dentry->node, offset, page->data, length);
+  int read = vfs_mount_status(dentry->mount, dentry->mount->filesystem->read(
+                                                 dentry->mount, &dentry->node,
+                                                 offset, page->data, length));
   if (read < 0 || (uint32_t)read != length) {
     free(page);
     return NULL;
@@ -470,6 +479,10 @@ static int vfs_resolve(vfs_context_t *context, const char *path,
     current = vfs_dentry_retain(context->cwd);
   }
 
+  if (vfs_mount_status(current->mount, VFS_OK) < 0) {
+    vfs_dentry_release(current);
+    return VFS_ERROR_IO;
+  }
   while (*cursor != '\0') {
     while (*cursor == '/' || *cursor == '\\') {
       cursor++;
@@ -506,8 +519,9 @@ static int vfs_resolve(vfs_context_t *context, const char *path,
     }
     vfs_node_t node;
     lock(&current->mount->lock);
-    status = current->mount->filesystem->lookup(current->mount, &current->node,
-                                                 normalized, &node);
+    status = vfs_mount_status(
+        current->mount, current->mount->filesystem->lookup(
+                            current->mount, &current->node, normalized, &node));
     unlock(&current->mount->lock);
     if (status < 0) {
       vfs_dentry_release(current);
@@ -822,7 +836,7 @@ bool vfs_mount_disk(uint8_t disk_number, uint8_t drive) {
     return false;
   }
 
-  if (filesystem->mount(mount) < 0) {
+  if (vfs_mount_status(mount, filesystem->mount(mount)) < 0) {
     state = irq_save();
     if (vfs_mounts[slot] == mount) {
       vfs_mounts[slot] = NULL;
@@ -844,7 +858,8 @@ bool vfs_mount_disk(uint8_t disk_number, uint8_t drive) {
   memset(mount->root, 0, sizeof(*mount->root));
   mount->root->name = malloc(1);
   if (mount->root->name == NULL ||
-      filesystem->root(mount, &mount->root->node) < 0) {
+      vfs_mount_status(mount, filesystem->root(mount, &mount->root->node)) <
+          0) {
     free(mount->root->name);
     free(mount->root);
     filesystem->unmount(mount);
@@ -899,6 +914,30 @@ bool vfs_unmount_disk(uint8_t drive) {
   return false;
 }
 
+bool vfs_disk_reusable(uint8_t disk) {
+  if (disk < 'A' || disk > 'Z' || vfs_disks[disk - 'A'].formatting ||
+      vfs_disks[disk - 'A'].retired_count != 0) {
+    return false;
+  }
+  for (unsigned i = 0; i < VFS_MAX_MOUNTS; i++) {
+    if (vfs_mounts[i] != NULL && vfs_mounts[i]->disk_number == disk) {
+      return false;
+    }
+  }
+  return true;
+}
+
+void vfs_disk_removed(uint8_t disk) {
+  for (unsigned i = 0; i < VFS_MAX_MOUNTS; i++) {
+    struct vfs_mount *mount = vfs_mounts[i];
+    if (mount != NULL && mount->disk_number == disk &&
+        mount->state == VFS_MOUNT_ACTIVE) {
+      vfs_cache_invalidate_mount(mount);
+      vfs_unmount_disk(mount->drive);
+    }
+  }
+}
+
 bool vfs_check_mount(uint8_t drive) {
   uint8_t normalized;
   if (!vfs_normalize_drive(drive, &normalized)) {
@@ -915,6 +954,9 @@ int vfs_format(uint8_t disk_number, const char *filesystem_name) {
   if (!vfs_normalize_drive(disk_number, &normalized) ||
       filesystem_name == NULL) {
     return VFS_ERROR_INVALID;
+  }
+  if (!disk_writable(normalized)) {
+    return VFS_ERROR_READ_ONLY;
   }
   const vfs_filesystem_t *filesystem = NULL;
   for (uint32_t index = 0; index < VFS_MAX_FILESYSTEMS; index++) {
@@ -953,7 +995,9 @@ int vfs_format(uint8_t disk_number, const char *filesystem_name) {
   if (unused != NULL) {
     vfs_destroy_mount(unused);
   }
-  int result = filesystem->format(normalized) ? VFS_OK : VFS_ERROR_IO;
+  int result = filesystem->format(normalized) && DiskReady(normalized)
+                   ? VFS_OK
+                   : VFS_ERROR_IO;
   state = irq_save();
   vfs_disks[disk_index].formatting = false;
   irq_restore(state);
@@ -1117,8 +1161,12 @@ int vfs_open(vfs_context_t *context, const char *path, uint32_t flags,
     }
     vfs_node_t node;
     lock(&parent->mount->lock);
-    status = parent->mount->filesystem->create(
-        parent->mount, &parent->node, name, VFS_NODE_FILE, &node);
+    status = vfs_mount_status(
+        parent->mount,
+        (disk_writable(parent->mount->disk_number)
+             ? parent->mount->filesystem->create(parent->mount, &parent->node,
+                                                 name, VFS_NODE_FILE, &node)
+             : VFS_ERROR_READ_ONLY));
     unlock(&parent->mount->lock);
     if (status == VFS_OK) {
       dentry = vfs_dentry_create(parent, name, &node);
@@ -1139,7 +1187,9 @@ int vfs_open(vfs_context_t *context, const char *path, uint32_t flags,
     vfs_dentry_release(dentry);
     return VFS_ERROR_IS_DIRECTORY;
   }
-  if ((flags & VFS_OPEN_WRITE) != 0 && dentry->mount->filesystem->write == NULL) {
+  if ((flags & VFS_OPEN_WRITE) != 0 &&
+      (dentry->mount->filesystem->write == NULL ||
+       !disk_writable(dentry->mount->disk_number))) {
     vfs_dentry_release(dentry);
     return VFS_ERROR_READ_ONLY;
   }
@@ -1150,7 +1200,11 @@ int vfs_open(vfs_context_t *context, const char *path, uint32_t flags,
       return VFS_ERROR_INVALID;
     }
     lock(&dentry->mount->lock);
-    status = dentry->mount->filesystem->truncate(dentry->mount, &dentry->node, 0);
+    status = vfs_mount_status(dentry->mount,
+                              (disk_writable(dentry->mount->disk_number)
+                                   ? dentry->mount->filesystem->truncate(
+                                         dentry->mount, &dentry->node, 0)
+                                   : VFS_ERROR_READ_ONLY));
     unlock(&dentry->mount->lock);
     if (status < 0) {
       vfs_dentry_release(dentry);
@@ -1219,6 +1273,10 @@ int vfs_read(vfs_handle_t *handle, void *buffer, uint32_t length) {
   }
   struct vfs_mount *mount = handle->dentry->mount;
   lock(&mount->lock);
+  if (vfs_mount_status(mount, VFS_OK) < 0) {
+    unlock(&mount->lock);
+    return VFS_ERROR_IO;
+  }
   if (length >= VFS_CACHE_BULK_READ_SIZE) {
     uint32_t read_offset = handle->offset;
     if (vfs_cache_copy(handle->dentry, read_offset, buffer, length)) {
@@ -1226,8 +1284,9 @@ int vfs_read(vfs_handle_t *handle, void *buffer, uint32_t length) {
       unlock(&mount->lock);
       return length;
     }
-    int read = mount->filesystem->read(mount, &handle->dentry->node,
-                                       handle->offset, buffer, length);
+    int read = vfs_mount_status(
+        mount, mount->filesystem->read(mount, &handle->dentry->node,
+                                       handle->offset, buffer, length));
     if (read > 0 && (uint32_t)read <= length) {
       handle->offset += (uint32_t)read;
       vfs_cache_store_read(handle->dentry, read_offset, buffer,
@@ -1273,6 +1332,10 @@ int vfs_write(vfs_handle_t *handle, const void *buffer, uint32_t length) {
   }
   struct vfs_mount *mount = handle->dentry->mount;
   lock(&mount->lock);
+  if (vfs_mount_status(mount, VFS_OK) < 0) {
+    unlock(&mount->lock);
+    return VFS_ERROR_IO;
+  }
   if ((handle->flags & VFS_OPEN_APPEND) != 0) {
     handle->offset = handle->dentry->node.size;
   }
@@ -1281,8 +1344,11 @@ int vfs_write(vfs_handle_t *handle, const void *buffer, uint32_t length) {
     return VFS_ERROR_OVERFLOW;
   }
   uint32_t previous_size = handle->dentry->node.size;
-  int written = mount->filesystem->write(mount, &handle->dentry->node,
-                                         handle->offset, buffer, length);
+  int written = vfs_mount_status(
+      mount, (disk_writable(mount->disk_number)
+                  ? mount->filesystem->write(mount, &handle->dentry->node,
+                                             handle->offset, buffer, length)
+                  : VFS_ERROR_READ_ONLY));
   if (written > 0) {
     uint32_t write_offset = handle->offset;
     uint32_t write_end = write_offset + (uint32_t)written;
@@ -1343,18 +1409,25 @@ int vfs_sync(vfs_handle_t *handle) {
   if (handle == NULL) {
     return VFS_ERROR_BAD_DESCRIPTOR;
   }
-  if (handle->dentry->mount->filesystem->sync == NULL) {
-    return VFS_OK;
+  struct vfs_mount *mount = handle->dentry->mount;
+  lock(&mount->lock);
+  int status = vfs_mount_status(mount, VFS_OK);
+  if (status == VFS_OK && mount->filesystem->sync != NULL) {
+    status = vfs_mount_status(mount, mount->filesystem->sync(mount));
   }
-  lock(&handle->dentry->mount->lock);
-  int status = handle->dentry->mount->filesystem->sync(handle->dentry->mount);
-  unlock(&handle->dentry->mount->lock);
+  if (status == VFS_OK && !disk_sync(mount->disk_number)) {
+    status = VFS_ERROR_IO;
+  }
+  unlock(&mount->lock);
   return status;
 }
 
 int vfs_fstat(vfs_handle_t *handle, vfs_stat_t *status) {
   if (handle == NULL || status == NULL) {
     return VFS_ERROR_INVALID;
+  }
+  if (vfs_mount_status(handle->dentry->mount, VFS_OK) < 0) {
+    return VFS_ERROR_IO;
   }
   status->type = handle->dentry->node.type;
   status->attributes = handle->dentry->node.attributes;
@@ -1398,8 +1471,10 @@ int vfs_list_directory(vfs_context_t *context, const char *path,
   lock(&directory->mount->lock);
   for (;;) {
     vfs_dir_entry_t entry;
-    int iterated = directory->mount->filesystem->iterate(
-        directory->mount, &directory->node, total, &entry);
+    int iterated = vfs_mount_status(
+        directory->mount,
+        directory->mount->filesystem->iterate(directory->mount,
+                                              &directory->node, total, &entry));
     if (iterated < 0) {
       status = iterated;
       break;
@@ -1441,8 +1516,12 @@ static int vfs_create_directory_entry(vfs_context_t *context,
   }
   vfs_node_t ignored;
   lock(&parent->mount->lock);
-  status = parent->mount->filesystem->create(parent->mount, &parent->node,
-                                              name, type, &ignored);
+  status = vfs_mount_status(
+      parent->mount,
+      (disk_writable(parent->mount->disk_number)
+           ? parent->mount->filesystem->create(parent->mount, &parent->node,
+                                               name, type, &ignored)
+           : VFS_ERROR_READ_ONLY));
   unlock(&parent->mount->lock);
   vfs_dentry_release(parent);
   return status;
@@ -1481,8 +1560,11 @@ static int vfs_remove_entry(vfs_context_t *context, const char *path,
   }
   if (status == VFS_OK) {
     lock(&parent->mount->lock);
-    status = parent->mount->filesystem->remove(parent->mount, &parent->node,
-                                                name, type);
+    status = vfs_mount_status(
+        parent->mount, (disk_writable(parent->mount->disk_number)
+                            ? parent->mount->filesystem->remove(
+                                  parent->mount, &parent->node, name, type)
+                            : VFS_ERROR_READ_ONLY));
     unlock(&parent->mount->lock);
   }
   if (status == VFS_OK) {
@@ -1531,9 +1613,13 @@ int vfs_rename(vfs_context_t *context, const char *source,
   }
   if (status == VFS_OK) {
     lock(&source_parent->mount->lock);
-    status = source_parent->mount->filesystem->rename(
-        source_parent->mount, &source_parent->node, source_name,
-        &destination_parent->node, destination_name);
+    status = vfs_mount_status(
+        source_parent->mount,
+        (disk_writable(source_parent->mount->disk_number)
+             ? source_parent->mount->filesystem->rename(
+                   source_parent->mount, &source_parent->node, source_name,
+                   &destination_parent->node, destination_name)
+             : VFS_ERROR_READ_ONLY));
     unlock(&source_parent->mount->lock);
   }
   if (status == VFS_OK) {

@@ -8,7 +8,7 @@ pc_objects := $(out_path_src)acpi.o $(out_path_src)beep.o \
 	$(out_path_src)init_platform.o \
 	$(out_path_src)keyboard.o \
 	$(out_path_src)mouse.o $(out_path_src)pci.o $(out_path_src)rtc.o \
-	$(out_path_src)sb16.o $(out_path_src)serial.o $(out_path_src)timer.o \
+	$(out_path_src)serial.o $(out_path_src)timer.o \
 	$(out_path_src)vga.o $(out_path_src)vbe.o
 
 -include $(call kernel_depfiles,$(pc_objects))

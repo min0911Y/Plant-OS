@@ -115,10 +115,9 @@ unsigned int GetDriveCode(unsigned char *name);
 bool DriveSemaphoreTake(unsigned int drive_code);
 void DriveSemaphoreGive(unsigned int drive_code);
 void vdisk_remove_task(unsigned tid);
-void sb16_remove_task(mtask *task);
-unsigned int disk_Size(char drive);
-void disk_read(unsigned int lba, unsigned int number, void *buffer, char drive);
-void disk_write(unsigned int lba, unsigned int number, void *buffer,
+uint64_t disk_Size(char drive);
+bool disk_read(unsigned int lba, unsigned int number, void *buffer, char drive);
+bool disk_write(unsigned int lba, unsigned int number, void *buffer,
                 char drive);
 bool CDROM_Read(unsigned int lba, unsigned int number, void *buffer,
                 char drive);

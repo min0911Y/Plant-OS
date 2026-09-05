@@ -1,12 +1,12 @@
 #include <arch.h>
 #include <dos.h>
+#include <input_device.h>
 #include <irq.h>
 #include <platform.h>
 // struct TASK *shell_task;
 // struct TASK *sr1, *sr2;
 // struct TASK normal;
 uintptr_t memsize;
-mouse_decoder_t mdec;
 
 #ifdef KERNEL_DISABLE_MEMTEST
 #define KERNEL_MEMSIZE_BYTES ((unsigned int)KERNEL_MEMSIZE_MB * 1024U * 1024U)
@@ -124,11 +124,11 @@ void sysinit(void) {
   if (!init_keyboard()) {
     WARNING_K("PS/2 keyboard initialization timed out");
   }
-  if (!enable_mouse(&mdec)) {
+  if (!enable_mouse()) {
     WARNING_K("PS/2 mouse initialization timed out");
   }
   logk("sysinit: enable_mouse done\n");
-  mouse_sleep(&mdec);
+  mouse_sleep();
   logk("sysinit: mouse_sleep done\n");
   irq_mask_clear(1);  // keyboard
   irq_mask_clear(12); // mouse
@@ -207,10 +207,6 @@ void sysinit(void) {
   printk("smp cpus=%d bsp apic=%d ctl=%s\n", smp_cpu_count(),
          smp_cpu_lapic_id(0),
          interrupt_controller_uses_apic() ? "apic" : "pic");
-  printk("sb16\n");
-  logk("sysinit: disable_sb16 start\n");
-  disable_sb16();
-  logk("sysinit: disable_sb16 done\n");
   printk("input stack\n");
   logk("sysinit: Input_Stack_Init start\n");
   Input_Stack_Init();
