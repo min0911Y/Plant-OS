@@ -125,8 +125,7 @@ static int gui_create_window(rpc_call_t *call) {
   TaskLock();
   window_t *window =
       create_window(desktop0, title, (int)request->width, (int)request->height,
-                    call->caller_tid,
-                    (vram_t *)((unsigned char *)shared + sizeof(*shared)));
+                    call->caller_tid);
   if (window == NULL) {
     TaskUnlock();
     free(allocation);
@@ -134,6 +133,10 @@ static int gui_create_window(rpc_call_t *call) {
     return RPC_ERR_NOMEM;
   }
 
+  /* The shared pixels are the client's render buffer. Only committed damage
+     reaches the private sheet used for exposure, mouse and window redraws. */
+  memcpy((unsigned char *)shared + sizeof(*shared), window->vram,
+         (size_t)window->xsize * window->ysize * sizeof(vram_t));
   gui_event_queue_init(&shared->events);
   gui_event_queue_init(&shared->key_press);
   gui_event_queue_init(&shared->key_up);
@@ -229,7 +232,14 @@ static int gui_refresh_window(rpc_call_t *call) {
       rect.y1 = remote->window->ysize;
     }
     if (rect.x0 < rect.x1 && rect.y0 < rect.y1) {
-      sheet_refresh(remote->window->sht, rect.x0, rect.y0, rect.x1, rect.y1);
+      window_t *window = remote->window;
+      const vram_t *source = (const vram_t *)(window->shared + 1);
+      size_t row_bytes = (size_t)(rect.x1 - rect.x0) * sizeof(*source);
+      for (int y = rect.y0; y < rect.y1; y++) {
+        size_t offset = (size_t)y * window->xsize + rect.x0;
+        memcpy(window->vram + offset, source + offset, row_bytes);
+      }
+      sheet_refresh(window->sht, rect.x0, rect.y0, rect.x1, rect.y1);
     }
   }
   TaskUnlock();
@@ -275,6 +285,12 @@ static int gui_set_title(rpc_call_t *call) {
   TaskLock();
   gui_remote_window_t *remote = gui_remote_find(call, request->window_id);
   int result = remote ? window_set_title(remote->window, title) : -1;
+  if (result == 0) {
+    window_t *window = remote->window;
+    size_t rows = window->ysize < 20 ? window->ysize : 20;
+    memcpy(window->shared + 1, window->vram,
+           rows * window->xsize * sizeof(vram_t));
+  }
   TaskUnlock();
   return result == 0 ? RPC_OK : RPC_ERR_INVAL;
 }

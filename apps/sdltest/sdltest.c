@@ -16,6 +16,58 @@
     }                                                                          \
   } while (0)
 
+static int frame_checkpoint(const char *phase) {
+  logkf("SDLFRAME READY %s\n", phase);
+  Uint64 deadline = SDL_GetTicks64() + 10000;
+  SDL_Event event;
+  while (SDL_GetTicks64() < deadline) {
+    if (SDL_WaitEventTimeout(&event, 100) && event.type == SDL_KEYDOWN &&
+        event.key.keysym.scancode == SDL_SCANCODE_SPACE)
+      return 0;
+  }
+  logkf("SDLFRAME FAIL timeout %s\n", phase);
+  return 1;
+}
+
+static int expose_window(SDL_Window *window) {
+  int x, y, width, height;
+  SDL_GetWindowPosition(window, &x, &y);
+  SDL_GetWindowSize(window, &width, &height);
+  SDL_Window *cover = SDL_CreateWindow("Exposure test", x, y, width, height, 0);
+  CHECK(cover);
+  SDL_DestroyWindow(cover);
+  return 0;
+}
+
+static int test_frame_publication(SDL_Window *first, SDL_Window *second,
+                                   SDL_Surface *surface, SDL_Renderer *renderer) {
+  /* Clearing the next frame must not change the presented image on exposure. */
+  CHECK(SDL_SetRenderDrawColor(renderer, 255, 0, 255, 255) == 0);
+  CHECK(SDL_RenderClear(renderer) == 0);
+  CHECK(SDL_RenderFlush(renderer) == 0);
+  CHECK(expose_window(second) == 0);
+  CHECK(frame_checkpoint("draft") == 0);
+
+  /* A partial update must leave all pixels outside the damage unchanged. */
+  CHECK(SDL_FillRect(surface, NULL, SDL_MapRGB(surface->format, 240, 160, 32)) == 0);
+  SDL_Rect damage = {0, 80, 32, 32};
+  CHECK(SDL_UpdateWindowSurfaceRects(first, &damage, 1) == 0);
+  CHECK(expose_window(first) == 0);
+  CHECK(frame_checkpoint("partial") == 0);
+
+  /* Return from Present is the boundary for reusing the shared render buffer. */
+  CHECK(SDL_SetRenderDrawColor(renderer, 224, 48, 32, 255) == 0);
+  CHECK(SDL_RenderClear(renderer) == 0);
+  SDL_RenderPresent(renderer);
+  CHECK(SDL_SetRenderDrawColor(renderer, 255, 0, 255, 255) == 0);
+  CHECK(SDL_RenderClear(renderer) == 0);
+  CHECK(SDL_RenderFlush(renderer) == 0);
+  CHECK(expose_window(second) == 0);
+  CHECK(frame_checkpoint("presented") == 0);
+  logkf("SDLFRAME PASS draft isolation, partial damage, present completion\n");
+  return 0;
+}
+
 int main(int argc, char **argv) {
   rpc_endpoint_t gui;
   if (rpc_connect(GUI_SERVICE_NAME, &gui, 0) != RPC_OK) {
@@ -122,6 +174,7 @@ int main(int argc, char **argv) {
   }
   logkf("SDLTEST INPUT seen=%u\n", seen);
   CHECK(seen == 127);
+  CHECK(test_frame_publication(first, second, surface, renderer) == 0);
   SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(second);
   SDL_DestroyWindow(first);

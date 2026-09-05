@@ -215,7 +215,7 @@ int window_set_title(window_t *window, const char *title) {
 }
 
 window_t *create_window(desktop_t *desktop, const char *title, int xsize,
-                        int ysize, unsigned tid, vram_t *vram) {
+                        int ysize, unsigned tid) {
   if (desktop == NULL || title == NULL || xsize <= 0 || ysize <= 0) {
     return NULL;
   }
@@ -225,9 +225,7 @@ window_t *create_window(desktop_t *desktop, const char *title, int xsize,
   }
   memset(res, 0, sizeof(*res));
   res->desktop = desktop;
-  res->owns_vram = vram == NULL;
-  res->vram = vram == NULL ? (vram_t *)malloc(xsize * ysize * sizeof(vram_t))
-                           : vram;
+  res->vram = malloc((size_t)xsize * ysize * sizeof(vram_t));
   if (res->vram == NULL) {
     free(res);
     return NULL;
@@ -236,9 +234,7 @@ window_t *create_window(desktop_t *desktop, const char *title, int xsize,
   res->ysize = ysize;
   res->title = malloc(strlen(title) + 1);
   if (res->title == NULL) {
-    if (res->owns_vram) {
-      free(res->vram);
-    }
+    free(res->vram);
     free(res);
     return NULL;
   }
@@ -246,9 +242,7 @@ window_t *create_window(desktop_t *desktop, const char *title, int xsize,
   res->sht = sheet_alloc(desktop->shtctl);
   if (res->sht == NULL) {
     free(res->title);
-    if (res->owns_vram) {
-      free(res->vram);
-    }
+    free(res->vram);
     free(res);
     return NULL;
   }
@@ -274,9 +268,7 @@ window_t *create_window(desktop_t *desktop, const char *title, int xsize,
     res->sht->wnd = NULL;
     sheet_free(res->sht);
     free(res->title);
-    if (res->owns_vram) {
-      free(res->vram);
-    }
+    free(res->vram);
     free(res);
     return NULL;
   }
@@ -322,9 +314,7 @@ void destroy_window(window_t *window) {
   if (focused) {
     desktop_focus_top_window(window->desktop);
   }
-  if (window->owns_vram) {
-    free(window->vram);
-  }
+  free(window->vram);
   free(window->title);
   free(window);
 }

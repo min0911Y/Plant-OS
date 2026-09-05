@@ -54,7 +54,7 @@ flanterm 自己处理 ANSI/VT100，默认 TTY 不再经过内核旧解析器。�
 
 两种架构使用同一份 `apps/sdl2` 后端，lite、Doom、invader 不再链接 `sdl2_old`。原生构建同时提供 SDL2、SDL2_ttf、SDL2_image、FreeType、zlib、libpng 和 JPEG 库。
 
-在系统中先运行 `gui.bin`，再从 GUI 终端运行 `lite.bin` 或 `nk.bin`。Doom 与 WAD 位于 `/games`，可在该目录运行 `doom.bin`。SDL 软件 surface 直接访问 GUI 提供的共享内存，pitch 包含窗口边框；刷新只提交 damage，不再逐像素复制一份 framebuffer。显示尺寸通过 `framebuffer_info()` 查询，SDL 不请求 BIOS 模式切换。每个窗口独立处理键盘前缀和鼠标状态，支持文字、方向键、滚轮、标题更新与关闭。
+在系统中先运行 `gui.bin`，再从 GUI 终端运行 `lite.bin` 或 `nk.bin`。Doom 与 WAD 位于 `/games`，可在该目录运行 `doom.bin`。SDL 软件 surface 直接写 GUI 提供的共享绘图缓冲，pitch 包含窗口边框；GUI 保留独立的已提交画面用于合成和遮挡恢复。Present 只按行复制 damage，并等刷新 RPC 应答后才复用共享绘图缓冲，避免 nk 清屏或绘制中的半成品帧被显示。SDL 不再额外持有第三份像素缓冲。普通 `window_refresh` 仍可合并异步更新；需要完整帧边界的程序使用 `window_present`。显示尺寸通过 `framebuffer_info()` 查询，SDL 不请求 BIOS 模式切换。每个窗口独立处理键盘前缀和鼠标状态，支持文字、方向键、滚轮、标题更新与关闭。
 
 当前支持软件渲染、字体、图片、键鼠及纳秒性能计时；窗口尺寸固定。OpenGL/Vulkan、音频设备、SDL 线程和 `SDL_AddTimer` 的异步回调尚未实现，不能把 `SDL_INIT_TIMER` 当成受支持的线程服务。`SDL_GetTicks64`、`SDL_GetPerformanceCounter` 和 `SDL_Delay` 可独立使用。
 
@@ -89,11 +89,11 @@ python3 scripts/test-x86_64.py --arch i386 --mouse --memory 512
 # C4 的原生指针/虚拟机、NASM ELF 输出与 JavaScript 对象
 python3 scripts/test-x86_64.py --tools --firmware uefi
 
-# SDL2 surface/renderer、FreeType 字体、鼠标、滚轮和按键
+# SDL2 帧提交隔离、局部 damage、遮挡恢复、字体和键鼠输入
 python3 scripts/test-x86_64.py --sdl --firmware uefi
 python3 scripts/test-x86_64.py --arch i386 --sdl --memory 512
 
-# 保存程序截图并通过鼠标关闭；lite 还验证文件编辑与保存
+# 保存程序截图并通过鼠标关闭；lite 验证编辑保存，nk 连续采样检查闪烁
 python3 scripts/test-x86_64.py --desktop-app lite --firmware uefi
 python3 scripts/test-x86_64.py --desktop-app nk --firmware uefi
 

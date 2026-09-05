@@ -165,7 +165,7 @@ def main():
         commands = ["gui.bin"]
     if args.sdl:
         commands = ["timetest.bin", "sdltest.bin"]
-        expected = ["TIMETEST PASS", "SDLTEST PASS"]
+        expected = ["TIMETEST PASS", "SDLTEST PASS", "SDLFRAME PASS"]
     if args.desktop_app:
         commands = ["timetest.bin", f"sdltest.bin {args.desktop_app}.bin"]
         expected = ["TIMETEST PASS", f"SDLAPP EXIT {args.desktop_app}.bin status=0"]
@@ -231,6 +231,7 @@ def main():
                 try:
                     deadline = time.monotonic() + args.timeout
                     mouse_sent = False
+                    frames_checked = set()
                     app_started = None
                     app_closed = False
                     while time.monotonic() < deadline and guest.poll() is None:
@@ -261,6 +262,20 @@ def main():
                                     app_width = int(width * 0.8) if args.desktop_app == "lite" else min(1000, width - 16)
                                     app_height = int(height * 0.8) if args.desktop_app == "lite" else min(800, height - 48)
                                     left, top = (width - app_width) // 2, (height - app_height) // 2
+                                    if args.desktop_app == "nk":
+                                        probes = [(left + 100, top + 120, (255, 0, 0)),
+                                                  (left + 100, top + 370, (0, 255, 0)),
+                                                  (left + 460, top + 210, (0, 0, 255))]
+                                        flicker = 0
+                                        for frame in range(40):
+                                            width, height, pixels = qmp.screenshot(output / "nk-refresh.ppm")
+                                            if any(tuple(pixels[(y * width + x) * 3:(y * width + x) * 3 + 3]) != color
+                                                   for x, y, color in probes):
+                                                flicker += 1
+                                            time.sleep(0.05)
+                                        (output / "nk-refresh.json").write_text(json.dumps({"samples": 40, "incomplete_frames": flicker}) + "\n")
+                                        if flicker:
+                                            raise RuntimeError(f"nk exposed incomplete content in {flicker}/40 samples")
                                     x, y = left + app_width - 7, top + 10
                                     qmp.move(x - width // 2, y - height // 2)
                                     qmp.press("btn", button="left")
@@ -282,6 +297,26 @@ def main():
                                 qmp.press("key", key={"type": "qcode", "data": "a"})
                                 qmp.press("key", key={"type": "qcode", "data": "left"})
                                 mouse_sent = True
+                            finally:
+                                qmp.close()
+                        for phase in re.findall(r"^SDLFRAME READY (\w+)$", text, re.M):
+                            if not args.sdl or phase in frames_checked:
+                                continue
+                            expected_pixels = {
+                                "draft": [(440, 160, (32, 192, 64))],
+                                "partial": [(100, 200, (240, 160, 32)), (160, 210, (24, 64, 128))],
+                                "presented": [(440, 160, (224, 48, 32))],
+                            }[phase]
+                            qmp = QMP(qmp_path)
+                            try:
+                                width, height, pixels = qmp.screenshot(output / f"sdl-frame-{phase}.ppm")
+                                for x, y, color in expected_pixels:
+                                    offset = (y * width + x) * 3
+                                    actual = tuple(pixels[offset:offset + 3])
+                                    if actual != color:
+                                        raise RuntimeError(f"SDL {phase} exposed incorrect pixels at {x},{y}: {actual} != {color}")
+                                qmp.press("key", key={"type": "qcode", "data": "spc"})
+                                frames_checked.add(phase)
                             finally:
                                 qmp.close()
                         mouse = re.search(r"GUIMOUSE READY origin=(\d+),(\d+) target=(\d+),(\d+)", text)

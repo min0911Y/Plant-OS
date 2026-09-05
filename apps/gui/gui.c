@@ -40,7 +40,7 @@ static void click1(button_t *button) {
   (void)button;
   window_t *a =
       create_window(desktop0, "console", 80 * 8 + 8, 25 * 16 + 28,
-                    NowTaskID(), NULL);
+                    NowTaskID());
   if (a == NULL) {
     return;
   }
@@ -287,7 +287,7 @@ void main() {
 
   window_t *window2 =
       create_window(desktop0, "console", 80 * 8 + 8, 25 * 16 + 28,
-                    NowTaskID(), NULL);
+                    NowTaskID());
   if (window2 == NULL) {
     logkf("GUI failed to create initial console window\n");
     return;
@@ -303,7 +303,7 @@ void main() {
   // console_t *console1 = create_console(window3, 40 * 8, 20 * 16, 4, 24);
 
   window_t *window1 =
-      create_window(desktop0, "ToolBox", 200, 200, NowTaskID(), NULL);
+      create_window(desktop0, "ToolBox", 200, 200, NowTaskID());
   if (window1 == NULL) {
     logkf("GUI failed to create toolbox window\n");
     return;

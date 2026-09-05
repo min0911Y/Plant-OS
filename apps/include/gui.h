@@ -15,7 +15,10 @@ int window_get_event(window_t window);
 void close_window(window_t window);
 int window_set_title(window_t window, const char *title);
 void draw_px(window_t window, int x, int y, int color);
+/* Queue damage; the render buffer remains shared until it is consumed. */
 void window_refresh(window_t window, int first, int last);
+/* Publish complete pixels and wait until the compositor has copied them. */
+int window_present(window_t window, int first, int last);
 void *window_get_fb(window_t window);
 void window_start_recv_keyboard(window_t window);
 void window_stop_recv_keyboard(window_t window);

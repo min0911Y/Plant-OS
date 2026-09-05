@@ -101,8 +101,9 @@ static int PLOS_UpdateWindowFramebuffer(_THIS, SDL_Window *window,
   }
   if (!SDL_RectEmpty(&damage)) {
     unsigned x = damage.x + BORDER, y = damage.y + TITLE;
-    window_refresh(data->handle, (x << 16) | y,
-                   ((x + damage.w) << 16) | (y + damage.h));
+    if (window_present(data->handle, (x << 16) | y,
+                        ((x + damage.w) << 16) | (y + damage.h)) != 0)
+      return SDL_SetError("Cannot present the GUI window framebuffer");
   }
   return 0;
 }

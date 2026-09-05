@@ -288,14 +288,14 @@ python3 scripts/kernel-perf.py \
 - 修改用户态库时检查 C 与 C++ 两套归档：`libp.a`、`libcpps.a`，以及 `libabi.a`、`libgui.a` 等相关产物。
 
 - x86_64 用户程序构建由 `apps/build-x86_64.mk` 提供公共规则，`apps/native-apps.mk` 维护应用、库与专属编译参数；单应用通过 `native.mk` 转到同一依赖图。SDL、lite、Doom、NASM 的 `sources.mk` 同时供两种架构使用，不能维护两份不同的源码清单，也不能把第三方对象写回源目录再被另一架构复用。当前构建生成 62 个 ELF64 程序；TCC 工具链、DOSLDR 安装器和 x87 专用 fputest 仍只构建 i386。
-- SDL 的唯一活动实现是 `apps/sdl2`，lite、Doom、invader 使用同一版本，不得重新链接 `sdl2_old`。SDL surface 直接指向 GUI 共享 framebuffer 的 client area，pitch 包含外部窗口边框，更新只提交裁剪合并后的 damage；不得恢复第二份逐像素复制缓冲。窗口由 GUI RPC 管理，显示尺寸从 `framebuffer_info` 查询，不能在 SDL 后端调用 BIOS/VBE。
+- SDL 的唯一活动实现是 `apps/sdl2`，lite、Doom、invader 使用同一版本，不得重新链接 `sdl2_old`。SDL surface 直接写共享绘图缓冲的 client area，pitch 包含外部窗口边框；GUI 的 sheet 必须使用自己持有的已提交画面，不能直接引用客户端仍在绘制的共享像素。提交时只把裁剪后的 damage 按行 memcpy 到 sheet，不能增加 SDL 私有的第三份缓冲或逐像素复制。`window_present` 复用刷新 RPC 并等待应答，返回后 SDL 才能清空、绘制下一帧；`window_refresh` 继续提供合并通知的异步更新，dirty/queued 清零不能当作完整帧已复制的确认。GUI 的复制与合成由现有 TaskLock 串行化，鼠标、遮挡恢复和标题重绘统一读取已提交画面；窗口私有 vram 统一由窗口创建和释放，禁止恢复外部 vram/owns_vram 双重所有权。窗口由 GUI RPC 管理，显示尺寸从 `framebuffer_info` 查询，不能在 SDL 后端调用 BIOS/VBE。
 - SDL 输入状态按窗口保存，只消费该窗口共享队列；E0 前缀必须跨事件保留，不能忙等下一个字节或用扩展扫描码索引 ASCII 小表。键盘修饰状态复用 SDL 的实现，鼠标事件始终成组消费坐标与滚轮数据。`SDL_GetTicks64`、性能计数器与延时依赖 `monotonic_ns`/内核阻塞睡眠；当前线程、异步 SDL timer、音频设备与 GPU 后端仍不支持，不能以空成功函数伪装支持。
 - `window_set_title` 使用 GUI_RPC_SET_TITLE，按服务端窗口 owner 验证，长度包含一个终止 NUL；GUI 统一重绘标题与控制按钮，文本必须裁剪在按钮之前。不能把 GUI 内部 window 指针传给 SDL 或客户端。
 - lite 绘图必须按 SDL surface 的真实 pitch 寻址，命令缓存起点和每条命令都满足 `_Alignof(Command)`；Lua userdata/字体指针保留原生宽度。文件 `stat` 失败必须返回 nil/error，绝对路径不能用固定 255 字节缓冲拼接或错误地返回原始相对路径。nk 的窗口尺寸受当前显示限制，不能假定屏幕高于 800 像素。
 - 用户态内存分配仅使用 `libp/abi.c` 的活动分配器；`memory/freeinfo`、`mm_alloc` 和空 `api_free` 已删除，调用者统一 `malloc/free`。C4 的字节码、符号表与栈单元为 `intptr_t`，不得将代码、数据或 FILE 指针存入 int。
 - 日期读取通过 `platform_rtc_timestamp` 的稳定 RTC 快照提供 UTC，按状态寄存器解码 BCD/二进制和 12/24 小时制；世纪不能再叠加 1980。`gmtime` 为 UTC，`localtime`/`mktime` 当前为 UTC+08:00，标准 `tm_year` 基准是 1900。`timetest.bin` 验证 epoch、闰年、世纪、月份归一化及 RTC 推进；GUI 使用同一时间库。
 - C4/NASM/JavaScript 回归使用 `scripts/test-x86_64.py --tools`，通过 Lua 准备临时 C/汇编文件并验证 C4 堆指针、NASM 原生 ELF class/machine 和 JavaScript 对象；不使用按键执行命令。NASM 文本文件使用标准 `r`/`w` 模式，不能依赖 `rt`/`wt` 扩展。
-- SDL/时间回归运行 `scripts/test-x86_64.py --sdl --firmware uefi` 与 `--arch i386 --sdl --memory 512`。`--desktop-app lite` 验证打开、输入、保存、标题及正常关闭，`--desktop-app nk` 检查渲染与关闭；可选 `--firmware uefi`，日志和截图由 `--out` 指定。测试使用固定 UTC RTC，按键只用于编辑和输入验证，测试命令仍通过临时 init.mst 注入。不得用仅编译通过来代替实际显示和输入验证。
+- SDL/时间回归运行 `scripts/test-x86_64.py --sdl --firmware uefi` 与 `--arch i386 --sdl --memory 512`。`--desktop-app lite` 验证打开、输入、保存、标题及正常关闭，`--desktop-app nk` 连续采样 40 帧检查三个颜色控件不闪烁，并验证关闭；可选 `--firmware uefi`，日志和截图由 `--out` 指定。测试使用固定 UTC RTC，按键只用于编辑和输入验证，测试命令仍通过临时 init.mst 注入。`--sdl` 还会在清屏未 Present、局部提交、Present 后立即复用缓冲三个阶段遮挡再暴露窗口，检查实际像素并输出 `SDLFRAME PASS`；不得用仅编译通过或单张截图来代替帧提交、显示和输入验证。
 
 ### 加载器、文件系统和磁盘格式
 

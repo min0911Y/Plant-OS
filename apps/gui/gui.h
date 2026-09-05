@@ -96,7 +96,6 @@ desktop_t *get_now_desktop();
 
 struct window {
   bool using1;
-  bool owns_vram;
   desktop_t *desktop;
   console_t *console;
   super_window_t *super_window;
@@ -146,7 +145,7 @@ struct super_window {
 };
 
 window_t *create_window(desktop_t *desktop, const char *title, int xsize,
-                        int ysize, unsigned tid, vram_t *vram);
+                        int ysize, unsigned tid);
 void window_focus(window_t *window);
 void close_window(window_t *window);
 int window_set_title(window_t *window, const char *title);
