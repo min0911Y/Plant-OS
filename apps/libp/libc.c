@@ -1572,7 +1572,6 @@ static char *month[] = {"January",   "February", "March",    "April",
                         "May",       "June",     "July",     "August",
                         "September", "October",  "November", "December"};
 
-static char buf[26];
 
 static int powers[5] = {1, 10, 100, 1000, 10000};
 
@@ -1605,6 +1604,9 @@ static void strfmt(char *str, const char *fmt, ...) {
 }
 
 size_t strftime(char *s, size_t max, const char *fmt, const struct tm *t) {
+  if (!max)
+    return 0;
+  char buf[64];
   int w, d;
   char *p, *q, *r;
 
@@ -1636,7 +1638,7 @@ size_t strftime(char *s, size_t max, const char *fmt, const struct tm *t) {
 
       case 'c':
         strfmt(r, "%0 %0 %2 %2:%2:%2 %4", aday[t->tm_wday], amonth[t->tm_mon],
-               t->tm_mday, t->tm_hour, t->tm_min, t->tm_sec, t->tm_year + 1970);
+               t->tm_mday, t->tm_hour, t->tm_min, t->tm_sec, t->tm_year + 1900);
         break;
 
       case 'd':
@@ -1702,8 +1704,8 @@ size_t strftime(char *s, size_t max, const char *fmt, const struct tm *t) {
         break;
 
       case 'x':
-        strfmt(r, "%3s %3s %2 %4", aday[t->tm_wday], amonth[t->tm_mon],
-               t->tm_mday, t->tm_year + 1970);
+        strfmt(r, "%0 %0 %2 %4", aday[t->tm_wday], amonth[t->tm_mon],
+               t->tm_mday, t->tm_year + 1900);
         break;
 
       case 'X':
@@ -1715,11 +1717,15 @@ size_t strftime(char *s, size_t max, const char *fmt, const struct tm *t) {
         break;
 
       case 'Y':
-        strfmt(r, "%4", t->tm_year + 1970);
+        strfmt(r, "%4", t->tm_year + 1900);
         break;
 
       case 'Z':
-        r = t->tm_isdst ? "DST" : "GMT";
+        r = "CST";
+        break;
+
+      case 'z':
+        r = "+0800";
         break;
 
       default:
@@ -4327,450 +4333,6 @@ int strncmp(const char *s1, const char *s2, size_t n) {
   }
   return 0;
 }
-#define FREE_MAX_NUM 4096
-#define ERRNO_NOPE 0
-#define ERRNO_NO_ENOGHT_MEMORY 1
-#define ERRNO_NO_MORE_FREE_MEMBER 2
-#define MEM_MAX(a, b) (a) > (b) ? (a) : (b)
-typedef struct {
-  uintptr_t start;
-  uintptr_t end; // end和start都等于0说明这个free结构没有使用
-} free_member;
-typedef struct freeinfo freeinfo;
-typedef struct freeinfo {
-  free_member *f;
-  freeinfo *next;
-} freeinfo;
-typedef struct {
-  freeinfo *freeinf;
-  int memerrno;
-} memory;
-int mem_free_finf(memory *mem, freeinfo *finf, void *p, uint32_t size);
-void mem_delete(int pos, freeinfo *finf);
-memory *mm;
-char *alloc_start;
-uint32_t total_size;
-void swap(free_member *a, free_member *b) {
-  free_member temp = *a;
-  *a = *b;
-  *b = temp;
-}
-int cmp(free_member a, free_member b) { return a.end <= b.end; }
-int partition(free_member *arr, int low, int high) {
-  free_member pivot = arr[high];
-  int i = (low - 1);
-
-  for (int j = low; j <= high - 1; j++) {
-    if (cmp(arr[j], pivot)) {
-      i++;
-      swap(&arr[i], &arr[j]);
-    }
-  }
-
-  swap(&arr[i + 1], &arr[high]);
-  return (i + 1);
-}
-
-void quicksort(free_member *arr, int low, int high) {
-  if (low < high) {
-    int pi = partition(arr, low, high);
-    quicksort(arr, low, pi - 1);
-    quicksort(arr, pi + 1, high);
-  }
-}
-freeinfo *make_next_freeinfo(memory *mem) {
-  const int size = FREE_MAX_NUM * sizeof(free_member) + sizeof(freeinfo);
-  freeinfo *fi = NULL;
-  freeinfo *finf = mem->freeinf;
-  freeinfo *old = NULL;
-  uint32_t s, n;
-  while (finf) {
-    old = finf;
-    for (int i = 0; i < FREE_MAX_NUM; i++) {
-      if (finf->f[i].start + finf->f[i].end == 0) {
-        break;
-      }
-      if (finf->f[i].end - finf->f[i].start >= size) {
-        uint32_t start = finf->f[i].start;
-        s = finf->f[i].start;
-        n = finf->f[i].end;
-        mem_delete(i, finf);
-        fi = (freeinfo *)start;
-        break;
-      }
-    }
-    if (fi) {
-      break;
-    }
-    finf = finf->next;
-  }
-  if (!fi) {
-    mem->memerrno = ERRNO_NO_ENOGHT_MEMORY;
-    return NULL;
-  }
-  fi->next = 0;
-  while (finf) {
-    old = finf;
-    finf = finf->next;
-  }
-  old->next = fi;
-  fi->f = (free_member *)((uintptr_t)fi + sizeof(freeinfo));
-  for (int i = 0; i < FREE_MAX_NUM; i++) {
-    fi->f[i].start = 0;
-    fi->f[i].end = 0;
-  }
-
-  if (n - s > size) {
-    mem_free_finf(mem, fi, (void *)(uintptr_t)(s + size), n - s - size); // 一点也不浪费
-  }
-
-  return fi;
-}
-free_member *mem_insert(int pos, freeinfo *finf) {
-  int j = 0;
-  for (int i = 0; i < FREE_MAX_NUM; i++) {
-    if (finf->f[i].start + finf->f[i].end != 0) {
-      ++j;
-    }
-  }
-  if (j == FREE_MAX_NUM) {
-    return NULL;
-  }
-  for (int i = j - 1; i >= pos; i--) {
-    uintptr_t debug1 = (uintptr_t)(&(finf->f[i + 1]));
-    uintptr_t debug2 = (uintptr_t)(&(finf->f[i]));
-    if (!debug1 || !debug2) {
-      printf("error!\n");
-      for (;;)
-        ;
-    }
-    finf->f[i + 1] = finf->f[i];
-  }
-  return &(finf->f[pos]);
-}
-free_member *mem_add(freeinfo *finf) {
-  int j = -1;
-  for (int i = 0; i < FREE_MAX_NUM; i++) {
-    if (finf->f[i].start + finf->f[i].end == 0) {
-      j = i;
-      break;
-    }
-  }
-  if (j == -1) {
-    return NULL;
-  }
-  return &(finf->f[j]);
-}
-void mem_delete(int pos, freeinfo *finf) {
-  int i;
-  for (i = pos; i < FREE_MAX_NUM - 1; i++) {
-    if (finf->f[i].start == 0 && finf->f[i].end == 0) {
-      return;
-    }
-    finf->f[i] = finf->f[i + 1];
-  }
-  finf->f[i].start = 0;
-  finf->f[i].end = 0;
-}
-uint32_t mem_get_all_finf(freeinfo *finf) {
-  for (int i = 0; i < FREE_MAX_NUM; i++) {
-    if (finf->f[i].start + finf->f[i].end == 0) {
-      return i;
-    }
-  }
-  return FREE_MAX_NUM;
-}
-// 内存整理
-void mem_defragmenter(freeinfo *finf) {
-  for (int i = 0; i < FREE_MAX_NUM - 1; i++) {
-    if (finf->f[i].start + finf->f[i].end == 0) {
-      break;
-    }
-    if (finf->f[i].end - finf->f[i].start == 0) {
-      mem_delete(i, finf);
-      continue;
-    }
-    if (finf->f[i].end == finf->f[i + 1].start) {
-      int end = finf->f[i + 1].end;
-      mem_delete(i + 1, finf);
-      finf->f[i].end = end;
-      continue;
-    }
-    if (finf->f[i + 1].start == finf->f[i].start) {
-      int end = MEM_MAX(finf->f[i].end, finf->f[i + 1].end);
-      mem_delete(i + 1, finf);
-      finf->f[i].end = end;
-      continue;
-    }
-    if (finf->f[i + 1].start < finf->f[i].end) {
-      int end = MEM_MAX(finf->f[i].end, finf->f[i + 1].end);
-      mem_delete(i + 1, finf);
-      finf->f[i].end = end;
-      continue;
-    }
-  }
-}
-int mem_free_finf(memory *mem, freeinfo *finf, void *p, uint32_t size) {
-  // quicksort(finf->f, 0, mem_get_all_finf(finf) - 1);
-  // mem_defragmenter(finf);
-  free_member *tmp1 = NULL, // 第一（二）个连续的内存 其limit与start相等
-      *tmp2 = NULL; // 第二（一）个连续的内存  其start与limit相等
-  int idx1, idx2;
-  // 遍历内存池，找到符合条件的两个格子（找不到也没关系）
-
-  for (int i = 0; i < FREE_MAX_NUM; i++) {
-    uintptr_t current_start = (uintptr_t)finf->f[i].start;
-    uintptr_t current_end = (uintptr_t)finf->f[i].end;
-    uintptr_t ptr_val = (uintptr_t)p;
-    if (current_start + current_end == 0) {
-      break;
-    }
-    if (current_end == ptr_val) {
-      tmp1 = &(finf->f[i]);
-      idx1 = i;
-    }
-    if (current_start == ptr_val + size) {
-      tmp2 = &(finf->f[i]);
-      idx2 = i;
-    }
-  }
-
-  if (!tmp1 && !tmp2) {             // 没有内存和他连续
-                                    // for(;;);
-    free_member *n = mem_add(finf); // 找一个空闲的格子放这块内存
-    if (!n)
-      return 0;
-    // 配置这个格子
-    n->start = (uintptr_t)p;
-    n->end = (uintptr_t)p + size;
-    // quicksort(finf->f, 0, mem_get_all_finf(finf) - 1);
-    // mem_defragmenter(finf);
-    return 1;
-  }
-  // for(;;);
-  //  两个都找到了，说明是个缺口
-  if (tmp1 && tmp2) {
-    tmp1->end = tmp2->end;
-    mem_delete(idx2, finf);
-    // quicksort(finf->f, 0, mem_get_all_finf(finf) - 1);
-    // mem_defragmenter(finf);
-    return 1;
-  }
-  if (tmp1) { // BUGFIX
-    tmp1->end += size;
-    // quicksort(finf->f, 0, mem_get_all_finf(finf) - 1);
-    // mem_defragmenter(finf);
-    return 1;
-  }
-  if (tmp2) {
-    tmp2->start = (uintptr_t)p;
-    // quicksort(finf->f, 0, mem_get_all_finf(finf) - 1);
-    // mem_defragmenter(finf);
-    return 1;
-  }
-
-  return 1;
-}
-void *mem_alloc_finf(memory *mem, freeinfo *finf, uint32_t size,
-                     freeinfo *if_nomore) {
-  free_member *choice = NULL;
-  int choice_index = 0;
-  int fg = 0;
-  int i;
-R:
-  for (i = 0; i < FREE_MAX_NUM; i++) {
-    if (finf->f[i].start == 0 && finf->f[i].end == 0) {
-      break;
-    }
-    if (finf->f[i].end - finf->f[i].start >= size) {
-      if (!choice) {
-        choice = &(finf->f[i]);
-        choice_index = i;
-        continue;
-      }
-      if (finf->f[i].end - finf->f[i].start < choice->start - choice->end) {
-        choice = &(finf->f[i]);
-        choice_index = i;
-        continue;
-      }
-    }
-  }
-  if (choice == NULL && fg == 0) {
-    quicksort(finf->f, 0, mem_get_all_finf(finf) - 1);
-    mem_defragmenter(finf);
-    fg = 1;
-    goto R;
-  } else if (choice == NULL) {
-    mem->memerrno = ERRNO_NO_ENOGHT_MEMORY;
-    return NULL;
-  }
-  uintptr_t start = choice->start;
-  choice->start += size;
-  if (choice->end - choice->start == 0) {
-    mem_delete(choice_index, finf);
-  }
-  mem->memerrno = ERRNO_NOPE;
-  mem_defragmenter(finf);
-  memset((void *)start, 0, size);
-
-  return (void *)start;
-}
-void *mem_alloc(memory *mem, uint32_t size) {
-  freeinfo *finf = mem->freeinf;
-  int flag = 0;
-  freeinfo *if_nomore = NULL;
-  while (finf) {
-    if (flag && !if_nomore) {
-      break;
-      ;
-    }
-    void *result = mem_alloc_finf(mem, finf, size, if_nomore);
-    if (mem->memerrno != ERRNO_NOPE) {
-      if (mem->memerrno == ERRNO_NO_MORE_FREE_MEMBER) {
-        if (!flag) {
-          if_nomore = finf;
-          flag = 1;
-        }
-      }
-    } else {
-      return result;
-    }
-    if (flag) {
-      if_nomore = if_nomore->next;
-    } else {
-      finf = finf->next;
-    }
-  }
-  if (flag) {
-    freeinfo *new_f = make_next_freeinfo(mem);
-    if (!new_f) {
-      return NULL;
-    }
-    return mem_alloc(mem, size);
-  }
-  return NULL;
-}
-void mem_free(memory *mem, void *p, uint32_t size) {
-  freeinfo *finf = mem->freeinf;
-  while (finf) {
-    if (mem_free_finf(mem, finf, p, size)) {
-      return;
-    }
-    finf = finf->next;
-  }
-  freeinfo *new_f = make_next_freeinfo(mem);
-  if (new_f) {
-    mem_free_finf(mem, new_f, p, size);
-  }
-}
-void show_mem(memory *mem) {
-  logkf("----------------\n");
-  freeinfo *finf = mem->freeinf;
-  while (finf) {
-    for (int i = 0; i < FREE_MAX_NUM; i++) {
-      if (finf->f[i].start == 0 && finf->f[i].end == 0) {
-        break;
-      }
-
-      logkf("START: %08x END: %08x SIZE: %08x Bytes\n", finf->f[i].start,
-            finf->f[i].end, finf->f[i].end - finf->f[i].start);
-      if ((finf->f[i].start & 0xfff) != 0) {
-      }
-    }
-    finf = finf->next;
-  }
-  logkf("----------------\n");
-}
-static unsigned div_round_up(unsigned num, unsigned size) {
-  return (num + size - 1) / size;
-}
-void *mm_alloc(uint32_t size) {
-  void *a;
-retry:
-  a = mem_alloc(mm, size);
-  if (!a) {
-    int sz = (size + 0xfff) & 0xfffff000;
-    logkf("%08x\n", sz);
-    sbrk(sz);
-    mem_free(mm, alloc_start + total_size, sz);
-    total_size += sz;
-    show_mem(mm);
-    goto retry;
-  }
-  return a;
-}
-void mm_free(void *addr, uint32_t size) {
-  mem_free(mm, addr, size);
-}
-void *mem_alloc_nb(memory *mem, uint32_t size, uint32_t n) {
-  size = (size + 0xf) & 0xfffffff0;
-  return mm_alloc(size);
-}
-void mem_free_nb(memory *mem, void *p, uint32_t size, uint32_t n) {
-  size = (size + 0xf) & 0xfffffff0;
-  mm_free(p, size);
-}
-memory *memory_init(uintptr_t start, uint32_t size) {
-  memory *mem;
-  mem = (memory *)start;
-  start += sizeof(memory);
-  size -= sizeof(memory);
-  if (size < 0) {
-    printf("mm init error.\n");
-    for (;;)
-      ;
-  }
-  mem->freeinf = (freeinfo *)start;
-  start += sizeof(freeinfo);
-  size -= sizeof(freeinfo);
-  if (size < 0) {
-    printf("mm init error.\n");
-    for (;;)
-      ;
-  }
-  mem->freeinf->next = 0;
-  mem->freeinf->f = (free_member *)start;
-  start += FREE_MAX_NUM * sizeof(free_member);
-  size -= FREE_MAX_NUM * sizeof(free_member);
-  if ((int)size < 0) {
-    printf("mm init error.\n");
-    for (;;)
-      ;
-  }
-  for (int i = 0; i < FREE_MAX_NUM; i++) {
-    mem->freeinf->f[i].start = 0;
-    mem->freeinf->f[i].end = 0;
-  }
-  mem->memerrno = ERRNO_NOPE;
-  // if(start & 0xfff) {
-  //   int old = start;
-  //   start += 0x1000;
-  //   start &= 0xfffff;
-  //   size -= old-start;
-  // }
-  mem_free(mem, (void *)start, size);
-  return mem;
-}
-char flag = 0;
-void init_mem() { abi_alloc_init(); }
-
-// void *malloc(int size) {
-//   if (flag) {
-//  //   logkf("malloc %d\n",size);
-//     void *p = mem_alloc_nb(mm, size + sizeof(int), 128);
-//     *(int *)p = size;
-//     return (char *)p + sizeof(int);
-//   } else {
-//     return __builtin_alloca(size);
-//   }
-// }
-// void free(void *p) {
-//   // printf("free\n");
-//   if (p == NULL)
-//     return;
-//   int size = *(int *)((char *)p - sizeof(int));
-//   mem_free_nb(mm, (char *)p - sizeof(int), size + sizeof(int), 128);
-// }
 enum {
   API_BUFFER_ERROR = -1,
   API_BUFFER_RETRY = -2,

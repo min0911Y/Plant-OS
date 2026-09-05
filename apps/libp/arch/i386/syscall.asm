@@ -3,7 +3,7 @@ GLOBAL libp_syscall3
 GLOBAL tty_alloc,tty_free,tty_set,tty_notify_input
 GLOBAL putch,putstr,getch,get_mouse,get_xy,goto_xy
 GLOBAL SwitchTo320X200X256,SwitchToText8025,Draw_Char,sleep
-GLOBAL PrintChineseChar,PrintChineseStr,Draw_Str,api_malloc,api_free
+GLOBAL PrintChineseChar,PrintChineseStr,Draw_Str,api_malloc
 GLOBAL print,scan,system,api_get_env
 GLOBAL Draw_Box,Draw_Px,Text_Draw_Box,mem_used,mem_total
 GLOBAL input_char_inSM,api_beep,RAND,api_get_command_line,Get_System_Version,_kbhit
@@ -265,8 +265,6 @@ pop	edx
 pop	ecx
 ret
 
-api_free:
-ret
 api_heapsize:
 push	edx
 mov	eax,0x09

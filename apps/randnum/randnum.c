@@ -32,7 +32,7 @@ int main(int argc,char **argv)
         {
             buf[i] = 0;
         }
-        api_free(buf, 128);
+        free(buf);
     }
     return 0;
 }

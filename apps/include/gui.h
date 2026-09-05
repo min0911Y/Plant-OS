@@ -13,6 +13,7 @@ typedef struct gui_window *window_t;
 window_t create_window(const char *title, int x, int y, int width, int height);
 int window_get_event(window_t window);
 void close_window(window_t window);
+int window_set_title(window_t window, const char *title);
 void draw_px(window_t window, int x, int y, int color);
 void window_refresh(window_t window, int first, int last);
 void *window_get_fb(window_t window);

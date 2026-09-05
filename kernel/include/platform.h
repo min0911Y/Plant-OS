@@ -14,6 +14,7 @@ typedef struct {
   uint8_t blue_size, blue_shift;
 } platform_video_info_t;
 
+bool platform_rtc_timestamp(uint32_t *timestamp);
 void platform_early_initialize(void);
 void *platform_text_vram(void);
 bool platform_is_text_vram(const void *vram);

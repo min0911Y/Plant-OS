@@ -27,7 +27,7 @@ static unsigned cells_buf2[CELLS_X * CELLS_Y];
 static unsigned *cells_prev = cells_buf1;
 static unsigned *cells = cells_buf2;
 static RenRect rect_buf[CELLS_X * CELLS_Y / 2];
-static char command_buf[COMMAND_BUF_SIZE];
+static _Alignas(Command) char command_buf[COMMAND_BUF_SIZE];
 static int command_buf_idx;
 static RenRect screen_rect;
 static bool show_debug;
@@ -77,6 +77,7 @@ static RenRect merge_rects(RenRect a, RenRect b) {
 
 
 static Command* push_command(int type, int size) {
+  size = (size + _Alignof(Command) - 1) & ~(_Alignof(Command) - 1);
   Command *cmd = (Command*) (command_buf + command_buf_idx);
   int n = command_buf_idx + size;
   if (n > COMMAND_BUF_SIZE) {

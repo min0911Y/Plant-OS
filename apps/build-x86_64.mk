@@ -2,13 +2,14 @@
 BUILD := out/x86_64
 LIBS := libs/x86_64
 CC := gcc
-CFLAGS := -m64 -mcmodel=large -mno-red-zone -msse2 -mfpmath=sse -mlong-double-64 \
+CFLAGS := -m64 -mcmodel=large -mno-red-zone -mno-mmx -msse2 -mfpmath=sse -mlong-double-64 \
 	-DPLANT_ARCH_X86_64 -std=gnu17 -Iinclude -Ilibutf/include \
 	-Ithird_party/pl_readline/include -DPL_ENABLE_HISTORY_FILE=0 \
-	-nostdinc -nostdlib -ffreestanding -fno-builtin -fno-stack-protector \
+	-nostdinc -isystem $(shell $(CC) -print-file-name=include) -nostdlib -ffreestanding -fno-builtin -fno-stack-protector \
 	-fno-pic -fno-pie -fno-asynchronous-unwind-tables -MMD -MP \
 	-ffunction-sections -fdata-sections -O2 -Wall -Wextra \
-	-Wno-unused-parameter -Wno-sign-compare
+	-Wno-unused-parameter -Wno-sign-compare -Werror=implicit-function-declaration \
+	-Werror=pointer-to-int-cast -Werror=int-to-pointer-cast
 LDFLAGS := -m elf_x86_64 -static --gc-sections -z max-page-size=4096 -T libp/arch/x86_64/app.ld
 LIBP_SOURCES := $(filter-out libp/tinyalloc.c,$(wildcard libp/*.c)) libp/arch/x86_64/math.c
 LIBP_OBJECTS := $(patsubst %.c,$(BUILD)/%.o,$(LIBP_SOURCES)) $(BUILD)/libp/arch/x86_64/syscall.obj
@@ -21,9 +22,12 @@ APP_LIBS := $(LIBS)/libp.a $(LIBS)/libmst.a $(LIBS)/libutf.a
 .PHONY: default all
 default all: $(addprefix $(BUILD)/,$(addsuffix .bin,$(PROGRAMS))) $(BUILD)/dktest.bin $(BUILD)/lua.bin $(BUILD)/luac.bin $(BUILD)/cpptest.bin $(LIBS)/libcpps.a
 
-$(BUILD)/%.o: %.c build-x86_64.mk
+$(BUILD)/%.o: %.c build-x86_64.mk native-apps.mk
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
+$(BUILD)/%.o: %.cpp build-x86_64.mk native-apps.mk
+	@mkdir -p $(dir $@)
+	g++ $(filter-out -std=gnu17 -Werror=implicit-function-declaration -Werror=pointer-to-int-cast,$(CFLAGS)) -std=gnu++17 -fno-exceptions -fno-rtti -fno-use-cxa-atexit -c $< -o $@
 $(BUILD)/%.obj: %.asm
 	@mkdir -p $(dir $@)
 	nasm -f elf64 $< -o $@
@@ -37,9 +41,11 @@ $(LIBS)/libutf.a: $(UTF_OBJECTS)
 	@mkdir -p $(dir $@)
 	ar rcs $@ $^
 
+objects = $(addprefix $(BUILD)/,$(patsubst %.cpp,%.o,$(patsubst %.c,%.o,$(1))))
+
 define application
-$(BUILD)/$(1).bin: $$(patsubst %.c,$$(BUILD)/%.o,$$(wildcard $(1)/*.c)) $(2) $(APP_LIBS) libp/arch/x86_64/app.ld
-	ld $$(LDFLAGS) -o $$@ $$(filter %.o %.obj,$$^) --start-group $$(APP_LIBS) --end-group
+$(BUILD)/$(1).bin: $(call objects,$(if $(3),$(3),$(wildcard $(1)/*.c))) $(2) $(APP_LIBS) libp/arch/x86_64/app.ld
+	ld $$(LDFLAGS) -o $$@ $$(filter %.o %.obj,$$^) --start-group $$(filter %.a,$$^) --end-group
 endef
 $(foreach program,$(PROGRAMS),$(eval $(call application,$(program),$(if $(filter psh,$(program)),$(READLINE_OBJECTS)))))
 $(BUILD)/simdtest.bin: $(BUILD)/simdtest/arch/x86_64/probe.obj
@@ -59,15 +65,11 @@ $(BUILD)/lua.bin: $(BUILD)/lua/lua.o $(LUA_READLINE_OBJECTS) $(APP_LIBS) libp/ar
 $(BUILD)/luac.bin: $(BUILD)/lua/luac.o $(APP_LIBS) libp/arch/x86_64/app.ld
 	ld $(LDFLAGS) -o $@ $(filter %.o,$^) --start-group $(APP_LIBS) --end-group
 
-$(BUILD)/libp/cppstart.o: libp/cppstart.cpp build-x86_64.mk
-	@mkdir -p $(dir $@)
-	g++ $(filter-out -std=gnu17,$(CFLAGS)) -std=gnu++17 -fno-exceptions -fno-rtti -fno-use-cxa-atexit -c $< -o $@
 $(LIBS)/libcpps.a: $(filter-out $(BUILD)/libp/entry.o,$(LIBP_OBJECTS)) $(BUILD)/libp/cppstart.o
 	@mkdir -p $(dir $@)
 	ar rcs $@ $^
 
-$(BUILD)/cpptest/cpptest.o: cpptest/cpptest.cpp build-x86_64.mk
-	@mkdir -p $(dir $@)
-	g++ $(filter-out -std=gnu17,$(CFLAGS)) -std=gnu++17 -fno-exceptions -fno-rtti -fno-use-cxa-atexit -c $< -o $@
 $(BUILD)/cpptest.bin: $(BUILD)/cpptest/cpptest.o $(LIBS)/libcpps.a libp/arch/x86_64/app.ld
 	ld $(LDFLAGS) -o $@ $(filter %.o %.a,$^)
+
+include native-apps.mk

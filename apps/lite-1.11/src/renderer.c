@@ -281,8 +281,8 @@ void ren_draw_rect(RenRect rect, RenColor color) {
 
   SDL_Surface *surf = SDL_GetWindowSurface(window);
   RenColor *d = (RenColor*) surf->pixels;
-  d += x1 + y1 * surf->w;
-  int dr = surf->w - (x2 - x1);
+  d += x1 + y1 * (surf->pitch / sizeof(RenColor));
+  int dr = surf->pitch / sizeof(RenColor) - (x2 - x1);
 
   if (color.a == 0xff) {
     rect_draw_loop(color);
@@ -311,9 +311,9 @@ void ren_draw_image(RenImage *image, RenRect *sub, int x, int y, RenColor color)
   RenColor *s = image->pixels;
   RenColor *d = (RenColor*) surf->pixels;
   s += sub->x + sub->y * image->width;
-  d += x + y * surf->w;
+  d += x + y * (surf->pitch / sizeof(RenColor));
   int sr = image->width - sub->width;
-  int dr = surf->w - sub->width;
+  int dr = surf->pitch / sizeof(RenColor) - sub->width;
 
   for (int j = 0; j < sub->height; j++) {
     for (int i = 0; i < sub->width; i++) {

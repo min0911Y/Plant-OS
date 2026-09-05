@@ -9,14 +9,14 @@
 #undef false
 int main(int argc,char **argv);
 extern "C" void init_env();
-extern "C" void init_mem();
+extern "C" void abi_alloc_init();
 extern "C" void init_float();
 extern "C" void return_to_app();
 extern "C" void set_rt(uintptr_t rt);
 extern "C" void Main()
 {
   set_rt((uintptr_t)return_to_app);
-  init_mem();
+  abi_alloc_init();
   stdio_initialize();
   if (stdout == NULL || stdin == NULL || stderr == NULL) {
     stdio_shutdown();

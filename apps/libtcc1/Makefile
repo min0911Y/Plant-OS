@@ -1,3 +1,7 @@
+ARCH ?= i386
+ifneq ($(ARCH),i386)
+$(error libtcc1 is only available for ARCH=i386)
+endif
 NASM = nasm
 OBJS_PACK = ../out/libtcc1.obj
 default : $(OBJS_PACK)

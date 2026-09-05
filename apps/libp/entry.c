@@ -8,14 +8,14 @@
 
 int main(int argc, char **argv);
 void init_env();
-void init_mem();
+void abi_alloc_init();
 void return_to_app();
 void set_rt(uintptr_t rt);
 void init_float();
 
 void Main() {
   set_rt((uintptr_t)return_to_app);
-  init_mem();
+  abi_alloc_init();
   stdio_initialize();
   if (stdout == NULL || stdin == NULL || stderr == NULL) {
     stdio_shutdown();

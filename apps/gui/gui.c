@@ -323,41 +323,28 @@ void main() {
     return;
   }
   // textbox_t *textbox0 = create_textbox(super_window0, 15 * 8, 16, 4, 110);
-  unsigned clock1 = clock();
-  time_t rawtime;
-  struct tm *info;
-  char buffer[80];
-  clock1 = clock();
-
-  rawtime = time(&rawtime);
-
-  info = localtime(&rawtime);
-
-  strftime(buffer, 80, "当前时间：%Y-%m-%d %H:%M:%S", info);
-  TaskLock();
-  draw_text(desktop0->sht, buffer, COL_FFFFFF, argb(0, 58, 110, 165), 312, 0,
-            background);
-  TaskUnlock();
+  unsigned clock1 = (unsigned)clock() - 1000;
   for (;;) {
-    unsigned elapsed = clock() - clock1;
+    unsigned elapsed = (unsigned)clock() - clock1;
     if (elapsed >= 1000) {
       clock1 = clock();
-
-      rawtime = time(&rawtime);
-
-      info = localtime(&rawtime);
-
-      strftime(buffer, 80, "当前时间：%Y-%m-%d %H:%M:%S", info);
+      time_t now = time(NULL);
+      if (now == (time_t)-1)
+        continue;
+      struct tm calendar;
+      char buffer[80];
+      localtime_r(&now, &calendar);
+      strftime(buffer, sizeof(buffer), "当前时间：%Y-%m-%d %H:%M:%S", &calendar);
       TaskLock();
       draw_text(desktop0->sht, buffer, COL_FFFFFF, argb(0, 58, 110, 165), 312,
                 0, background);
       TaskUnlock();
-    } else {
-      rpc_status = rpc_serve_once(1000 - elapsed);
-      if (rpc_status != RPC_OK && rpc_status != RPC_ERR_TIMEOUT) {
-        logkf("GUI RPC service stopped: %d\n", rpc_status);
-        return;
-      }
+      continue;
+    }
+    rpc_status = rpc_serve_once(1000 - elapsed);
+    if (rpc_status != RPC_OK && rpc_status != RPC_ERR_TIMEOUT) {
+      logkf("GUI RPC service stopped: %d\n", rpc_status);
+      return;
     }
   }
 }

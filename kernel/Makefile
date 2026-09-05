@@ -189,6 +189,8 @@ Mimg : make_dir $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $
 		mcopy -i ./disk.img $(APPSOUTPATH)dktest.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)rpctest.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)guitest.bin ::
+		mcopy -i ./disk.img $(APPSOUTPATH)timetest.bin ::
+		mcopy -i ./disk.img $(APPSOUTPATH)sdltest.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)exc_test.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)fputest.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)lua.bin ::
@@ -242,6 +244,8 @@ Mimg : make_dir $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $
 		mcopy -i boot.img $(APPSOUTPATH)dktest.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)rpctest.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)guitest.bin ::
+		mcopy -i boot.img $(APPSOUTPATH)timetest.bin ::
+		mcopy -i boot.img $(APPSOUTPATH)sdltest.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)exc_test.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)fputest.bin ::
 		mcopy -i boot.img $(FONTPATH)font.bin ::

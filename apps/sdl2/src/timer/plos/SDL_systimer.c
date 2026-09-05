@@ -18,56 +18,37 @@
      misrepresented as being the original software.
   3. This notice may not be removed or altered from any source distribution.
 */
+/* Plant OS uses the kernel's monotonic nanosecond clock on both architectures. */
 #include "../../SDL_internal.h"
-
 #if SDL_TIMER_PLOS
-
 #include "../SDL_timer_c.h"
-#include <stdlib.h>
+#include <syscall.h>
 #include <time.h>
 
+static Uint64 start;
+static SDL_bool initialized;
 
-static SDL_bool ticks_started = SDL_FALSE;
-
-void
-SDL_TicksInit(void)
-{
-    ticks_started = SDL_TRUE;
+void SDL_TicksInit(void) {
+  if (!initialized) {
+    start = monotonic_ns();
+    initialized = SDL_TRUE;
+  }
 }
 
-void
-SDL_TicksQuit(void)
-{
-    ticks_started = SDL_FALSE;
+void SDL_TicksQuit(void) { initialized = SDL_FALSE; }
+
+Uint64 SDL_GetTicks64(void) {
+  SDL_TicksInit();
+  return (monotonic_ns() - start) / 1000000;
 }
 
-Uint32 SDL_GetTicks(void)
-{
-    if (!ticks_started) {
-        SDL_TicksInit();
-    }
-
-    return clock();
+Uint32 SDL_GetTicks(void) { return (Uint32)SDL_GetTicks64(); }
+Uint64 SDL_GetPerformanceCounter(void) { return monotonic_ns(); }
+Uint64 SDL_GetPerformanceFrequency(void) { return 1000000000; }
+void SDL_Delay(Uint32 milliseconds) {
+  if (milliseconds)
+    sleep(milliseconds);
+  else
+    api_yield();
 }
-
-Uint64
-SDL_GetPerformanceCounter(void)
-{
-    return SDL_GetTicks();
-}
-
-Uint64
-SDL_GetPerformanceFrequency(void)
-{
-    return 1000;
-}
-
-void SDL_Delay(Uint32 ms)
-{
-    sleep(ms);
-}
-
-#endif /* SDL_TIMER_BOOKOS */
-
-/* vim: ts=4 sw=4
- */
+#endif

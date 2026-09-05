@@ -34,8 +34,7 @@ uint32_t calendar_to_unix_timestamp(uint32_t year, uint32_t month,
   seconds += (day - 1) * CALENDAR_DAY_SECONDS + hour * 3600 + minute * 60 +
              second;
   return leap_years * CALENDAR_LEAP_YEAR_SECONDS +
-         (year - 1970 - leap_years) * CALENDAR_COMMON_YEAR_SECONDS + seconds -
-         28800;
+         (year - 1970 - leap_years) * CALENDAR_COMMON_YEAR_SECONDS + seconds;
 }
 
 void calendar_from_ntp_timestamp(uint32_t timestamp, uint32_t *year,

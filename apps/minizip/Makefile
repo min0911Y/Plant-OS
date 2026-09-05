@@ -1,3 +1,8 @@
+ARCH ?= i386
+ifeq ($(ARCH),x86_64)
+NATIVE_TARGETS := out/x86_64/minizip.bin out/x86_64/miniunz.bin
+include ../native.mk
+else ifeq ($(ARCH),i386)
 LIBS_PATH := ../libs
 INCLUDE_PATH := ../include
 include ../defs.mk
@@ -13,3 +18,7 @@ default : $(OBJS_PACK1) $(OBJS_PACK2)
 	$(CPP) -c $*.cpp -o ../out/$*.obj
 ../out/%.obj : %.asm Makefile
 	nasm -f elf $*.asm -o ../out/$*.obj
+
+else
+$(error unsupported ARCH)
+endif

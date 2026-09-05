@@ -17,10 +17,13 @@ typedef unsigned int time_t;
 time_t time(time_t *timer);
 clock_t clock();
 uint64_t monotonic_ns(void);
-void clock_gettime(int* sec1, int* usec1);
-time_t mktime(struct tm* tm);
+void clock_gettime(int *sec1, int *usec1);
+time_t mktime(struct tm *tm);
 double difftime(time_t t1, time_t t0);
-size_t strftime(char * s, size_t max, const char * fmt, const struct tm * t);
-struct tm* localtime(time_t *t1);
+size_t strftime(char *s, size_t max, const char *fmt, const struct tm *t);
+struct tm *localtime(const time_t *timer);
+struct tm *gmtime(const time_t *timer);
+struct tm *localtime_r(const time_t *timer, struct tm *result);
+struct tm *gmtime_r(const time_t *timer, struct tm *result);
 #define CLOCKS_PER_SEC 1000
 #endif

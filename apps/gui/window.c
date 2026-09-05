@@ -134,6 +134,86 @@ void handle_left_window(window_t *window, gmouse_t *gmouse) {
   }
 }
 
+static void window_draw_title(window_t *window) {
+  int xsize = window->xsize;
+  if (xsize < 40 || window->ysize < 20)
+    return;
+  static const char *const closebtn[14] = {
+      "OOOOOOOOOOOOOOO@", "OQQQQQQQQQQQQQ$@", "OQQQQQQQQQQQQQ$@",
+      "OQQQ@@QQQQ@@QQ$@", "OQQQQ@@QQ@@QQQ$@", "OQQQQQ@@@@QQQQ$@",
+      "OQQQQQQ@@QQQQQ$@", "OQQQQQ@@@@QQQQ$@", "OQQQQ@@QQ@@QQQ$@",
+      "OQQQ@@QQQQ@@QQ$@", "OQQQQQQQQQQQQQ$@", "OQQQQQQQQQQQQQ$@",
+      "O$$$$$$$$$$$$$$@", "@@@@@@@@@@@@@@@@"};
+  static const char *const smallbtn[14] = {
+      "OOOOOOOOOOOOOOO@", "OQQQQQQQQQQQQQ$@", "OQQQQQQQQQQQQQ$@",
+      "OQQQQQQQQQQQQQ$@", "OQQQQQQQQQQQQQ$@", "OQQQQQQQQQQQQQ$@",
+      "OQQQQQQQQQQQQQ$@", "OQQQQQQQQQQQQQ$@", "OQQQQQQQQQQQQQ$@",
+      "OQQ@@@@@@@@@QQ$@", "OQQ@@@@@@@@@QQ$@", "OQQQQQQQQQQQQQ$@",
+      "O$$$$$$$$$$$$$$@", "@@@@@@@@@@@@@@@@",
+  };
+  uint32_t times = (xsize - 8) / (255 - 106) + 1;
+  for (int i = 3; i < 20; i++) {
+    color_t color = argb(0, 10, 36, 106);
+    for (int j = 3, count = 0; j < xsize - 4; j++, count++) {
+      window->vram[j + i * xsize] = color;
+      if (count == times && (color & 0xff) != 255) {
+        color += 0x00010101;
+        count = 0;
+      }
+    }
+  }
+
+  size_t visible = xsize > 62 ? (xsize - 62) / 8 : 0;
+  size_t length = strlen(window->title);
+  if (visible > length)
+    visible = length;
+  char saved = window->title[visible];
+  window->title[visible] = 0;
+  putfonts_asc(window->vram, xsize, 24, 4, COL_FFFFFF,
+               (unsigned char *)window->title);
+  window->title[visible] = saved;
+  color_t c;
+  for (int y = 0; y < 14; y++) {
+    for (int x = 0; x < 16; x++) {
+      if (closebtn[y][x] == '@') {
+        c = COL_000000;
+      } else if (closebtn[y][x] == '$') {
+        c = COL_848484;
+      } else if (closebtn[y][x] == 'Q') {
+        c = COL_C6C6C6;
+      } else {
+        c = COL_FFFFFF;
+      }
+      window->vram[(5 + y) * xsize + (xsize - 21 + x)] = c;
+    }
+  }
+  for (int y = 0; y < 14; y++) {
+    for (int x = 0; x < 16; x++) {
+      if (smallbtn[y][x] == '@') {
+        c = COL_000000;
+      } else if (smallbtn[y][x] == '$') {
+        c = COL_848484;
+      } else if (smallbtn[y][x] == 'Q') {
+        c = COL_C6C6C6;
+      } else {
+        c = COL_FFFFFF;
+      }
+      window->vram[(5 + y) * xsize + (xsize - 37 + x)] = c;
+    }
+  }
+}
+
+int window_set_title(window_t *window, const char *title) {
+  char *copy = strdup(title);
+  if (!copy)
+    return -1;
+  free(window->title);
+  window->title = copy;
+  window_draw_title(window);
+  sheet_refresh(window->sht, 3, 3, window->xsize - 4, 20);
+  return 0;
+}
+
 window_t *create_window(desktop_t *desktop, const char *title, int xsize,
                         int ysize, unsigned tid, vram_t *vram) {
   if (desktop == NULL || title == NULL || xsize <= 0 || ysize <= 0) {
@@ -203,20 +283,6 @@ window_t *create_window(desktop_t *desktop, const char *title, int xsize,
 
   sheet_setbuf(res->sht, res->vram, xsize, ysize, -1);
 
-  static char *closebtn[14] = {
-      "OOOOOOOOOOOOOOO@", "OQQQQQQQQQQQQQ$@", "OQQQQQQQQQQQQQ$@",
-      "OQQQ@@QQQQ@@QQ$@", "OQQQQ@@QQ@@QQQ$@", "OQQQQQ@@@@QQQQ$@",
-      "OQQQQQQ@@QQQQQ$@", "OQQQQQ@@@@QQQQ$@", "OQQQQ@@QQ@@QQQ$@",
-      "OQQQ@@QQQQ@@QQ$@", "OQQQQQQQQQQQQQ$@", "OQQQQQQQQQQQQQ$@",
-      "O$$$$$$$$$$$$$$@", "@@@@@@@@@@@@@@@@"};
-  static char *smallbtn[14] = {
-      "OOOOOOOOOOOOOOO@", "OQQQQQQQQQQQQQ$@", "OQQQQQQQQQQQQQ$@",
-      "OQQQQQQQQQQQQQ$@", "OQQQQQQQQQQQQQ$@", "OQQQQQQQQQQQQQ$@",
-      "OQQQQQQQQQQQQQ$@", "OQQQQQQQQQQQQQ$@", "OQQQQQQQQQQQQQ$@",
-      "OQQ@@@@@@@@@QQ$@", "OQQ@@@@@@@@@QQ$@", "OQQQQQQQQQQQQQ$@",
-      "O$$$$$$$$$$$$$$@", "@@@@@@@@@@@@@@@@",
-  };
-  color_t c;
   boxfill(res->vram, xsize, COL_C6C6C6, 0, 0, xsize - 1, 0);
   boxfill(res->vram, xsize, COL_FFFFFF, 1, 1, xsize - 2, 1);
   boxfill(res->vram, xsize, COL_C6C6C6, 0, 0, 0, ysize - 1);
@@ -225,50 +291,10 @@ window_t *create_window(desktop_t *desktop, const char *title, int xsize,
   boxfill(res->vram, xsize, COL_000000, xsize - 1, 0, xsize - 1, ysize - 1);
   boxfill(res->vram, xsize, COL_C6C6C6, 2, 2, xsize - 3, ysize - 3);
 
-  uint32_t times = (xsize - 8) / (255 - 106) + 1;
-  for (int i = 3; i < 20; i++) {
-    color_t color = argb(0, 10, 36, 106);
-    for (int j = 3, count = 0; j < xsize - 4; j++, count++) {
-      res->vram[j + i * xsize] = color;
-      if (count == times && (color & 0xff) != 255) {
-        color += 0x00010101;
-        count = 0;
-      }
-    }
-  }
-
   boxfill(res->vram, xsize, COL_848484, 1, ysize - 2, xsize - 2, ysize - 2);
   boxfill(res->vram, xsize, COL_000000, 0, ysize - 1, xsize - 1, ysize - 1);
-  putfonts_asc(res->vram, xsize, 24, 4, COL_FFFFFF, (unsigned char *)title);
 
-  for (int y = 0; y < 14; y++) {
-    for (int x = 0; x < 16; x++) {
-      if (closebtn[y][x] == '@') {
-        c = COL_000000;
-      } else if (closebtn[y][x] == '$') {
-        c = COL_848484;
-      } else if (closebtn[y][x] == 'Q') {
-        c = COL_C6C6C6;
-      } else {
-        c = COL_FFFFFF;
-      }
-      res->vram[(5 + y) * xsize + (xsize - 21 + x)] = c;
-    }
-  }
-  for (int y = 0; y < 14; y++) {
-    for (int x = 0; x < 16; x++) {
-      if (smallbtn[y][x] == '@') {
-        c = COL_000000;
-      } else if (smallbtn[y][x] == '$') {
-        c = COL_848484;
-      } else if (smallbtn[y][x] == 'Q') {
-        c = COL_C6C6C6;
-      } else {
-        c = COL_FFFFFF;
-      }
-      res->vram[(5 + y) * xsize + (xsize - 37 + x)] = c;
-    }
-  }
+  window_draw_title(res);
   return res;
 }
 

@@ -24,7 +24,10 @@ static void init_window_icon(void) {
 
 int main(int argc, char **argv) {
 
-  SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS);
+  if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0) {
+    fprintf(stderr, "lite: %s\n", SDL_GetError());
+    return 1;
+  }
   SDL_EnableScreenSaver();
   SDL_EventState(SDL_DROPFILE, SDL_ENABLE);
   atexit(SDL_Quit);
@@ -37,8 +40,12 @@ int main(int argc, char **argv) {
   SDL_GetCurrentDisplayMode(0, &dm);
 
   window = SDL_CreateWindow(
-    "", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, dm.w * 0.8, dm.h * 0.8,
+    "Lite", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, dm.w * 0.8, dm.h * 0.8,
     SDL_WINDOW_SHOWN);
+  if (!window) {
+    fprintf(stderr, "lite: %s\n", SDL_GetError());
+    return 1;
+  }
   init_window_icon();
   ren_init(window);
 
@@ -78,7 +85,7 @@ int main(int argc, char **argv) {
     "  EXEDIR = ''\n"
     "  package.path = '/data/?.lua;' .. package.path\n"
     "  package.path = '/data/?/init.lua;' .. package.path\n"
-    "  core = require('core');print('ok')\n"
+    "  core = require('core')\n"
     "  core.init()\n"
     "  core.run()\n"
     "end, function(err)\n"

@@ -45,7 +45,7 @@ void DeleteVal(int count, struct List* Obj) {
   } else {
     list_get(count - 1, Obj)->next = list_get(count + 1, Obj);
   }
-  api_free(Will_Free, sizeof(struct List));
+  free(Will_Free);
 }
 void InsertVal(int count, int val, struct List* Obj) {
   if (list_get(count, Obj) == NULL) {

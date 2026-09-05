@@ -43,7 +43,7 @@ void cal(int year, int month,int d) {
     print(" ");
   }
   print(buf);
-  api_free(buf, 128);
+  free(buf);
   print("\n");
   print("Su Mo Tu We Th Fr Sa\n");
   buf = malloc(128);

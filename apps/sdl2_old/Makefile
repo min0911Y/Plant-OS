@@ -1,3 +1,7 @@
+ARCH ?= i386
+ifneq ($(ARCH),i386)
+$(error sdl2_old is only available for ARCH=i386)
+endif
 INCLUDE_DIRS := -I../include -I./include -I./SDL2 -I./src/video/yuv2rgb
 CFLAGS := -m32 $(INCLUDE_DIRS) -nostdinc -nostdlib -fno-builtin -ffreestanding \
 	-fno-stack-protector -Qn -fno-pic -fno-pie -fno-asynchronous-unwind-tables \

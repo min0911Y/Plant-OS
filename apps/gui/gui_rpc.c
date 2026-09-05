@@ -263,12 +263,29 @@ static int gui_stop_keyboard(rpc_call_t *call) {
   return gui_keyboard_set(call, 0);
 }
 
+static int gui_set_title(rpc_call_t *call) {
+  if (call->arg_len <= sizeof(gui_rpc_window_request_t) ||
+      call->arg_len > sizeof(gui_rpc_window_request_t) + GUI_TITLE_MAX + 1)
+    return RPC_ERR_INVAL;
+  const gui_rpc_window_request_t *request = call->arg;
+  const char *title = (const char *)call->arg + sizeof(*request);
+  size_t length = call->arg_len - sizeof(*request);
+  if (title[length - 1] != 0 || strlen(title) != length - 1)
+    return RPC_ERR_INVAL;
+  TaskLock();
+  gui_remote_window_t *remote = gui_remote_find(call, request->window_id);
+  int result = remote ? window_set_title(remote->window, title) : -1;
+  TaskUnlock();
+  return result == 0 ? RPC_OK : RPC_ERR_INVAL;
+}
+
 static const rpc_handler_t gui_handlers[GUI_RPC_COUNT] = {
     [GUI_RPC_CREATE_WINDOW] = gui_create_window,
     [GUI_RPC_CLOSE_WINDOW] = gui_close_window,
     [GUI_RPC_REFRESH_WINDOW] = gui_refresh_window,
     [GUI_RPC_START_KEYBOARD] = gui_start_keyboard,
     [GUI_RPC_STOP_KEYBOARD] = gui_stop_keyboard,
+    [GUI_RPC_SET_TITLE] = gui_set_title,
 };
 
 int gui_rpc_service_start(void) {

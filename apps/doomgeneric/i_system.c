@@ -335,7 +335,6 @@ static boolean already_quitting = false;
 
 void I_Error (char *error, ...)
 {
-    SwitchToText8025_BIOS();
     char msgbuf[512];
     va_list argptr;
     atexit_listentry_t *entry;

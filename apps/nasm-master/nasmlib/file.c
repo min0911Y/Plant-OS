@@ -152,7 +152,7 @@ FILE *nasm_open_read(const char *filename, enum file_flags flags)
         memset(fopen_flags, 0, sizeof fopen_flags);
 
         fopen_flags[0] = 'r';
-        fopen_flags[1] = (flags & NF_TEXT) ? 't' : 'b';
+        fopen_flags[1] = (flags & NF_TEXT) ? '\0' : 'b';
 
 #if defined(__GLIBC__) || defined(__linux__)
         /*
@@ -192,7 +192,7 @@ FILE *nasm_open_write(const char *filename, enum file_flags flags)
         os_fopenflag fopen_flags[3];
 
         fopen_flags[0] = 'w';
-        fopen_flags[1] = (flags & NF_TEXT) ? 't' : 'b';
+        fopen_flags[1] = (flags & NF_TEXT) ? '\0' : 'b';
         fopen_flags[2] = '\0';
 
         f = os_fopen(osfname, fopen_flags);

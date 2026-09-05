@@ -52,6 +52,13 @@ class QMP:
                 {"type": event_type, "data": dict(data, down=down)}])
             time.sleep(0.15)
 
+    def chord(self, *keys):
+        for down, sequence in ((True, keys), (False, reversed(keys))):
+            for key in sequence:
+                self.execute("input-send-event", events=[
+                    {"type": "key", "data": {"down": down, "key": {"type": "qcode", "data": key}}}])
+                time.sleep(0.15)
+
     def screenshot(self, path):
         self.execute("screendump", filename=str(path))
         magic, dimensions, maximum, pixels = path.read_bytes().split(b"\n", 3)
@@ -129,6 +136,9 @@ def main():
     gui_mode.add_argument("--capacity", action="store_true", help="also cross the 255-task boundary")
     gui_mode.add_argument("--mouse", action="store_true", help="validate PS/2 motion, buttons and wheel using QMP")
     gui_mode.add_argument("--console", action="store_true", help="validate GUI shell rendering, input echo, backspace and scrolling")
+    gui_mode.add_argument("--sdl", action="store_true", help="validate SDL2 shared surfaces, renderer, fonts and input")
+    gui_mode.add_argument("--desktop-app", choices=("lite", "nk"), help="capture and close an SDL desktop application")
+    gui_mode.add_argument("--tools", action="store_true", help="run C4 pointer/VM, NASM object and JavaScript regressions")
     parser.add_argument("--out", type=Path, default=Path("/tmp/plant-x86_64-smoke"))
     parser.add_argument("--ovmf", type=Path, default=Path("/usr/share/OVMF"))
     args = parser.parse_args()
@@ -139,20 +149,47 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     native = args.arch == "x86_64"
     commands = (["archtest.bin", "cpptest.bin", "simdtest.bin"] if native else ["fputest.bin"]) + [
-        "exc_test.bin", "rpctest.bin", "dktest.bin", "nettest.bin loopback",
+        "timetest.bin", "exc_test.bin", "rpctest.bin", "dktest.bin", "nettest.bin loopback",
         "guitest.bin capacity" if args.capacity else "guitest.bin mouse" if args.mouse else "guitest.bin",
         "psh.bin -c insmod hello.mod", "psh.bin -c rmmod hello_mod",
         "psh.bin -c insmod hello.mod", "psh.bin -c rmmod hello_mod",
         'lua.bin -e assert(math.sqrt(81)==9);assert(math.abs(math.sin(0.5)-0.479425538604203)<1e-12)',
     ]
     expected = (["ARCHTEST PASS", "CPPTEST PASS", "SIMDTEST PASS"] if native else ["FPUTEST PASS"]) + [
-                "EXCEPTION_TEST done checks=5 fails=0", "GUITEST THREAD PASS", "GMOUSE ID =",
+                "TIMETEST PASS", "EXCEPTION_TEST done checks=5 fails=0", "GUITEST THREAD PASS", "GMOUSE ID =",
                 "RPCTEST done checks=22 fails=0", "DKTEST PASS",
                 "GUISTRESS PASS" if args.capacity else "GUITEST PASS"]
     if args.mouse:
         expected.append("GUIMOUSE PASS events=15")
     if args.console:
         commands = ["gui.bin"]
+    if args.sdl:
+        commands = ["timetest.bin", "sdltest.bin"]
+        expected = ["TIMETEST PASS", "SDLTEST PASS"]
+    if args.desktop_app:
+        commands = ["timetest.bin", f"sdltest.bin {args.desktop_app}.bin"]
+        expected = ["TIMETEST PASS", f"SDLAPP EXIT {args.desktop_app}.bin status=0"]
+        if args.desktop_app == "lite":
+            expected.append("LITE EDIT PASS")
+    if args.tools:
+        # Commands and source files enter the guest through init.mst and Lua;
+        # keyboard input is never used to execute commands.
+        source = "int main(){int *p;p=malloc(16);*p=41;if(*p+1!=42)return 1;free(p);return 0;}"
+        assembly = "section .text\nglobal probe\nprobe: mov eax,42\nret\n"
+        def lua_bytes(value):
+            return "string.char(" + ",".join(str(byte) for byte in value.encode()) + ")"
+        prepare = ("f=assert(io.open([[/c4probe.c]],[[w]]));f:write(" + lua_bytes(source) + ");f:close();"
+                   "f=assert(io.open([[/probe.asm]],[[w]]));f:write(" + lua_bytes(assembly) + ");f:close()")
+        bits = 64 if native else 32
+        verify = ("f=assert(io.open([[/probe.o]],[[rb]]));h=f:read(20);f:close();"
+                  f"assert(h:sub(1,4)==string.char(127)..[[ELF]]);assert(h:byte(5)=={2 if native else 1});"
+                  f"assert(h:byte(19)=={62 if native else 3});"
+                  "os.remove([[/probe.o]]);os.remove([[/probe.asm]]);os.remove([[/c4probe.c]])")
+        commands = ["lua.bin -e " + prepare, "c4.bin /c4probe.c",
+                    f"nasm.bin -f elf{bits} /probe.asm -o /probe.o",
+                    "lua.bin -e " + verify,
+                    "duktape.bin -e a=[];for(i=0;i<1000;i++)a.push({v:i});if(a[999].v!==999){throw(1);}"]
+        expected = []
     iso = repo / "kernel" / ("plant-os-x86_64.iso" if native else "plant-os-livecd.iso")
     init = repo / "kernel/res/init.mst"
     original = init.read_bytes()
@@ -163,7 +200,8 @@ def main():
     with (output / "build.log").open("w") as build_log:
         try:
             init.write_text('"todo" = [\n' + ',\n'.join(actions) + '\n]\n')
-            subprocess.run(["make", "-C", str(repo / "apps"), f"ARCH={args.arch}"],
+            subprocess.run(["make", "-C", str(repo / "apps"), f"ARCH={args.arch}",
+                            *(["-j8"] if native else [])],
                            stdout=build_log, stderr=subprocess.STDOUT, check=True)
             if not native:
                 subprocess.run(["make", "-C", str(repo / "loader")],
@@ -175,7 +213,7 @@ def main():
     serial = output / "serial.log"
     serial.write_bytes(b"")
     command = ["qemu-system-x86_64", "-accel", "tcg", "-cpu", "max", "-smp", str(args.cpus),
-               "-m", str(args.memory), "-cdrom", str(iso),
+               "-m", str(args.memory), "-rtc", "base=2026-09-05T04:05:06,clock=vm", "-cdrom", str(iso),
                "-boot", "d", "-display", "none", "-serial", f"file:{serial}",
                "-monitor", "none", "-no-reboot", "-no-shutdown", "-netdev", "user,id=net0",
                "-device", "pcnet,netdev=net0"]
@@ -193,6 +231,8 @@ def main():
                 try:
                     deadline = time.monotonic() + args.timeout
                     mouse_sent = False
+                    app_started = None
+                    app_closed = False
                     while time.monotonic() < deadline and guest.poll() is None:
                         text = serial.read_text(errors="replace") if serial.exists() else ""
                         if re.search(r"PANIC|x86_64 exception .*cs=8", text):
@@ -201,6 +241,49 @@ def main():
                             exercise_console(qmp_path, output)
                             print(f"{args.arch} {args.firmware} GUICONSOLE PASS: prompt, echo, backspace, scroll; {output}")
                             return
+                        if args.desktop_app and f"SDLAPP START {args.desktop_app}.bin" in text:
+                            if app_started is None:
+                                app_started = time.monotonic()
+                            if not app_closed and time.monotonic() - app_started > 10:
+                                qmp = QMP(qmp_path)
+                                try:
+                                    if args.desktop_app == "lite":
+                                        qmp.chord("ctrl", "end")
+                                        qmp.press("key", key={"type": "qcode", "data": "a"})
+                                        qmp.chord("ctrl", "s")
+                                    width, height, pixels = qmp.screenshot(output / f"{args.desktop_app}.ppm")
+                                    # The client must have drawn content inside its window.
+                                    sample = b"".join(pixels[(y * width + 120) * 3:(y * width + 800) * 3]
+                                                      for y in range(120, 650))
+                                    if len(set(sample[i:i + 3] for i in range(0, len(sample), 3))) < 8:
+                                        raise RuntimeError("desktop application has no rendered content")
+                                    # SDL centers undefined/centered coordinates in the desktop.
+                                    app_width = int(width * 0.8) if args.desktop_app == "lite" else min(1000, width - 16)
+                                    app_height = int(height * 0.8) if args.desktop_app == "lite" else min(800, height - 48)
+                                    left, top = (width - app_width) // 2, (height - app_height) // 2
+                                    x, y = left + app_width - 7, top + 10
+                                    qmp.move(x - width // 2, y - height // 2)
+                                    qmp.press("btn", button="left")
+                                    app_closed = True
+                                finally:
+                                    qmp.close()
+                        sdl = re.search(r"SDLTEST READY origin=(\d+),(\d+) target=(\d+),(\d+)", text)
+                        if args.sdl and sdl and not mouse_sent:
+                            qmp = QMP(qmp_path)
+                            try:
+                                width, height, pixels = qmp.screenshot(output / "sdl-surfaces.ppm")
+                                for x, y, color in ((100, 210, b"\x18\x40\x80"), (440, 160, b"\x20\xc0\x40")):
+                                    offset = (y * width + x) * 3
+                                    if pixels[offset:offset + 3] != color:
+                                        raise RuntimeError(f"SDL framebuffer mismatch at {x},{y}")
+                                qmp.move(int(sdl[3]) - int(sdl[1]), int(sdl[4]) - int(sdl[2]))
+                                qmp.press("btn", button="left")
+                                qmp.press("btn", button="wheel-up")
+                                qmp.press("key", key={"type": "qcode", "data": "a"})
+                                qmp.press("key", key={"type": "qcode", "data": "left"})
+                                mouse_sent = True
+                            finally:
+                                qmp.close()
                         mouse = re.search(r"GUIMOUSE READY origin=(\d+),(\d+) target=(\d+),(\d+)", text)
                         if args.mouse and mouse and not mouse_sent:
                             origin = tuple(map(int, mouse.group(1, 2)))
@@ -210,6 +293,11 @@ def main():
                         if "init: run psh.bin\n" in text:
                             statuses = re.findall(r"^init: command .* status=(-?\d+)$", text, re.M)
                             if len(statuses) != len(commands) or any(status != "0" for status in statuses):
+                                qmp = QMP(qmp_path)
+                                try:
+                                    qmp.screenshot(output / "failure.ppm")
+                                finally:
+                                    qmp.close()
                                 raise RuntimeError(f"command regression; see {serial}")
                             missing = [marker for marker in expected if marker not in text]
                             if missing:

@@ -72,18 +72,6 @@
 
 int start = 0;
 nk_size prog = 0;
-void thread() __attribute__((optimize("O0")));
-void thread() {
-  while (1) {
-    if (start) {
-      if (prog < 100) {
-        prog++;
-        sleep(10);
-      }
-      
-    }
-  }
-}
 int main(int argc, char *argv[]) {
   /* Platform */
   SDL_Window *win;
@@ -98,10 +86,17 @@ int main(int argc, char *argv[]) {
 
   /* SDL setup */
   SDL_SetHint(SDL_HINT_VIDEO_HIGHDPI_DISABLED, "0");
-  SDL_Init(SDL_INIT_VIDEO);
+  if (SDL_Init(SDL_INIT_VIDEO) != 0) {
+    SDL_Log("SDL initialization failed: %s", SDL_GetError());
+    return 1;
+  }
+  SDL_DisplayMode display;
+  if (SDL_GetCurrentDisplayMode(0, &display) != 0)
+    return 1;
 
   win = SDL_CreateWindow("Demo", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                         WINDOW_WIDTH, WINDOW_HEIGHT,
+                         SDL_min(WINDOW_WIDTH, display.w - 16),
+                         SDL_min(WINDOW_HEIGHT, display.h - 48),
                          SDL_WINDOW_SHOWN | SDL_WINDOW_ALLOW_HIGHDPI);
 
   if (win == NULL) {
@@ -153,7 +148,7 @@ int main(int argc, char *argv[]) {
      * multiplied by font_scale to produce better results at higher DPIs */
     nk_sdl_font_stash_begin(&atlas);
     // font = nk_font_atlas_add_default(atlas, 13 * font_scale, &config);
-    font = nk_font_atlas_add_from_file(atlas, "data/fonts/mono.ttf",
+    font = nk_font_atlas_add_from_file(atlas, "/data/fonts/mono.ttf",
                                        17 * font_scale, &config);
     /*font = nk_font_atlas_add_from_file(atlas,
      * "../../../extra_font/Roboto-Regular.ttf", 16 * font_scale, &config);*/
@@ -188,7 +183,8 @@ int main(int argc, char *argv[]) {
     SDL_Event evt;
     nk_input_begin(ctx);
     while (SDL_PollEvent(&evt)) {
-      if (evt.type == SDL_QUIT)
+      if (evt.type == SDL_QUIT ||
+          (evt.type == SDL_WINDOWEVENT && evt.window.event == SDL_WINDOWEVENT_CLOSE))
         goto cleanup;
       nk_sdl_handle_event(&evt);
     }

@@ -1,4 +1,3 @@
-#include <calendar.h>
 #include <cmd.h>
 #include <dos.h>
 #include <framebuffer.h>
@@ -6,6 +5,7 @@
 #include <limits.h>
 #include <math_util.h>
 #include <platform.h>
+#include <stdint.h>
 #include <syscall.h>
 #include <user_space.h>
 #if defined(KERNEL_ARCH_X86_64)
@@ -1115,9 +1115,8 @@ static void syscall_framebuffer(syscall_context_t *frame) {
 }
 
 static void syscall_timestamp(syscall_context_t *frame) {
-  frame->value = calendar_to_unix_timestamp(
-      get_year(), get_mon_hex(), get_day_of_month(), get_hour_hex(),
-      get_min_hex(), get_sec_hex());
+  uint32_t timestamp;
+  frame->value = platform_rtc_timestamp(&timestamp) ? timestamp : UINT32_MAX;
 }
 
 static void syscall_uptime(syscall_context_t *frame) {

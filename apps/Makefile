@@ -10,7 +10,6 @@ default : Makefile
 	make -r -C libtcc1
 	make -r -C miniset
 	make -r -C sdl2
-	make -r -C sdl2_old
 	make -r -C freetype
 	make -r -C SDL2_ttf
 	make -r -C bainian
@@ -75,6 +74,8 @@ default : Makefile
 	make -r -C bitz
 	make -r -C netgobang
 	make -r -C my_basic-master
+	make -r -C timetest
+	make -r -C sdltest
 clean :
 	rm -rf libs/* out/*
 else

@@ -149,6 +149,7 @@ window_t *create_window(desktop_t *desktop, const char *title, int xsize,
                         int ysize, unsigned tid, vram_t *vram);
 void window_focus(window_t *window);
 void close_window(window_t *window);
+int window_set_title(window_t *window, const char *title);
 void destroy_window(window_t *window);
 super_window_t *create_super_window(window_t *window);
 

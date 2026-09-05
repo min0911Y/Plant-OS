@@ -175,6 +175,20 @@ void close_window(window_t window) {
   free(window);
 }
 
+int window_set_title(window_t window, const char *title) {
+  if (!window || !title)
+    return RPC_ERR_INVAL;
+  size_t length = strlen(title);
+  if (length > GUI_TITLE_MAX)
+    return RPC_ERR_INVAL;
+  unsigned char buffer[sizeof(gui_rpc_window_request_t) + GUI_TITLE_MAX + 1];
+  gui_rpc_window_request_t request = {.window_id = window->id};
+  memcpy(buffer, &request, sizeof(request));
+  memcpy(buffer + sizeof(request), title, length + 1);
+  return gui_call(GUI_RPC_SET_TITLE, buffer, sizeof(request) + length + 1,
+                  NULL, 0, NULL);
+}
+
 void draw_px(window_t window, int x, int y, int color) {
   if (window == NULL || (unsigned)x >= window->width ||
       (unsigned)y >= window->height) {

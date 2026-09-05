@@ -155,6 +155,9 @@ else
   cp "$object_dir"/*.mod "$payload_dir/"
   cp "$kernel_dir/res/init.mst" "$kernel_dir/res/env.cfg" "$kernel_dir/res/sys.cfg" "$payload_dir/"
   cp "$repo_dir/font/font.bin" "$repo_dir/font/HZK16" "$kernel_dir/res/font.ttf" "$payload_dir/"
+  mkdir -p "$payload_dir/games"
+  mv "$payload_dir/doom.bin" "$payload_dir/games/"
+  cp "$kernel_dir/res/doom1.wad" "$payload_dir/games/"
   mkdir -p "$payload_dir/data"
   cp -R "$lite_data_dir"/. "$payload_dir/data/"
 fi

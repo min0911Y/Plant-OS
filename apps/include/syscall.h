@@ -146,7 +146,6 @@ void PrintChineseChar(int x, int y, int color, unsigned short cChar);
 void PrintChineseStr(int x, int y, int color, unsigned char *cStr);
 void print(char *str);
 void scan(char *str, int length);
-void api_free(void *ptr, int size);
 int system(char *command);
 void bmpview(char *filename);
 void Draw_Box(int x, int y, int w, int h, int color);

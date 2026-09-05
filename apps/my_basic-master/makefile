@@ -1,3 +1,8 @@
+ARCH ?= i386
+ifeq ($(ARCH),x86_64)
+NATIVE_TARGETS := out/x86_64/my_basic.bin
+include ../native.mk
+else ifeq ($(ARCH),i386)
 LIBS_PATH := ../libs
 INCLUDE_PATH := ../include
 include ../defs.mk
@@ -13,3 +18,7 @@ default: ../out/my_basic.bin
 
 clean:
 	rm -f ../out/my_basic.obj ../out/main.obj ../out/my_basic.bin
+
+else
+$(error unsupported ARCH)
+endif

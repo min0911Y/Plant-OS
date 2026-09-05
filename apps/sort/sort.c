@@ -48,6 +48,6 @@ int main(int argc,char **argv) // entry
     {
         printf("%d\n", array[i]);
     }
-	api_free(buf,100);
+	free(buf);
 	return 0;
 }

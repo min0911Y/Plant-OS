@@ -51,7 +51,10 @@ top:
     return 1;
 
   case SDL_WINDOWEVENT:
-    if (e.window.event == SDL_WINDOWEVENT_RESIZED) {
+    if (e.window.event == SDL_WINDOWEVENT_CLOSE) {
+      lua_pushstring(L, "quit");
+      return 1;
+    } else if (e.window.event == SDL_WINDOWEVENT_RESIZED) {
       lua_pushstring(L, "resized");
       lua_pushnumber(L, e.window.data1);
       lua_pushnumber(L, e.window.data2);
@@ -259,19 +262,29 @@ static int f_list_dir(lua_State *L) {
 
 static int f_absolute_path(lua_State *L) {
   const char *path = luaL_checkstring(L, 1);
-  if (path[0] == '/') {
+  if (path[0] == '/' || (path[0] && path[1] == ':')) {
     lua_pushstring(L, path);
     return 1;
   }
-  char cwd[255];
-  char result[255];
-  getcwd(cwd, sizeof(cwd));
-  if (cwd[strlen(cwd) - 1] == '/') {
-    sprintf(result, "/%s", path);
-  } else {
-    sprintf(result, "%s/%s", cwd, path);
+  size_t capacity = 128;
+  char *cwd = NULL;
+  for (;;) {
+    char *grown = realloc(cwd, capacity);
+    if (!grown) {
+      free(cwd);
+      return luaL_error(L, "path allocation failed");
+    }
+    cwd = grown;
+    if (getcwd(cwd, capacity))
+      break;
+    if (errno != ERANGE || capacity > (size_t)-1 / 2) {
+      free(cwd);
+      return luaL_error(L, "getcwd() failed: %s", strerror(errno));
+    }
+    capacity *= 2;
   }
-  lua_pushstring(L, path);
+  lua_pushfstring(L, "%s%s%s", cwd, cwd[strlen(cwd) - 1] == '/' ? "" : "/", path);
+  free(cwd);
   return 1;
 }
 
@@ -279,29 +292,17 @@ static int f_get_file_info(lua_State *L) {
   const char *path = luaL_checkstring(L, 1);
   struct stat status;
   if (stat(path, &status) != 0) {
-    lua_newtable(L);
-    lua_pushnumber(L, 0);
-    lua_setfield(L, -2, "modified");
-
-    lua_pushnumber(L, 0);
-    lua_setfield(L, -2, "size");
-
-    lua_pushstring(L, "dir");
-
-    lua_setfield(L, -2, "type");
-    return 1;
-  } else {
-    lua_newtable(L);
-    lua_pushnumber(L, 0);
-    lua_setfield(L, -2, "modified");
-
-    lua_pushnumber(L, status.st_size);
-    lua_setfield(L, -2, "size");
-    lua_pushstring(L, S_ISDIR(status.st_mode) ? "dir" : "file");
-
-    lua_setfield(L, -2, "type");
+    lua_pushnil(L);
+    lua_pushstring(L, strerror(errno));
+    return 2;
   }
-
+  lua_newtable(L);
+  lua_pushnumber(L, status.st_mtime);
+  lua_setfield(L, -2, "modified");
+  lua_pushnumber(L, status.st_size);
+  lua_setfield(L, -2, "size");
+  lua_pushstring(L, S_ISDIR(status.st_mode) ? "dir" : "file");
+  lua_setfield(L, -2, "type");
   return 1;
 }
 
