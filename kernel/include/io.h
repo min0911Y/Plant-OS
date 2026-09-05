@@ -23,9 +23,12 @@ void screen_ne_TextMode(struct tty *res);
 void clear_TextMode(struct tty *res);
 void Draw_Box_TextMode(struct tty *res, int x, int y, int x1, int y1,
                        unsigned char color);
-bool now_tty_TextMode(struct tty *res);
 // tty.c
 bool init_tty(void);
+struct tty *tty_console_create(void);
+int default_tty_fifo_status(struct tty *tty);
+int default_tty_fifo_get(struct tty *tty);
+void tty_set_color(struct tty *tty, unsigned char color);
 struct tty *tty_alloc(void *vram, int xsize, int ysize,
                       void (*putchar)(struct tty *res, int c),
                       void (*MoveCursor)(struct tty *res, int x, int y),
@@ -61,7 +64,6 @@ void clear_HighTextMode(struct tty *res);
 void screen_ne_HighTextMode(struct tty *res);
 void MoveCursor_HighTextMode(struct tty *res, int x, int y);
 void putchar_HighTextMode(struct tty *res, int c);
-bool now_tty_HighTextMode(struct tty *res);
 // void Gar_Test_Task();
 bool SwitchToHighTextMode(void);
 void Draw_Box_HighTextMode(struct tty *res, int x, int y, int x1, int y1,

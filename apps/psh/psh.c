@@ -166,7 +166,8 @@ static int print_directory(const char *path) {
   return 0;
 }
 static void print_memory_usage(void) {
-  printf("Used/Total: %u/%u\n", mem_used(), div_round_up(mem_total(), 0x1000));
+  printf("Used/Total: %lu/%lu\n", (unsigned long)mem_used(),
+         (unsigned long)(mem_total() / 4096 + (mem_total() % 4096 != 0)));
 }
 
 static void pause_shell(void) {

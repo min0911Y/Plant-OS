@@ -256,8 +256,7 @@ gmouse_t *create_gmouse(desktop_t *desktop, int x, int y, int pos) {
   sheet_refresh(res->sht, 0, 0, 16, 19);
 
   uintptr_t stack_top = (uintptr_t)mouse_stack + 32 * 1024;
-  ((uintptr_t *)stack_top)[-1] = (uintptr_t)res;
-  res->tid = AddThread("", (uintptr_t)gmouse, stack_top - 8);
+  res->tid = AddThread("gmouse", (uintptr_t)gmouse, stack_top, (uintptr_t)res);
   if ((int)res->tid < 0) {
     sheet_free(res->sht);
     free(mouse_vram);

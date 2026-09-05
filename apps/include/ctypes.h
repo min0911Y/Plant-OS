@@ -1,5 +1,8 @@
 #ifndef _CTYPES_H
 #define _CTYPES_H
+#ifndef __WORDSIZE
+#define __WORDSIZE (__SIZEOF_POINTER__ * 8)
+#endif
 #include <stdbool.h>
 #ifndef NULL
 #ifdef __cplusplus

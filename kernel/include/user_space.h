@@ -5,6 +5,8 @@
 
 #if defined(KERNEL_ARCH_I386)
 #include <arch/x86/i386/user.h>
+#elif defined(KERNEL_ARCH_X86_64)
+#include <arch/x86/x86_64/user.h>
 #else
 #error "User address-space layout is not defined for the selected architecture"
 #endif

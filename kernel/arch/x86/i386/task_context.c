@@ -36,7 +36,13 @@ void arch_task_fork_context_init(mtask *task) {
 }
 
 __attribute__((noreturn)) void
-arch_task_enter_user(uintptr_t instruction_pointer, uintptr_t stack_pointer) {
+arch_task_enter_user(uintptr_t instruction_pointer, uintptr_t stack_top,
+                     uintptr_t argument) {
+  /* i386 SysV: the argument follows the return address; ESP + 4 is aligned. */
+  uintptr_t stack_pointer = (stack_top & ~(uintptr_t)15) - 20;
+  uintptr_t *stack = (uintptr_t *)stack_pointer;
+  stack[0] = 0;
+  stack[1] = argument;
   x86_interrupt_frame_t frame;
   x86_user_frame_init(&frame, (uint32_t)instruction_pointer,
                       (uint32_t)stack_pointer);

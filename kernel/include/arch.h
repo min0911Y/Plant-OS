@@ -4,6 +4,8 @@
 #if defined(KERNEL_ARCH_I386)
 #include <arch/x86/i386/fpu.h>
 #include <arch/x86/i386/task.h>
+#elif defined(KERNEL_ARCH_X86_64)
+#include <arch/x86/x86_64/task.h>
 #else
 #error "No Plant OS architecture backend selected"
 #endif
@@ -33,7 +35,8 @@ arch_task_start(arch_task_context_t *next_context,
 __attribute__((noreturn)) void arch_task_interrupt_return(void);
 void arch_task_fork_context_init(struct mtask *task);
 __attribute__((noreturn)) void arch_task_enter_user(uintptr_t instruction_pointer,
-                                                   uintptr_t stack_pointer);
+                                                   uintptr_t stack_top,
+                                                   uintptr_t argument);
 bool arch_task_prepare_signal(struct mtask *task, uintptr_t handler,
                               uintptr_t trampoline);
 
@@ -56,6 +59,10 @@ bool arch_address_space_unmap_shared(
 bool arch_address_space_map_user_device(uintptr_t user_address,
                                         uintptr_t physical_address,
                                         size_t size);
+void *arch_module_allocate(size_t size);
+bool arch_module_protect(void *address, size_t size, bool writable,
+                         bool executable);
+void arch_module_free(void *address, size_t size);
 
 void arch_fpu_init_cpu(void);
 void arch_fpu_flush_cpu(void);

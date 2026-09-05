@@ -4,15 +4,15 @@
 #include <kasan.h>
 #include <limits.h>
 
-#define HEAP_ALIGNMENT 8u
+#define HEAP_ALIGNMENT (sizeof(uintptr_t) * 2u)
 #define HEAP_PAGE_BYTES 4096u
 #define HEAP_INITIAL_BYTES (1024u * 1024u)
 #define HEAP_GROWTH_BYTES (1024u * 1024u)
 #define HEAP_COOKIE 0x48454150u
 
 typedef struct {
-  uint32_t size;
-  uint32_t cookie;
+  size_t size;
+  uintptr_t cookie;
 } heap_allocation_header_t;
 
 typedef enum {
@@ -57,8 +57,8 @@ static void *heap_record_allocation(void *raw, size_t size, size_t total,
                                     uint8_t kasan_type) {
   heap_allocation_header_t *header = raw;
   void *user = header + 1;
-  header->size = (uint32_t)size;
-  header->cookie = (uint32_t)(uintptr_t)raw ^ (uint32_t)size ^ HEAP_COOKIE;
+  header->size = size;
+  header->cookie = (uintptr_t)raw ^ size ^ HEAP_COOKIE;
   kasan_alloc(raw, (uint32_t)total, user, (uint32_t)size, kasan_type);
   return user;
 }
@@ -70,7 +70,7 @@ static heap_allocation_header_t *heap_allocation_header(void *ptr) {
   }
   heap_allocation_header_t *header =
       (heap_allocation_header_t *)ptr - 1;
-  uint32_t cookie = (uint32_t)(uintptr_t)header ^ header->size ^ HEAP_COOKIE;
+  uintptr_t cookie = (uintptr_t)header ^ header->size ^ HEAP_COOKIE;
   if (header->cookie != cookie) {
     heap_corruption(ptr);
   }

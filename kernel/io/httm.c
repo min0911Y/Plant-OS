@@ -349,11 +349,3 @@ bool SwitchToHighTextMode(void) {
   tty_set(current_task(), tty_h);
   return true;
 }
-bool now_tty_HighTextMode(struct tty *res) {
-  struct SHEET *sht = (struct SHEET *)res->vram;
-  if (sht->height == 0) {
-    return true;
-  } else {
-    return false;
-  }
-}

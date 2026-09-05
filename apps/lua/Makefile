@@ -1,3 +1,8 @@
+ARCH ?= i386
+ifeq ($(ARCH),x86_64)
+NATIVE_TARGETS := out/x86_64/lua.bin out/x86_64/luac.bin
+include ../native.mk
+else ifeq ($(ARCH),i386)
 LIBS_PATH := ../libs
 INCLUDE_PATH := ../include
 include ../defs.mk
@@ -28,3 +33,7 @@ default : $(OBJS_PACK1) $(OBJS_PACK2) $(OBJS_PACK3)
 	$(CPP) -c $*.cpp -o ../out/$*.obj
 ../out/%.obj : %.asm Makefile
 	nasm -f elf $*.asm -o ../out/$*.obj
+
+else
+$(error unsupported ARCH '$(ARCH)'; supported architectures: i386 x86_64)
+endif

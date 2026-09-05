@@ -232,15 +232,13 @@ static void page_claim_idx(unsigned idx, uint32_t task_id) {
   pages[idx].task_id = task_id;
 }
 
-unsigned page_ref_count(unsigned paddr) {
+unsigned page_ref_count(uintptr_t paddr) {
   return page_refcount_idx(IDX(paddr));
 }
 
-void page_ref_release(unsigned paddr) {
-  page_ref_dec_idx(IDX(paddr));
-}
+void page_ref_release(uintptr_t paddr) { page_ref_dec_idx(IDX(paddr)); }
 
-unsigned page_used_count(unsigned physical_size) {
+size_t page_used_count(uintptr_t physical_size) {
   unsigned limit = physical_size / PAGE_SIZE_BYTES;
   if (physical_size % PAGE_SIZE_BYTES) {
     limit++;
@@ -790,6 +788,17 @@ restore:
 int page_link(uintptr_t addr) {
   return page_link_pde(addr, current_task()->address_space);
 }
+void *arch_module_allocate(size_t size) { return page_malloc(size); }
+bool arch_module_protect(void *address, size_t size, bool writable,
+                         bool executable) {
+  (void)address;
+  (void)size;
+  (void)writable;
+  (void)executable;
+  /* The i386 backend uses its existing shared, executable kernel direct map. */
+  return true;
+}
+void arch_module_free(void *address, size_t size) { page_free(address, size); }
 void init_page(const boot_info_t *boot_info) {
   init_pdepte(I386_KERNEL_PAGE_DIRECTORY, I386_KERNEL_PAGE_TABLES, I386_KERNEL_PAGE_TABLES_END);
   init_page_manager(boot_info);

@@ -1,3 +1,7 @@
+ARCH ?= i386
+ifeq ($(ARCH),x86_64)
+include arch/x86/x86_64/build.mk
+else
 FONTPATH = ../font/
 APPSPATH = ../apps/
 APPSOUTPATH = ../apps/out/
@@ -29,7 +33,7 @@ ARCHPATH = ./arch/x86/i386/
 ARCH_LD_EMULATION = elf_i386
 QEMU_SYSTEM = qemu-system-i386
 else
-$(error unsupported ARCH '$(ARCH)'; supported architectures: i386)
+$(error unsupported ARCH '$(ARCH)'; supported architectures: i386 x86_64)
 endif
 QEMU_CPUS ?= 4
 LIVECD_ISO = plant-os-livecd.iso
@@ -49,7 +53,7 @@ OBJS_BOOTPACK = $(OUTPATH)boot_entry.obj $(OUTPATH)boot.o \
 				$(OUTPATH)mouse.o $(OUTPATH)acpi.o $(OUTPATH)is.o $(OUTPATH)descriptor_tables.o $(OUTPATH)arg.o \
 				$(OUTPATH)other.o $(OUTPATH)floppy.o $(OUTPATH)dma.o $(OUTPATH)init.o $(OUTPATH)main.o \
 				$(OUTPATH)init_platform.o \
-				$(OUTPATH)std.o $(OUTPATH)sheet.o $(OUTPATH)vbe.o $(OUTPATH)cmos.o $(OUTPATH)pci.o $(OUTPATH)fat.o \
+				$(OUTPATH)std.o $(OUTPATH)format.o $(OUTPATH)sheet.o $(OUTPATH)vbe.o $(OUTPATH)cmos.o $(OUTPATH)pci.o $(OUTPATH)fat.o \
 				$(OUTPATH)beep.o $(OUTPATH)syscall.o $(OUTPATH)fifo.o $(OUTPATH)list.o $(OUTPATH)input.o $(OUTPATH)keyboard.o \
 				$(OUTPATH)pcnet.o $(OUTPATH)ipc.o $(OUTPATH)tty.o $(OUTPATH)page.o $(OUTPATH)serial.o $(OUTPATH)log.o \
 				$(OUTPATH)path.o $(OUTPATH)draw.o $(OUTPATH)httm.o $(OUTPATH)interrupt_controller.o $(OUTPATH)bmp.o $(OUTPATH)sb16.o \
@@ -312,3 +316,4 @@ clean :
 	rm -r ./img
 	rm -f ./$(LIVECD_ISO)
 	$(MAKE) -C $(APPSPATH) clean
+endif

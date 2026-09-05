@@ -111,23 +111,23 @@ pop	edx
 ret
 
 SwitchTo320X200X256:
-push	eax
+
 push	ebx
 mov	eax,0x03
 mov	ebx,0x02
 int	36h
 pop	ebx
-pop	eax
+
 ret
 
 SwitchToText8025:
-push	eax
+
 push	ebx
 mov	eax,0x03
 mov	ebx,0x01
 int	36h
 pop	ebx
-pop	eax
+
 ret
 
 Draw_Char:
@@ -415,23 +415,23 @@ _kbhit:
     ret
 
 SwitchTo320X200X256_BIOS:
-	push	eax
+
 	push	ebx
 	mov	eax,0x21
 	mov	ebx,0x02
 	int	36h
 	pop	ebx
-	pop	eax
+
 	ret
 
 SwitchToText8025_BIOS:
-	push	eax
+
 	push	ebx
 	mov	eax,0x21
 	mov	ebx,0x01
 	int	36h
 	pop	ebx
-	pop	eax
+
 	ret
 
 TaskForever:
@@ -669,21 +669,24 @@ longjmp:
     mov [esp + 0], ecx ; ret addr = ecx = setjmp's next code
     ret
 AddThread:
-	push ebx ; 4
-	push ecx ; 8
-	push edx ; 12
-	push esi ; 16
-	mov eax,0x22
-	mov ebx,0x0a
-	mov ecx,[esp+4+16]
-	mov edx,[esp+8+16]
-	mov esi,[esp+12+16]
-	int 36h
-	pop esi
-	pop edx
-	pop ecx
-	pop ebx
-	ret
+    push ebx
+    push ecx
+    push edx
+    push esi
+    push edi
+    mov eax, 0x22
+    mov ebx, 0x0a
+    mov ecx, [esp + 24]
+    mov edx, [esp + 28]
+    mov esi, [esp + 32]
+    mov edi, [esp + 36]
+    int 36h
+    pop edi
+    pop esi
+    pop edx
+    pop ecx
+    pop ebx
+    ret
 TaskLock:
 	push eax
 	push ebx

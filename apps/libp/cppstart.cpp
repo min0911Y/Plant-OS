@@ -1,7 +1,9 @@
-#include <syscall.h>
+#include "runtime_lifecycle.h"
 #include <runtime_args.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <syscall.h>
 #undef bool
 #undef true
 #undef false
@@ -27,6 +29,7 @@ extern "C" void Main()
   }
   init_env();
   init_float();
+  runtime_initialize_static();
   int status = main(arguments.argc, arguments.argv);
   runtime_arguments_destroy(&arguments);
   exit(status);
@@ -40,10 +43,7 @@ void __chkstk_ms()
     //莫名其妙的错误
 }
 
-extern "C" void __cxa_pure_virtual()
-{
-    // Do nothing or print an error message.
-}
+extern "C" void __cxa_pure_virtual() { abort(); }
 
 void *operator new(size_t size)
 {
@@ -58,17 +58,15 @@ void *operator new[](size_t size)
   //  logkf("mother fucker %d %p\n",size,p);
     return p;
 }
- 
-void operator delete(void *p,unsigned int size)
-{
-    (void)size;
-    free(p);
+
+void operator delete(void *p, size_t size) {
+  (void)size;
+  free(p);
 }
- 
-void operator delete[](void *p,unsigned int size)
-{
-    (void)size;
-    free(p);
+
+void operator delete[](void *p, size_t size) {
+  (void)size;
+  free(p);
 }
 void operator delete(void *p)
 {

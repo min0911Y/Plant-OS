@@ -17,6 +17,7 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
+#include <syscall.h>
 #include <time.h>
 
 Shell shell;
@@ -193,11 +194,13 @@ int userNewThread(void *handler, void *param) {
   if (allocation == NULL) {
     return -1;
   }
-  unsigned *stack =
-      (unsigned *)((uintptr_t)allocation + 1024 * 512 - sizeof(unsigned));
-  *stack = (uintptr_t)param;
-  return AddThread("", (uintptr_t)handler, (uintptr_t)(stack - 1)) < 0 ? -1
-                                                                       : 0;
+  int tid = AddThread("", (uintptr_t)handler,
+                      (uintptr_t)allocation + 1024 * 512, (uintptr_t)param);
+  if (tid < 0) {
+    free(allocation);
+    return -1;
+  }
+  return 0;
 }
 
 /**

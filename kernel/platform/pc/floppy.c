@@ -123,7 +123,6 @@ void init_floppy() {
     return;
   }
 
-#endif
   vdisk vd = {0};
   strcpy(vd.DriveName, "floppy");
   vd.Read = Read;
@@ -132,6 +131,7 @@ void init_floppy() {
   vd.max_transfer_sectors = SECTORS_ONCE;
   vd.flag = VDISK_TYPE_BLOCK;
   register_vdisk_at('A', vd);
+#endif
 }
 static void floppy_interrupt(void) {
   /**

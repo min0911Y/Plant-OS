@@ -42,3 +42,6 @@ $(out_path_src)%.o: %.c Makefile
 
 $(out_path_src)%.obj: %.asm Makefile
 	nasm -f $(KERNEL_ARCH_ASM_FORMAT) $*.asm -o $(out_path_src)$*.obj
+
+$(out_path_src)module.o: ../../../modules/loader.c Makefile
+	gcc $(KERNEL_COMMON_CFLAGS) -O3 -Wall -c $< -o $@

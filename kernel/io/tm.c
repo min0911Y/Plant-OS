@@ -116,6 +116,10 @@ void Draw_Box_TextMode(struct tty *res, int x, int y, int x1, int y1,
     }
   }
 }
-bool now_tty_TextMode(struct tty *res) {
-  return platform_is_text_vram(res->vram);
+
+struct tty *tty_console_create(void) {
+  return tty_alloc(platform_text_vram(), 80, 25, putchar_TextMode,
+                   MoveCursor_TextMode, clear_TextMode, screen_ne_TextMode,
+                   Draw_Box_TextMode, default_tty_fifo_status,
+                   default_tty_fifo_get);
 }

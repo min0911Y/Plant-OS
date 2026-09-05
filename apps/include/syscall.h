@@ -7,6 +7,7 @@
 extern "C" {
 #endif
 #include <ctypes.h>
+enum { SYSCALL_SIGNAL_RETURN = 0x65 };
 #define T_DrawBox(x, y, w, h, c) Text_Draw_Box((y), (x), (h) + y, (w) + x, (c))
 typedef enum { FLE, DIR, RDO, HID, SYS } ftype;
 struct finfo_block {
@@ -135,8 +136,8 @@ int getch(void);
 char input_char_inSM();
 int get_xy();
 void goto_xy(int x, int y);
-void SwitchTo320X200X256();
-void SwitchToText8025();
+int SwitchTo320X200X256(void);
+int SwitchToText8025(void);
 int get_mouse();
 void Draw_Char(int x, int y, char ch, int color);
 void Draw_Str(int x, int y, char *str, int color);
@@ -161,8 +162,8 @@ int rmdir(const char *filename);
 int chdir(const char *path);
 int list_directory(const char *path, struct finfo_block **entries,
                    size_t *count);
-void SwitchTo320X200X256_BIOS();
-void SwitchToText8025_BIOS();
+int SwitchTo320X200X256_BIOS(void);
+int SwitchToText8025_BIOS(void);
 void TaskForever();
 void SendMessage(int to_tid, void *data, unsigned int size);
 void GetMessage(void *data, int from_tid);
@@ -189,11 +190,14 @@ int get_day_of_month();
 int get_day_of_week();
 int get_mon_hex();
 int get_year();
-int AddThread(char *name, uintptr_t func, uintptr_t stack);
+/* stack_top ends caller-owned writable storage. The architecture aligns the
+ * C entry frame and passes argument to func, which must exit without returning. */
+int AddThread(const char *name, uintptr_t func, uintptr_t stack_top,
+              uintptr_t argument);
 void TaskLock();
 void TaskUnlock();
 void SubThread(unsigned int taskID);
-int set_mode(int w, int h); // 设置显示模式（bpp不能设置，只能32位彩色）
+intptr_t set_mode(int w, int h);
 void VBEDraw_Px(int x, int y, unsigned int color);
 unsigned int VBEGet_Px(int x, int y);
 void VBEGetBuffer(void *buffer);
@@ -214,8 +218,8 @@ void clear();
 int vfs_check_mount(uint8_t drive);
 int vfs_mount(uint8_t disk_number,uint8_t drive);
 int vfs_change_disk(uint8_t drive);
-uint32_t mem_used();
-uint32_t mem_total();
+size_t mem_used(void);
+size_t mem_total(void);
 void tty_start_cur_moving();
 void tty_stop_cur_moving();
 int tty_get_xsize(void);

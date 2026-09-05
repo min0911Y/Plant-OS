@@ -9,6 +9,7 @@ extern "C" {
 #include <ctypes.h>
 typedef float	float_t;
 typedef double	double_t;
+float roundf(float value);
 
 #define FORCE_EVAL(x) do {									\
 	if (sizeof(x) == sizeof(float)) {						\

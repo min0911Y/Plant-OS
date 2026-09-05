@@ -88,7 +88,7 @@ int64_t __divmoddi4(int64_t num, int64_t den, int64_t *rem_p) {
 #else
 #define BRKSIZE 4096
 #endif
-#define PTRSIZE ((int)sizeof(void *))
+#define PTRSIZE ((int)(sizeof(void *) == 8 ? 16 : sizeof(void *)))
 #define Align(x, a) (((x) + (a - 1)) & ~(a - 1))
 #define NextSlot(p) (*(void **)((p)-PTRSIZE))
 #define NextFree(p) (*(void **)(p))

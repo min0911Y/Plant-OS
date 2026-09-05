@@ -18,7 +18,7 @@ static bool tty_registered(const struct tty *tty) {
   }
 }
 static void tty_print(struct tty *res, const char *string) {
-  for (int i = 0; i < strlen(string); i++) {
+  for (size_t i = 0; string[i]; i++) {
     if (res->y == res->ysize && res->x >= res->xsize) {
       res->screen_ne(res);
     }
@@ -72,11 +72,7 @@ bool init_tty(void) {
   if (tty_list == NULL) {
     return false;
   }
-  tty_default =
-      tty_alloc(platform_text_vram(), 80, 25, putchar_TextMode,
-                MoveCursor_TextMode,
-                clear_TextMode, screen_ne_TextMode, Draw_Box_TextMode,
-                default_tty_fifo_status, default_tty_fifo_get);
+  tty_default = tty_console_create();
   if (tty_default == NULL) {
     DeleteList(tty_list);
     tty_list = NULL;
@@ -97,6 +93,8 @@ struct tty *tty_alloc(void *vram, int xsize, int ysize,
     return NULL;
   }
   res->using1 = 1;
+  res->native_ansi = false;
+  res->Raw_y = 0;
   res->x = 0;
   res->y = 0;
   res->vram = vram;
@@ -168,8 +166,28 @@ void tty_set_reserved(struct tty *res, uintptr_t reserved1,
   res->reserved[2] = reserved3;
   res->reserved[3] = reserved4;
 }
-void tty_stop_cursor_moving(struct tty *t) { t->cur_moving = 0; }
+void tty_set_color(struct tty *tty, unsigned char color) {
+  tty->color = color;
+  if (tty->native_ansi) {
+    unsigned foreground = (color & 2) | ((color & 1) << 2) | ((color & 4) >> 2);
+    unsigned background = (color >> 4) & 7;
+    background =
+        (background & 2) | ((background & 1) << 2) | ((background & 4) >> 2);
+    char sequence[24];
+    snprintf(sequence, sizeof(sequence), "\033[%u;%um",
+             foreground + (color & 8 ? 90 : 30),
+             background + (color & 128 ? 100 : 40));
+    tty->print(tty, sequence);
+  }
+}
+void tty_stop_cursor_moving(struct tty *t) {
+  t->cur_moving = 0;
+  if (t->native_ansi)
+    t->print(t, "\033[?25l");
+}
 void tty_start_curor_moving(struct tty *t) {
   t->cur_moving = 1;
+  if (t->native_ansi)
+    t->print(t, "\033[?25h");
   t->MoveCursor(t, t->x, t->y);
 }

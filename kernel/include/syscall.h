@@ -4,6 +4,10 @@
 #include <stddef.h>
 
 typedef uintptr_t syscall_word_t;
+enum {
+  SYSCALL_ARCH_RESET_FPU = 0x2f,
+  SYSCALL_ARCH_SIGNAL_RETURN = 0x65,
+};
 
 typedef struct {
   syscall_word_t value;

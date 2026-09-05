@@ -22,6 +22,7 @@ void printchar(char ch) {
     tty->print(tty, ch1);
   }
 }
+#if KERNEL_TTY_VT100
 static char eos[] = {
     'A', 'B', 'C', 'D', 'E', 'F', 'G',
     'H', 'f', 'J', 'K', 'S', 'T', 'm'}; // end of string,
@@ -355,7 +356,13 @@ static int parse_vt100(struct tty *res, char *string) {
   }
   return 0;
 }
+#endif
 void t_putchar(struct tty *res, char ch) {
+#if KERNEL_TTY_VT100
+  if (res->native_ansi) {
+    res->putchar(res, ch);
+    return;
+  }
   if (ch == '\033' && res->vt100 == 0) {
     memset(res->buffer, 0, 81);
     res->buf_p = 0;
@@ -399,6 +406,7 @@ void t_putchar(struct tty *res, char ch) {
 
     return;
   }
+#endif
   res->putchar(res, ch);
 }
 void putchar(char ch) {

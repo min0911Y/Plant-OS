@@ -1,13 +1,18 @@
+ARCH ?= i386
+ifeq ($(ARCH),x86_64)
+NATIVE_TARGETS := libs/x86_64/libp.a libs/x86_64/libcpps.a
+include ../native.mk
+else ifeq ($(ARCH),i386)
 NASM = nasm
 INCLUDE_PATH := ../include
 include ../defs.mk
 ARCH_SOURCE := arch/$(ARCH)
 OBJS_PACK = ../out/entry.obj ../out/syscall.obj ../out/rand.obj ../out/arg.obj \
 			../out/mouse.obj ../out/math.obj ../out/math_arch.obj ../out/libc.obj ../out/socket.obj ../out/socket_syscall.obj ../out/vfs_syscall.obj ../out/time.obj ../out/posix.obj ../out/pow.obj ../out/exit.obj \
-			../out/ipc.obj ../out/rpc.obj ../out/runtime_args.obj ../out/task.obj
+			../out/ipc.obj ../out/rpc.obj ../out/runtime_args.obj ../out/runtime_lifecycle.obj ../out/cxxabi.obj ../out/task.obj ../out/video.obj ../out/search.obj
 OBJS_PACK_CPP = ../out/cppstart.obj ../out/syscall.obj ../out/rand.obj ../out/arg.obj \
 			../out/mouse.obj ../out/math.obj ../out/math_arch.obj ../out/libc.obj ../out/socket.obj ../out/socket_syscall.obj ../out/vfs_syscall.obj ../out/time.obj ../out/posix.obj ../out/pow.obj ../out/exit.obj \
-			../out/ipc.obj ../out/rpc.obj ../out/runtime_args.obj ../out/task.obj
+			../out/ipc.obj ../out/rpc.obj ../out/runtime_args.obj ../out/runtime_lifecycle.obj ../out/cxxabi.obj ../out/task.obj ../out/video.obj ../out/search.obj
 OBJS_PACK_GUI = ../out/libp_gui_rpc.obj
 default : $(OBJS_PACK_GUI) $(OBJS_PACK) $(OBJS_GUI) ../out/abi.obj $(OBJS_PACK_CPP)
 	rm -f ../libs/libp.a ../libs/libcpps.a ../libs/libabi.a
@@ -30,3 +35,7 @@ default : $(OBJS_PACK_GUI) $(OBJS_PACK) $(OBJS_GUI) ../out/abi.obj $(OBJS_PACK_C
 	$(NASM) -f $(ARCH_ASM_FORMAT) $< -o $@
 ../out/vfs_syscall.obj: $(ARCH_SOURCE)/vfs_syscall.asm Makefile
 	$(NASM) -f $(ARCH_ASM_FORMAT) $< -o $@
+
+else
+$(error unsupported ARCH '$(ARCH)'; supported architectures: i386 x86_64)
+endif

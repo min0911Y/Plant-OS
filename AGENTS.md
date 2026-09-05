@@ -10,17 +10,17 @@
 ## 项目定位
 
 - 本文件适用于整个仓库。
-- Plant OS 是用于学习操作系统原理的 32 位 x86（i386）操作系统，运行于保护模式，支持现有 BIOS/FAT 磁盘镜像启动和 Limine BIOS LiveCD 启动。它不是宿主系统上的普通应用。
+- Plant OS 是用于学习操作系统原理的多架构操作系统，当前支持 i386 保护模式和 x86_64 长模式；i386 保留 BIOS/FAT 磁盘链，x86_64 使用 Limine 原生协议从 BIOS 或 UEFI 启动。它不是宿主系统上的普通应用。
 - 内核、加载器和用户程序都是 freestanding 代码：不能默认使用宿主 libc、线程库、文件系统语义或现代 CPU 运行时。
-- 当前仓库的有效实现是 `kernel/` 下的 32 位内核。仓库中没有 `kernel64/`；`.gitignore`、`doc/README_zh-cn.md` 和 `scripts/build_rootfs.sh` 中残留的 `kernel64` 内容属于旧版本痕迹，不要据此创建或修改 64 位实现。
+- 两个架构的有效实现都在 `kernel/`，共用任务、VFS、IPC、网络和设备服务。仓库中没有 `kernel64/`；`.gitignore`、`doc/README_zh-cn.md` 和 `scripts/build_rootfs.sh` 中残留的 `kernel64` 内容属于旧版本痕迹，不要据此创建或修改 64 位实现。
 - 构建文件和当前源码比 README 中的历史描述更可信。发现两者不一致时，以实际 `Makefile` 和调用链为准，并在修改中指出差异。
 
 ## 启动与运行模型
 
 - `kernel/boot/` 生成现有磁盘启动扇区；`loader/` 生成 `loader/out/dosldr.bin`，链接地址为 `0x100000`，入口为 `loader_main`；加载器再寻找并装载 `kernel.bin`。这条链继续由 `boot.img`/`img_run` 使用。
-- 内核生成 `kernel/obj/kernel.bin`，链接地址为 `0x280000`。ELF 入口是 `kernel/arch/x86/i386/boot_entry.asm` 的 `x86_boot_entry`：它同时接受现有 DOSLDR 入口状态和 Limine Multiboot2 状态，建立固定的平坦 GDT/内核栈后调用 `KernelMain`（`kernel/dos/init/main.c`）。Multiboot2 header 必须保留在文件前 32 KiB 内，链接布局由 `kernel/arch/x86/i386/kernel.ld` 固定，并断言内核不覆盖 `0x400000` 的 bootstrap 页表。
-- Limine LiveCD 默认直接加载 `kernel.bin` 和一个 FAT initramfs module，不经过 DOSLDR。x86 早期入口依据 Multiboot2 memory map 把 module 搬到 KASAN shadow 之后的首个可用物理区；分页初始化后必须立刻经正式 page API 保留这些页，内存探测不得改写 module。initramfs 注册为可写但不持久化的 `R:` 虚拟盘，系统启动只挂载该盘作为根。Limine 菜单的第二项只 chainload 第一块硬盘上的现有 Plant OS 磁盘引导器。
-- 用户程序统一链接到 `0x70000000`，链接入口为 `Main`。`apps/libp/entry.c` 或 `apps/libp/cppstart.cpp` 完成运行时初始化后调用应用自己的 `main(argc, argv)`。
+- i386 内核生成 `kernel/obj/kernel.bin`，链接地址为 `0x280000`。ELF 入口是 `kernel/arch/x86/i386/boot_entry.asm` 的 `x86_boot_entry`：它同时接受现有 DOSLDR 入口状态和 Limine Multiboot2 状态，建立固定的平坦 GDT/内核栈后调用 `KernelMain`（`kernel/dos/init/main.c`）。Multiboot2 header 必须保留在文件前 32 KiB 内，链接布局由 `kernel/arch/x86/i386/kernel.ld` 固定，并断言内核不覆盖 `0x400000` 的 bootstrap 页表。
+- i386 Limine LiveCD 默认直接加载 `kernel.bin` 和一个 FAT initramfs module，不经过 DOSLDR。x86 早期入口依据 Multiboot2 memory map 把 module 搬到 KASAN shadow 之后的首个可用物理区；分页初始化后必须立刻经正式 page API 保留这些页，内存探测不得改写 module。initramfs 注册为可写但不持久化的 `R:` 虚拟盘，系统启动只挂载该盘作为根。Limine 菜单的第二项只 chainload 第一块硬盘上的现有 Plant OS 磁盘引导器。
+- i386 用户程序链接到 `0x70000000`，x86_64 用户程序链接到 `0x100000000`，链接入口均为 `Main`。`apps/libp/entry.c` 或 `apps/libp/cppstart.cpp` 完成运行时初始化后调用应用自己的 `main(argc, argv)`。
 - 内核与应用共享的是项目自定义 ABI，不是 Linux ABI。地址、结构体布局、寄存器约定和中断号都可能是兼容性边界；不要随意改成宿主平台惯例。
 
 ## 目录地图
@@ -43,6 +43,7 @@
 - `apps/psh` 与 `apps/lua` 的交互行编辑统一使用 `apps/third_party/pl_readline` 及其共享 Plant OS 按键适配；适配层必须把 `KEY_INPUT_*` 方向键及 Enter、Backspace、Tab 映射为库按键，只丢弃 `getch()` 返回的 `0` 与其他无字符控制值，不能再把它们写进命令行或恢复另一套本地编辑器。psh 的补全词表只含内建命令，首词统一用 `PL_COLOR_CYAN` 染色，文件路径暂不参与补全；Lua REPL 只使用行编辑与历史，以 `PL_ENABLE_INTELLISENSE=0` 配合普通重绘对象，不链接补全和高亮代码。该移植版将内部 `pl_list_*` 名称空间化以避开 MST 的链表 API，并依赖文本与高文本 TTY 保持标准 CR 和 `CSI K` 语义。
 - 标准 PS/2 键盘扫描码只投递给当前前台 TTY 上拥有有效 key FIFO 的进程；TTY 所有权是唯一前台判据，不再额外依赖容易滞后的 `state` 或 `fifosleep`。同步前台子进程运行时父 shell 通过清空 TTY 明确交出前台，子进程退出后恢复 TTY 即恢复输入。`getch()`/`input_char_inSM()` 必须使用 `WAIT_REASON_KEYBOARD` 阻塞并由 IRQ 唤醒，禁止在持有 kernel lock 时忙等；ready 握手必须覆盖扫描码在发布等待前到达的竞态。不得重新广播给所有 `RUNNING` 任务，尤其不能向每 CPU idle task 的空 FIFO 写入。
 - PS/2 控制器与鼠标协商期间保持 IRQ1/IRQ12 屏蔽，命令必须使用单调时间 deadline 并逐条消费 ACK/设备 ID，完成同步初始化后才解屏蔽；不得恢复固定次数忙等或让 IRQ 与轮询方竞争响应字节。GUI 输入线程通过 `input_wait()`/`SYSCALL_INPUT_WAIT`（`0x64`）一次等待鼠标、按键按下与松开 FIFO，使用 `WAIT_REASON_INPUT` 发布等待并由对应 IRQ 的 ready 握手唤醒；不得用多个 pending syscall 加 `api_yield()` 轮询。
+- `AddThread(name, entry, stack_top, argument)` 显式接收线程参数和调用者分配的栈顶；调用者不能手写 cdecl 栈槽或减去固定字节数。内核在发布线程前校验入口和栈，架构入口建立对齐的 C 调用帧：i386 把参数放在返回地址之后，x86_64 使用 RDI。系统调用包装必须完整传递四个参数，线程进入用户态后自行退出，不能返回到空返回地址。
 - `kernel/mst/`、`kernel/std/`、`kernel/modules/`：MST 脚本、基础运行库和可加载模块。
 - `kernel/include/`：内核公共声明；很多模块通过 `dos.h`、`define.h` 等大头文件耦合。
 - `kernel/include/arch/x86/`：共享 x86 声明（例如 CPUID 与端口 I/O）；当前 i386 的中断帧、入口和其他 ABI 声明位于 `kernel/include/arch/x86/i386/`，通用内核头文件不应重新定义这些布局。
@@ -50,11 +51,18 @@
 
 ### 当前多架构边界
 
-- 当前可构建目标是 `ARCH=i386`、`PLATFORM=pc`。标准顺序为 `make -C apps ARCH=i386`、`make -C loader`、`make -C kernel ARCH=i386`；未完成的架构必须由构建文件明确报错。
+- 当前可构建目标是 `ARCH=i386` 或 `ARCH=x86_64`，平台为 `PLATFORM=pc`。i386 标准顺序为 `make -C apps ARCH=i386`、`make -C loader`、`make -C kernel ARCH=i386`；未完成的架构必须由构建文件明确报错。
 - i386 专属代码集中在 `kernel/arch/x86/i386/`，可共享的 x86 代码集中在 `kernel/arch/x86/common/`，PC 设备实现集中在 `kernel/platform/pc/`。新增通用内核逻辑应依赖架构/平台接口，而不是重新引入 x86 内联汇编、固定指针宽度或 PC 端口常量。
 - 用户态运行库的汇编入口和 x87 数学原语位于 `apps/libp/arch/i386/`；仅供架构回归程序使用的汇编也按应用放在对应的 `arch/i386/` 子目录（例如 `apps/fputest/arch/i386/`）。
-- `x86_64` 目前只是后续扩展方向，仓库没有 `kernel64` 或兼容后端；在完整实现寄存器帧、页表、上下文、链接和启动 ABI 前，不得添加伪实现或兼容层。
-- Limine LiveCD 通过 Multiboot2 直接加载 `/boot/kernel.bin` 与 FAT initramfs；DOSLDR 仅保留给现有磁盘启动链、格式化资源和菜单 chainload，不是 LiveCD 的默认内核加载器。
+- x86_64 后端位于 `kernel/arch/x86/x86_64/`，产物分别写入 `kernel/obj/x86_64/`、`apps/out/x86_64/`、`apps/libs/x86_64/`，不能与 i386 混用。构建入口是 `make -C kernel ARCH=x86_64 livecd`，生成 `kernel/plant-os-x86_64.iso`，不依赖 DOSLDR 或已有 `boot.img`。实现说明见 `doc/multiarch.md`。
+- x86_64 只接收 Limine native/base revision 3 的 HHDM、内存图、framebuffer、RSDP、MP 和 FAT module；四级页表根据内存图建立，不能探测写 RAM、扫描 BIOS RSDP 区或调用实模式服务。用户 ELF 必须是 ELF64/EM_X86_64，拒绝 ELF32、PT_INTERP、PT_DYNAMIC、段重叠及 W+X 段。
+- x86_64 通过 `syscall`/`swapgs`/`sysretq` 进入与返回内核，IDT 不开放用户中断系统调用。GS 的前 16 字节固定为内核/用户栈槽，用户 GS 为零，禁止启用 FSGSBASE；NMI、双重故障、机器检查使用独立 IST，并检查 GS 基址处理 SWAPGS 过渡窗口。返回前校验 canonical 用户 RIP/RSP、CS/SS、RFLAGS 与 MXCSR。
+- x86_64 的 C/C++ 浮点 ABI 使用 SSE2，`long double` 为 binary64；两侧均使用 `-mno-red-zone -msse2 -mfpmath=sse -mlong-double-64`，不启用 AVX/OSXSAVE。每次入口先保存完整 FXSAVE64 状态，再装入内核 MXCSR；调度、fork 和信号返回保留 16 个 XMM 寄存器及 MXCSR。不得在共享代码恢复 x87 内联数学汇编，i386 的 x87 后端仍独立保留。
+- 默认 TTY 由构建选择的 `tty_console_create()` 创建；i386 由 TextMode 创建，HighTextMode 继续可选，x86_64 由 flanterm 创建。前台 TTY 直接以 `tty_default` 为准，不再按显示模式扫描列表。flanterm 的 `native_ansi` 输出直接送给自身解析器，TTY 输出层把 LF 转为 CRLF，不能依赖其未实现的 `CSI 20h` 换行模式；`VT100=0` 可以裁掉旧解析器，保留旧 GUI 文本 TTY 时仍应使用默认 `VT100=1`。该选项必须纳入构建配置指纹。
+- x86_64 显示尺寸由 Limine 请求 `1024x768x32`，实际尺寸、pitch 和 RGB 位位置以响应为准。`set_mode` 返回 `intptr_t`，只清屏、取得显示所有权并映射当前 framebuffer，不修改硬件模式。`framebuffer_info()` 返回实际布局；GUI 合成器区分逻辑宽度与目标 stride，并转换 RGB 位序。内核和用户 framebuffer 别名必须保留相同 PAT 缓存属性；所有者退出后恢复 flanterm。VGA 320×200、80×25 和 BIOS/VBE 模式编号操作在 x86_64 返回负状态，不能伪造成功。
+- x86_64 的旧 ISA 软驱驱动当前通过既有 `__NO_FLOPPY__` 开关禁用；不要把其 `0x80000` 固定 DMA 缓冲作为长模式虚拟地址使用。尚未移植的第三方应用和 KASAN/PERF 配置必须明确报错，不能装入或链接 i386 产物。
+- 模块管理位于 `kernel/modules/loader.c`，通过 native ELF 类型访问各架构布局：i386 使用 REL，x86_64 使用 RELA。x86_64 模块使用独立内核映射，重定位后设置 W^X 权限；导出表只能发布已经填充的条目，禁止在重复名称查询中遍历未初始化的名称指针。
+- i386 Limine LiveCD 通过 Multiboot2 直接加载 `/boot/kernel.bin` 与 FAT initramfs；DOSLDR 仅保留给现有磁盘启动链、格式化资源和菜单 chainload，不是 LiveCD 的默认内核加载器。
 <!-- 过时：`interrupt_disable/get_interrupt_state/set_interrupt_state` 在 `kernel/dos/task/lock.c` 中实现并从 `dos.h` 暴露。 -->
 <!-- 过时：GDT/IDT 地址、descriptor/TSS 布局和 `set_segmdesc`/`set_gatedesc`/`load_*` 从 `define.h`、`dos.h` 暴露给通用代码。 -->
 - `kernel/res/`：打包进镜像的资源；资源是否进入镜像由 `kernel/Makefile` 中显式的 `mcopy` 命令决定。
@@ -69,7 +77,7 @@
 - `font/`、`kernel/res/` 包含当前镜像使用的运行时二进制资源；`kernel/iso/` 中只有 `modules/*` 被当前 `kernel/Makefile` 打包，其余内容是未接入当前 32 位 `Mimg` 流程的旧 ISO 暂存资源。不要重新提交 `a.iso`、`cd.iso` 或 `iso/psh.bin` 等旧生成物。
 - `chat/`、`netgobang/`、`fattools/` 是宿主侧辅助/演示程序，不属于内核或 Plant OS 用户态 ABI。
 - `scripts/kernel-perf.py` 严格解析内核输出的 version 2 聚合采样，可从同一串口日志选择任意完整采样段，并直接生成 folded stacks 与无外部依赖的交互式 SVG 火焰图。SVG 栈帧点击缩放时必须按新宽度重新布局并重算标签，悬停详情保留完整名称，`Reset Zoom`/`Esc` 恢复原图；不得退回只把整张图等比放大、标签仍固定截断的静态实现。`scripts/build_rootfs.sh` 当前引用已不存在的 `kernel64`，不是 32 位主构建流程的一部分。
-- `scripts/build-livecd.sh` 从当前 `boot.img` 提取通用运行时文件，使用当前 `kernel.bin` 与 `apps/out/*.bin` 覆盖构建产物后生成 FAT initramfs；`boot.bin`、`boot32.bin`、`boot_pfs.bin` 与规范名称 `DOSLDR.bin` 必须作为 FAT/PFS 格式化及硬盘安装资源保留，但不得把 DOSLDR 或整个 `boot.img` 配置为 Limine 默认启动 module。应用默认位于根目录，`doom.bin` 与 `doom1.wad` 位于 `/games`，`apps/lite-1.11/data` 整体复制到 `/data`，不得手工枚举其 core、fonts、plugins、user 子目录。TCC 文件沿用 `tcc.img` 布局：`apps/include` 完整复制到 `/tcc/include`，静态库放入 `/tcc/lib`，`libtcc1.a` 单独放入 `/tcc/inst`，`apps/tcc` 构建的 `crti.obj` 作为 `/tcc/crt/crti.o` 供 LiveCD 直接链接，根目录的 `crti.c` 继续供 `tccinst.bin` 使用。脚本最后用固定校验值的 Limine 12.6.1 构造 BIOS ISO。
+- `scripts/build-livecd.sh` 的 i386 分支从当前 `boot.img` 提取通用运行时文件，使用当前 `kernel.bin` 与 `apps/out/*.bin` 覆盖构建产物后生成 FAT initramfs；`boot.bin`、`boot32.bin`、`boot_pfs.bin` 与规范名称 `DOSLDR.bin` 必须作为 FAT/PFS 格式化及硬盘安装资源保留，但不得把 DOSLDR 或整个 `boot.img` 配置为 Limine 默认启动 module。应用默认位于根目录，`doom.bin` 与 `doom1.wad` 位于 `/games`，`apps/lite-1.11/data` 整体复制到 `/data`，不得手工枚举其 core、fonts、plugins、user 子目录。TCC 文件沿用 `tcc.img` 布局：`apps/include` 完整复制到 `/tcc/include`，静态库放入 `/tcc/lib`，`libtcc1.a` 单独放入 `/tcc/inst`，`apps/tcc` 构建的 `crti.obj` 作为 `/tcc/crt/crti.o` 供 LiveCD 直接链接，根目录的 `crti.c` 继续供 `tccinst.bin` 使用。脚本最后用固定校验值的 Limine 12.6.1 构造 BIOS ISO。
 - LiveCD 的 `setup.mst` 不使用静态文件清单：initramfs 首次填充后，`scripts/build-livecd.sh` 必须通过 `mshortname` 从镜像本身取得每个路径的真实 FAT 别名，再自动生成覆盖全部目录和文件的清单并写回镜像。每个条目记录源 FAT 短路径、PFS 原路径和 FAT 8.3 目标路径；`DOSLDR.bin` 必须是第一个文件条目，`kernel.bin` 与 `setup.mst` 本身也必须包含。`setup1.bin` 从当前源盘复制到 C:，继续允许用户选择 FAT/PFS：FAT 使用清单短名，PFS 保留原名，不得因存在长文件名而强制 PFS，也不得恢复 A:/多软盘 `next` 流程。
 
 ## 构建环境与命令
@@ -117,7 +125,7 @@ make -C kernel BENCH=1
 make -C kernel MEMTEST=0 MEMSIZE_MB=512
 ```
 
-- `PERF=1` 会启用内核 CPU 采样、保留 frame pointer 并关闭 sibling-call 优化；`PERF_STACKS` 可调整固定哈希表槽数，必须是至少为 4 的 2 次幂，默认 4096。`kernel/obj/.build-config` 跟踪会影响代码生成的诊断开关，在普通、KASAN、PERF 等配置间切换时必须依靠它重编对象，不得退回复用不同编译参数旧对象的做法。
+- i386 的 `PERF=1` 会启用内核 CPU 采样、保留 frame pointer 并关闭 sibling-call 优化；`PERF_STACKS` 可调整固定哈希表槽数，必须是至少为 4 的 2 次幂，默认 4096。`kernel/obj/.build-config` 跟踪会影响代码生成的诊断开关，在普通、KASAN、PERF 等配置间切换时必须依靠它重编对象，不得退回复用不同编译参数旧对象的做法。
 - 启动 timer benchmark 默认关闭；只有显式 `BENCH=1` 才比较 PIT 与 TSC-deadline。benchmark 结果不参与运行时计时，不得恢复无消费者的 `base_count`、普通启动忙等或关闭 benchmark 后反而等待 100 tick 的 fallback。
 - `MEMTEST=0` 必须同时提供 `MEMSIZE_MB`。
 - 这些命令仍依赖已经构建好的应用和加载器产物。
@@ -133,7 +141,8 @@ make -C kernel MEMTEST=0 MEMSIZE_MB=512
 - 需要自动运行系统内命令时，临时修改 `kernel/res/init.mst`，构建并测试后立即恢复该文件。禁止用 QEMU monitor 的 `sendkey` 注入命令。
 - IPC/RPC 改动可在系统中运行 `rpctest.bin`；磁盘和任务生命周期相关改动可结合 `dktest.bin`。两者都已由 `kernel/Makefile` 打包进主镜像。
 - GUI RPC 与共享映射改动可运行 `guitest.bin`：它 fork 出 `gui.bin`，验证服务发现、窗口创建、共享 framebuffer、异步刷新、键盘队列控制与关闭回收，并在串口输出 `GUITEST PASS`。高任务数与多客户端刷新回归使用 `guitest.bin stress`：它保持 256 个负载进程和 48 个窗口，确保系统实际越过旧的 255 TID/页引用边界，再从两个全新的 exec 地址空间按 50ms 周期持续刷新；任一窗口的共享 damage 连续 2 秒未被消费即失败，成功时输出 `GUISTRESS PASS`。无 KVM 的慢速 TCG 环境可使用同样越过 255 边界、但只保留两个刷新窗口的 `guitest.bin capacity`。自动运行时仍临时修改 `init.mst`，测试后立即恢复。
-- x86 异常入口与用户异常退出可在系统中运行 `exc_test.bin`，它依次验证 `#DE`、`#UD`、`#GP`、`#PF` 的子进程退出状态；该程序同样已打包进主镜像。
+- `guitest.bin` 还通过真实线程和 IPC 验证原生宽度的入口参数及非法入口/栈拒绝，输出 `GUITEST THREAD PASS`。鼠标修复必须运行 `guitest.bin mouse`，按 `GUIMOUSE READY` 中的原点和目标注入相对移动、左键、右键和向上滚轮，检查共享事件中的精确坐标及 `GUIMOUSE PASS events=15`；仅通过窗口/RPC 回归不能证明输入可用。`scripts/test-x86_64.py --mouse --firmware bios`/`--firmware uefi` 自动执行此测试并保存移动前后截图；`--arch i386 --mouse --memory 512` 复用同一测试验证 i386。测试只用 QMP `input-send-event` 注入鼠标，仍禁止 `sendkey`，结束后恢复 `init.mst` 和正常启动镜像。
+- 两种架构的异常入口与用户异常退出均可在系统中运行 `exc_test.bin`，它依次验证 `#DE`、`#UD`、`#GP`、`#PF` 的子进程退出状态；该程序同样已打包进主镜像。
 - SMP FPU 保存、恢复、fork 快照与迁移回归使用 `fputest.bin`：它按 CPU 数创建多个独立进程，在 x87 栈保留哨兵值后连续主动让出 CPU，并校验多次切换及 fork 两侧的完整状态；成功时串口输出 `FPUTEST PASS`。
 
 <!-- 过时：旧文档中的 kernel64 构建、运行和 rootfs 流程；当前仓库只有 kernel/ 下的 32 位内核。 -->
@@ -147,6 +156,10 @@ python3 scripts/kernel-perf.py \
   --out path/to/perf.folded
 ```
 
+- x86_64 自动回归使用 `python3 scripts/test-x86_64.py --firmware bios --memory 6144` 和 `python3 scripts/test-x86_64.py --firmware uefi --capacity`。脚本临时写入并恢复 `init.mst`，验证 ELF32/旧中断入口拒绝、旧显示 API 返回错误、固定 framebuffer、SSE/fork、用户异常、IPC/RPC、磁盘生命周期、回环网络、GUI、原生模块及 Lua，最后恢复正常 ISO。`--capacity` 实际越过 255 TID，执行持续刷新；UEFI 使用 OVMF，不得通过 sendkey 跳过引导警告。
+- C/C++ 入口共享静态初始化生命周期；原生链接脚本保留对齐的 `.init_array`/`.fini_array`，全局对象在 main 前构造，退出回调及析构逆序执行。`atexit` 和 `__cxa_atexit` 共用可扩容回调表，`__dso_handle` 必须是数据对象，本地静态初始化使用真实 guard，不得恢复无参空函数占位。`cpptest.bin` 覆盖构造、析构、guard、对齐与回调扩容。
+- GUI 字体舍入使用共享 `roundf`，不得用依赖 x87 扩展精度的 `x + 2^52 - 2^52` 实现单精度舍入。文本绘制按真实字形边界和图层尺寸裁剪，禁止恢复固定 512×128 位图及未经检查的负 bearing 偏移。
+- 内核格式化集中在 `kernel/std/format.c`，`snprintf`/`vsnprintf` 必须遵守容量，`long`、`long long`、`size_t`、指针按实际架构取参；不得恢复返回空指针的 64 位十进制转换或共享静态格式化缓冲。
 - 仅修改文档时至少运行 `git diff --check`。不要为了文档改动重建大型磁盘镜像。
 
 ## 跨层修改规则
@@ -194,11 +207,11 @@ python3 scripts/kernel-perf.py \
 ### 内核架构边界
 
 - x86 中断帧、汇编入口和寄存器约定放在 `kernel/include/arch/x86/i386/` 及对应 i386 实现中；共享 x86 声明保留在 `kernel/include/arch/x86/`。通用任务、系统调用和信号代码通过架构头访问，不在 `define.h` 重复声明布局。
-- x86 的 0..31 异常统一通过 `kernel/arch/x86/i386/exceptions.asm` 构造规范化 frame，并由 `x86_exception_dispatch` 按只读描述表分派。只有 `#NM` 的 lazy-FPU 恢复和合法的写时复制 `#PF` 可以返回；普通用户异常依据保存的 `CS.RPL` 终止当前任务，NMI、双重故障、机器检查及所有内核异常必须 fail-stop。
+- i386 的 0..31 异常统一通过 `kernel/arch/x86/i386/exceptions.asm` 构造规范化 frame，并由 `x86_exception_dispatch` 按只读描述表分派。只有 `#NM` 的 lazy-FPU 恢复和合法的写时复制 `#PF` 可以返回；普通用户异常依据保存的 `CS.RPL` 终止当前任务，NMI、双重故障、机器检查及所有内核异常必须 fail-stop。
 <!-- 过时：异常入口分散在 `kernel/dos/asm/errors.asm`，通过 FS 猜测用户态、改写 CatchEIP 或在汇编中单独处理/自旋。 -->
-- x86 控制寄存器访问统一使用 `kernel/include/arch/x86/i386/control.h` 的固定宽度 inline 接口和 `X86_CR0_*` 位定义；写 CR0/CR3 必须带 `memory` clobber，页故障地址通过 `x86_cr2_read` 获取。
+- i386 控制寄存器访问统一使用 `kernel/include/arch/x86/i386/control.h` 的固定宽度 inline 接口和 `X86_CR0_*` 位定义；写 CR0/CR3 必须带 `memory` clobber，页故障地址通过 `x86_cr2_read` 获取。
 <!-- 过时：CR0 位定义放在 `define.h`，并同时保留 `get_cr0/set_cr0` 与 `load_cr0/store_cr0` 多套实现。 -->
-- x87 状态与每 CPU owner 统一由 `kernel/arch/x86/i386/fpu.c` 管理，任务结构只保存 `x86_fpu_state_t` 与状态是否已初始化。任务实际切离 CPU 前必须调用 `x86_fpu_flush_cpu()`：只有当前 CPU 的真实 owner 才执行 `FNSAVE`，随后清空 owner 并置 TS，保证所有 `on_cpu == 0` 的任务状态都已落入任务结构、可直接跨 CPU 迁移。`#NM` 通过 `CLTS` 后恢复或初始化当前任务并登记 owner；CPU 初始化保持 CR0.EM 清零、CR0.MP/NE/TS 置位。fork、显式 reset 和任务回收必须使用该架构接口，不得直接改状态标志或在调度器、异常处理器中散落 `FNSAVE`/`FRSTOR`/CR0 FPU 位操作。
+- i386 的 x87 状态与每 CPU owner 统一由 `kernel/arch/x86/i386/fpu.c` 管理，任务结构只保存 `x86_fpu_state_t` 与状态是否已初始化。任务实际切离 CPU 前必须调用 `x86_fpu_flush_cpu()`：只有当前 CPU 的真实 owner 才执行 `FNSAVE`，随后清空 owner 并置 TS，保证所有 `on_cpu == 0` 的任务状态都已落入任务结构、可直接跨 CPU 迁移。`#NM` 通过 `CLTS` 后恢复或初始化当前任务并登记 owner；CPU 初始化保持 CR0.EM 清零、CR0.MP/NE/TS 置位。fork、显式 reset 和任务回收必须使用该架构接口，不得直接改状态标志或在调度器、异常处理器中散落 `FNSAVE`/`FRSTOR`/CR0 FPU 位操作。
 - x86 port I/O 统一使用 `kernel/include/arch/x86/io.h` 的 `x86_port_read8/16/32` 与 `x86_port_write8/16/32`；动态 port（特别是 PCI BAR）必须先验证是 I/O 空间、整个寄存器窗口不超过 `uint16_t` 范围，然后才显式收窄；数据宽度必须与硬件寄存器一致。这些 inline asm 都是 `volatile`，使用 `Nd` port/累加器约束并带 `memory` clobber；`x86_io_wait()` 只通过向 `0x80` 写入一个 8-bit 零实现，仅用于 PIC 初始化和明确需要该 legacy delay 的软盘控制器轮询。
 - VGA 文本 TTY 的滚屏只能搬移前 `ysize - 1` 行并单独清空末行，优先使用对齐的 32-bit 顺序访问；禁止恢复逐列跨行复制、逐字节搬移或读取第 `ysize` 行之外显存的实现。
 <!-- 过时：port I/O、中断开关、EFLAGS 和文本光标通过 `kernel/dos/asm/i386.asm` 的 `io_*`/`ASM_call` 全局 wrapper 访问。 -->
@@ -252,7 +265,8 @@ python3 scripts/kernel-perf.py \
 - `gui.bin` 是严格单例：必须在读取大资源、切换 VBE 或创建 `gmouse` 输入线程之前先注册 `gui` RPC 服务，服务名冲突时立即退出，禁止第二实例先覆盖显示模式或输入 owner。内核的 `mouse_enable()`/`use_keyboard()` 采用不可抢占的独占获取，已有其他任务持有时返回失败；GUI 输入线程必须检查返回值，不能静默抢占全局 PS/2 所有权。
 - 任务的活动 `TTY` 与稳定 `tty_session` 语义分离：同步执行子程序时可临时交出活动 TTY，但会话归属必须继承并保持。释放注册 TTY 时先把整个会话切换到安全 fallback，再终止其进程/线程并回收僵尸，禁止留下指向已释放 TTY 的等待父任务；TTY 输入通知只唤醒正在 `WAIT_REASON_KEYBOARD` 上等待的前台任务。
 - GUI console 关闭必须完整释放其 TTY 会话、console 线程栈、键盘 FIFO、内部 sheet/控制器/VRAM、窗口和链表节点；不得保留空的 `close_console` 或忽略 `AddThread`/分配失败，否则每个已关闭终端仍会遗留 `thread + psh.bin` 并最终耗尽任务槽。ToolBox/super-window 的子 sheet、按钮和 textbox 同样由窗口关闭路径统一回收。
-- `apps/gui/gui.h` 的 window/console/sheet 布局被多个显式对象共享；修改结构布局后必须删除并重编全部 `apps/gui` 对象。console 原有且未被读取的 `tid` 槽现用于保存 `tty_handle`，不得在结构中间再次插入字段导致新旧对象静默错位。
+- `apps/gui/gui.h` 的 window/console/sheet 布局被多个显式对象共享；修改结构布局后必须通过头文件依赖重编全部 `apps/gui` 对象，不能混用旧对象。console 的 `tty_handle` 必须使用与公开 `tty_t` 同宽的 `uintptr_t`，并保留编译期宽度断言；不得使用 `unsigned` 截断 x86_64 内核句柄，否则 shell 输出、输入通知和 TTY 回收都会失效。console 线程使用完整的 `psh.bin` 命令行启动 shell，并在 shell 返回后退出，不能忙等。GUI 终端滚屏只复制前 `ysize - 1` 行并清空末行，禁止读取第 `ysize` 行之外的像素。
+- GUI 终端回归使用 `scripts/test-x86_64.py --console --firmware bios`、`--console --firmware uefi` 和 `--arch i386 --console --memory 512`。脚本通过临时 `init.mst` 启动 GUI，QMP 只测试点击、字符输入、退格和空行，不能通过按键执行测试命令；直接检查提示符、回显、退格恢复和滚屏后的窗口像素，输出 `GUICONSOLE PASS` 并保存截图。测试后恢复启动脚本及正常镜像，仍禁止 `sendkey`。
 - `X86_VECTOR_RESCHEDULE`（`0xf0`）是内核固定重调度 IPI；唤醒远端 CPU 上的任务时发送该 IPI，处理入口发送 Local APIC EOI 后进入本地调度。外部 IOAPIC IRQ 仍路由到 BSP，不能让 AP 重复处理同一设备中断。
 - 用户态任务快照使用 `SYSCALL_TASK_SNAPSHOT`（`0x60`）的 query + capacity ABI，CPU 数量/当前 CPU 使用 `SYSCALL_CPU_INFO`（`0x61`）；`apps/ps` 构建为 `ps.bin`，显示 TID、TGID、状态、运行核心和累计运行时间。修改 `task_info_t` 时必须同步 `kernel/include/task_snapshot.h`、`apps/include/task.h` 与 `apps/libp/task.c`，并保持结构大小断言。
 - `kernel/Makefile` 的 QEMU CPU 数由 `QEMU_CPUS` 控制，默认 4。内核 C/C++ 编译统一生成并由各子 Makefile 加载 `.d` 头文件依赖；修改 `mtask` 等共享结构布局后，受影响对象必须由依赖图自动重编，不能删除依赖跟踪或用不完整的旧增量对象做启动验证。
@@ -297,7 +311,7 @@ python3 scripts/kernel-perf.py \
 - FAT 对齐的完整连续簇必须合并为批量磁盘 I/O，只在首尾非对齐或清零写入时分配 bounce buffer；不得恢复逐簇获取磁盘信号量、逐簇分配或无条件二次复制。程序 ELF 加载只解析一次路径并直接使用 VFS handle，段复制完成后立即释放内核临时镜像。
 - `vdisk.max_transfer_sectors` 是块设备单次传输能力，未声明时保守使用 8 个扇区；通用磁盘层按设备能力分批并在每批之间响应已发布的重调度，不得在持有全局 kernel lock 时将长读写变成不可抢占的整段忙等。每个逻辑磁盘信号量使用可扩容的 32 位 TID FIFO，禁止把等待者重新塞进 `FIFO8` 或固定 256 项字节数组。内核 IDE 数据路径只使用 PCI Bus Master DMA：从 `init_PCI` 已建立的设备表按 class/subclass 查找兼容模式 IDE controller，验证 BAR4 是范围合法的 I/O window 并启用 PCI I/O/bus-master command bits，不得恢复启动时传入零 BAR、ATA PIO 或 ATAPI data-phase PIO fallback。每个 channel 持有 page-backed 64 KiB bounce buffer 与 PRDT，PRD 必须在 64 KiB 边界分段；ATA 单次最多传输 128 个 512-byte 扇区，ATAPI READ(12) 必须通过 PACKET feature DMA 批量传输最多 32 个 2048-byte 扇区。两者共用 bus-master/IRQ 阻塞完成状态，ATAPI 只保留独立的 command packet 阶段；ISO9660 对齐的完整连续扇区必须直接批量读取，不得退回逐扇区 data transfer。IRQ 必须停止 bus master、清除 status、读 ATA status 并只发送一次对应 EOI。
 - 程序创建、fork、页分配和用户堆扩展的成功热路径不得输出裸地址或逐次分配日志；串口日志只保留可操作的错误、显式诊断模式和必要生命周期状态，避免同步输出成为程序启动延迟。
-- 内核通用堆由 `kernel/dos/mm/heap.c` 统一封装 vendored i686 liballoc/talc；第三方导出在构建副本中统一改名为私有 `liballoc_*`，内核和模块只能使用带 KASAN/元数据校验的标准 `malloc/free/realloc`。heap 从 1 MiB span 起步并按需通过 `page_malloc` 增长，不得恢复 `memory/freeinfo` 排序整理器或启动时预清零固定 128 MiB arena。链接时 liballoc archive 必须紧跟 `heap.o`，使其静态锁状态位于固定 `0x400000` 页表区之前；放到对象列表末尾会在 KASAN 构建中被页表初始化覆盖。
+- 内核通用堆由 `kernel/dos/mm/heap.c` 统一封装按架构选择的 vendored liballoc/talc；x86_64 堆及任务 SIMD 状态必须满足 16 字节对齐；第三方导出在构建副本中统一改名为私有 `liballoc_*`，内核和模块只能使用带 KASAN/元数据校验的标准 `malloc/free/realloc`。heap 从 1 MiB span 起步并按需通过 `page_malloc` 增长，不得恢复 `memory/freeinfo` 排序整理器或启动时预清零固定 128 MiB arena。链接时 liballoc archive 必须紧跟 `heap.o`，使其静态锁状态位于固定 `0x400000` 页表区之前；放到对象列表末尾会在 KASAN 构建中被页表初始化覆盖。
 - PFS format 必须在写盘前完整读取并校验 boot sector 与 `dosldr.bin`，按 boot sector 每次 92 个扇区的读取粒度动态扩大并清零 loader 保留区，再把 bitmap/root 布置在保留区之后；检查长度、磁盘容量和分配失败，所有区域写后校验并把真实失败传播到 VFS/psh/安装器。VFS 统一负责安全摘除无人使用的活动挂载；psh 格式化成功后重新挂载目标盘，安装器成功后重新 mount/change，失败时按逆序尽力恢复源盘。
 - PFS node 以 directory block + inode index 定位文件，以 directory data block 定位目录；文件数据按 508-byte payload block 进行偏移 I/O。PFS 中不得出现 path resolver、`current_dict_block` 或 `prev_dict_block` cwd 状态。
 - 启动系统盘必须同时包含 `init.bin`、`psh.bin`、`sys.cfg`；探测失败必须 panic，不得退回可能是 DEVFS 的 `first_vdisk()`。显式盘符剥离依赖标准重叠 `memmove` 语义，修改基础内存函数后必须做冷启动验证。
@@ -309,8 +323,8 @@ python3 scripts/kernel-perf.py \
 
 - 项目自有 C/C++ 代码遵循根目录 `.clang-format`：2 空格缩进、不使用 Tab、左大括号同行、指针星号靠变量。只格式化本次触及的项目自有文件。
 - 历史代码风格并不完全统一，且部分目录关闭了警告。不要借功能修改之机大面积重排代码；编译成功也不代表没有截断、越界、符号扩展或并发问题。
-- 内核编译禁用宿主头文件、内建函数、栈保护、PIE、MMX/SSE，并使用 x87；C++ 禁用异常和 RTTI。新代码必须保持这些限制，不要引入依赖异常、线程局部存储、动态链接或宿主运行时的库。
-- 编译参数使用 UTF-8 输入、GB2312 执行字符集。修改中文字符串、字体或终端输出时要考虑转换和字节长度，不能默认 UTF-8 字节序列会原样进入镜像。
+- 内核编译禁用宿主头文件、内建函数、栈保护和 PIE；i386 禁用 MMX/SSE 并使用 x87，x86_64 使用 SSE2。C++ 禁用异常和 RTTI。新代码必须保持这些限制，不要引入依赖异常、线程局部存储、动态链接或宿主运行时的库。
+- i386 编译参数使用 UTF-8 输入、GB2312 执行字符集；x86_64 应用使用 UTF-8 执行字符集以匹配 flanterm。修改中文字符串、字体或终端输出时要考虑转换和字节长度，不能默认 UTF-8 字节序列会原样进入镜像。
 - 优先使用仓库已有的整数类型、分配器、字符串/内存函数、锁和日志接口。引入宿主专用 API 前先确认它确实只用于 `scripts/` 或宿主工具。
 - `NewList`、`AddVal`、TTY 和 MST 构造路径都可能分配失败；调用者必须在解引用前检查，失败时回滚已 append 的节点并释放 token buffer、嵌套 list 和外层对象，不得继续使用部分构造的状态。
 - 该代码大量依赖 32 位指针和整数互转。新增代码应使用项目已有的 `uintptr_t`/固定宽度类型表达地址，并显式检查溢出、对齐和范围。

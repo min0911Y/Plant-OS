@@ -1509,8 +1509,6 @@ double log2(double x) {
   y = lo + r2 * p + hi;
   return eval_as_double(y);
 }
-void __dso_handle() {}
-void __cxa_atexit() {}
 int fileno(FILE *fp) {
   if (fp == NULL) {
     errno = EINVAL;

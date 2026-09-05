@@ -5,7 +5,7 @@
 
 #if defined(KERNEL_ARCH_I386)
 #include <arch/x86/i386/kasan.h>
-#else
+#elif defined(KERNEL_KASAN)
 #error "KASAN layout is not defined for the selected architecture"
 #endif
 

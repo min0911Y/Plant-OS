@@ -7,17 +7,27 @@ limine_sha256=1d7f71df1614110892eadb35bad7b7f4277ca0d2dbf8575512da333a546009a7
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_dir=$(dirname -- "$script_dir")
 apps_dir=$repo_dir/apps
+architecture=${2:-i386}
 apps_out_dir=$apps_dir/out
 apps_include_dir=$apps_dir/include
 apps_lib_dir=$apps_dir/libs
 lite_data_dir=$apps_dir/lite-1.11/data
 kernel_dir=$repo_dir/kernel
 object_dir=$kernel_dir/obj
+case "$architecture" in
+  i386) ;;
+  x86_64)
+    apps_out_dir=$apps_out_dir/x86_64
+    apps_lib_dir=$apps_lib_dir/x86_64
+    object_dir=$object_dir/x86_64
+    ;;
+  *) echo "build-livecd: unsupported architecture: $architecture" >&2; exit 1 ;;
+esac
 work_dir=$object_dir/livecd
 iso_root=$work_dir/root
 payload_dir=$work_dir/payload
 initramfs=$iso_root/boot/initramfs.img
-limine_dir=${LIMINE_DIR:-$object_dir/limine-$limine_version}
+limine_dir=${LIMINE_DIR:-$kernel_dir/obj/limine-$limine_version}
 output=${1:-$kernel_dir/plant-os-livecd.iso}
 
 fat_short_path() {
@@ -66,6 +76,7 @@ else
   exit 1
 fi
 
+if [ "$architecture" = i386 ]; then
 for artifact in "$kernel_dir/boot.img" "$object_dir/kernel.bin" \
                 "$apps_out_dir/crti.obj" "$apps_out_dir/doom.bin" \
                 "$apps_lib_dir/libtcc1.a" \
@@ -84,6 +95,15 @@ for directory in "$apps_out_dir" "$apps_include_dir" "$apps_lib_dir" \
   fi
 done
 
+else
+  for artifact in "$object_dir/kernel.bin" "$apps_out_dir/init.bin" "$apps_out_dir/psh.bin"; do
+    if [ ! -f "$artifact" ]; then
+      echo "build-livecd: missing build artifact: $artifact" >&2
+      exit 1
+    fi
+  done
+fi
+
 if [ ! -f "$limine_dir/limine-bios-cd.bin" ]; then
   archive=$object_dir/limine-binary-$limine_version.tar.xz
   mkdir -p "$limine_dir"
@@ -97,6 +117,7 @@ make -C "$limine_dir"
 
 rm -rf "$work_dir"
 mkdir -p "$payload_dir" "$iso_root/boot/limine"
+if [ "$architecture" = i386 ]; then
 mcopy -s -i "$kernel_dir/boot.img" '::/*' "$payload_dir"
 for resource in boot.bin boot32.bin boot_pfs.bin dosldr.bin; do
   if [ ! -f "$payload_dir/$resource" ]; then
@@ -129,6 +150,15 @@ mv "$payload_dir/tcc/lib/libtcc1.a" "$payload_dir/tcc/inst/"
 cp "$apps_out_dir/crti.obj" "$payload_dir/tcc/crt/crti.o"
 cp "$apps_dir/tcc/tcc/crti.c" "$payload_dir/"
 
+else
+  cp "$apps_out_dir"/*.bin "$payload_dir/"
+  cp "$object_dir"/*.mod "$payload_dir/"
+  cp "$kernel_dir/res/init.mst" "$kernel_dir/res/env.cfg" "$kernel_dir/res/sys.cfg" "$payload_dir/"
+  cp "$repo_dir/font/font.bin" "$repo_dir/font/HZK16" "$kernel_dir/res/font.ttf" "$payload_dir/"
+  mkdir -p "$payload_dir/data"
+  cp -R "$lite_data_dir"/. "$payload_dir/data/"
+fi
+
 payload_kib=$(du -sk "$payload_dir" | awk '{print $1}')
 image_mib=$(((payload_kib + payload_kib / 4 + 2048 + 1023) / 1024))
 if [ "$image_mib" -lt 16 ]; then
@@ -140,6 +170,7 @@ truncate -s "${image_mib}M" "$initramfs"
 mformat -T "$image_sectors" -h 64 -s 16 -i "$initramfs"
 mcopy -s -i "$initramfs" "$payload_dir"/* ::/
 
+if [ "$architecture" = i386 ]; then
 setup_manifest=$payload_dir/setup.mst
 loader_source=$(fat_short_path "$initramfs" DOSLDR.bin)
 {
@@ -163,24 +194,42 @@ loader_source=$(fat_short_path "$initramfs" DOSLDR.bin)
 } >"$setup_manifest"
 mcopy -i "$initramfs" "$setup_manifest" ::/setup.mst
 
+fi
+
 cp "$object_dir/kernel.bin" "$iso_root/boot/kernel.bin"
-cp "$kernel_dir/res/limine.conf" "$iso_root/limine.conf"
+if [ "$architecture" = x86_64 ]; then
+  cp "$kernel_dir/res/limine-x86_64.conf" "$iso_root/limine.conf"
+  cp "$limine_dir/limine-uefi-cd.bin" "$iso_root/boot/limine/"
+  mkdir -p "$iso_root/EFI/BOOT"
+  cp "$limine_dir/BOOTX64.EFI" "$iso_root/EFI/BOOT/"
+else
+  cp "$kernel_dir/res/limine.conf" "$iso_root/limine.conf"
+fi
 cp "$limine_dir/limine-bios-cd.bin" "$iso_root/boot/limine/"
 cp "$limine_dir/limine-bios.sys" "$iso_root/boot/limine/"
 cp "$limine_dir/LICENSE" "$iso_root/boot/limine/"
 
+set --
+if [ "$architecture" = x86_64 ]; then
+  if [ "$iso_maker" != xorriso ]; then
+    echo "build-livecd: x86_64 hybrid UEFI images require xorriso" >&2
+    exit 1
+  fi
+  set -- --efi-boot boot/limine/limine-uefi-cd.bin -efi-boot-part \
+    --efi-boot-image --protective-msdos-label
+fi
 if [ "$iso_maker" = xorriso ]; then
   xorriso -as mkisofs \
     -R -J -joliet-long -iso-level 3 -V PLANT_OS_LIVE \
     -b boot/limine/limine-bios-cd.bin \
     -no-emul-boot -boot-load-size 4 -boot-info-table \
-    -o "$output" "$iso_root"
+    -o "$output" "$@" "$iso_root"
 else
   genisoimage \
     -R -J -joliet-long -iso-level 3 -V PLANT_OS_LIVE \
     -b boot/limine/limine-bios-cd.bin \
     -no-emul-boot -boot-load-size 4 -boot-info-table \
-    -o "$output" "$iso_root"
+    -o "$output" "$@" "$iso_root"
 fi
 "$limine_dir/limine" bios-install --force "$output"
 

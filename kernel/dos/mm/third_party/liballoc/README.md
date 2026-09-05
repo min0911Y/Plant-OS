@@ -15,3 +15,7 @@ an ignored build copy with all public exports moved into the `liballoc_*`
 private namespace; the
 kernel-facing `malloc`, `free`, `realloc`, `kmalloc`, and KASAN semantics remain
 owned by `kernel/dos/mm/heap.c`.
+
+The x86_64 backend uses the same release's `liballoc-x86_64.a` (ELF64 AMD64).
+SHA-256: `2137fa65410bfecc22371769f3557e8f342216254afe67ad72e76117d1446d08`.
+Both architectures build separate archives with private symbol names.

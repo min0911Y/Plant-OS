@@ -1,17 +1,16 @@
-#include <io.h>
 #include <dos.h>
-//系统日志打印
-void kprint(char *str) {
-  for (int i = 0; i < strlen(str); i++) {
-    write_serial(str[i]);
-  }
+#include <io.h>
+
+void kprint(char *string) {
+  for (; *string; string++)
+    write_serial(*string);
 }
-void logk(char *str, ...) {
-  int len;
-  va_list ap;
-  va_start(ap, str);
-  char buf[1024];
-  len = vsprintf(buf, str,ap);
-  kprint(buf);
-  va_end(ap);
+
+void logk(char *format, ...) {
+  char buffer[1024];
+  va_list arguments;
+  va_start(arguments, format);
+  vsnprintf(buffer, sizeof(buffer), format, arguments);
+  va_end(arguments);
+  kprint(buffer);
 }

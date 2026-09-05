@@ -40,6 +40,10 @@ struct SHTCTL* shtctl_init(vram_t* vram, int xsize, int ysize) {
   }
   ctl->vram = vram;
   ctl->xsize = xsize;
+  ctl->stride = xsize;
+  ctl->red_shift = 16;
+  ctl->green_shift = 8;
+  ctl->blue_shift = 0;
   ctl->ysize = ysize;
   ctl->top = -1; /* 没有一张SHEET */
   for (i = 0; i < MAX_SHEETS; i++) {
@@ -208,6 +212,22 @@ void sheet_refreshsub(struct SHTCTL* ctl,
     if (by1 > sht->bysize) {
       by1 = sht->bysize;
     }
+    if (ctl->red_shift != 16 || ctl->green_shift != 8 || ctl->blue_shift != 0) {
+      for (by = by0; by < by1; by++) {
+        vy = sht->vy0 + by;
+        for (bx = bx0; bx < bx1; bx++) {
+          vx = sht->vx0 + bx;
+          if (map[vy * ctl->xsize + vx] != sid)
+            continue;
+          uint32_t color = buf[by * sht->bxsize + bx];
+          vram[vy * ctl->stride + vx] =
+              ((color >> 16) & 255) << ctl->red_shift |
+              ((color >> 8) & 255) << ctl->green_shift |
+              (color & 255) << ctl->blue_shift;
+        }
+      }
+      continue;
+    }
     if ((sht->vx0 & 3) == 0) {
       /* 4字节型*/
       i = (bx0 + 3) / 4; /* bx0除以4（小数进位）*/
@@ -220,12 +240,12 @@ void sheet_refreshsub(struct SHTCTL* ctl,
           /*前面被4除多余的部分逐个字节写入*/
           vx = sht->vx0 + bx;
           if (map[vy * ctl->xsize + vx] == sid) {
-            vram[vy * ctl->xsize + vx] = buf[by * sht->bxsize + bx];
+            vram[vy * ctl->stride + vx] = buf[by * sht->bxsize + bx];
           }
         }
         vx = sht->vx0 + bx;
         p = (int*)&map[vy * ctl->xsize + vx];
-        q = (int4*)&vram[vy * ctl->xsize + vx];
+        q = (int4 *)&vram[vy * ctl->stride + vx];
         r = (int4*)&buf[by * sht->bxsize + bx];
         for (i = 0; i < i1; i++) {
           /* 4的倍数部分*/
@@ -235,16 +255,16 @@ void sheet_refreshsub(struct SHTCTL* ctl,
             bx2 = bx + i * 4;
             vx = sht->vx0 + bx2;
             if (map[vy * ctl->xsize + vx + 0] == sid) {
-              vram[vy * ctl->xsize + vx + 0] = buf[by * sht->bxsize + bx2 + 0];
+              vram[vy * ctl->stride + vx + 0] = buf[by * sht->bxsize + bx2 + 0];
             }
             if (map[vy * ctl->xsize + vx + 1] == sid) {
-              vram[vy * ctl->xsize + vx + 1] = buf[by * sht->bxsize + bx2 + 1];
+              vram[vy * ctl->stride + vx + 1] = buf[by * sht->bxsize + bx2 + 1];
             }
             if (map[vy * ctl->xsize + vx + 2] == sid) {
-              vram[vy * ctl->xsize + vx + 2] = buf[by * sht->bxsize + bx2 + 2];
+              vram[vy * ctl->stride + vx + 2] = buf[by * sht->bxsize + bx2 + 2];
             }
             if (map[vy * ctl->xsize + vx + 3] == sid) {
-              vram[vy * ctl->xsize + vx + 3] = buf[by * sht->bxsize + bx2 + 3];
+              vram[vy * ctl->stride + vx + 3] = buf[by * sht->bxsize + bx2 + 3];
             }
           }
         }
@@ -252,7 +272,7 @@ void sheet_refreshsub(struct SHTCTL* ctl,
           /*后面被4除多余的部分逐个字节写入*/
           vx = sht->vx0 + bx;
           if (map[vy * ctl->xsize + vx] == sid) {
-            vram[vy * ctl->xsize + vx] = buf[by * sht->bxsize + bx];
+            vram[vy * ctl->stride + vx] = buf[by * sht->bxsize + bx];
           }
         }
       }
@@ -263,7 +283,7 @@ void sheet_refreshsub(struct SHTCTL* ctl,
         for (bx = bx0; bx < bx1; bx++) {
           vx = sht->vx0 + bx;
           if (map[vy * ctl->xsize + vx] == sid) {
-            vram[vy * ctl->xsize + vx] = buf[by * sht->bxsize + bx];
+            vram[vy * ctl->stride + vx] = buf[by * sht->bxsize + bx];
           }
         }
       }

@@ -49,7 +49,7 @@ int feof(FILE *stream);
 int ferror(FILE *stream);
 int getc(FILE *stream);
 int sscanf(const char * s, const char * fmt, ...);
-int snprintf(char * s, unsigned n, const char *fmt, ...);
+int snprintf(char *s, size_t n, const char *fmt, ...);
 int scanf(const char * fmt, ...);
 int fileno(FILE *fp);
 char *getcwd(char *buf, size_t size);

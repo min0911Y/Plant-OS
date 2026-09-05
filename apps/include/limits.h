@@ -61,7 +61,7 @@
 *
 * TODO: This is not correct for Alphas, which have 64 bit longs.
 */
-#define LONG_MAX 2147483647L
+#define LONG_MAX __LONG_MAX__
 #define LONG_MIN (-LONG_MAX-1)
 #define ULONG_MAX 0xffffffffUL
 /*

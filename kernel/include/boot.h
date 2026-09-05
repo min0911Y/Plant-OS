@@ -25,7 +25,8 @@ typedef struct {
 
 typedef struct {
   boot_module_t initramfs;
-  boot_memory_range_t memory_ranges[BOOT_MEMORY_RANGE_CAPACITY];
+  uint64_t rsdp_physical;
+  boot_memory_range_t *memory_ranges;
   uint32_t memory_range_count;
 } boot_info_t;
 

@@ -263,6 +263,12 @@ char checksum(unsigned char* addr, unsigned int length) {
 }
 
 unsigned int* acpi_find_rsdp(void) {
+  uint64_t supplied = arch_boot_info()->rsdp_physical;
+  if (supplied)
+    return arch_mmio_map(supplied, sizeof(struct ACPI_RSDP));
+#if defined(KERNEL_ARCH_X86_64)
+  return NULL;
+#else
   uint8_t *start = arch_mmio_map(0x000e0000u, 0x00020000u);
   if (start == NULL) {
     return NULL;
@@ -284,6 +290,7 @@ unsigned int* acpi_find_rsdp(void) {
     }
   }
   return 0;
+#endif
 }
 
 void* acpi_find_table(char* Signature) {

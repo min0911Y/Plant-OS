@@ -4,25 +4,32 @@
 
 static struct List *desktop_list = NULL;
 
-void display_desktop(desktop_t *desktop, vram_t *vram) {
-  memcpy((void *)vram, (void *)desktop->shtctl->vram,
-         desktop->xsize * desktop->ysize * sizeof(vram_t));
-  free((void *)desktop->shtctl->vram);
-  desktop->shtctl->vram = vram;
+void display_desktop(desktop_t *desktop,
+                     const framebuffer_info_t *framebuffer) {
+  struct SHTCTL *ctl = desktop->shtctl;
+  free(ctl->vram);
+  ctl->vram = (vram_t *)framebuffer->address;
+  ctl->stride = framebuffer->pitch / sizeof(vram_t);
+  ctl->red_shift = framebuffer->red_shift;
+  ctl->green_shift = framebuffer->green_shift;
+  ctl->blue_shift = framebuffer->blue_shift;
   desktop->using1 = true;
-  return;
+  sheet_refreshsub(ctl, 0, 0, ctl->xsize, ctl->ysize, 0, ctl->top);
 }
 
 void hide_desktop(desktop_t *desktop) {
-  vram_t *vram1 = desktop->shtctl->vram;
-  vram_t *vram =
-      (vram_t *)malloc(desktop->xsize * desktop->ysize * sizeof(vram_t));
-  memcpy((void *)vram, (void *)vram1,
-         desktop->xsize * desktop->ysize * sizeof(vram_t));
-  desktop->shtctl->vram = vram;
-  memset((void *)vram1, 0, desktop->xsize * desktop->ysize * sizeof(vram_t));
+  struct SHTCTL *ctl = desktop->shtctl;
+  vram_t *backing = malloc((size_t)ctl->xsize * ctl->ysize * sizeof(vram_t));
+  if (!backing)
+    return;
+  memset(ctl->vram, 0, ctl->stride * ctl->ysize * sizeof(vram_t));
+  ctl->vram = backing;
+  ctl->stride = ctl->xsize;
+  ctl->red_shift = 16;
+  ctl->green_shift = 8;
+  ctl->blue_shift = 0;
   desktop->using1 = false;
-  return;
+  sheet_refreshsub(ctl, 0, 0, ctl->xsize, ctl->ysize, 0, ctl->top);
 }
 
 void draw_desktop(desktop_t *desktop, int x, int y, int x1, int y1,

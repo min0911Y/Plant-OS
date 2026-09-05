@@ -13,6 +13,8 @@ void *malloc(size_t size);
 void free(void *p);
 void *realloc(void *ptr, size_t size);
 void qsort (void *, size_t, size_t, int (*)(const void *, const void *));
+void *bsearch(const void *key, const void *base, size_t count, size_t size,
+              int (*compare)(const void *, const void *));
 char *getenv(const char *name);
 int setenv(const char *name, const char *value, int overwrite);
 float strtof(const char * nptr, char ** endptr);
@@ -22,7 +24,7 @@ double strtod(const char *nptr, char **endptr);
 int atoi(const char * nptr);
 int abs(int a);
 double atof(const char *s);
-void atexit(void (*func)(void));
+int atexit(void (*func)(void));
 void *calloc(size_t num, size_t size);
 void abort(void);
 void exit(unsigned status);

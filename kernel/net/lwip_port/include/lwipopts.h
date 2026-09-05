@@ -37,7 +37,7 @@
  * net_stack_tick(), outside raw-API output callbacks. */
 #define LWIP_NETIF_LOOPBACK 1
 
-#define MEM_ALIGNMENT 4
+#define MEM_ALIGNMENT __SIZEOF_POINTER__
 #define MEM_SIZE (64 * 1024)
 #define mem_free lwip_mem_free
 #define atoi lwip_port_atoi

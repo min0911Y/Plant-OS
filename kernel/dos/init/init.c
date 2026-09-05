@@ -49,14 +49,14 @@ static void bench_timer_modes(void) {
   if (apic_timer_tsc_deadline_available()) {
     if (apic_timer_use_tsc_deadline()) {
       tsc_base = bench_loops_avg(rounds);
-      printk("bench tsc-deadline base=%08x\n", tsc_base);
-      logk("sysinit: timer bench tsc_deadline=%08x\n", tsc_base);
+      printk("bench tsc-deadline base=%zx\n", tsc_base);
+      logk("sysinit: timer bench tsc_deadline=%zx\n", tsc_base);
     }
 
     apic_timer_use_irq0();
     pit_base = bench_loops_avg(rounds);
-    printk("bench pit base=%08x\n", pit_base);
-    logk("sysinit: timer bench pit=%08x\n", pit_base);
+    printk("bench pit base=%zx\n", pit_base);
+    logk("sysinit: timer bench pit=%zx\n", pit_base);
 
     if (tsc_base != 0 && pit_base != 0) {
       int diff_pct = (int)(((int64_t)tsc_base - (int64_t)pit_base) * 100 /
@@ -70,8 +70,8 @@ static void bench_timer_modes(void) {
     }
   } else {
     pit_base = bench_loops_avg(rounds);
-    printk("bench pit base=%08x\n", pit_base);
-    logk("sysinit: timer bench pit_only=%08x\n", pit_base);
+    printk("bench pit base=%zx\n", pit_base);
+    logk("sysinit: timer bench pit_only=%zx\n", pit_base);
   }
 
   logk("sysinit: timer bench done mode=%s\n",
@@ -94,8 +94,11 @@ void sysinit(void) {
   char mousebuf_sr2[128];
 
   init_page(boot_info); // 初始化分页与 WP
+  uint64_t initramfs_physical = 0;
   if (has_initramfs &&
-      !page_reserve_physical_range(initramfs.address, initramfs.size)) {
+      (!arch_dma_map((void *)initramfs.address, initramfs.size,
+                     &initramfs_physical) ||
+       !page_reserve_physical_range(initramfs_physical, initramfs.size))) {
     Panic_K("unable to reserve initramfs memory");
     return;
   }
@@ -148,17 +151,16 @@ void sysinit(void) {
 #ifndef KERNEL_DISABLE_MEMTEST
   logk("sysinit: memtest start\n");
   memsize = arch_memory_detect(boot_info);
-  logk("sysinit: memtest done memsize=%08x\n", memsize);
+  logk("sysinit: memtest done memsize=%zx\n", memsize);
 #else
   memsize = KERNEL_MEMSIZE_BYTES;
   printk("memtest disabled, assume %u MiB RAM\n", KERNEL_MEMSIZE_MB);
-  logk("sysinit: memtest disabled memsize=%08x memsize_mb=%u\n", memsize,
+  logk("sysinit: memtest disabled memsize=%zx memsize_mb=%u\n", memsize,
        KERNEL_MEMSIZE_MB);
 #endif
 
-  if (has_initramfs &&
-      (initramfs.address >= memsize ||
-       initramfs.size > memsize - initramfs.address)) {
+  if (has_initramfs && (initramfs_physical >= memsize ||
+                        initramfs.size > memsize - initramfs_physical)) {
     Panic_K("initramfs lies outside detected memory");
     return;
   }
@@ -197,8 +199,8 @@ void sysinit(void) {
   logk("sysinit: reg_pfs start\n");
   reg_pfs();
   logk("sysinit: reg_pfs done\n");
-  printk("pf set up to %08x\n",memsize);
-  logk("sysinit: pf_set start memsize=%08x\n", memsize);
+  printk("pf set up to %zx\n", memsize);
+  logk("sysinit: pf_set start memsize=%zx\n", memsize);
   pf_set(memsize);
   logk("sysinit: pf_set done\n");
   printk("acpi\n");

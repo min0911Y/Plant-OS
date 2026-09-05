@@ -3,8 +3,8 @@
 #include <dos.h>
 #include <irq.h>
 #include <limits.h>
+#include <platform.h>
 #include <smp.h>
-#include <user_space.h>
 #define STACK_SIZE TASK_KERNEL_STACK_SIZE
 #define REAPER_TID 0u
 #define TASK_ID_NONE ((uint32_t)-1)
@@ -214,7 +214,7 @@ static bool task_pin_address_space(arch_address_space_t address_space,
 
 static int scheduler_task_eligible(const mtask *task, uint32_t cpu,
                                    const mtask *current) {
-  return task->state == RUNNING && task->cpu == cpu &&
+  return task != NULL && task->state == RUNNING && task->cpu == cpu &&
          !(task->sched_flags & TASK_SCHED_IDLE) &&
          (!task->on_cpu || task == current);
 }
@@ -473,22 +473,6 @@ mtask *get_task(unsigned tid) {
   }
   return task;
 }
-void task_to_user_mode(uintptr_t eip, uintptr_t esp) {
-  mtask *task = current_task();
-  struct user_runtime_layout layout;
-  if (!user_runtime_layout_calculate(USER_SPACE_START, 0, 0, false, eip,
-                                     &layout) ||
-      esp < USER_SPACE_START || esp >= USER_HEAP_END) {
-    task_exit(-1);
-    return;
-  }
-  (void)layout;
-  task->user_mode = 1;
-  arch_task_set_kernel_stack(task->top);
-  kernel_lock_leave();
-  arch_task_enter_user(eip, esp);
-}
-
 unsigned task_address_space_owner(arch_address_space_t address_space) {
   mtask *fallback = NULL;
 
@@ -527,6 +511,9 @@ static void task_clear_ipc_refs(mtask *task) {
 }
 
 static void task_clear_external_refs(mtask *task) {
+#if defined(KERNEL_ARCH_X86_64)
+  platform_video_release_owner(task);
+#endif
   extern mtask *keyboard_use_task;
   extern int disable_flag;
 
@@ -557,7 +544,9 @@ static void task_clear_external_refs(mtask *task) {
     disable_flag = 0;
   }
   timer_cancel_for_task(task);
+#if defined(KERNEL_ARCH_I386)
   high_text_cursor_task_exited(task);
+#endif
   task_clear_ipc_refs(task);
   net_socket_cancel_waits(task->tid, task->generation);
   if (task->kind == TASK_PROCESS && task->tid == task->tgid) {

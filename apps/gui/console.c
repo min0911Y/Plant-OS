@@ -2,13 +2,17 @@
 #include <stdlib.h>
 #include <string.h>
 #include <syscall.h>
+_Static_assert(sizeof(((console_t *)0)->tty_handle) == sizeof(tty_t),
+               "console TTY handle must retain the native ABI width");
 void draw_window(window_t *window, int x, int y, int x1, int y1, color_t color);
 void puts_window(window_t *window, char *s, int x, int y, color_t color);
 void console_task(tty_t tty) {
   tty_set(NowTaskID(), tty);
-  exec("psh.bin", "");
-  for (;;)
-    ;
+  int status = exec("psh.bin", "psh.bin");
+  if (status != 0) {
+    logkf("GUI console shell exited with status %d\n", status);
+  }
+  _exit(status);
 }
 bool now_tty_GraphicMode(struct tty *res) {
   console_t *console = (console_t *)res->vram;
@@ -148,7 +152,7 @@ static void copy_char(vram_t *vram, int off_x, int off_y, int x, int y, int x1,
 }
 void screen_ne_console(struct tty *res) {
   console_t *console = (console_t *)res->vram;
-  for (int i = 0; i < res->ysize; i++) {
+  for (int i = 0; i < res->ysize - 1; i++) {
     for (int j = 0; j < res->xsize; j++) {
       copy_char(console->vram_copy, console->x, console->y, j * 8, i * 16,
                 j * 8, (i + 1) * 16, console->window->xsize);
@@ -357,9 +361,8 @@ console_t *create_console(window_t *window, int xsize, int ysize, int x,
   window->draw = draw_console_window;
   window->puts = puts_console_window;
   uintptr_t stack_top = (uintptr_t)res->task_stack + 32 * 1024;
-  ((uintptr_t *)stack_top)[-1] = res->tty_handle;
   int thread_tid =
-      AddThread("", (uintptr_t)console_task, stack_top - 8);
+      AddThread("console", (uintptr_t)console_task, stack_top, res->tty_handle);
   if (thread_tid < 0) {
     goto fail;
   }

@@ -234,9 +234,9 @@ int main(int argc,char **argv)
 			} 		
 		}
 	}
-	api_free(str,200); //释放内存空间
-	char *buf = malloc(100);
-	while(symbol.top != -1) {
+        free(str); //释放内存空间
+        char *buf = malloc(100);
+        while(symbol.top != -1) {
     //     sprintf(buf,"%d",symbol.top);
 		// print(buf);
 		v2 = Putshuju(&data);

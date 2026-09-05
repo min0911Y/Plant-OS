@@ -1,3 +1,8 @@
+ARCH ?= i386
+ifeq ($(ARCH),x86_64)
+NATIVE_TARGETS := out/x86_64/gui.bin
+include ../native.mk
+else ifeq ($(ARCH),i386)
 LIBS_PATH := ../libs
 INCLUDE_PATH := ../include
 include ../defs.mk
@@ -6,8 +11,14 @@ OBJS_PACK = ../out/gui.obj ../out/gui_rpc.obj ../out/list.obj ../out/sheet.obj .
 default : $(OBJS_PACK)
 	$(LINK) $(OBJS_PACK) $(LIBS_PATH)/libutf.a $(BASIC_LIB_C) -o ../out/gui.bin
 ../out/%.obj : %.c Makefile
-	gcc -m32 -I$(INCLUDE_PATH) -nostdinc -nolibc -nostdlib -ffreestanding -fno-stack-protector -Qn -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fomit-frame-pointer -march=pentium -Qn -O3 -w  -c $*.c -o ../out/$*.obj
+	$(C) -O3  -c $*.c -o ../out/$*.obj
 ../out/%.obj : %.cpp Makefile
 	$(CPP) -c $*.cpp -o ../out/$*.obj
 ../out/%.obj : %.asm Makefile
 	nasm -f elf $*.asm -o ../out/$*.obj
+
+$(OBJS_PACK): gui.h
+
+else
+$(error unsupported ARCH '$(ARCH)'; supported architectures: i386 x86_64)
+endif

@@ -1,3 +1,4 @@
+#include <framebuffer.h>
 #include <gui.h>
 #include <gui_rpc.h>
 #include <ipc.h>
@@ -31,6 +32,95 @@ typedef struct {
 
 static char gui_program[] = "gui.bin";
 static char guitest_program[] = "guitest.bin";
+
+typedef struct {
+  unsigned parent_tid;
+  uintptr_t cookie;
+} gui_thread_probe_t;
+
+static void gui_thread_probe(gui_thread_probe_t *probe) {
+  uintptr_t reply[] = {(uintptr_t)probe, probe->cookie};
+  ipc_send_to(probe->parent_tid, 0, 0, reply, sizeof(reply), 5000);
+  _exit(0);
+}
+
+static int gui_test_thread(void) {
+  void *stack = malloc(32 * 1024);
+  if (stack == NULL) {
+    return 1;
+  }
+  gui_thread_probe_t probe = {
+      .parent_tid = NowTaskID(),
+      .cookie = ~(uintptr_t)0x12345678,
+  };
+  uintptr_t entry = (uintptr_t)gui_thread_probe;
+  uintptr_t top = (uintptr_t)stack + 32 * 1024;
+  int valid =
+      AddThread("probe", entry, 0, 0) < 0 && AddThread("probe", 0, top, 0) < 0;
+  int tid = AddThread("probe", entry, top, (uintptr_t)&probe);
+  uintptr_t reply[2] = {0};
+  ipc_msg_t message;
+  valid = tid > 0 &&
+          ipc_recv_from(tid, reply, sizeof(reply), &message, 5000) ==
+              sizeof(reply) &&
+          reply[0] == (uintptr_t)&probe && reply[1] == probe.cookie && valid;
+  if (tid > 0) {
+    SubThread(tid);
+  }
+  free(stack);
+  logkf("GUITEST THREAD %s\n", valid ? "PASS" : "FAIL");
+  return !valid;
+}
+
+static int gui_test_mouse(void) {
+  window_t window = create_window("GUI mouse test", 64, 64, 256, 192);
+  framebuffer_info_t display;
+  if (window == NULL || framebuffer_info(&display) < 0) {
+    close_window(window);
+    return 40;
+  }
+
+  logkf("GUIMOUSE READY origin=%u,%u target=128,128\n", display.width / 2,
+        display.height / 2);
+  unsigned observed = 0;
+  unsigned deadline = (unsigned)clock() + 15000;
+  while ((int)((unsigned)clock() - deadline) < 0 && observed != 15) {
+    int event = window_get_event(window);
+    if (event == -1) {
+      sleep(10);
+      continue;
+    }
+    if (event != GUI_EVENT_MOUSE_STAY && event != GUI_EVENT_MOUSE_CLICK_LEFT &&
+        event != GUI_EVENT_MOUSE_CLICK_RIGHT &&
+        event != GUI_EVENT_MOUSE_WHEEL) {
+      break;
+    }
+    int position = window_get_event(window);
+    int x = (position >> 16) & 0xffff;
+    int y = position & 0xffff;
+    int wheel = event == GUI_EVENT_MOUSE_WHEEL ? window_get_event(window) : 0;
+    if (event == GUI_EVENT_MOUSE_STAY && position >= 0 &&
+        (x != 64 || y != 64)) {
+      continue;
+    }
+    if (position < 0 || x != 64 || y != 64) {
+      logkf("GUIMOUSE FAIL event=%d position=%d,%d\n", event, x, y);
+      break;
+    }
+    if (event == GUI_EVENT_MOUSE_STAY) {
+      observed |= 1;
+    } else if (event == GUI_EVENT_MOUSE_CLICK_LEFT) {
+      observed |= 2;
+    } else if (event == GUI_EVENT_MOUSE_CLICK_RIGHT) {
+      observed |= 4;
+    } else if (wheel == 1) {
+      observed |= 8;
+    }
+  }
+  close_window(window);
+  logkf("GUIMOUSE %s events=%u\n", observed == 15 ? "PASS" : "FAIL", observed);
+  return observed == 15 ? 0 : 41;
+}
 
 static int gui_test_basic(void) {
   window_t window = create_window("GUI RPC test", 48, 48, 64, 64);
@@ -318,6 +408,9 @@ int main(int argc, char **argv) {
     return gui_stress_refresh_process((unsigned)parent_tid, (unsigned)index);
   }
 
+  if (gui_test_thread() != 0) {
+    return 1;
+  }
   int gui_pid = fork();
   if (gui_pid < 0) {
     logkf("GUITEST FAIL fork\n");
@@ -342,6 +435,12 @@ int main(int argc, char **argv) {
   result = gui_test_basic();
   if (result != 0) {
     return result;
+  }
+  if (argc == 2 && strcmp(argv[1], "mouse") == 0) {
+    result = gui_test_mouse();
+    if (result != 0) {
+      return result;
+    }
   }
 
   logkf("GUITEST PASS gui_pid=%d\n", gui_pid);

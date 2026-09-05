@@ -1,13 +1,16 @@
 #include <calendar.h>
 #include <cmd.h>
 #include <dos.h>
+#include <framebuffer.h>
 #include <irq.h>
 #include <limits.h>
 #include <math_util.h>
 #include <platform.h>
 #include <syscall.h>
 #include <user_space.h>
-
+#if defined(KERNEL_ARCH_X86_64)
+#include <arch/x86/x86_64/cpu.h>
+#endif
 
 static void keyboard_press(uint8_t data, uint32_t tid) {
   fifo8_put(get_task(tid)->Pkeyfifo, data);
@@ -17,33 +20,48 @@ static void keyboard_release(uint8_t data, uint32_t tid) {
   fifo8_put(get_task(tid)->Ukeyfifo, data);
 }
 
-static void user_thread_entry(void) {
-  while (!current_task()->line) {
-  }
+typedef struct {
+  uintptr_t entry;
+  uintptr_t stack_top;
+  uintptr_t argument;
+} user_thread_start_t;
 
-  uintptr_t *request = (uintptr_t *)current_task()->line;
-  uintptr_t esp = request[0];
-  uintptr_t eip = request[1];
+static void user_thread_entry(void) {
+  mtask *task = current_task();
+  user_thread_start_t *request = (user_thread_start_t *)task->line;
+  user_thread_start_t start = *request;
   page_free_one(request);
+  task->line = NULL;
 
   struct FIFO8 *key_fifo = page_malloc_one();
   struct FIFO8 *mouse_fifo = page_malloc_one();
   unsigned char *key_buffer = page_malloc_one();
   unsigned char *mouse_buffer = page_malloc_one();
+  if (key_fifo == NULL || mouse_fifo == NULL || key_buffer == NULL ||
+      mouse_buffer == NULL) {
+    page_free(key_fifo, sizeof(*key_fifo));
+    page_free(mouse_fifo, sizeof(*mouse_fifo));
+    page_free(key_buffer, 4096);
+    page_free(mouse_buffer, 4096);
+    task_exit(-1);
+    return;
+  }
   fifo8_init(key_fifo, 4096, key_buffer);
   fifo8_init(mouse_fifo, 4096, mouse_buffer);
-  task_set_fifo(current_task(), key_fifo, mouse_fifo);
-  task_to_user_mode(eip, esp);
-
-  for (;;) {
-  }
+  task_set_fifo(task, key_fifo, mouse_fifo);
+  task->user_mode = 1;
+  arch_task_set_kernel_stack(task->top);
+  kernel_lock_leave();
+  arch_task_enter_user(start.entry, start.stack_top, start.argument);
 }
 
 static int user_range_ok(uintptr_t addr, size_t size) {
-  if (addr < USER_SPACE_START || addr > USER_HEAP_END) {
-    return 0;
-  }
-  return size <= USER_HEAP_END - addr;
+#if defined(KERNEL_ARCH_X86_64)
+  return x64_user_access(addr, size, false);
+#else
+  return addr >= USER_SPACE_START && addr <= USER_HEAP_END &&
+         size <= USER_HEAP_END - addr;
+#endif
 }
 
 static char *copy_user_string(uintptr_t addr, size_t *length_out) {
@@ -226,7 +244,7 @@ enum syscall_id {
   SYSCALL_COMMAND_LINE = 0x1b,
   SYSCALL_KEYBOARD_HIT = 0x1d,
   SYSCALL_EXIT = 0x1e,
-  SYSCALL_VBE_CONTROL = 0x20,
+  SYSCALL_VIDEO_CONTROL = 0x20,
   SYSCALL_BIOS_VIDEO = 0x21,
   SYSCALL_TASK_CONTROL = 0x22,
   SYSCALL_TTY_COLOR = 0x23,
@@ -240,7 +258,7 @@ enum syscall_id {
   SYSCALL_DRAW_BOX = 0x2c,
   SYSCALL_TIMESTAMP = 0x2d,
   SYSCALL_UPTIME = 0x2e,
-  SYSCALL_RESET_FPU = 0x2f,
+  SYSCALL_RESET_FPU = SYSCALL_ARCH_RESET_FPU,
   SYSCALL_KEYBOARD_SETUP = 0x30,
   SYSCALL_KEY_PRESS_PENDING = 0x31,
   SYSCALL_KEY_RELEASE_PENDING = 0x32,
@@ -285,6 +303,7 @@ enum syscall_id {
   SYSCALL_TTY_INPUT_NOTIFY = 0x62,
   SYSCALL_PERF_CONTROL = 0x63,
   SYSCALL_INPUT_WAIT = 0x64,
+  SYSCALL_SIGNAL_RETURN = SYSCALL_ARCH_SIGNAL_RETURN,
   SYSCALL_COUNT,
 };
 
@@ -299,6 +318,8 @@ static void syscall_print_character(syscall_context_t *frame) {
 }
 
 static void syscall_legacy_graphics(syscall_context_t *frame) {
+#if defined(KERNEL_ARCH_I386)
+  frame->value = (syscall_word_t)-1;
   if (running_mode != POWERINTDOS) {
     return;
   }
@@ -330,7 +351,13 @@ static void syscall_legacy_graphics(syscall_context_t *frame) {
     PrintChineseStr(frame->argument1, frame->argument2, frame->argument4,
                     (unsigned char *)(uintptr_t)frame->argument3);
     break;
+  default:
+    return;
   }
+  frame->value = 0;
+#else
+  frame->value = (syscall_word_t)-1;
+#endif
 }
 
 static void syscall_set_cursor(syscall_context_t *frame) {
@@ -369,6 +396,7 @@ static void syscall_cursor_position(syscall_context_t *frame) {
 }
 
 static void syscall_mouse_event(syscall_context_t *frame) {
+#if defined(KERNEL_ARCH_I386)
   if (running_mode != POWERINTDOS) {
     return;
   }
@@ -452,6 +480,9 @@ static void syscall_mouse_event(syscall_context_t *frame) {
             1) = background;
   task->mx = old_mouse_x;
   task->my = old_mouse_y;
+#else
+  frame->value = (syscall_word_t)-1;
+#endif
 }
 
 static void syscall_mouse_supported(syscall_context_t *frame) {
@@ -776,42 +807,65 @@ static void syscall_exit(syscall_context_t *frame) {
   }
 }
 
-static void syscall_vbe_control(syscall_context_t *frame) {
-  if (running_mode != POWERINTDOS || !task_pin_current(0)) {
+static void syscall_video_control(syscall_context_t *frame) {
+  frame->value = (syscall_word_t)-1;
+  if (frame->argument0 == 6) {
+    platform_video_info_t video;
+    if (!user_range_ok(frame->argument1, sizeof(framebuffer_info_t)) ||
+        !platform_video_current_info(&video))
+      return;
+#if defined(KERNEL_ARCH_X86_64)
+    if (!x64_user_access(frame->argument1, sizeof(framebuffer_info_t), true))
+      return;
+    uintptr_t address =
+        USER_FRAMEBUFFER_START + (video.physical_address & 4095);
+#else
+    uintptr_t address = video.framebuffer;
+#endif
+    *(framebuffer_info_t *)frame->argument1 = (framebuffer_info_t){
+        address, video.width,     video.height,      video.pitch,
+        32,      video.red_shift, video.green_shift, video.blue_shift,
+        0};
+    frame->value = 0;
     return;
   }
-
-  if (frame->argument0 == 0x01) {
-    frame->value = platform_video_switch_mode((int)frame->argument1);
-  } else if (frame->argument0 == 0x02) {
-    frame->value = platform_video_check_mode((int)frame->argument1);
-  } else if (frame->argument0 == 0x05) {
-    platform_video_info_t info;
-    if (!platform_video_set_mode((uint32_t)frame->argument1,
-                                 (uint32_t)frame->argument2, 32, &info)) {
-      frame->value = UINT_MAX;
-      return;
-    }
-    uintptr_t framebuffer = info.framebuffer;
-    uint64_t framebuffer_bytes = (uint64_t)info.width * info.height * 4;
-    frame->value = framebuffer;
-    if (framebuffer == 0 || (framebuffer & 0xfffu) != 0 ||
-        framebuffer_bytes == 0 || framebuffer_bytes > UINT_MAX ||
-        framebuffer_bytes > UINT_MAX - 0xfffu ||
-        framebuffer > UINT_MAX - (uintptr_t)framebuffer_bytes) {
-      frame->value = UINT_MAX;
-      return;
-    }
-    size_t mapping_size =
-        (framebuffer_bytes + 0xfffu) & ~(size_t)0xfffu;
-    if (!arch_address_space_map_user_device(framebuffer, framebuffer,
-                                            mapping_size)) {
-      frame->value = UINT_MAX;
-    }
+#if defined(KERNEL_ARCH_I386)
+  if (running_mode != POWERINTDOS || !task_pin_current(0))
+    return;
+  if (frame->argument0 == 1) {
+    frame->value = platform_video_switch_mode(frame->argument1);
+    return;
+  }
+  if (frame->argument0 == 2) {
+    frame->value = platform_video_check_mode(frame->argument1);
+    return;
+  }
+#endif
+  if (frame->argument0 != 5)
+    return;
+  platform_video_info_t info;
+  if (!platform_video_set_mode(frame->argument1, frame->argument2, 32, &info))
+    return;
+  size_t bytes = (size_t)info.pitch * info.height;
+  uintptr_t physical = info.physical_address;
+#if defined(KERNEL_ARCH_X86_64)
+  uintptr_t user = USER_FRAMEBUFFER_START;
+#else
+  uintptr_t user = physical & ~(uintptr_t)4095;
+#endif
+  size_t displacement = physical & 4095;
+  if (!bytes || bytes > (size_t)-1 - displacement - 4095)
+    return;
+  size_t size = (bytes + displacement + 4095) & ~(size_t)4095;
+  if (arch_address_space_map_user_device(user, physical & ~(uintptr_t)4095,
+                                         size)) {
+    frame->value = user + displacement;
   }
 }
 
 static void syscall_bios_video(syscall_context_t *frame) {
+#if defined(KERNEL_ARCH_I386)
+  frame->value = (syscall_word_t)-1;
   if (running_mode != POWERINTDOS || !task_pin_current(0)) {
     return;
   }
@@ -819,7 +873,13 @@ static void syscall_bios_video(syscall_context_t *frame) {
     platform_video_text_mode();
   } else if (frame->argument0 == 0x02) {
     platform_video_graphics_mode();
+  } else {
+    return;
   }
+  frame->value = 0;
+#else
+  frame->value = (syscall_word_t)-1;
+#endif
 }
 
 static void syscall_task_control(syscall_context_t *frame) {
@@ -845,34 +905,42 @@ static void syscall_task_control(syscall_context_t *frame) {
     get_msg_all((void *)(uintptr_t)frame->argument2);
     break;
   case 0x0a: {
+    /* Both native C entry frames fit in the final 32 bytes of the stack. */
+    uintptr_t stack_top = frame->argument3 & ~(uintptr_t)15;
+    frame->value = -1;
+    if (!user_range_ok(frame->argument2, 1) ||
+        stack_top < USER_SPACE_START + 32 || stack_top > USER_HEAP_END ||
+        !user_range_ok(stack_top - 32, 32)) {
+      return;
+    }
+#if defined(KERNEL_ARCH_X86_64)
+    if (!x64_user_access(stack_top - 32, 32, true)) {
+      return;
+    }
+#endif
     mtask *thread = create_thread_task((uintptr_t)user_thread_entry, 1);
     if (thread == NULL) {
-      frame->value = -1;
       return;
     }
     thread->alloc_addr = task->alloc_addr;
     thread->alloc_size = task->alloc_size;
     thread->TTY = task->TTY;
     thread->tty_session = task->tty_session;
-    thread->ptid = task->ptid;
-    thread->tgid = task->tgid;
-    thread->kind = TASK_THREAD;
     task_set_name(thread, "thread");
-    thread->mx = 0;
-    thread->my = 0;
-    uintptr_t *request = page_malloc_one_no_mark();
+    user_thread_start_t *request = page_malloc_one_no_mark();
     if (request == NULL) {
       task_abort_creation(thread);
-      frame->value = -1;
       return;
     }
-    request[0] = frame->argument3;
-    request[1] = frame->argument2;
+    *request = (user_thread_start_t){
+        .entry = frame->argument2,
+        .stack_top = stack_top,
+        .argument = frame->argument4,
+    };
     thread->line = (char *)request;
     if (!task_publish(thread)) {
       task_abort_creation(thread);
       page_free_one(request);
-      frame->value = -1;
       return;
     }
     frame->value = thread->tid;
@@ -895,10 +963,15 @@ static void syscall_task_control(syscall_context_t *frame) {
 }
 
 static void syscall_tty_color(syscall_context_t *frame) {
+  struct tty *tty = current_task()->TTY;
+  frame->value = (syscall_word_t)-1;
+  if (tty == NULL)
+    return;
   if (frame->argument0 == 0x01) {
-    frame->value = current_task()->TTY->color;
+    frame->value = tty->color;
   } else if (frame->argument0 == 0x02) {
-    current_task()->TTY->color = frame->argument1;
+    tty_set_color(tty, frame->argument1);
+    frame->value = 0;
   }
 }
 
@@ -1053,7 +1126,11 @@ static void syscall_uptime(syscall_context_t *frame) {
 
 static void syscall_monotonic_ns(syscall_context_t *frame) {
   uint64_t nanoseconds = monotonic_time_ns();
+#if defined(KERNEL_ARCH_X86_64)
+  frame->value = nanoseconds;
+#else
   frame->value = (uint32_t)nanoseconds;
+#endif
   frame->argument2 = (uint32_t)(nanoseconds >> 32);
 }
 
@@ -1759,7 +1836,7 @@ static const syscall_handler_t syscall_handlers[SYSCALL_COUNT] = {
     [SYSCALL_COMMAND_LINE] = syscall_command_line,
     [SYSCALL_KEYBOARD_HIT] = syscall_keyboard_hit,
     [SYSCALL_EXIT] = syscall_exit,
-    [SYSCALL_VBE_CONTROL] = syscall_vbe_control,
+    [SYSCALL_VIDEO_CONTROL] = syscall_video_control,
     [SYSCALL_BIOS_VIDEO] = syscall_bios_video,
     [SYSCALL_TASK_CONTROL] = syscall_task_control,
     [SYSCALL_TTY_COLOR] = syscall_tty_color,
@@ -1820,6 +1897,7 @@ static const syscall_handler_t syscall_handlers[SYSCALL_COUNT] = {
 
 void syscall_dispatch(syscall_context_t *frame) {
   if (frame->value >= SYSCALL_COUNT || syscall_handlers[frame->value] == NULL) {
+    frame->value = (syscall_word_t)-1;
     return;
   }
   syscall_handlers[frame->value](frame);

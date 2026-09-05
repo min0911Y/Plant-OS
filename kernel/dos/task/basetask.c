@@ -96,11 +96,13 @@ void init() {
       WARNING_K("network: Ethernet unavailable; loopback remains available");
     }
   }
+#if defined(KERNEL_ARCH_I386)
   if (strcmp("HIGHTEXTMODE", env_read("video_mode")) == 0) {
     running_mode = SwitchToHighTextMode() ? HIGHTEXTMODE : POWERINTDOS;
   } else {
     running_mode = POWERINTDOS;
   }
+#endif
 
   vfs_stat_t font_status;
   FILE *fp = fopen("font.bin", "rb");

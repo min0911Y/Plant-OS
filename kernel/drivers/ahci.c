@@ -910,7 +910,6 @@ static void ahci_vdisk_read(char drive, unsigned char *buffer,
   }
   memcpy(buffer, cache, number * 512);
 }
-void usleep(unsigned long long ns);
 static void ahci_vdisk_write(char drive, unsigned char *buffer,
                              unsigned int number, unsigned int lba) {
   uint8_t mapped_drive = (uint8_t)drive;

@@ -1,3 +1,7 @@
+ARCH ?= i386
+ifeq ($(ARCH),x86_64)
+include build-x86_64.mk
+else ifeq ($(ARCH),i386)
 default : Makefile
 	mkdir -p libs
 	mkdir -p out
@@ -73,3 +77,6 @@ default : Makefile
 	make -r -C my_basic-master
 clean :
 	rm -rf libs/* out/*
+else
+$(error unsupported ARCH '$(ARCH)'; supported architectures: i386 x86_64)
+endif

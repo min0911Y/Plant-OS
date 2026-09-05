@@ -70,146 +70,92 @@ uint32_t LCD_AlphaBlend(uint32_t foreground_color, uint32_t background_color,
 
   return (rb & 0xFF) | ((g & 0xFF) << 8) | ((a & 0xFF) << 16);
 }
-void set_size(int s1) {}
-#define EPS (2.22044604925031308085e-16)
-static const float_t toint = 1 / EPS;
-
-float roundf(float x) {
-  union {
-    float f;
-    uint32_t i;
-  } u = {x};
-  int e = u.i >> 23 & 0xff;
-  float_t y;
-
-  if (e >= 0x7f + 23)
-    return x;
-  if (u.i >> 31)
-    x = -x;
-  if (e < 0x7f - 1) {
-    FORCE_EVAL(x + toint);
-    return 0 * u.f;
+static void draw_text(struct SHEET *sheet, const char *text,
+                      uint32_t foreground, uint32_t background_color, int x,
+                      int y, const vram_t *background) {
+  float scale = stbtt_ScaleForPixelHeight(&font, 30.0f);
+  int ascent, descent, gap;
+  stbtt_GetFontVMetrics(&font, &ascent, &descent, &gap);
+  int baseline = y + (int)roundf(ascent * scale);
+  int left = x, right = x, top = y;
+  int bottom = y + (int)ceilf((ascent - descent + gap) * scale);
+  int pen = x;
+  for (const char *cursor = text; *cursor;) {
+    Rune codepoint, next = 0;
+    cursor += chartorune(&codepoint, cursor);
+    if (*cursor)
+      chartorune(&next, cursor);
+    int advance, bearing, x0, y0, x1, y1;
+    stbtt_GetCodepointHMetrics(&font, codepoint, &advance, &bearing);
+    stbtt_GetCodepointBitmapBox(&font, codepoint, scale, scale, &x0, &y0, &x1,
+                                &y1);
+    if (pen + x0 < left)
+      left = pen + x0;
+    if (pen + x1 > right)
+      right = pen + x1;
+    if (baseline + y0 < top)
+      top = baseline + y0;
+    if (baseline + y1 > bottom)
+      bottom = baseline + y1;
+    pen += (int)roundf(
+        (advance + stbtt_GetCodepointKernAdvance(&font, codepoint, next)) *
+        scale);
   }
-  y = x + toint - toint - x;
-  if (y > 0.5f)
-    y = y + x - 1;
-  else if (y <= -0.5f)
-    y = y + x + 1;
-  else
-    y = y + x;
-  if (u.i >> 31)
-    y = -y;
-  return y;
-}
-char *TTF_Print(vram_t *vram, unsigned xsize, int xpos, int y_shift, unsigned c,
-                int *buf, unsigned bc, unsigned *width, unsigned *heigh) {
-  /* 创建位图 */
-  int bitmap_w = 512; /* 位图的宽 */
-  int bitmap_h = 128; /* 位图的高 */
-  unsigned char *bitmap = calloc(bitmap_w * bitmap_h, sizeof(unsigned char));
-
-  /* "STB"的 unicode 编码 */
-  int *word = buf;
-
-  /* 计算字体缩放 */
-  float pixels = 30.0; /* 字体大小（字号） */
-  float scale = stbtt_ScaleForPixelHeight(
-      &font, pixels); /* scale = pixels / (ascent - descent) */
-
-  /**
-   * 获取垂直方向上的度量
-   * ascent：字体从基线到顶部的高度；
-   * descent：基线到底部的高度，通常为负值；
-   * lineGap：两个字体之间的间距；
-   * 行间距为：ascent - descent + lineGap。
-   */
-  int ascent = 0;
-  int descent = 0;
-  int lineGap = 0;
-  stbtt_GetFontVMetrics(&font, &ascent, &descent, &lineGap);
-
-  /* 根据缩放调整字高 */
-  ascent = roundf(ascent * scale);
-  descent = roundf(descent * scale);
-
-  int x = 0; /*位图的x*/
-  int max = 0;
-  /* 循环加载word中每个字符 */
-  unsigned h = (int)((float)(ascent - descent + lineGap * scale));
-  for (int i = 0; word[i] != 0; ++i) {
-    /**
-     * 获取水平方向上的度量
-     * advanceWidth：字宽；
-     * leftSideBearing：左侧位置；
-     */
-    int advanceWidth = 0;
-    int leftSideBearing = 0;
-    stbtt_GetCodepointHMetrics(&font, word[i], &advanceWidth, &leftSideBearing);
-
-    /* 获取字符的边框（边界） */
-    int c_x1, c_y1, c_x2, c_y2;
-    stbtt_GetCodepointBitmapBox(&font, word[i], scale, scale, &c_x1, &c_y1,
-                                &c_x2, &c_y2);
-
-    /* 计算位图的y (不同字符的高度不同） */
-    int y = ascent + c_y1;
-    // if (y > max)
-    //   max = y;
-    /* 渲染字符 */
-    int byteOffset = x + roundf(leftSideBearing * scale) + (y * bitmap_w);
-    stbtt_MakeCodepointBitmap(&font, bitmap + byteOffset, c_x2 - c_x1,
-                              c_y2 - c_y1, bitmap_w, scale, scale, word[i]);
-
-    /* 调整x */
-    x += roundf(advanceWidth * scale);
-
-    /* 调整字距 */
-    int kern;
-    kern = stbtt_GetCodepointKernAdvance(&font, word[i], word[i + 1]);
-    x += roundf(kern * scale);
-  }
-  *width = x;
-  *heigh = max + h;
-  return bitmap;
-}
-void put_bitmap(unsigned char *bitmap, vram_t *vram, unsigned x, unsigned y,
-                unsigned width, unsigned heigh, unsigned bitmap_xsize,
-                unsigned xsize, unsigned fc, unsigned bc) {
-  for (int i = 0; i < width; i++) {
-    for (int j = 0; j < heigh; j++) {
-      vram[(y + j) * xsize + (x + i)] = LCD_AlphaBlend(
-          fc, vram[(y + j) * xsize + (x + i)], bitmap[j * bitmap_xsize + i]);
+  if (pen > right)
+    right = pen;
+  if (left < 0)
+    left = 0;
+  if (top < 0)
+    top = 0;
+  if (right > sheet->bxsize)
+    right = sheet->bxsize;
+  if (bottom > sheet->bysize)
+    bottom = sheet->bysize;
+  if (left >= right || top >= bottom)
+    return;
+  for (int row = top; row < bottom; row++) {
+    for (int column = left; column < right; column++) {
+      size_t offset = (size_t)row * sheet->bxsize + column;
+      sheet->buf[offset] = background ? background[offset] : background_color;
     }
   }
-}
-
-void print_box_ttf(struct SHEET *sht, vram_t *vram, char *buf, unsigned fc,
-                   unsigned bc, unsigned x, unsigned y, unsigned xsize,
-                   vram_t *background) {
-  Rune *r = (Rune *)malloc((utflen(buf) + 1) * sizeof(Rune));
-  r[utflen(buf)] = 0;
-  int i = 0;
-  while (*buf != '\0') {
-    buf += chartorune(&(r[i++]), buf);
-  }
-  unsigned width, heigh;
-  char *bitmap = TTF_Print(vram, xsize, x, y, fc, r, bc, &width, &heigh);
-  // SDraw_Box(vram, x, y, x + width, y + heigh, bc, xsize);
-  if (background) {
-    int i, j;
-    for (i = x; i < x + width; i++) {
-      for (j = y; j < y + heigh; j++) {
-        vram[j * xsize + i] = background[j * xsize + i];
+  pen = x;
+  for (const char *cursor = text; *cursor;) {
+    Rune codepoint, next = 0;
+    cursor += chartorune(&codepoint, cursor);
+    if (*cursor)
+      chartorune(&next, cursor);
+    struct {
+      unsigned char *pixels;
+      int width, height, x, y;
+    } glyph;
+    glyph.pixels =
+        stbtt_GetCodepointBitmap(&font, scale, scale, codepoint, &glyph.width,
+                                 &glyph.height, &glyph.x, &glyph.y);
+    if (glyph.pixels) {
+      for (int row = 0; row < glyph.height; row++) {
+        int target_y = baseline + glyph.y + row;
+        if (target_y < top || target_y >= bottom)
+          continue;
+        for (int column = 0; column < glyph.width; column++) {
+          int target_x = pen + glyph.x + column;
+          if (target_x < left || target_x >= right)
+            continue;
+          size_t offset = (size_t)target_y * sheet->bxsize + target_x;
+          unsigned char alpha = glyph.pixels[row * glyph.width + column];
+          sheet->buf[offset] =
+              LCD_AlphaBlend(foreground, sheet->buf[offset], alpha);
+        }
       }
+      stbtt_FreeBitmap(glyph.pixels, font.userdata);
     }
-  } else {
-    SDraw_Box(vram, x, y, x + width, y + heigh, bc, xsize);
+    int advance, bearing;
+    stbtt_GetCodepointHMetrics(&font, codepoint, &advance, &bearing);
+    pen += (int)roundf(
+        (advance + stbtt_GetCodepointKernAdvance(&font, codepoint, next)) *
+        scale);
   }
-  sheet_refresh(sht, x, y, x + width, y + heigh);
-  put_bitmap(bitmap, vram, x, y, width, heigh, 512, xsize, fc, bc);
-  sheet_refresh(sht, x, y, x + width, y + heigh);
-  free(bitmap);
-  free(r);
+  sheet_refresh(sheet, left, top, right, bottom);
 }
 void convert_ABGR_to_ARGB(uint32_t *bitmap, size_t num_pixels) {
   for (size_t i = 0; i < num_pixels; ++i) {
@@ -237,7 +183,6 @@ void main() {
   printf("Done.\n");
   stbtt_InitFont(&font, ttf_buffer, stbtt_GetFontOffsetForIndex(ttf_buffer, 0));
 
-  set_size(15);
   printf("\n\n");
   int xsize_input, ysize_input;
   xsize_input = 1024;
@@ -245,11 +190,22 @@ void main() {
   uintptr_t vram;
   vram = set_mode(xsize_input, ysize_input);
 
-  logkf("vram = %08x\n", vram);
   if (vram == (uintptr_t)-1) {
-    logkf("GUI failed to set %dx%dx32 VBE mode\n", xsize_input, ysize_input);
+    logkf("GUI failed to acquire %dx%dx32 framebuffer\n", xsize_input,
+          ysize_input);
     return;
   }
+  framebuffer_info_t framebuffer;
+  if (framebuffer_info(&framebuffer) < 0 || framebuffer.bpp != 32 ||
+      framebuffer.pitch % sizeof(vram_t) ||
+      framebuffer.pitch / sizeof(vram_t) < framebuffer.width) {
+    logkf("GUI framebuffer layout unavailable\n");
+    return;
+  }
+  logkf("GUI framebuffer %ux%u pitch=%u\n", framebuffer.width,
+        framebuffer.height, framebuffer.pitch);
+  xsize_input = framebuffer.width;
+  ysize_input = framebuffer.height;
   ascfont = load_file("font.bin", NULL);
   hzkfont = load_file("HZK16", NULL);
   if (ascfont == NULL || hzkfont == NULL) {
@@ -261,7 +217,7 @@ void main() {
     logkf("GUI failed to create desktop\n");
     return;
   }
-  desktop0->display(desktop0, (vram_t *)vram);
+  desktop0->display(desktop0, &framebuffer);
   desktop0->draw(desktop0, 0, 0, xsize_input, ysize_input,
                  argb(0, 58, 110, 165));
   vram_t *background = NULL;
@@ -322,9 +278,6 @@ void main() {
     desktop0->draw(desktop0, 0, 0, xsize_input, ysize_input,
                    argb(0, 58, 110, 165));
   }
-  // print_box_ttf(desktop0->sht, desktop0->vram,
-  //               "原神，启动！Genshin Impact Start!", COL_000000,
-  //               COL_C6C6C6, 10, 30, desktop0->xsize);
 
   // desktop0->draw(desktop0, 10, 30, 18 + 48 * 8 + 8, 30 + 16, COL_C6C6C6);
 
@@ -382,9 +335,8 @@ void main() {
 
   strftime(buffer, 80, "当前时间：%Y-%m-%d %H:%M:%S", info);
   TaskLock();
-  print_box_ttf(desktop0->sht, desktop0->vram, buffer, COL_FFFFFF,
-                argb(0, 58, 110, 165), 512 - 200, 0, desktop0->xsize,
-                background);
+  draw_text(desktop0->sht, buffer, COL_FFFFFF, argb(0, 58, 110, 165), 312, 0,
+            background);
   TaskUnlock();
   for (;;) {
     unsigned elapsed = clock() - clock1;
@@ -397,9 +349,8 @@ void main() {
 
       strftime(buffer, 80, "当前时间：%Y-%m-%d %H:%M:%S", info);
       TaskLock();
-      print_box_ttf(desktop0->sht, desktop0->vram, buffer, COL_FFFFFF,
-                    argb(0, 58, 110, 165), 512 - 200, 0, desktop0->xsize,
-                    background);
+      draw_text(desktop0->sht, buffer, COL_FFFFFF, argb(0, 58, 110, 165), 312,
+                0, background);
       TaskUnlock();
     } else {
       rpc_status = rpc_serve_once(1000 - elapsed);

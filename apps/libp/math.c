@@ -1,6 +1,26 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <math.h>
+
+float roundf(float value) {
+  union {
+    float value;
+    uint32_t bits;
+  } number = {value};
+  unsigned exponent = (number.bits >> 23) & 255;
+  if (exponent >= 150)
+    return value;
+  if (exponent < 126) {
+    number.bits &= 0x80000000u;
+  } else if (exponent == 126) {
+    number.bits = (number.bits & 0x80000000u) | 0x3f800000u;
+  } else {
+    unsigned fractional_bits = 150 - exponent;
+    number.bits += 1u << (fractional_bits - 1);
+    number.bits &= ~((1u << fractional_bits) - 1);
+  }
+  return number.value;
+}
 #include <errno.h>
 #define accuracy 0.000001
 #define pai 3.1415926

@@ -9,11 +9,12 @@ KERNEL_MEMTEST_ENABLED := $(if $(filter 0,$(MEMTEST)),0,1)
 KERNEL_PERF_STACKS := $(if $(PERF_STACKS),$(PERF_STACKS),4096)
 ARCH ?= i386
 PLATFORM ?= pc
+VT100 ?= 1
 KERNEL_CFLAGS_FILE := $(abspath $(lastword $(MAKEFILE_LIST)))
 KERNEL_BUILD_FILES := $(KERNEL_CFLAGS_FILE) $(dir $(KERNEL_CFLAGS_FILE))cdef.mk
-KERNEL_CONFIG_STAMP := $(dir $(KERNEL_CFLAGS_FILE))obj/.build-config
+KERNEL_CONFIG_STAMP := $(dir $(KERNEL_CFLAGS_FILE))obj/$(if $(filter x86_64,$(ARCH)),x86_64/).build-config
 KERNEL_BUILD_CONFIG := \
-	ARCH=$(ARCH) PLATFORM=$(PLATFORM) PERF=$(KERNEL_PERF_ENABLED) KASAN=$(KERNEL_KASAN_ENABLED) \
+	ARCH=$(ARCH) PLATFORM=$(PLATFORM) VT100=$(VT100) PERF=$(KERNEL_PERF_ENABLED) KASAN=$(KERNEL_KASAN_ENABLED) \
 	BENCH=$(KERNEL_BENCH_ENABLED) MEMTEST=$(KERNEL_MEMTEST_ENABLED) \
 	MEMSIZE_MB=$(if $(filter 0,$(KERNEL_MEMTEST_ENABLED)),$(MEMSIZE_MB),) \
 	PERF_STACKS=$(if $(filter 1,$(KERNEL_PERF_ENABLED)),$(KERNEL_PERF_STACKS),)
@@ -56,9 +57,16 @@ KERNEL_ARCH_CFLAGS = -m32 -mno-mmx -mno-sse -mfpmath=387
 KERNEL_ARCH_LD_EMULATION = elf_i386
 KERNEL_ARCH_ASM_FORMAT = elf32
 CDEFS += -DKERNEL_ARCH_I386
+else ifeq ($(ARCH),x86_64)
+KERNEL_ARCH_CFLAGS = -m64 -mcmodel=kernel -mno-red-zone -msse2 -mfpmath=sse -mlong-double-64 -fno-tree-vectorize
+KERNEL_ARCH_LD_EMULATION = elf_x86_64
+KERNEL_ARCH_ASM_FORMAT = elf64
+CDEFS += -DKERNEL_ARCH_X86_64 -D__NO_FLOPPY__
 else
-$(error unsupported ARCH '$(ARCH)'; supported architectures: i386)
+$(error unsupported ARCH '$(ARCH)'; supported architectures: i386 x86_64)
 endif
+
+CDEFS += -DKERNEL_TTY_VT100=$(VT100)
 
 KERNEL_COMMON_CFLAGS = \
 	$(KERNEL_ARCH_CFLAGS) -I$(incpath_src) -nostdinc -nolibc -nostdlib -fno-builtin \

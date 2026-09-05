@@ -1,3 +1,4 @@
+#include "runtime_lifecycle.h"
 #include <ctypes.h>
 #include <math.h>
 #include <runtime_args.h>
@@ -28,6 +29,7 @@ void Main() {
   }
   init_env();
   init_float();
+  runtime_initialize_static();
   int status = main(arguments.argc, arguments.argv);
   runtime_arguments_destroy(&arguments);
   exit(status);

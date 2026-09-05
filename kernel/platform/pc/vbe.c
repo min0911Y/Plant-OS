@@ -46,10 +46,18 @@ static int set_mode(int mode) {
   return registers.ax == VBE_SUCCESS ? 0 : -1;
 }
 
-static void update_current_video(const struct VBEINFO *vbe) {
-  current_video.framebuffer = (uintptr_t)(uint32_t)vbe->vram;
-  current_video.width = (uint32_t)(uint16_t)vbe->xsize;
-  current_video.height = (uint32_t)(uint16_t)vbe->ysize;
+static void update_current_video(const VESAModeInfo *vbe) {
+  current_video.framebuffer = (uintptr_t)vbe->physbase;
+  current_video.physical_address = current_video.framebuffer;
+  current_video.width = vbe->width;
+  current_video.height = vbe->height;
+  current_video.pitch = vbe->bytesPerLine;
+  current_video.red_size = vbe->red_mask;
+  current_video.red_shift = vbe->red_position;
+  current_video.green_size = vbe->green_mask;
+  current_video.green_shift = vbe->green_position;
+  current_video.blue_size = vbe->blue_mask;
+  current_video.blue_shift = vbe->blue_position;
   current_video_valid = current_video.framebuffer != 0 &&
                         current_video.width != 0 && current_video.height != 0;
 }
@@ -62,7 +70,7 @@ int platform_video_switch_mode(int mode) {
   if (query_mode(mode, VBE_CONTROLLER_BUFFER) != 0 || set_mode(mode) != 0) {
     return -1;
   }
-  update_current_video((const struct VBEINFO *)(uintptr_t)VBE_CONTROLLER_BUFFER);
+  update_current_video((const VESAModeInfo *)(uintptr_t)VBE_CONTROLLER_BUFFER);
   return 0;
 }
 

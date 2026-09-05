@@ -378,6 +378,7 @@ struct tty {
   int (*fifo_status)(struct tty *res);
   int (*fifo_get)(struct tty *res);
   uintptr_t reserved[4]; // backend-private values
+  bool native_ansi;
 
   //////////////实现VT100需要的//////////////////
 

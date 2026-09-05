@@ -1180,11 +1180,9 @@ public:
     c->ml = n->maxLine();
 #endif
     uintptr_t stack = (uintptr_t)malloc(16 * 1024);
-    stack += 16 * 1024 - sizeof(uintptr_t);
-    uintptr_t *s = (uintptr_t *)stack;
-    *s = (uintptr_t)this;
+    stack += 16 * 1024;
     if (mouse_support())
-      AddThread("mouse", (uintptr_t)&m_thread, stack - sizeof(uintptr_t));
+      AddThread("mouse", (uintptr_t)&m_thread, stack, (uintptr_t)this);
     r->showAll();
     int times = 0;
     int tap = 0;

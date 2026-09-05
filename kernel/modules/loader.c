@@ -1,6 +1,7 @@
 #include <dos.h>
-#include <arch/x86/i386/elf.h>
+#include <limits.h>
 #include <module.h>
+#include <native_elf.h>
 
 typedef struct module_section {
   char name[32];
@@ -116,13 +117,18 @@ static bool module_register_exports(module_loaded_t *module) {
     module->export_count = 0;
     return true;
   }
-  module->exports = malloc(sizeof(module_exported_symbol_t) * module->info->export_count);
+  if (!module->info->exports ||
+      module->info->export_count >
+          (size_t)INT_MAX / sizeof(module_exported_symbol_t))
+    return false;
+  module->exports =
+      malloc(sizeof(module_exported_symbol_t) * module->info->export_count);
   if (!module->exports) {
     return false;
   }
   memset(module->exports, 0,
          sizeof(module_exported_symbol_t) * module->info->export_count);
-  module->export_count = module->info->export_count;
+  module->export_count = 0;
   for (uint32_t i = 0; i < module->info->export_count; i++) {
     const char *name = module->info->exports[i].name;
     uintptr_t addr = module->info->exports[i].addr;
@@ -137,6 +143,7 @@ static bool module_register_exports(module_loaded_t *module) {
     }
     module->exports[i].name = name;
     module->exports[i].addr = addr;
+    module->export_count++;
   }
   return true;
 }
@@ -154,8 +161,8 @@ static module_section_t *module_find_section(module_loaded_t *module,
   return NULL;
 }
 
-static uintptr_t module_symbol_value(module_loaded_t *module, Elf32_Ehdr *hdr,
-                                     Elf32_Sym *sym, const char *strtab) {
+static uintptr_t module_symbol_value(module_loaded_t *module, Elf_Ehdr *hdr,
+                                     Elf_Sym *sym, const char *strtab) {
   (void)strtab;
   if (sym->st_shndx == SHN_UNDEF) {
     return module_resolve_symbol((const char *)strtab + sym->st_name);
@@ -170,71 +177,111 @@ static uintptr_t module_symbol_value(module_loaded_t *module, Elf32_Ehdr *hdr,
   return (uintptr_t)section->addr + sym->st_value;
 }
 
-static bool module_apply_relocations(module_loaded_t *module, Elf32_Ehdr *hdr) {
-  Elf32_Shdr *symtab_shdr;
-  Elf32_Sym *symtab = elf32_symtab(hdr, &symtab_shdr);
+static bool module_apply_relocations(module_loaded_t *module, Elf_Ehdr *hdr) {
+  Elf_Shdr *symtab_shdr;
+  Elf_Sym *symtab = elf_symtab(hdr, &symtab_shdr);
   if (!symtab || !symtab_shdr) {
     printk("module: no symtab in %s\n", module->path);
     return false;
   }
-  Elf32_Shdr *strtab_shdr = elf32_section(hdr, symtab_shdr->sh_link);
-  const char *strtab = elf32_string_table(hdr, strtab_shdr);
+  Elf_Shdr *strtab_shdr = elf_section(hdr, symtab_shdr->sh_link);
+  const char *strtab = elf_string_table(hdr, strtab_shdr);
   if (!strtab) {
     printk("module: no strtab in %s\n", module->path);
     return false;
   }
 
   for (int i = 0; i < hdr->e_shnum; i++) {
-    Elf32_Shdr *relsec = elf32_section(hdr, i);
-    if (!relsec || relsec->sh_type != SHT_REL) {
+    Elf_Shdr *relsec = elf_section(hdr, i);
+    if (!relsec || relsec->sh_type != ELF_RELOCATION_SECTION) {
       continue;
     }
     module_section_t *target = module_find_section(module, relsec->sh_info);
     if (!target) {
-      printk("module: relocation target missing for section %d\n", relsec->sh_info);
+      printk("module: relocation target missing for section %d\n",
+             relsec->sh_info);
       return false;
     }
 
-    Elf32_Rel *rels = (Elf32_Rel *)((uint8_t *)hdr + relsec->sh_offset);
-    uint32_t rel_count = relsec->sh_size / sizeof(Elf32_Rel);
+    Elf_Rel *rels = (Elf_Rel *)((uint8_t *)hdr + relsec->sh_offset);
+    uint32_t rel_count = relsec->sh_size / sizeof(Elf_Rel);
     for (uint32_t j = 0; j < rel_count; j++) {
-      Elf32_Rel *rel = &rels[j];
-      uint32_t sym_idx = ELF32_R_SYM(rel->r_info);
-      uint32_t type = ELF32_R_TYPE(rel->r_info);
-      Elf32_Sym *sym = &symtab[sym_idx];
+      Elf_Rel *rel = &rels[j];
+      uint32_t sym_idx = ELF_R_SYM(rel->r_info);
+      uint32_t type = ELF_R_TYPE(rel->r_info);
+      if (type == 0)
+        continue;
+      if (sym_idx >= symtab_shdr->sh_size / sizeof(Elf_Sym))
+        return false;
+      Elf_Sym *sym = &symtab[sym_idx];
+      size_t width = ELF_RELOCATION_WIDTH(type);
+      if (sym->st_name >= strtab_shdr->sh_size ||
+          rel->r_offset > target->size || width > target->size - rel->r_offset)
+        return false;
       uintptr_t S = module_symbol_value(module, hdr, sym, strtab);
       uintptr_t P = (uintptr_t)target->addr + rel->r_offset;
-      uint32_t *where = (uint32_t *)P;
-      uint32_t A = *where;
+#if defined(KERNEL_ARCH_X86_64)
+      int64_t A = rel->r_addend;
+#else
+      uint32_t A = *(uint32_t *)P;
+#endif
 
-      if (!S && sym->st_shndx == SHN_UNDEF) {
+      if (!S && sym->st_shndx == SHN_UNDEF && (sym->st_info >> 4) != 2) {
         const char *name = strtab + sym->st_name;
         printk("module: unresolved symbol %s\n", name);
         return false;
       }
 
+#if defined(KERNEL_ARCH_X86_64)
+      uint64_t value = S + A;
+      switch (type) {
+      case 0:
+        break;
+      case 1:
+        *(uint64_t *)P = value;
+        break;
+      case 2:
+      case 4:
+        if ((int64_t)(value - P) < INT_MIN || (int64_t)(value - P) > INT_MAX)
+          return false;
+        *(uint32_t *)P = value - P;
+        break;
+      case 10:
+        if (value > UINT_MAX)
+          return false;
+        *(uint32_t *)P = value;
+        break;
+      case 11:
+        if ((int64_t)value != (int32_t)value)
+          return false;
+        *(int32_t *)P = value;
+        break;
+      default:
+        return false;
+      }
+#else
       switch (type) {
       case R_386_NONE:
         break;
       case R_386_32:
-        *where = (uint32_t)(S + A);
+        *(uint32_t *)P = S + A;
         break;
       case R_386_PC32:
-        *where = (uint32_t)(S + A - P);
+        *(uint32_t *)P = S + A - P;
         break;
       default:
-        printk("module: unsupported relocation type %d\n", type);
         return false;
       }
+#endif
     }
   }
   return true;
 }
 
-static bool module_copy_sections(module_loaded_t *module, Elf32_Ehdr *hdr) {
+static bool module_copy_sections(module_loaded_t *module, Elf_Ehdr *hdr) {
   uint32_t alloc_count = 0;
   for (int i = 0; i < hdr->e_shnum; i++) {
-    Elf32_Shdr *section = elf32_section(hdr, i);
+    Elf_Shdr *section = elf_section(hdr, i);
     if (section && (section->sh_flags & SHF_ALLOC) && section->sh_size) {
       alloc_count++;
     }
@@ -247,12 +294,12 @@ static bool module_copy_sections(module_loaded_t *module, Elf32_Ehdr *hdr) {
   module->section_count = 0;
 
   for (int i = 0; i < hdr->e_shnum; i++) {
-    Elf32_Shdr *section = elf32_section(hdr, i);
+    Elf_Shdr *section = elf_section(hdr, i);
     if (!section || !(section->sh_flags & SHF_ALLOC) || !section->sh_size) {
       continue;
     }
 
-    void *buffer = page_malloc(section->sh_size);
+    void *buffer = arch_module_allocate(section->sh_size);
     if (!buffer) {
       printk("module: no memory for section %d\n", i);
       return false;
@@ -264,7 +311,7 @@ static bool module_copy_sections(module_loaded_t *module, Elf32_Ehdr *hdr) {
 
     module_section_t *dst = &module->sections[module->section_count++];
     memset(dst, 0, sizeof(*dst));
-    const char *section_name = elf32_section_name(hdr, i);
+    const char *section_name = elf_section_name(hdr, i);
     if (section_name) {
       strncpy(dst->name, section_name, sizeof(dst->name) - 1);
     }
@@ -297,7 +344,7 @@ static void module_release_memory(module_loaded_t *module) {
   if (module->sections) {
     for (uint32_t i = 0; i < module->section_count; i++) {
       if (module->sections[i].addr) {
-        page_free(module->sections[i].addr, module->sections[i].size);
+        arch_module_free(module->sections[i].addr, module->sections[i].size);
       }
     }
     free(module->sections);
@@ -339,8 +386,8 @@ static bool module_load_image(module_loaded_t *module, const char *path) {
   }
   fclose(stream);
 
-  Elf32_Ehdr *hdr = (Elf32_Ehdr *)module->image;
-  if (!elf32_validate_relocatable(hdr, module->image_size)) {
+  Elf_Ehdr *hdr = (Elf_Ehdr *)module->image;
+  if (!elf_validate_relocatable(hdr, module->image_size)) {
     printk("module: %s is not relocatable ELF\n", path);
     return false;
   }
@@ -349,6 +396,13 @@ static bool module_load_image(module_loaded_t *module, const char *path) {
   }
   if (!module_apply_relocations(module, hdr)) {
     return false;
+  }
+  for (uint32_t i = 0; i < module->section_count; i++) {
+    module_section_t *section = &module->sections[i];
+    if (!arch_module_protect(section->addr, section->size,
+                             section->flags & SHF_WRITE,
+                             section->flags & SHF_EXECINSTR))
+      return false;
   }
   module->info = module_find_info(module);
   if (!module->info || module->info->magic != MODULE_INFO_MAGIC ||

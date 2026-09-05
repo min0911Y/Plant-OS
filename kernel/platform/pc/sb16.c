@@ -154,7 +154,7 @@ int sb16_set(int cmd, void* args) {
       sb.channel = 5;
       return 0;
     case 4:
-      sb_set_volume((uint32_t)args & 0xff);
+      sb_set_volume((uintptr_t)args & 0xff);
       return 0;
     default:
       break;

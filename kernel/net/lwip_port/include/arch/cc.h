@@ -26,6 +26,7 @@ typedef uintptr_t mem_ptr_t;
 typedef irq_state_t sys_prot_t;
 
 u32_t lwip_port_rand(void);
+int lwip_port_atoi(const char *text);
 void lwip_port_assert(const char *message);
 
 #define LWIP_RAND() lwip_port_rand()

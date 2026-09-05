@@ -144,7 +144,7 @@ void task_to_user_mode_shell() {
       ;
   }
   uintptr_t alloc_addr =
-      (image_end + PAGE_SIZE_BYTES - 1) & ~(PAGE_SIZE_BYTES - 1);
+      (image_end + PAGE_SIZE_BYTES - 1) & ~(uintptr_t)(PAGE_SIZE_BYTES - 1);
   size_t pg = size_div_round_up(*(task->alloc_size), PAGE_SIZE_BYTES);
   struct user_runtime_layout layout;
   if (!user_runtime_layout_calculate(alloc_addr, pg, 128, true, user_eip,
@@ -168,7 +168,7 @@ void task_to_user_mode_shell() {
   arch_task_set_kernel_stack(task->top);
 
   kernel_lock_leave();
-  arch_task_enter_user(user_eip, layout.stack_top);
+  arch_task_enter_user(user_eip, layout.stack_top, 0);
 }
 void task_to_user_mode_elf(char *filename) {
   mtask *task = current_task();
@@ -214,7 +214,7 @@ void task_to_user_mode_elf(char *filename) {
       ;
   }
   uintptr_t alloc_addr =
-      (image_end + PAGE_SIZE_BYTES - 1) & ~(PAGE_SIZE_BYTES - 1);
+      (image_end + PAGE_SIZE_BYTES - 1) & ~(uintptr_t)(PAGE_SIZE_BYTES - 1);
   size_t pg = size_div_round_up(*(task->alloc_size), PAGE_SIZE_BYTES);
   bool uses_status_page = task->ptid != (uint32_t)-1;
   struct user_runtime_layout layout;
@@ -245,7 +245,7 @@ void task_to_user_mode_elf(char *filename) {
   arch_task_set_kernel_stack(task->top);
 
   kernel_lock_leave();
-  arch_task_enter_user(user_eip, layout.stack_top);
+  arch_task_enter_user(user_eip, layout.stack_top, 0);
 }
 int os_execute(char *filename, char *line) {
   if (filename == NULL || line == NULL) {

@@ -5,7 +5,7 @@ ARCH_LD_EMULATION = elf_i386
 ARCH_ASM_FORMAT = elf32
 ENTRYPOINT = 0x70000000
 else
-$(error unsupported ARCH '$(ARCH)'; supported application architectures: i386)
+$(error this application Makefile has no ARCH '$(ARCH)' backend; ported x86_64 applications use apps/native.mk)
 endif
 
 CFLAGS = $(ARCH_CFLAGS) -std=gnu17 -I$(INCLUDE_PATH) -nostdinc -nolibc -nostdlib -ffreestanding -fno-stack-protector -Qn -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fomit-frame-pointer -finput-charset=UTF-8 -fexec-charset=GB2312 -Qn -O0 -w

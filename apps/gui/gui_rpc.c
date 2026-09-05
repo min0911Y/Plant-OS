@@ -117,9 +117,9 @@ static int gui_create_window(rpc_call_t *call) {
     free(allocation);
     return RPC_ERR_NOMEM;
   }
-  gui_window_shared_t *shared = (gui_window_shared_t *)(((uintptr_t)allocation +
-                                                           0xfffu) &
-                                                          ~0xfffu);
+  gui_window_shared_t *shared =
+      (gui_window_shared_t *)(((uintptr_t)allocation + 0xfffu) &
+                              ~(uintptr_t)0xfffu);
   memset(shared, 0, mapping_size);
 
   TaskLock();

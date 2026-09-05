@@ -1,0 +1,11 @@
+#ifndef KERNEL_X86_64_USER_H
+#define KERNEL_X86_64_USER_H
+
+#define USER_SPACE_START ((uintptr_t)0x100000000ull)
+#define USER_HEAP_END ((uintptr_t)0x400000000000ull)
+#define USER_SHARED_START (USER_HEAP_END + 0x100000ull)
+#define USER_SHARED_END (USER_SHARED_START + 0x10000000ull)
+#define USER_FRAMEBUFFER_START ((uintptr_t)0x600000000000ull)
+#define USER_SPACE_END ((uintptr_t)0x800000000000ull)
+
+#endif

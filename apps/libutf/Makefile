@@ -1,3 +1,8 @@
+ARCH ?= i386
+ifeq ($(ARCH),x86_64)
+NATIVE_TARGETS := libs/x86_64/libutf.a
+include ../native.mk
+else ifeq ($(ARCH),i386)
 # See LICENSE file for copyright and license details.
 
 include config.mk
@@ -106,3 +111,7 @@ uninstall:
 clean:
 	@echo cleaning
 	@rm -f $(GEN) $(OBJ) $(LIB) $(TEST)
+
+else
+$(error unsupported ARCH '$(ARCH)'; supported architectures: i386 x86_64)
+endif

@@ -7,8 +7,12 @@
 #define GUI_TITLE_MAX 255u
 
 /* This range is reserved for client-side GUI shared mappings. */
+#if defined(PLANT_ARCH_X86_64)
+#define GUI_SHARED_REGION_START ((uintptr_t)0x400000100000ull)
+#else
 #define GUI_SHARED_REGION_START ((uintptr_t)0xf0100000u)
-#define GUI_SHARED_REGION_END ((uintptr_t)0xf1000000u)
+#endif
+#define GUI_SHARED_REGION_END (GUI_SHARED_REGION_START + 0xf00000u)
 
 #define GUI_EVENT_QUEUE_CAPACITY 64u
 

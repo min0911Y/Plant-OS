@@ -4,6 +4,7 @@ typedef unsigned int vram_t;
 typedef vram_t color_t;
 #include "list.h"
 #include <ctypes.h>
+#include <framebuffer.h>
 #include <gui_rpc.h>
 struct tty {
   int using1;                              // 使用标志
@@ -78,7 +79,7 @@ struct desktop {
   int xsize, ysize;
   struct List *window_list;
   window_t *focused_window;
-  void (*display)(desktop_t *desktop, vram_t *vram);
+  void (*display)(desktop_t *desktop, const framebuffer_info_t *framebuffer);
   void (*hide)(desktop_t *desktop);
   void (*draw)(desktop_t *desktop, int x, int y, int x1, int y1, color_t color);
   void (*puts)(desktop_t *desktop, char *s, int x, int y, color_t color);
@@ -170,7 +171,7 @@ gmouse_t *create_gmouse(desktop_t *desktop, int x, int y, int pos);
 struct console {
   window_t *window;
   struct tty *tty;
-  unsigned tty_handle;
+  uintptr_t tty_handle;
   int xsize, ysize, x, y;
   struct SHTCTL *shtctl;
   vram_t *vram_copy, *vram_cur;
@@ -225,12 +226,16 @@ struct SHTCTL {
   vram_t *vram;
   unsigned char *map;
   int xsize, ysize, top;
+  size_t stride;
+  uint8_t red_shift, green_shift, blue_shift;
   struct SHEET *sheets[MAX_SHEETS];
   struct SHEET sheets0[MAX_SHEETS];
 };
 
 struct SHTCTL *shtctl_init(vram_t *vram, int xsize, int ysize);
 void ctl_free(struct SHTCTL *ctl);
+void sheet_refreshsub(struct SHTCTL *ctl, int x, int y, int x1, int y1, int h0,
+                      int h1);
 struct SHEET *sheet_alloc(struct SHTCTL *ctl);
 void sheet_setbuf(struct SHEET *sht, vram_t *buf, int xsize, int ysize,
                   int col_inv);

@@ -39,7 +39,8 @@ typedef struct {
   multiboot2_memory_entry_t entries[];
 } multiboot2_memory_map_tag_t;
 
-static boot_info_t boot_info;
+static boot_memory_range_t memory_ranges[BOOT_MEMORY_RANGE_CAPACITY];
+static boot_info_t boot_info = {.memory_ranges = memory_ranges};
 
 static uintptr_t align_up(uintptr_t value, uintptr_t alignment) {
   return (value + alignment - 1) & ~(alignment - 1);
