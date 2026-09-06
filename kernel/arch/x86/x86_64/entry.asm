@@ -29,6 +29,8 @@ global arch_task_interrupt_return
   xor eax, eax
   mov ecx, 64
   rep stosq
+  ; A transient frame needs a complete image: XSAVEOPT's modified-state
+  ; optimization cannot be used with a cleared or reused stack buffer.
   fxsave64 [rsp]
   ldmxcsr [kernel_mxcsr]
 %endmacro

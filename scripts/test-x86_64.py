@@ -307,6 +307,8 @@ def main():
                         help="QEMU chipset; q35 exercises ACPI MCFG/ECAM configuration access")
     parser.add_argument("--memory", type=int, default=1024, help="guest RAM in MiB")
     parser.add_argument("--cpus", type=int, default=4)
+    parser.add_argument("--cpu", default="max", help="QEMU CPU model and feature overrides")
+    parser.add_argument("--accel", choices=("tcg", "kvm"), default="tcg")
     parser.add_argument("--apic", choices=("xapic", "x2apic"),
                         help="require a QEMU APIC mode and verify the boot handoff")
     parser.add_argument("--usb-debug", action="store_true",
@@ -480,10 +482,10 @@ def main():
                 config.write_bytes(original_config)
     serial = output / "serial.log"
     serial.write_bytes(b"")
-    cpu = "max"
+    cpu = args.cpu
     if args.apic:
         cpu += "," + ("+" if args.apic == "x2apic" else "-") + "x2apic,enforce"
-    command = ["qemu-system-x86_64", "-accel", "tcg", "-cpu", cpu, "-smp", str(args.cpus),
+    command = ["qemu-system-x86_64", "-accel", args.accel, "-cpu", cpu, "-smp", str(args.cpus),
                "-machine", args.machine + (",i8042=off" if args.usb else ""),
                "-m", str(args.memory), "-rtc", "base=2026-09-05T04:05:06,clock=vm", "-cdrom", str(iso),
                "-boot", "d", "-display", "none", "-serial", f"file:{serial}",

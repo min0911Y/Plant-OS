@@ -53,7 +53,19 @@ x86_64 使用四级页表和 Limine HHDM，不探测写物理内存。物理页�
 
 系统调用保留 Plant API 的语义编号，但使用完整的 64 位参数：`RAX` 为编号，参数为 `RDI, RSI, RDX, R10, R8, R9`。这不是 Linux ABI。入口通过 `swapgs` 取得每 CPU 内核栈，屏蔽 IF/TF/DF/NT/AC；NMI、双重故障和机器检查有独立 IST。用户中断系统调用门未开放，32 位程序会在 ELF 检查时被拒绝。
 
-用户与内核都以 `-mno-red-zone -msse2 -mfpmath=sse -mlong-double-64` 构建。入口在执行 C 代码前保存 FXSAVE64 状态并装入内核 MXCSR，返回恢复用户状态；调度和 fork 保留全部 XMM 寄存器。FSGSBASE 和 OSXSAVE 未启用；用户 GS 固定为零，AVX 不属于当前 ABI。信号返回使用编号 `0x65`，检查用户 frame 后经 `iretq` 恢复完整寄存器。
+用户与内核都以 `-mno-red-zone -msse2 -mfpmath=sse -mlong-double-64` 构建。调度器在 CPU 支持时使用 XSAVEOPT64/XRSTOR64，否则使用 FXSAVE64/FXRSTOR64；BSP 选择后端，AP 验证能力。XSAVEOPT 后端启用 CR4.OSXSAVE，并在每个 CPU 设置 XCR0=3，只保存 x87 和 SSE；任务保存区为 64 字节对齐的 576-byte 标准 XSAVE 格式，任务注册表按页分配。保存区在恢复和下次保存之间保持完整，当前任务 reset 同时重置硬件状态跟踪。
+
+临时中断及 syscall 栈帧在执行 C 代码前仍保存完整 FXSAVE64 状态并装入内核 MXCSR，返回时恢复；清零或复用的临时栈不能依赖 XSAVEOPT 跳过未修改状态。调度、fork 和信号返回保留全部 XMM、x87 和 MXCSR。FSGSBASE 未启用，用户 GS 固定为零，AVX 不属于当前 ABI。信号返回使用编号 `0x65`，检查用户 frame 后经 `iretq` 恢复完整寄存器；信号 frame 保持完整的 FXSAVE 格式，不接受用户提供的 XSAVE header。
+
+`simdtest.bin` 验证多核切换、fork、x87、16 个 XMM、MXCSR 和显式 reset。以下 CPU 配置分别覆盖 XSAVEOPT、只有 XSAVE、没有 XSAVE；串口 `simd: context=... xcr0=...` 显示实际选择，这些配置均运行完整回归：
+
+```sh
+python3 scripts/test-x86_64.py --cpu max
+python3 scripts/test-x86_64.py --cpu max,xsaveopt=off,enforce
+python3 scripts/test-x86_64.py --cpu max,xsave=off,xsaveopt=off,xsavec=off,xsaves=off,enforce
+# 支持 XSAVEOPT 的宿主：验证真实硬件优化，而非仅 TCG 的指令模拟
+python3 scripts/test-x86_64.py --accel kvm --cpu host,enforce
+```
 
 ## 显示与终端
 

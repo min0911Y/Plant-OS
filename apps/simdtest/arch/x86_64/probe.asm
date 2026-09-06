@@ -1,12 +1,18 @@
 bits 64
 default rel
 section .text
-global simd_yield_probe, simd_fork_probe
+global simd_yield_probe, simd_fork_probe, simd_reset_probe
 
+simd_reset_probe:
+  mov r9d, 1
+  mov eax, 0x50
+  jmp simd_probe
 simd_yield_probe:
+  xor r9d, r9d
   mov eax, 0x50
   jmp simd_probe
 simd_fork_probe:
+  xor r9d, r9d
   mov eax, 0x4a
 simd_probe:
   push rbx
@@ -27,6 +33,12 @@ simd_probe:
   movdqu xmm%+reg, [r12 + reg * 16]
 %assign reg reg + 1
 %endrep
+  fninit
+  fld qword [r12]
+  test r9d, r9d
+  jz .loop
+  mov eax, 0x2f
+  syscall
 .loop:
   mov eax, ebx
   syscall
@@ -38,6 +50,17 @@ simd_probe:
 %assign reg reg + 1
 %endrep
   stmxcsr [r15]
+  ; Capture the x87 control/status/tag word as well as ST(0) when nonempty.
+  ; FXSAVE needs only 16-byte alignment and is available on every x86_64 CPU.
+  sub rsp, 512
+  fxsave64 [rsp]
+  mov rcx, [rsp]
+  mov [r13 + 256], rcx
+  test byte [rsp + 4], 0xff
+  jz .empty
+  fstp qword [r13 + 264]
+.empty:
+  add rsp, 512
   add rsp, 16
   pop r15
   pop r14

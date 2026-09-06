@@ -17,7 +17,7 @@ void arch_task_enter_user(uintptr_t entry, uintptr_t stack, uintptr_t argument) 
   /* Use a local frame: the current C stack can overlap the TSS entry slot. */
   x64_interrupt_frame_t initial = {0};
   arch_fpu_reset(task);
-  initial.simd = task->fpu_state;
+  initial.simd = task->fpu_state.legacy;
   initial.rip = entry;
   initial.rdi = argument;
   initial.rsp = (stack & ~15ull) - 8;

@@ -59,12 +59,13 @@ static bool task_registry_grow(void) {
     return false;
   }
 
-  mtask *chunk = malloc(sizeof(*chunk) * TASK_SLOT_CHUNK_SIZE);
+  /* Task contexts may require stricter alignment than the general heap. */
+  size_t chunk_bytes = sizeof(mtask) * TASK_SLOT_CHUNK_SIZE;
+  mtask *chunk = page_malloc(chunk_bytes);
   if (chunk == NULL) {
     return false;
   }
   uint32_t first_tid = task_registry.slot_count;
-  memset(chunk, 0, sizeof(*chunk) * TASK_SLOT_CHUNK_SIZE);
   for (uint32_t i = 0; i < TASK_SLOT_CHUNK_SIZE; i++) {
     task_slot_reset(&chunk[i], first_tid + i);
   }
@@ -77,14 +78,14 @@ static bool task_registry_grow(void) {
     if (capacity < task_registry.chunk_capacity ||
         capacity > UINT_MAX / sizeof(*task_registry.chunks)) {
       irq_restore(state);
-      free(chunk);
+      page_free(chunk, chunk_bytes);
       return false;
     }
     mtask **chunks = realloc(task_registry.chunks,
                              capacity * sizeof(*task_registry.chunks));
     if (chunks == NULL) {
       irq_restore(state);
-      free(chunk);
+      page_free(chunk, chunk_bytes);
       return false;
     }
     task_registry.chunks = chunks;

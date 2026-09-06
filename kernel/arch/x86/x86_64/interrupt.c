@@ -168,7 +168,7 @@ void x64_syscall_dispatch(x64_interrupt_frame_t *frame) {
   irq_enable();
   syscall_dispatch(&call);
   if (reset_simd)
-    frame->simd = current_task()->fpu_state;
+    frame->simd = current_task()->fpu_state.legacy;
   frame->rax = call.value;
   frame->rdi = call.argument0;
   frame->rsi = call.argument1;
