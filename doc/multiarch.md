@@ -86,15 +86,15 @@ python3 scripts/test-x86_64.py --accel kvm --cpu host,enforce
 
 Limine 请求 `1024x768x32`，以固件实际提供的尺寸、pitch 和颜色布局为准。x86_64 的 `set_mode(w, h)` 返回 `intptr_t`：取得当前显示、清屏并映射 framebuffer，硬件模式保持不变。程序通过 `framebuffer_info()` 取得真实布局。GUI 的目标 stride 独立于窗口的逻辑宽度，并支持 RGB 位序转换。
 
-flanterm 自己处理 ANSI/VT100，默认 TTY 不再经过内核旧解析器。旧 GUI 文本 TTY 仍可使用原解析器；`VT100=0` 可以在构建时将它移除。i386 的 TextMode、HighTextMode、VGA 与 BIOS/VBE 操作继续由原后端提供，x86_64 对旧模式请求返回负状态。显示所有者退出后恢复 flanterm。
+flanterm 自己处理 ANSI/VT100，默认 TTY 不再经过内核旧解析器。GUI 启动独立的 `term.bin`，由 os-terminal 处理终端输出；fartty 同样绕过内核旧解析器。旧解析器仅用于 i386 的传统显示后端，`VT100=0` 可以在构建时将它移除。i386 的 TextMode、HighTextMode、VGA 与 BIOS/VBE 操作继续由原后端提供，x86_64 对旧模式请求返回负状态。显示所有者退出后恢复 flanterm。
 
-GUI console 的内核后端 `fartty` 通过 IPC/RPC 请求用户态服务，协议单源定义在 `apps/include/tty_rpc.h` 和 `rpc_wire.h`。`tty_alloc(server_tid, opcode, columns, rows)` 将 TTY 绑定到同一任务组中的服务任务，返回不透明且不复用的句柄；`tty_set(tid, 0)` 恢复默认 TTY。设置、释放和输入通知均校验服务所属任务组与世代号，服务退出会关闭其 TTY 和会话。
+`term` 的内核后端 `fartty` 通过 IPC/RPC 请求用户态服务，协议单源定义在 `apps/include/tty_rpc.h` 和 `rpc_wire.h`。`tty_alloc(server_tid, opcode, columns, rows)` 将 TTY 绑定到同一任务组中的服务任务，返回不透明且不复用的句柄；`tty_set(tid, 0)` 恢复默认 TTY。设置、释放和输入通知均校验服务所属任务组与世代号，服务退出会关闭其 TTY 和会话。
 
-输出、光标、清屏、滚屏、颜色区域及键盘 FIFO 查询/读取均由服务的 RPC handler 执行。连续文本按消息容量分批，ANSI 控制序列仍经过现有内核解析器；同一 TTY 的请求串行执行，收到有效应答后更新光标状态。GUI 只保存自己的 console 状态和像素，内核不持有用户函数或 console 指针。
+输出、光标、清屏、滚屏、颜色区域及键盘 FIFO 查询/读取均由 term 的 RPC handler 执行。连续文本按消息容量分批，ANSI 字节不经内核解释或改写；同一 TTY 的请求串行执行，收到有效应答后更新光标状态。GUI 只管理普通窗口、合成与输入分发，终端状态和绘制归 term 所有。依赖、显式刷新和会话生命周期见 [终端](terminal.md)。
 
 内核 RPC 调用使用保留的调用序号高位，用户态不能伪造这种请求。应答按调用序号、opcode 和双方 TID/generation 校验后直接唤醒内核等待者，不进入应用的 IPC 队列；队列已满也不妨碍返回，迟到应答被丢弃。每次 TTY 请求使用有限 deadline，超时或非法应答使该 TTY 断开，后续操作不重试。输入读取跨越 RPC 等待时用通知序号检查竞态，避免空应答覆盖已到达的按键唤醒。
 
-`rpctest.bin` 的 `tty_rpc` 项验证批量文本、光标/清屏、已满的应用队列、输入通知竞态、句柄权限、超时、迟到应答及服务退出后的会话回收。`--console` 则通过实际键盘事件及连续像素比较验证 GUI 提示符、回显、退格、滚屏及关闭后重新创建控制台。
+`rpctest.bin` 的 `tty_rpc` 项验证批量文本、原始及分段 ANSI、光标/清屏、已满的应用队列、输入通知竞态、句柄权限、超时、迟到应答及服务退出后的会话回收。`--console` 验证独立 term 的输出协议，并通过实际键盘事件及连续像素比较验证 psh 提示符、回显、退格、滚屏及关闭后重新启动终端。
 
 ## SDL2 与桌面程序
 

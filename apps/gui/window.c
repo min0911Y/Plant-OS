@@ -56,9 +56,6 @@ void close_window(window_t *window) {
   if (window == NULL) {
     return;
   }
-  if (window->console != NULL) {
-    window->console->close(window->console);
-  }
   if (window->super_window != NULL) {
     window->super_window->close(window->super_window);
   }
@@ -120,11 +117,7 @@ void handle_left_window(window_t *window, gmouse_t *gmouse) {
     // printk("You hide a window.\n");
     return;
   }
-  if (window->console != NULL) {
-    if (window->console->handle_left != NULL) {
-      window->console->handle_left(window->console, gmouse);
-    }
-  } else if (window->super_window != NULL) {
+  if (window->super_window != NULL) {
     if (window->super_window->handle_left != NULL) {
       window->super_window->handle_left(window, gmouse);
     }
@@ -257,10 +250,7 @@ window_t *create_window(desktop_t *desktop, const char *title, int xsize,
   res->handle_stay = NULL;
   res->handle_mouse_wheel = NULL;
   res->close = close_window;
-  res->console = NULL;
   res->super_window = NULL;
-  res->fifo_keypress = NULL;
-  res->fifo_keyup = NULL;
   res->shared = NULL;
   res->keyboard_events = false;
   res->sht->wnd = res;

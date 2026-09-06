@@ -10,13 +10,6 @@
 
 mouse_event_t mouse_event;
 void (*drop)();
-char keytable1[0x54] = { // 未按下Shift
-    0,    0x01, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-',  '=',
-    '\b', '\t', 'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[',  ']',
-    10,   0,    'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', '\'', '`',
-    0,    '\\', 'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/', 0,    '*',
-    0,    ' ',  0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,    0,
-    0,    '7',  '8', '9', '-', '4', '5', '6', '+', '1', '2', '3', '0',  '.'};
 static window_t *window_at(gmouse_t *gmouse) {
   for (int height = gmouse->sht->ctl->top; height > 0; height--) {
     struct SHEET *sheet = gmouse->sht->ctl->sheets[height];
@@ -136,30 +129,13 @@ void gmouse(gmouse_t *gmouse) {
 
       window_t *r = gmouse->desktop->focused_window;
       uint8_t i = get_key_press();
-      // if (gmouse->click_textbox_last != NULL) {
-      //   gmouse->click_textbox_last->add_char(gmouse->click_textbox_last,
-      //                                        keytable1[i]);
-      // }
-      if (r != NULL) {
-        if (r->shared != NULL && r->keyboard_events) {
-          gui_event_queue_push(&r->shared->key_press, i);
-        } else if (r->fifo_keypress != NULL) {
-          fifo8_put(r->fifo_keypress, i);
-          if (r->console != NULL) {
-            tty_notify_input(r->console->tty_handle);
-          }
-        }
-      }
+      if (r != NULL && r->shared != NULL && r->keyboard_events)
+        gui_event_queue_push(&r->shared->key_press, i);
     } else if (key_up_status() != 0) {
       window_t *r = gmouse->desktop->focused_window;
       uint8_t i = get_key_up();
-      if (r != NULL) {
-        if (r->shared != NULL && r->keyboard_events) {
-          gui_event_queue_push(&r->shared->key_up, i);
-        } else if (r->fifo_keyup != NULL) {
-          fifo8_put(r->fifo_keyup, i);
-        }
-      }
+      if (r != NULL && r->shared != NULL && r->keyboard_events)
+        gui_event_queue_push(&r->shared->key_up, i);
     }
     window_t *focused = gmouse->desktop->focused_window;
     new = focused != NULL ? focused->tid : 0;

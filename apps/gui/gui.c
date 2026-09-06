@@ -36,18 +36,40 @@ static void *load_file(const char *path, uint32_t *size) {
   }
   return buffer;
 }
-static void click1(button_t *button) {
+typedef struct gui_launch {
+  struct gui_launch *next;
+  int tid;
+  bool finished;
+  unsigned char stack[32 * 1024];
+} gui_launch_t;
+
+static gui_launch_t *launches;
+
+static void terminal_task(gui_launch_t *launch) {
+  int status = exec("term.bin", "term.bin");
+  if (status != 0)
+    logkf("GUI: term exited with status %d\n", status);
+  __atomic_store_n(&launch->finished, true, __ATOMIC_RELEASE);
+  _exit(status);
+}
+
+static void launch_terminal(button_t *button) {
   (void)button;
-  window_t *a =
-      create_window(desktop0, "console", 80 * 8 + 8, 25 * 16 + 28,
-                    NowTaskID());
-  if (a == NULL) {
+  gui_launch_t *launch = calloc(1, sizeof(*launch));
+  if (launch == NULL)
     return;
+  TaskLock();
+  launch->tid = AddThread("launch", (uintptr_t)terminal_task,
+                          (uintptr_t)(launch->stack + sizeof(launch->stack)),
+                          (uintptr_t)launch);
+  if (launch->tid < 0) {
+    free(launch);
+    logkf("GUI: could not start term\n");
+  } else {
+    launch->next = launches;
+    launches = launch;
   }
-  a->display(a, 0, 0);
-  if (create_console(a, 80 * 8, 25 * 16, 4, 24) == NULL) {
-    close_window(a);
-  }
+  TaskUnlock();
 }
 
 unsigned char *ascfont, *hzkfont;
@@ -285,22 +307,12 @@ void main() {
   // kernel",
   //                18, 30, COL_000000);
 
-  window_t *window2 =
-      create_window(desktop0, "console", 80 * 8 + 8, 25 * 16 + 28,
-                    NowTaskID());
-  if (window2 == NULL) {
-    logkf("GUI failed to create initial console window\n");
-    return;
-  }
-  window2->display(window2, 250, 250);
   gmouse_t *gmouse0 =
       create_gmouse(desktop0, desktop0->xsize / 2, desktop0->ysize / 2, 5);
-  console_t *console0 = create_console(window2, 80 * 8, 25 * 16, 4, 24);
-  if (gmouse0 == NULL || console0 == NULL) {
-    logkf("GUI failed to create input or console\n");
+  if (gmouse0 == NULL) {
+    logkf("GUI failed to create input\n");
     return;
   }
-  // console_t *console1 = create_console(window3, 40 * 8, 20 * 16, 4, 24);
 
   window_t *window1 =
       create_window(desktop0, "ToolBox", 200, 200, NowTaskID());
@@ -315,19 +327,31 @@ void main() {
     return;
   }
   window1->display(window1, 200, 200);
-  button_t *button0 =
-      create_button(super_window0, "NewConsole", 100, 20, 50, 50, click1);
+  button_t *button0 = create_button(super_window0, "Terminal", 100, 20, 50, 50,
+                                    launch_terminal);
   if (button0 == NULL) {
     close_window(window1);
     logkf("GUI failed to create toolbox button\n");
     return;
   }
-  // textbox_t *textbox0 = create_textbox(super_window0, 15 * 8, 16, 4, 110);
+  launch_terminal(NULL);
   unsigned clock1 = (unsigned)clock() - 1000;
   for (;;) {
     unsigned elapsed = (unsigned)clock() - clock1;
     if (elapsed >= 1000) {
       clock1 = clock();
+      TaskLock();
+      for (gui_launch_t **link = &launches; *link;) {
+        gui_launch_t *launch = *link;
+        if (!__atomic_load_n(&launch->finished, __ATOMIC_ACQUIRE)) {
+          link = &launch->next;
+          continue;
+        }
+        SubThread(launch->tid);
+        *link = launch->next;
+        free(launch);
+      }
+      TaskUnlock();
       time_t now = time(NULL);
       if (now == (time_t)-1)
         continue;

@@ -117,7 +117,7 @@ void handle_left_super_window(window_t *window, gmouse_t *gmouse) {
   }
 }
 super_window_t *create_super_window(window_t *window) {
-  if (window == NULL || window->console != NULL || window->super_window != NULL)
+  if (window == NULL || window->super_window != NULL)
     return NULL;
   super_window_t *res = malloc(sizeof(super_window_t));
   if (res == NULL) {

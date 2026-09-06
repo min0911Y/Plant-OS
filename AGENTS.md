@@ -75,9 +75,10 @@ make -C kernel ARCH=x86_64 livecd
 
 - `kernel/cmd/` 只适配用户态 `psh.bin`，shell 与普通程序统一走 `os_execute`。`psh -c` 直接分派 `argv[2..]`，交互解析与外部命令构造复用 `runtime_args.c`；按命令语义校验 argc，目录不能遮蔽同名 `.bin`。重挂载命令统一为 `remount_drive X:`。
 - psh/Lua 行编辑共用 `apps/third_party/pl_readline`。PS/2 与 USB 共用 `input_device.c` 的设备状态和逻辑键码；完整鼠标事件由 `mouse_read(mouse_event_t *)` 传递，不在用户态解码 PS/2 字节。
+- `getch()` 的字符、Ctrl 控制字符与导航键统一由内核转换，键值单源定义在 `apps/include/key_input.h`；Escape 为 ASCII 27。`editor.bin` 使用 `apps/third_party/pl_editor` 的 C 核心和 `apps/editor/` 平台层，经 VFS 读写文件、经 ANSI 终端显示，不引入私有键盘解码器或终端解析器。使用与回归见 [编辑器](doc/editor.md)。
 - 键盘只投递给有效输入 owner 或前台 TTY；TTY 所有权决定前台，阻塞使用 `WAIT_REASON_KEYBOARD`/`input_wait()`。同步执行在发布子进程时原子交接 TTY，仅交接调用者自己的鼠标所有权；返回时不能覆盖其他 owner。
 - `AddThread(name, entry, stack_top, argument)` 显式传四个参数，入口由架构建立对齐调用帧；调用者不手写栈槽。活动 TTY 与 `tty_session` 分开维护，销毁 TTY 前迁移会话并清理相关任务、FIFO、栈与窗口。
-- GUI 是单例 `gui` RPC 服务，须在切换显示和获取输入前注册。客户端只持有不透明窗口句柄及经过 owner/generation 校验的共享区域；焦点显式维护，GUI console 写入输入 FIFO 后调用 `tty_notify_input`。`fartty` 通过同一 IPC/RPC 协议调用所属服务，使用不透明 TTY 句柄及 TID/generation 校验；内核不得切换到用户地址空间执行回调，RPC 等待不得消费应用消息。
+- GUI 是单例 `gui` RPC 服务，须在切换显示和获取输入前注册。客户端只持有不透明窗口句柄及经过 owner/generation 校验的共享区域；焦点显式维护。终端由独立的 C 应用 `term.bin` 提供，直接链接 os-terminal 的对应架构静态库，默认通过 fartty 启动 `psh.bin`；GUI 不内置终端。fartty 原样转发 ANSI 字节，绕过内核旧 VT100 解析器；term 关闭 auto-flush，合并输出后显式刷新并同步提交窗口，有按键时调用 `tty_notify_input`。`fartty` 通过同一 IPC/RPC 协议调用所属服务，使用不透明 TTY 句柄及 TID/generation 校验；内核不得切换到用户地址空间执行回调，RPC 等待不得消费应用消息。依赖与验证见 [终端](doc/terminal.md)。
 - SDL 唯一活动实现为 `apps/sdl2`。GUI 合成读取已提交画面，`window_present` 应答后客户端才复用绘图缓冲，`window_refresh` 保留异步 damage 合并。显示布局以 `framebuffer_info()` 的实际尺寸、pitch 和颜色位序为准；framebuffer 别名保持相同缓存属性。详情见 [显示与 SDL](doc/multiarch.md)。
 
 ### 文件系统与设备
@@ -116,7 +117,7 @@ python3 scripts/test-x86_64.py --arch i386 --dynamic --memory 512
 | --- | --- |
 | IPC/RPC、磁盘、网络 | `rpctest.bin`、`dktest.bin`、`nettest.bin` |
 | 任务、异常、浮点 | `guitest.bin stress`/`capacity`、`exc_test.bin`、i386 `fputest.bin`、x86_64 `simdtest.bin` |
-| GUI、输入、SDL、工具 | `--mouse`、`--console`、`--sdl`、`--desktop-app`（`lite` 或 `nk`）、`--tools` |
+| GUI、输入、SDL、工具 | `--mouse`、`--console`、`--editor`、`--sdl`、`--desktop-app`（`lite` 或 `nk`）、`--tools` |
 | 动态链接与全部应用装载 | `--dynamic`、`--all-apps`，见 [动态链接验证](doc/dynamic-linking.md#验证) |
 | USB、PCI、AHCI | `--usb`、`--usb-hubs`、`--usb-irq`、`--usb-root-bus`、`--ahci --machine q35`；故障与模式组合见对应专题文档 |
 | APIC、SIMD 与 TLB 后端 | `--apic`、`--cpu`、`--tlb`，见 [多架构说明](doc/multiarch.md) |

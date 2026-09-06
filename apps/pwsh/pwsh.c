@@ -200,7 +200,7 @@ int main(int argc, char **argv) {
             }
           }
         }
-      } else if (c == 1) {
+      } else if (c == KEY_INPUT_ESCAPE) {
         TaskLock();
         goto_xy(8, 1);
         scan(path, 512);

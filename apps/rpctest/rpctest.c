@@ -445,6 +445,9 @@ static int client_main(unsigned server_tid) {
 
 /* Kernel TTY calls share the RPC wire protocol, but not the user inbox. */
 #define OP_TTY_FINISH (TTY_RPC_DISPATCH + 1)
+static const char tty_test_ansi[] = "\033[38;2;12;34;56m\033]0;raw\a";
+static const char tty_test_native[] =
+    "\033[?25l\033[?25h\033[38;2;12;34;56m\033]0;raw\a\033[0m";
 static struct {
   tty_t handle;
   unsigned writes, bytes, reads;
@@ -464,15 +467,23 @@ static int tty_test_dispatch(rpc_call_t *call) {
     unsigned length = call->arg_len - sizeof(*request);
     const char *text = (const char *)(request + 1);
     tty_test.writes++;
-    tty_test.bytes += length;
     if (length == 1 && text[0] == '!') {
+      tty_test.bytes++;
       // Reply after the kernel deadline; it must never enter the user inbox.
       sleep(2500);
       break;
     }
-    for (unsigned i = 0; i < length; i++)
-      tty_test.failed |= text[i] != 'x';
-    reply.state.x = (reply.state.x + length) % 80;
+    for (unsigned i = 0; i < length; i++) {
+      unsigned offset = tty_test.bytes++;
+      if (offset < 6000) {
+        tty_test.failed |= text[i] != 'x';
+        reply.state.x = (reply.state.x + 1) % 80;
+      } else {
+        offset -= 6000;
+        tty_test.failed |= offset >= sizeof(tty_test_native) - 1 ||
+                           text[i] != tty_test_native[offset];
+      }
+    }
     break;
   }
   case TTY_RPC_MOVE:
@@ -540,6 +551,9 @@ static int tty_test_writer(rpc_endpoint_t server) {
   Text_Draw_Box(0, 0, 1, 1, 0x17);
   clear();
   failed |= get_xy() != 0;
+  print(tty_test_ansi);
+  for (const char *p = "\033[0m"; *p; p++)
+    putch(*p);
   failed |= input_char_inSM() != 42;
   failed |=
       tty_notify_input(tty_test.handle) != -1; // Only the provider can wake it.
@@ -593,8 +607,9 @@ static int tty_test_server(unsigned parent) {
     }
   }
   int status = waittid(writer);
-  int failed = status != 0 || tty_test.failed || tty_test.writes != 3 ||
-               tty_test.bytes != 6001 || tty_test.reads != 2;
+  int failed = status != 0 || tty_test.failed || tty_test.writes != 10 ||
+               tty_test.bytes != 6000 + sizeof(tty_test_native) ||
+               tty_test.reads != 2;
   logkf("FARTTY RPC writes=%u bytes=%u reads=%u status=%d failed=%d\n",
         tty_test.writes, tty_test.bytes, tty_test.reads, status, failed);
   failed |= tty_free(tty_test.handle) != 0;

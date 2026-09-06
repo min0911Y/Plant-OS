@@ -9,12 +9,10 @@ typedef vram_t color_t;
 #include <framebuffer.h>
 #include <gui_rpc.h>
 #include <rpc.h>
-#include <tty_rpc.h>
 typedef struct desktop desktop_t;
 typedef struct window window_t;
 typedef struct super_window super_window_t;
 typedef struct gmouse gmouse_t;
-typedef struct console console_t;
 typedef struct button button_t;
 typedef struct textbox textbox_t;
 #define COL_000000 0x00000000
@@ -45,14 +43,6 @@ queue_t *queue_init();
 void queue_push(queue_t *q, unsigned value);
 unsigned queue_pop(queue_t *q);
 void queue_free(queue_t *q);
-struct FIFO8 {
-  unsigned char *buf;
-  int p, q, size, free, flags;
-};
-void fifo8_init(struct FIFO8 *fifo, int size, unsigned char *buf);
-int fifo8_put(struct FIFO8 *fifo, unsigned char data);
-int fifo8_get(struct FIFO8 *fifo);
-int fifo8_status(struct FIFO8 *fifo);
 #define MAX_SHEETS 256
 
 
@@ -76,15 +66,12 @@ desktop_t *get_now_desktop();
 struct window {
   bool using1;
   desktop_t *desktop;
-  console_t *console;
   super_window_t *super_window;
   struct SHEET *sht;
   vram_t *vram;
   unsigned tid;
   int xsize, ysize, x, y;
   char *title;
-  struct FIFO8 *fifo_keypress;
-  struct FIFO8 *fifo_keyup;
   gui_window_shared_t *shared;
   bool keyboard_events;
   void (*display)(window_t *window, int x, int y);
@@ -146,24 +133,6 @@ struct gmouse {
 
 bool Collision(int x, int y, int w, int h, int x1, int y1);
 gmouse_t *create_gmouse(desktop_t *desktop, int x, int y, int pos);
-
-struct console {
-  window_t *window;
-  tty_rpc_state_t state;
-  uintptr_t tty_handle;
-  int xsize, ysize, x, y;
-  struct SHTCTL *shtctl;
-  vram_t *vram_copy, *vram_cur;
-  struct SHEET *sht_copy, *sht_cur;
-  void *task_stack;
-  void (*handle_left)(console_t *console, gmouse_t *gmouse);
-  void (*handle_right)(console_t *console, gmouse_t *gmouse);
-  void (*handle_stay)(console_t *console, gmouse_t *gmouse);
-  void (*close)(console_t *console);
-};
-
-int console_rpc_dispatch(rpc_call_t *call);
-console_t *create_console(window_t *window, int xsize, int ysize, int x, int y);
 
 struct button {
   super_window_t *super_window;

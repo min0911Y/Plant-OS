@@ -1,25 +1,26 @@
 #include <dos.h>
 #include <input_device.h>
 #include <irq.h>
+#include <key_input.h>
 
 _Static_assert(sizeof(mouse_event_t) == 16, "mouse event ABI");
 
 mtask *keyboard_use_task;
 
 char keytable[0x54] = { // 按下Shift
-    0,    0x01, '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_',  '+',
-    '\b', '\t', 'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '{',  '}',
-    10,   0,    'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ':', '\"', '~',
-    0,    '|',  'Z', 'X', 'C', 'V', 'B', 'N', 'M', '<', '>', '?', 0,    '*',
-    0,    ' ',  0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,    0,
-    0,    '7',  'D', '8', '-', '4', '5', '6', '+', '1', '2', '3', '0',  '.'};
+    0,    '\033', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_',  '+',
+    '\b', '\t',   'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '{',  '}',
+    10,   0,      'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ':', '\"', '~',
+    0,    '|',    'Z', 'X', 'C', 'V', 'B', 'N', 'M', '<', '>', '?', 0,    '*',
+    0,    ' ',    0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,    0,
+    0,    '7',    'D', '8', '-', '4', '5', '6', '+', '1', '2', '3', '0',  '.'};
 char keytable1[0x54] = { // 未按下Shift
-    0,    0x01, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-',  '=',
-    '\b', '\t', 'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[',  ']',
-    10,   0,    'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', '\'', '`',
-    0,    '\\', 'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/', 0,    '*',
-    0,    ' ',  0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,    0,
-    0,    '7',  '8', '9', '-', '4', '5', '6', '+', '1', '2', '3', '0',  '.'};
+    0,    '\033', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-',  '=',
+    '\b', '\t',   'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[',  ']',
+    10,   0,      'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', '\'', '`',
+    0,    '\\',   'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/', 0,    '*',
+    0,    ' ',    0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,    0,
+    0,    '7',    '8', '9', '-', '4', '5', '6', '+', '1', '2', '3', '0',  '.'};
 
 extern struct tty *tty_default;
 static struct tty *tty_for_input(void) {
@@ -210,13 +211,29 @@ int sc2a(int sc) {
   if (sc >= 0x80) {
     switch (sc - 0x80) {
     case 0x48:
-      return -1;
+      return KEY_INPUT_UP;
     case 0x50:
-      return -2;
+      return KEY_INPUT_DOWN;
     case 0x4b:
-      return -3;
+      return KEY_INPUT_LEFT;
     case 0x4d:
-      return -4;
+      return KEY_INPUT_RIGHT;
+    case 0x47:
+      return KEY_INPUT_HOME;
+    case 0x4f:
+      return KEY_INPUT_END;
+    case 0x49:
+      return KEY_INPUT_PAGE_UP;
+    case 0x51:
+      return KEY_INPUT_PAGE_DOWN;
+    case 0x53:
+      return KEY_INPUT_DELETE;
+    case 0x52:
+      return KEY_INPUT_INSERT;
+    case 0x1c:
+      return '\n';
+    case 0x35:
+      return '/';
     default:
       return 0;
     }
@@ -228,7 +245,18 @@ int sc2a(int sc) {
   if (keytable1[sc] >= 'a' && keytable1[sc] <= 'z') {
     shifted ^= caps_lock;
   }
-  return shifted ? keytable[sc] : keytable1[sc];
+  int character = shifted ? keytable[sc] : keytable1[sc];
+  if (key_references[0x1d] || key_references[0x11d]) {
+    if (character >= 'a' && character <= 'z')
+      character -= 'a' - 'A';
+    if (character >= '@' && character <= '_')
+      return character & 0x1f;
+    if (character == '?')
+      return 127;
+    if (character == ' ')
+      return 0;
+  }
+  return character;
 }
 
 int getch(void) {

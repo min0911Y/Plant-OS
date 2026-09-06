@@ -176,5 +176,6 @@ void tty_start_curor_moving(struct tty *t) {
   t->cur_moving = 1;
   if (t->native_ansi)
     t->print(t, "\033[?25h");
-  t->MoveCursor(t, t->x, t->y);
+  else
+    t->MoveCursor(t, t->x, t->y);
 }

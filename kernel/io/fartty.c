@@ -79,18 +79,8 @@ static void fartty_print(struct tty *tty, const char *text) {
   memset(&message.request, 0, sizeof(message.request));
   message.request.operation = TTY_RPC_WRITE;
   while (*text != '\0' && !tty->remote.disconnected) {
-#if KERNEL_TTY_VT100
-    if (tty->vt100 || *text == '\033') {
-      t_putchar(tty, *text++);
-      continue;
-    }
-#endif
     unsigned length = 0;
     while (length < sizeof(message.text) && text[length] != '\0') {
-#if KERNEL_TTY_VT100
-      if (text[length] == '\033')
-        break;
-#endif
       message.text[length] = text[length];
       length++;
     }
@@ -152,6 +142,7 @@ struct tty *fartty_alloc(mtask *server, unsigned opcode, int xsize, int ysize) {
   tty->remote.server = (rpc_endpoint_t){server->tid, server->generation};
   tty->remote.opcode = opcode;
   tty->remote.handle = next_handle++;
+  tty->native_ansi = true;
   tty->print = fartty_print;
   return tty;
 }

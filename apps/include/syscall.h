@@ -8,6 +8,7 @@ extern "C" {
 #endif
 #include <ctypes.h>
 #include <input_event.h>
+#include <key_input.h>
 enum { SYSCALL_SIGNAL_RETURN = 0x65 };
 #define T_DrawBox(x, y, w, h, c) Text_Draw_Box((y), (x), (h) + y, (w) + x, (c))
 typedef enum { FLE, DIR, RDO, HID, SYS } ftype;
@@ -124,13 +125,6 @@ typedef struct module_handle {
   uint32_t section_count;
   uint32_t export_count;
 } module_handle_t;
-
-enum key_input {
-  KEY_INPUT_UP = -1,
-  KEY_INPUT_DOWN = -2,
-  KEY_INPUT_LEFT = -3,
-  KEY_INPUT_RIGHT = -4,
-};
 
 void putch(char ch);
 int getch(void);

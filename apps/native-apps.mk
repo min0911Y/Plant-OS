@@ -2,6 +2,18 @@
 SDL_ROOT := sdl2
 include sdl2/sources.mk
 
+OS_TERMINAL_DIR ?= $(HOME)/os-terminal
+OS_TERMINAL_LIB := $(OS_TERMINAL_DIR)/libos_terminal_$(if $(filter i386,$(ARCH)),x86,x64).a
+$(BUILD)/term/%.o: CFLAGS += -I$(OS_TERMINAL_DIR)
+$(BUILD)/term/arch/i386/float.o: CFLAGS += -mno-fp-ret-in-387 -fvisibility=hidden
+$(eval $(call application,term,$(OS_TERMINAL_LIB),term/term.c $(if $(filter i386,$(ARCH)),term/arch/i386/float.c)))
+$(BUILD)/term/term.o: $(BUILD)/term/.config $(OS_TERMINAL_DIR)/os_terminal.h
+.PHONY: FORCE_TERM_CONFIG
+$(BUILD)/term/.config: FORCE_TERM_CONFIG
+	@mkdir -p $(dir $@)
+	@printf '%s\n' '$(abspath $(OS_TERMINAL_DIR))' > $@.tmp
+	@if cmp -s $@.tmp $@; then rm $@.tmp; else mv $@.tmp $@; fi
+
 define library
 .PHONY: $(1)
 $(1): $(LIBS)/$(1).a
@@ -30,7 +42,9 @@ $(foreach app,$(SIMPLE_PROGRAMS),$(eval $(call application,$(app))))
 $(eval $(call application,bf,,brainfuck/bf.c))
 $(eval $(call application,c4,,c4/c4.c))
 $(eval $(call application,cc,,cc/cc.c))
-$(eval $(call application,editor,,editor/editor.cpp))
+EDITOR_SOURCES := editor/main.c editor/platform.c third_party/pl_editor/pleditor.c third_party/pl_editor/syntax.c
+$(call objects,$(EDITOR_SOURCES)): CFLAGS += -Ithird_party/pl_editor
+$(eval $(call application,editor,,$(EDITOR_SOURCES)))
 
 ZLIB_SOURCES := $(addprefix zlib/,adler32.c compress.c crc32.c deflate.c gzclose.c gzlib.c gzread.c gzwrite.c infback.c inffast.c inflate.c inftrees.c trees.c uncompr.c zutil.c)
 $(eval $(call library,libz,$(ZLIB_SOURCES)))

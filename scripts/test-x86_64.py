@@ -186,12 +186,12 @@ def exercise_console(qmp_path, output, origin=None):
     qmp = QMP(qmp_path)
     try:
         width, height, _ = qmp.screenshot(output / "console-desktop.ppm")
-        # Focus the initial console, whose text is initially behind the toolbox.
+        # term centers its default 640x400 content in a decorated GUI window.
         origin = origin or (width // 2, height // 2)
         qmp.move(700 - origin[0], 500 - origin[1])
         qmp.press("btn", button="left")
 
-        console_x, console_y = 250, 250
+        console_x, console_y = (width - 648) // 2, (height - 428) // 2
 
         def cell_rows(label, row, columns):
             width, height, pixels = qmp.screenshot(output / f"console-{label}.ppm")
@@ -205,12 +205,13 @@ def exercise_console(qmp_path, output, origin=None):
         deadline = time.monotonic() + 10
         while True:
             prompt = cell_rows("prompt", 1, 7)
-            if len(set(prompt)) > 1:
+            if len(set(prompt[i:i + 3] for i in range(0, len(prompt), 3))) > 1:
                 break
             if time.monotonic() >= deadline:
                 raise RuntimeError("GUI console has no shell prompt")
             time.sleep(0.2)
-        if len(set(cell_rows("banner", 0, 13))) <= 1:
+        banner = cell_rows("banner", 0, 13)
+        if len(set(banner[i:i + 3] for i in range(0, len(banner), 3))) <= 1:
             raise RuntimeError("GUI console has no shell banner")
         before = cell_rows("before-input", 1, 12)
         qmp.press("key", key={"type": "qcode", "data": "a"})
@@ -226,8 +227,16 @@ def exercise_console(qmp_path, output, origin=None):
             raise RuntimeError("GUI console did not scroll completed lines")
         if cell_rows("scrolled-bottom", 24, 7) != prompt:
             raise RuntimeError("GUI console lost its prompt after scrolling")
-        # Retire a blocked shell, then create consoles from the input thread.
-        # Their RPC endpoint must remain the GUI service task, not that thread.
+        for _ in range(8):
+            qmp.press("btn", button="wheel-up")
+        if cell_rows("history", 0, 13) != banner:
+            raise RuntimeError("term did not reveal its scrollback history")
+        for _ in range(8):
+            qmp.press("btn", button="wheel-down")
+        if cell_rows("history-bottom", 0, 7) != prompt:
+            raise RuntimeError("term did not return from scrollback")
+        # Closing term must retire its blocked shell; the toolbox launches a
+        # new process, window and independently owned TTY each time.
         mouse_x, mouse_y = 700, 500
         for cycle in range(2):
             close_x, close_y = console_x + 635, console_y + 15
@@ -236,9 +245,8 @@ def exercise_console(qmp_path, output, origin=None):
             if cell_rows(f"closed-{cycle}", 1, 7) == prompt:
                 raise RuntimeError("closed GUI console is still visible")
             qmp.move(300 - close_x, 260 - close_y)
-            qmp.press("btn", button="left")  # Toolbox / NewConsole
+            qmp.press("btn", button="left")  # Toolbox / Terminal
             mouse_x, mouse_y = 300, 260
-            console_x = console_y = 0
             deadline = time.monotonic() + 10
             while cell_rows(f"reopened-{cycle}", 1, 7) != prompt:
                 if time.monotonic() >= deadline:
@@ -251,6 +259,114 @@ def exercise_console(qmp_path, output, origin=None):
             qmp.press("key", key={"type": "qcode", "data": "backspace"})
             if cell_rows(f"reopened-backspace-{cycle}", 1, 12) != before:
                 raise RuntimeError("reopened GUI console backspace failed")
+    finally:
+        qmp.close()
+
+
+def exercise_editor(qmp_path, serial, output):
+    qmp = QMP(qmp_path)
+
+    def wait_for(marker, count=1):
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            text = serial.read_text(errors="replace")
+            if "EDITORTEST FAIL" in text or "PANIC" in text:
+                raise RuntimeError(f"editor regression; see {serial}")
+            if text.count(marker) >= count:
+                return
+            time.sleep(0.1)
+        raise RuntimeError(f"editor did not reach {marker}; see {serial}")
+
+    def key(code):
+        qmp.press("key", key={"type": "qcode", "data": code})
+
+    def type_text(text):
+        codes = {" ": "spc", "/": "slash", ".": "dot"}
+        for char in text:
+            key(codes.get(char, char))
+
+    def content(label, row=0, rows=23):
+        width, height, pixels = qmp.screenshot(output / f"editor-{label}.ppm")
+        left, top = (width - 648) // 2 + 4, (height - 428) // 2 + 24 + row * 16
+        return b"".join(pixels[(y * width + left) * 3:(y * width + left + 640) * 3]
+                        for y in range(top, top + rows * 16))
+
+    def restored(phase):
+        wait_for(f"EDITORTEST RESTORED phase={phase}")
+        time.sleep(0.1)
+        bar = content(f"restored-{phase}", 23, 1)
+        if len(set(bar[i:i + 3] for i in range(0, len(bar), 3))) != 1:
+            raise RuntimeError("editor did not restore the previous terminal screen")
+        key("ret")
+
+    try:
+        wait_for("EDITOR ready", 1)
+        width, height, _ = qmp.screenshot(output / "editor-desktop.ppm")
+        qmp.move(700 - width // 2, 500 - height // 2)
+        qmp.press("btn", button="left")
+        before = content("opened")
+        key("end")
+        key("left")
+        key("backspace")
+        key("2")
+        qmp.chord("ctrl", "z")
+        qmp.chord("ctrl", "y")
+        key("delete")
+        qmp.chord("ctrl", "z")
+        key("end")
+        key("ret")
+        qmp.chord("ctrl", "z")
+        qmp.chord("ctrl", "y")
+        type_text("// saved")
+        if content("edited") == before:
+            raise RuntimeError("editor received no visible text input")
+        qmp.chord("ctrl", "f")
+        type_text("value")
+        key("ret")
+        qmp.chord("ctrl", "n")
+        qmp.chord("ctrl", "p")
+        key("esc")
+        with_lines = content("line-numbers")
+        qmp.chord("ctrl", "r")
+        if content("without-line-numbers") == with_lines:
+            raise RuntimeError("editor line-number shortcut had no effect")
+        qmp.chord("ctrl", "r")
+        qmp.chord("ctrl", "s")
+        content("saved")
+        qmp.chord("ctrl", "q")
+        restored(1)
+
+        wait_for("EDITOR ready", 2)
+        # Navigation on an empty document must leave a valid insertion point.
+        for code in ("pgdn", "pgup", "home", "end"):
+            key(code)
+        type_text("draft")
+        qmp.chord("ctrl", "s")
+        type_text("missing/edsave.txt")
+        key("ret")
+        content("save-error", 24, 1)
+        qmp.chord("ctrl", "s")
+        type_text("edsave.txt")
+        key("ret")
+        qmp.chord("ctrl", "q")
+        restored(2)
+
+        wait_for("EDITOR ready", 3)
+        key("x")
+        before = content("modified", 24, 1)
+        qmp.chord("ctrl", "q")
+        if content("quit-warning", 24, 1) == before:
+            raise RuntimeError("editor did not warn about unsaved changes")
+        key("esc")
+        for _ in range(4):
+            qmp.chord("ctrl", "q")
+        restored(3)
+
+        wait_for("EDITOR ready", 4)
+        type_text("new file")
+        qmp.chord("ctrl", "s")
+        qmp.chord("ctrl", "q")
+        restored(4)
     finally:
         qmp.close()
 
@@ -359,6 +475,7 @@ def main():
     gui_mode.add_argument("--capacity", action="store_true", help="also cross the 255-task boundary")
     gui_mode.add_argument("--mouse", action="store_true", help="validate PS/2 motion, buttons and wheel using QMP")
     gui_mode.add_argument("--console", action="store_true", help="validate GUI shell rendering, input echo, backspace and scrolling")
+    gui_mode.add_argument("--editor", action="store_true", help="edit and save files with pl_editor inside term using real keyboard events")
     gui_mode.add_argument("--sdl", action="store_true", help="validate SDL2 shared surfaces, renderer, fonts and input")
     gui_mode.add_argument("--desktop-app", choices=("lite", "nk"), help="capture and close an SDL desktop application")
     gui_mode.add_argument("--tools", action="store_true", help="run C4 pointer/VM, NASM object and JavaScript regressions")
@@ -399,7 +516,10 @@ def main():
     if args.mouse:
         expected.append("GUIMOUSE PASS events=15")
     if args.console:
-        commands = ["gui.bin"]
+        commands = ["guitest.bin terminal"]
+    if args.editor:
+        commands = ["guitest.bin editor"]
+        expected = ["EDITORTEST PASS", "GUITEST EDITOR PASS"]
     if args.sdl:
         commands = ["timetest.bin", "sdltest.bin"]
         expected = ["TIMETEST PASS", "SDLTEST PASS", "SDLFRAME PASS"]
@@ -679,7 +799,10 @@ def main():
                                     usb_steps.add(marker)
                                 finally:
                                     qmp.close()
-                        if args.console and "GMOUSE ID =" in text:
+                        if args.editor and "EDITORTEST START phase=1" in text and not mouse_sent:
+                            exercise_editor(qmp_path, serial, output)
+                            mouse_sent = True
+                        if args.console and "GUITERM PASS" in text:
                             exercise_console(qmp_path, output)
                             print(f"{args.arch} {args.firmware} GUICONSOLE PASS: prompt, echo, backspace, scroll, close/reopen; {output}")
                             return

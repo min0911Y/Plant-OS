@@ -459,7 +459,102 @@ static int gui_test_stress(unsigned window_processes) {
   return result;
 }
 
+static int gui_test_terminal_client(void) {
+  int failed = 0;
+  clear();
+  // These sequences are deliberately fragmented across individual syscalls.
+  const char *output = "\033[38;2;12;34;56mABC\033[0m\033[3;4HZ";
+  for (const char *p = output; *p; p++)
+    putch(*p);
+  failed |= get_xy() != (4 << 16 | 2);
+  print("\033]0;split title");
+  print("\033\\\033(BA");
+  failed |= get_xy() != (5 << 16 | 2);
+  print("\033[?1049h\033[Halt\033[?1049l");
+  failed |= get_xy() != (5 << 16 | 2);
+  goto_xy(2, 4);
+  tty_stop_cur_moving();
+  print("one\ntwo");
+  tty_start_cur_moving();
+  failed |= get_xy() != (3 << 16 | 5);
+  Text_Draw_Box(10, 10, 15, 11, 0x17);
+  failed |= get_xy() != (3 << 16 | 5);
+  clear();
+  failed |= get_xy() != 0;
+  for (int i = 0; i < tty_get_xsize(); i++)
+    putch('x');
+  putch('y');
+  failed |= get_xy() != (1 << 16 | 1);
+  clear();
+  for (int i = 0; i < tty_get_ysize() + 3; i++)
+    print("scroll\n");
+  failed |= get_xy() != tty_get_ysize() - 1;
+  logkf("TERMTEST %s\n", failed ? "FAIL" : "PASS");
+  return failed;
+}
+
+static int gui_editor_file_matches(const char *path, const char *expected) {
+  char data[128];
+  FILE *file = fopen(path, "rb");
+  if (!file)
+    return 0;
+  size_t length = fread(data, 1, sizeof(data), file);
+  int matches = !ferror(file) && length == strlen(expected) &&
+                memcmp(data, expected, length) == 0;
+  if (fclose(file) != 0)
+    matches = 0;
+  return matches;
+}
+
+static int gui_test_editor_client(void) {
+  static const char initial[] = "int value = 1;\n";
+  FILE *file = fopen("edtest.c", "wb");
+  if (!file)
+    return 1;
+  bool written =
+      fwrite(initial, 1, sizeof(initial) - 1, file) == sizeof(initial) - 1;
+  if (fclose(file) != 0 || !written)
+    return 1;
+  remove("edsave.txt");
+  remove("ednew.txt");
+  // A directory must fail to open rather than appear as a new empty file.
+  if (exec("editor.bin", "editor.bin /") == 0)
+    return 1;
+  clear();
+  print("Editor session test\n");
+  static const struct {
+    char *command;
+    const char *path, *contents;
+  } cases[] = {
+      {"editor.bin edtest.c", "edtest.c", "int value = 2;\n// saved\n"},
+      {"editor.bin", "edsave.txt", "draft\n"},
+      {"editor.bin edtest.c", "edtest.c", "int value = 2;\n// saved\n"},
+      {"editor.bin ednew.txt", "ednew.txt", "new file\n"},
+  };
+  for (unsigned phase = 0; phase < sizeof(cases) / sizeof(cases[0]); phase++) {
+    logkf("EDITORTEST START phase=%u\n", phase + 1);
+    if (exec("editor.bin", cases[phase].command) != 0 ||
+        !gui_editor_file_matches(cases[phase].path, cases[phase].contents)) {
+      logkf("EDITORTEST FAIL phase=%u\n", phase + 1);
+      return 1;
+    }
+    print("Editor returned. Press Enter to continue.\n");
+    logkf("EDITORTEST RESTORED phase=%u\n", phase + 1);
+    while (getch() != '\n') {
+    }
+  }
+  remove("edtest.c");
+  remove("edsave.txt");
+  remove("ednew.txt");
+  logkf("EDITORTEST PASS edit, undo, redo, search, save, reopen, discard\n");
+  return 0;
+}
+
 int main(int argc, char **argv) {
+  if (argc == 2 && strcmp(argv[1], "editor-client") == 0)
+    return gui_test_editor_client();
+  if (argc == 2 && strcmp(argv[1], "terminal-client") == 0)
+    return gui_test_terminal_client();
   if (argc == 4 && strcmp(argv[1], "worker") == 0) {
     int parent_tid = atoi(argv[2]);
     int index = atoi(argv[3]);
@@ -495,6 +590,16 @@ int main(int argc, char **argv) {
   }
   result = gui_test_basic();
   if (result != 0) {
+    return result;
+  }
+  if (argc == 2 && strcmp(argv[1], "terminal") == 0) {
+    result = exec("term.bin", "term.bin guitest.bin terminal-client");
+    logkf("GUITERM %s\n", result == 0 ? "PASS" : "FAIL");
+    return result;
+  }
+  if (argc == 2 && strcmp(argv[1], "editor") == 0) {
+    result = exec("term.bin", "term.bin guitest.bin editor-client");
+    logkf("GUITEST EDITOR %s\n", result == 0 ? "PASS" : "FAIL");
     return result;
   }
   if (argc == 2 &&
