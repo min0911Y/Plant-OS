@@ -842,17 +842,47 @@ LIBTCCAPI TCCState *tcc_new(void)
     /* 32bit systems. */
     tcc_define_symbol(s, "__SIZE_TYPE__", "unsigned int");
     tcc_define_symbol(s, "__PTRDIFF_TYPE__", "int");
+    tcc_define_symbol(s, "__SIZEOF_POINTER__", "4");
     tcc_define_symbol(s, "__ILP32__", NULL);
 #elif LONG_SIZE == 4
     /* 64bit Windows. */
     tcc_define_symbol(s, "__SIZE_TYPE__", "unsigned long long");
     tcc_define_symbol(s, "__PTRDIFF_TYPE__", "long long");
+    tcc_define_symbol(s, "__SIZEOF_POINTER__", "8");
     tcc_define_symbol(s, "__LLP64__", NULL);
 #else
     /* Other 64bit systems. */
     tcc_define_symbol(s, "__SIZE_TYPE__", "unsigned long");
     tcc_define_symbol(s, "__PTRDIFF_TYPE__", "long");
+    tcc_define_symbol(s, "__SIZEOF_POINTER__", "8");
     tcc_define_symbol(s, "__LP64__", NULL);
+#endif
+
+    /* Native freestanding headers use the compiler's exact-width types. */
+    static const struct { const char *name, *type; } integer_types[] = {
+        {"__INTPTR_TYPE__", "__PTRDIFF_TYPE__"},
+        {"__UINTPTR_TYPE__", "__SIZE_TYPE__"},
+        {"__INT8_TYPE__", "signed char"}, {"__UINT8_TYPE__", "unsigned char"},
+        {"__INT16_TYPE__", "short"}, {"__UINT16_TYPE__", "unsigned short"},
+        {"__INT32_TYPE__", "int"}, {"__UINT32_TYPE__", "unsigned int"},
+        {"__INT64_TYPE__", LONG_SIZE == 8 ? "long" : "long long"},
+        {"__UINT64_TYPE__", LONG_SIZE == 8 ? "unsigned long" : "unsigned long long"},
+    };
+    for (int i = 0; i < sizeof(integer_types) / sizeof(integer_types[0]); i++)
+        tcc_define_symbol(s, integer_types[i].name, integer_types[i].type);
+    tcc_define_symbol(s, "_Static_assert(test,message)",
+        "extern int __tcc_static_assert[(test) ? 1 : -1]");
+
+#ifdef TCC_TARGET_I386
+    /* i386 cdecl arguments occupy four-byte stack slots. Supply the builtin
+       spellings used by the shared freestanding stdarg.h. */
+    tcc_define_symbol(s, "__builtin_va_list", "char *");
+    tcc_define_symbol(s, "__builtin_va_start(ap,last)",
+        "((ap) = (char *)&(last) + ((sizeof(last) + 3) & ~3))");
+    tcc_define_symbol(s, "__builtin_va_arg(ap,type)",
+        "(*(type *)((ap += (sizeof(type) + 3) & ~3) - ((sizeof(type) + 3) & ~3)))");
+    tcc_define_symbol(s, "__builtin_va_end(ap)", "((void)(ap))");
+    tcc_define_symbol(s, "__builtin_va_copy(dst,src)", "((dst) = (src))");
 #endif
 
 #ifdef TCC_TARGET_PE

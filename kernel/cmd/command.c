@@ -1,5 +1,6 @@
 #include <cmd.h>
 #include <dos.h>
+#include <executable.h>
 #include <limits.h>
 
 int run_shell_command(const char *command, size_t command_length) {
@@ -18,7 +19,10 @@ int run_shell_command(const char *command, size_t command_length) {
   memcpy(line, "psh.bin -c ", command_offset);
   memcpy(line + command_offset, command, command_length);
   line[line_size - 1] = '\0';
-  int status = os_execute_shell(line, line_size - 1);
+  extern char default_drive;
+  char shell_path[] = "?:/psh.bin";
+  shell_path[0] = default_drive;
+  int status = os_execute(shell_path, line, EXECUTE_COMMAND);
   free(line);
   return status;
 }

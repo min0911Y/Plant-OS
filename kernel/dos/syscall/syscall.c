@@ -1,5 +1,6 @@
 #include <cmd.h>
 #include <dos.h>
+#include <executable.h>
 #include <framebuffer.h>
 #include <input_device.h>
 #include <irq.h>
@@ -9,6 +10,7 @@
 #include <stdint.h>
 #include <syscall.h>
 #include <user_space.h>
+#include <user_vm.h>
 #if defined(KERNEL_ARCH_X86_64)
 #include <arch/x86/x86_64/cpu.h>
 #endif
@@ -305,6 +307,7 @@ enum syscall_id {
   SYSCALL_PERF_CONTROL = 0x63,
   SYSCALL_INPUT_WAIT = 0x64,
   SYSCALL_SIGNAL_RETURN = SYSCALL_ARCH_SIGNAL_RETURN,
+  SYSCALL_VIRTUAL_MEMORY = SYSCALL_VM,
   SYSCALL_COUNT,
 };
 
@@ -786,12 +789,7 @@ static void syscall_keyboard_hit(syscall_context_t *frame) {
 static void syscall_exit(syscall_context_t *frame) {
   mtask *task = current_task();
   unsigned status = frame->argument0;
-  if (!*(unsigned char *)USER_HEAP_END) {
-
-    if (mouse_use_task == task) {
-      mouse_sleep();
-    }
-  } else {
+  if (task->return_cwd) {
     mtask *parent = task->ptid == 0 || task->ptid == (uint32_t)-1
                         ? NULL
                         : get_task(task->ptid);
@@ -1200,19 +1198,44 @@ static void syscall_grow_heap(syscall_context_t *frame) {
   size_t requested = (size_t)frame->argument0;
   size_t request = (requested + 0xfffu) & ~(size_t)0xfffu;
   if (request < requested || start_addr < task->alloc_addr ||
-      start_addr >= USER_HEAP_END || request > USER_HEAP_END - start_addr) {
+      start_addr >= USER_HEAP_END || request > USER_HEAP_END - start_addr ||
+      !user_vm_range_free(start_addr, request)) {
     frame->value = -1;
     return;
   }
 
   for (uintptr_t offset = 0; offset < request; offset += 0x1000u) {
     if (!page_link(start_addr + offset)) {
+      if (offset)
+        arch_user_unmap(start_addr, offset);
       frame->value = -1;
       return;
     }
   }
   *task->alloc_size = old_size + request;
   frame->value = 0;
+}
+
+static void syscall_virtual_memory(syscall_context_t *frame) {
+  uintptr_t address = frame->argument1;
+  if (frame->argument0 >= VM_OPERATION_COUNT ||
+      frame->argument2 != sizeof(vm_request_t) || address < USER_SPACE_START ||
+      address >= USER_HEAP_END ||
+      sizeof(vm_request_t) > USER_HEAP_END - address) {
+    frame->value = VM_ERROR_INVALID;
+    return;
+  }
+  uintptr_t last = (address + sizeof(vm_request_t) - 1) & ~(uintptr_t)4095;
+  for (uintptr_t page = address & ~(uintptr_t)4095; page <= last;
+       page += 4096) {
+    if (!(arch_user_page_flags(page) & VM_READ)) {
+      frame->value = VM_ERROR_FAULT;
+      return;
+    }
+  }
+  vm_request_t request;
+  memcpy(&request, (const void *)address, sizeof(request));
+  frame->value = user_vm_operation(frame->argument0, &request);
 }
 
 static void syscall_read_env(syscall_context_t *frame) {
@@ -1227,7 +1250,7 @@ static void syscall_read_env(syscall_context_t *frame) {
 
 static void syscall_execute(syscall_context_t *frame) {
   frame->value = os_execute((char *)(uintptr_t)frame->argument0,
-                          (char *)(uintptr_t)frame->argument1);
+                          (char *)(uintptr_t)frame->argument1, EXECUTE_PROGRAM);
 }
 
 static void syscall_clear(syscall_context_t *frame) {
@@ -1900,6 +1923,7 @@ static const syscall_handler_t syscall_handlers[SYSCALL_COUNT] = {
     [SYSCALL_TTY_INPUT_NOTIFY] = syscall_tty_input_notify,
     [SYSCALL_PERF_CONTROL] = syscall_perf_control,
     [SYSCALL_INPUT_WAIT] = syscall_input_wait,
+    [SYSCALL_VIRTUAL_MEMORY] = syscall_virtual_memory,
 };
 
 void syscall_dispatch(syscall_context_t *frame) {

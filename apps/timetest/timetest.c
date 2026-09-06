@@ -5,6 +5,8 @@
 #include <syscall.h>
 #include <time.h>
 
+int64_t __divmoddi4(int64_t numerator, int64_t denominator, int64_t *remainder);
+
 #define CHECK(condition)                                                       \
   do {                                                                         \
     if (!(condition)) {                                                        \
@@ -14,6 +16,24 @@
   } while (0)
 
 int main(void) {
+  static const struct {
+    int64_t num, den, quotient, remainder;
+  } divisions[] = {{0, 86400, 0, 0},
+                   {-9, 4, -2, -1},
+                   {9, -4, -2, 1},
+                   {-9, -4, 2, -1},
+                   {INT64_MIN, 1, INT64_MIN, 0},
+                   {INT64_MAX, 3, INT64_MAX / 3, INT64_MAX % 3}};
+  for (size_t i = 0; i < sizeof(divisions) / sizeof(*divisions); i++) {
+    volatile int64_t numerator = divisions[i].num;
+    volatile int64_t denominator = divisions[i].den;
+    int64_t remainder;
+    CHECK(__divmoddi4(numerator, denominator, &remainder) ==
+          divisions[i].quotient);
+    CHECK(remainder == divisions[i].remainder);
+    CHECK(numerator / denominator == divisions[i].quotient);
+    CHECK(numerator % denominator == divisions[i].remainder);
+  }
   static const struct {
     time_t timestamp;
     const char *utc;

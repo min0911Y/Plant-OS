@@ -4,6 +4,7 @@
 #include <limits.h>
 #include <page_fault.h>
 #include <user_space.h>
+#include <user_vm.h>
 
 enum { PAGE_BYTES = 4096, TABLE_ENTRIES = 512 };
 #define PTE_ADDRESS 0x000ffffffffff000ull
@@ -358,16 +359,63 @@ bool x64_user_access(uintptr_t address, size_t size, bool writable) {
 
 bool x64_user_protect(uintptr_t address, size_t size, bool writable,
                       bool executable) {
+  return arch_user_protect(address, size,
+                           VM_READ | (writable ? VM_WRITE : 0) |
+                               (executable ? VM_EXEC : 0));
+}
+
+unsigned arch_user_page_flags(uintptr_t address) {
+  uint64_t *entry = page_entry(arch_address_space_current(), address, false);
+  if (!entry || (*entry & (PTE_PRESENT | PTE_USER)) != (PTE_PRESENT | PTE_USER))
+    return 0;
+  return VM_READ | (*entry & (PTE_WRITE | PTE_COW) ? VM_WRITE : 0) |
+         (*entry & PTE_NX ? 0 : VM_EXEC);
+}
+
+uintptr_t arch_user_find_free(uintptr_t lower, uintptr_t upper, size_t size) {
+  size_t available = 0;
+  for (uintptr_t page = upper; page > lower;) {
+    page -= PAGE_BYTES;
+    available = arch_user_page_flags(page) ? 0 : available + PAGE_BYTES;
+    if (available == size)
+      return page;
+  }
+  return 0;
+}
+
+static bool user_pages_change(uintptr_t address, size_t size,
+                              unsigned protection, bool unmap) {
   for (size_t offset = 0; offset < size; offset += PAGE_BYTES) {
     uint64_t *entry =
         page_entry(arch_address_space_current(), address + offset, false);
-    if (!entry || !(*entry & PTE_USER))
+    if (!entry ||
+        (*entry & (PTE_PRESENT | PTE_USER)) != (PTE_PRESENT | PTE_USER) ||
+        (*entry & (PTE_SHARED | PTE_DEVICE)))
       return false;
-    *entry = (*entry & ~(PTE_WRITE | PTE_NX)) | (writable ? PTE_WRITE : 0) |
-             (executable ? 0 : PTE_NX);
+  }
+  for (size_t offset = 0; offset < size; offset += PAGE_BYTES) {
+    uint64_t *entry =
+        page_entry(arch_address_space_current(), address + offset, false);
+    if (unmap) {
+      mapping_release(*entry);
+      *entry = 0;
+    } else {
+      *entry = (*entry & ~(PTE_WRITE | PTE_COW | PTE_NX)) |
+               (protection & VM_EXEC ? 0 : PTE_NX);
+      if (protection & VM_WRITE)
+        *entry |= pages[(*entry & PTE_ADDRESS) / PAGE_BYTES].references > 1
+                      ? PTE_COW
+                      : PTE_WRITE;
+    }
     __asm__ volatile("invlpg (%0)" : : "r"(address + offset) : "memory");
   }
   return true;
+}
+bool arch_user_protect(uintptr_t address, size_t size, unsigned protection) {
+  return user_pages_change(address, size, protection, false);
+}
+bool arch_user_unmap(uintptr_t address, size_t size) {
+  return user_pages_change(address, size, 0, true);
 }
 
 bool page_fault_try_resolve(uintptr_t address, uint32_t error) {

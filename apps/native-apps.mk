@@ -1,9 +1,11 @@
-# Native programs and library dependencies. No i386 objects enter these targets.
+# Application sources and private library dependencies, shared by both architectures.
 SDL_ROOT := sdl2
 include sdl2/sources.mk
 
 define library
-$(LIBS)/$(1).a: $(call objects,$(2)) build-x86_64.mk native-apps.mk
+.PHONY: $(1)
+$(1): $(LIBS)/$(1).a
+$(LIBS)/$(1).a: $(call objects,$(2)) build.mk native-apps.mk
 	@mkdir -p $$(dir $$@)
 	rm -f $$@
 	ar rcs $$@ $$(filter %.o,$$^)
@@ -28,7 +30,7 @@ $(foreach app,$(SIMPLE_PROGRAMS),$(eval $(call application,$(app))))
 $(eval $(call application,bf,,brainfuck/bf.c))
 $(eval $(call application,c4,,c4/c4.c))
 $(eval $(call application,cc,,cc/cc.c))
-$(eval $(call application,editor,$(LIBS)/libcpps.a,editor/editor.cpp))
+$(eval $(call application,editor,,editor/editor.cpp))
 
 ZLIB_SOURCES := $(addprefix zlib/,adler32.c compress.c crc32.c deflate.c gzclose.c gzlib.c gzread.c gzwrite.c infback.c inffast.c inflate.c inftrees.c trees.c uncompr.c zutil.c)
 $(eval $(call library,libz,$(ZLIB_SOURCES)))
@@ -75,8 +77,3 @@ $(eval $(call application,timetest,,timetest/timetest.c))
 $(BUILD)/sdltest/%.o: CFLAGS += $(SDL_CFLAGS) -ISDL2_ttf
 $(eval $(call application,sdltest,$(addprefix $(LIBS)/,sdl2.a sdl2_ttf.a libft.a libz.a),sdltest/sdltest.c))
 default all: $(BUILD)/timetest.bin $(BUILD)/sdltest.bin
-
-# Reject unported tools explicitly; keep them in the i386 build.
-$(addprefix $(BUILD)/,tcc.bin tccinst.bin setup1.bin fputest.bin):
-	@echo "$(@F) is i386-only: its compiler/installer/x87 backend is not ported" >&2
-	@exit 1

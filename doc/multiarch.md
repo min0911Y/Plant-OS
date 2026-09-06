@@ -49,7 +49,7 @@ xAPIC 模式下映射 LAPIC MMIO；不需要为此关闭 BIOS 中的 x2APIC。
 | 浮点运算 | x87 | SSE2，binary64 `long double` |
 | 默认终端 | TextMode，可选 HighTextMode | Limine framebuffer + flanterm |
 
-x86_64 使用四级页表和 Limine HHDM，不探测写物理内存。物理页元数据按内存图分配；用户页优先从高物理地址分配，低地址保留给有 DMA 地址限制的设备。用户页按需建立，并支持 COW、共享映射和 NX；只接受静态原生 ELF，检查段、入口和用户地址边界。
+x86_64 使用四级页表和 Limine HHDM，不探测写物理内存。物理页元数据按内存图分配；用户页优先从高物理地址分配，低地址保留给有 DMA 地址限制的设备。用户页按需建立，并支持 COW、共享映射和 NX；静态 loader 检查原生 ELF 的段、入口和用户地址边界；动态 PIE 的 PT_INTERP 启动独立用户态 `/lib/ld.so`，共享库解析和重定位由它完成，详见 [动态链接](dynamic-linking.md)。
 
 系统调用保留 Plant API 的语义编号，但使用完整的 64 位参数：`RAX` 为编号，参数为 `RDI, RSI, RDX, R10, R8, R9`。这不是 Linux ABI。入口通过 `swapgs` 取得每 CPU 内核栈，屏蔽 IF/TF/DF/NT/AC；NMI、双重故障和机器检查有独立 IST。用户中断系统调用门未开放，32 位程序会在 ELF 检查时被拒绝。
 
@@ -77,7 +77,7 @@ RTC 保存 UTC。读取完整、稳定的快照，解码 BCD/二进制与 12/24 
 
 ## 程序与验证
 
-原生构建目前生成 62 个 ELF64 程序，包括 init、psh、GUI、Lua/luac、lite、nk、Doom、kcube、invader、minewep、bitz、C4、Duktape、MY-BASIC、NASM/ndisasm、压缩与网络工具，以及架构、SSE、时间、SDL、异常、IPC/RPC 和磁盘生命周期回归程序。C/C++ 运行库分别为原生 `libp.a` 和 `libcpps.a`，共享静态初始化与退出生命周期；`cpptest.bin` 验证全局/局部静态对象、析构、对齐及退出回调。已接入的应用也可单独构建，例如 `make -C apps/gui ARCH=x86_64`。尚未移植的第三方程序不能复用 i386 二进制或静态库；原生构建规则在 `apps/build-x86_64.mk`，应用及依赖在 `apps/native-apps.mk`。SDL、lite、Doom 和 NASM 的源文件清单与 i386 共用。
+原生构建生成 ELF64 程序，包括 init、psh、GUI、Lua/luac、lite、nk、Doom、kcube、invader、minewep、bitz、C4、Duktape、MY-BASIC、NASM/ndisasm、压缩与网络工具，以及架构、SSE、时间、SDL、异常、IPC/RPC 和磁盘生命周期回归程序。全部正式应用为动态 PIE，公共 C/C++ 运行库分别为 `libp.so`、`libcpp.so`，由独立的静态自举 `ld.so` 装载；两种语言使用同一入口与初始化/退出生命周期；`cpptest.bin` 验证全局/局部静态对象、析构、对齐及退出回调。已接入的应用也可单独构建，例如 `make -C apps/gui ARCH=x86_64`。尚未移植的第三方程序不能复用 i386 二进制或静态库；两种架构的公共构建规则在 `apps/build.mk`，应用及依赖在 `apps/native-apps.mk`。SDL、lite、Doom 和 NASM 的源文件清单与 i386 共用。
 
 `setup1` 的 DOSLDR 安装流程、`tcc`/`tccinst` 的编译器与运行时工具链、`fputest` 的 x87 探针仍仅面向 i386；它们随 i386 全量构建保留。生成 ELF64 不表示所有旧演示程序的 BIOS 显示功能可用：这些调用在 x86_64 仍按约定返回错误。
 

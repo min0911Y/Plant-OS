@@ -75,6 +75,8 @@ bool arch_executable_validate(const void *image, size_t image_size,
   bool has_load_segment = false;
   bool entry_valid = false;
   for (uint16_t i = 0; i < segment_count; i++) {
+    if (segments[i].p_type == PT_INTERP || segments[i].p_type == PT_DYNAMIC)
+      return false;
     if (segments[i].p_type != PT_LOAD) {
       continue;
     }
@@ -175,11 +177,10 @@ bool arch_executable_load(const void *image, size_t image_size,
 
 bool elf32_validate_relocatable(const void *image, size_t image_size) {
   const Elf32_Ehdr *header = image;
-  if (!elf32_header_valid(header, image_size, ET_ELF) ||
+  if (!elf32_header_valid(header, image_size, ET_REL) ||
       header->e_shentsize != sizeof(Elf32_Shdr) ||
       header->e_shoff > image_size ||
-      header->e_shnum >
-          (image_size - header->e_shoff) / sizeof(Elf32_Shdr)) {
+      header->e_shnum > (image_size - header->e_shoff) / sizeof(Elf32_Shdr)) {
     return false;
   }
   return true;

@@ -1,0 +1,135 @@
+# 用户态动态链接
+
+Plant OS 的 ELF 动态链接器是独立程序 `/lib/ld.so`，源文件位于
+`apps/ldso/`。i386 与 x86_64 共用装载、依赖、符号查找及生命周期实现，
+分别处理 ELF32/REL 和 ELF64/RELA。它使用 Plant OS ABI，不能运行宿主 Linux
+的 libc 或程序。
+
+## 进程启动边界
+
+内核在 `kernel/dos/task/execute.c` 中读取原生 ELF 的 `PT_INTERP`。
+没有解释器的静态程序继续经架构 ELF loader 启动；有解释器时，内核只装载
+该解释器，以正常 C 调用约定将 `loader_start_t *` 传给它的 `Main`。
+结构定义在 `apps/include/loader.h`，包含结构大小、已打开的原始可执行文件
+描述符、实际执行路径及解释器的带盘符路径。解释器从系统启动盘打开，
+默认库目录取解释器所在目录，因此当前目录位于其他盘时也能执行系统程序。
+命令行保持原样，因此 `argv[0]` 可以与文件名不同。
+解释器描述符在装载结束后关闭，原程序描述符由用户态解释器读取并关闭；
+任务退出也会关闭未完成装载的所有描述符。
+
+`ld.so` 本身是无 `PT_INTERP`、无 `PT_DYNAMIC` 的静态 ELF，不需要自举
+重定位或另一份链接器。它使用独立匿名映射保存元数据，不初始化或占用应用
+的 malloc arena。随后由它装载 PIE 和依赖库，完成重定位、设置页面权限，
+最后调用程序的 `Main(runtime_linker_t *)`。`libp` 初始化分配器、stdio、
+命令行和环境后，调用链接器的初始化钩子；普通 `exit()` 调用析构钩子。
+内核不搜索共享库、不解释动态符号，也不执行用户 ELF 重定位。
+
+`init`、shell 和普通应用使用同一启动路径。内核不再缓存静态 shell 镜像或维护
+专用 shell loader。`system()` 使用 `EXECUTE_COMMAND`，在正常退出时把 cwd
+返回调用者；普通 `exec()` 保持目录隔离。该状态由任务内部的 `return_cwd`
+记录，fork 清除它，不再通过可写的用户状态页控制退出行为。
+
+## 已实现的 ELF 行为
+
+- 原生 `ET_DYN` PIE 与共享库；按 program headers 装载、清零 BSS，无需
+  section headers。校验文件范围、地址溢出、对齐、页重叠、可执行入口、
+  字符串和动态表范围。装载地址由 VM 在空闲地址空间内选择。
+- `DT_NEEDED` 依赖图、SONAME/规范路径去重，以及广度优先的全局符号范围。
+  支持 SysV 和 GNU hash，包括只有导入符号的空 GNU hash。
+- 全局/弱符号、未定义弱符号、符号覆盖、hidden/protected visibility 和
+  `DT_SYMBOLIC`。所有 PLT 槽都在进入程序前解析，不依赖延迟绑定 trampoline。
+- REL/RELA 中的相对、绝对、PC-relative、GLOB_DAT、JUMP_SLOT 和 COPY
+  重定位；x86_64 的 32-bit 结果检查溢出。COPY 在其他重定位完成后执行。
+- `DT_RUNPATH` 的直接依赖搜索、无 RUNPATH 时沿装载祖先搜索 `DT_RPATH`、
+  `$ORIGIN`/`${ORIGIN}`，最后搜索系统解释器所在的 `lib` 目录。包含路径分隔符的 NEEDED 项直接
+  按路径查找；空搜索项表示当前目录。
+- 主程序 PREINIT_ARRAY、依赖先于使用者的 INIT/INIT_ARRAY，逆序
+  FINI_ARRAY/FINI。图遍历使用显式栈，循环依赖不会无限递归，初始化一次。
+- 重定位完成后应用 LOAD 权限及 GNU RELRO。x86_64 同时执行写保护和 NX；
+  当前非 PAE i386 没有 NX，但执行只读写保护。两种架构都拒绝 W+X LOAD、
+  文本重定位和可执行栈。GNU RELRO 可以覆盖 LOAD 末尾的页内零填充；
+  校验基于实际 LOAD 页面，不能误拒绝 GNU ld 生成的这种合法布局。
+
+当前仅接收 PIE 动态主程序，普通固定地址 `ET_EXEC` 主程序仍采用静态链接。
+尚未实现 TLS、IFUNC、符号版本、RELR、`dlopen`/`dlsym`/`dlclose`、
+`LD_PRELOAD` 或 `LD_LIBRARY_PATH`。不支持的 ELF 元数据会明确失败，
+不会假装已完成链接。用户态装载错误打印 `ld.so:` 诊断并退出 `127`；
+内核无法打开解释器或解析启动 ELF 时返回 `-1`。
+
+## 构建与使用
+
+当前全部正式应用（69 个 i386、68 个 x86_64 产物，含回归用例）均为
+`ET_DYN` PIE，带 `/lib/ld.so` 的 `PT_INTERP`，通过 `DT_NEEDED` 使用
+`libp.so`。C++ 应用另导入 `libcpp.so`，C/C++ 都使用 `libp/entry.c` 的唯一
+`Main` 包装；C++ 支持代码位于 `libp/cxx.cpp`。`ld.so` 自身保持静态自举。
+
+```sh
+make -C apps ARCH=i386 -j8
+make -C apps ARCH=x86_64 -j8
+make -C apps/psh ARCH=i386
+make -C apps/gui ARCH=x86_64
+```
+
+两种架构共用 `apps/build.mk` 的编译、链接与依赖规则，`apps/native-apps.mk`
+记录应用源文件和私有库依赖。子目录 Makefile 只选择逻辑目标并转发到同一
+依赖图。新增应用通过 `application` 宏注册，实现通常的 `main(argc, argv)`，
+不手写固定地址链接参数。C++ 源文件会自动引入对应共享运行库。
+
+系统调用表由 `libp/arch/syscalls.inc` 在两种架构上展开；i386 包装完整保存
+PIC 的 GOT 寄存器及其他 callee-saved 寄存器。运行库的有符号 64 位除法辅助
+函数同样遵守商向零截断、余数随被除数符号的 ABI。
+
+运行库和解释器构建由 `apps/dynamic.mk` 提供，单独构建可用
+`make -C apps -f dynamic.mk ARCH=i386 dynamic -j8`。i386 运行时产物为
+`apps/out/lib/{ld.so,libp.so,libcpp.so}`；x86_64 位于
+`apps/out/x86_64/lib/`。所有应用及应用私有的 SDL、MST 等归档都使用 PIC，
+应用只包含所用私有库代码，公共 C/C++ 运行库经 DSO 导入。对象不写回第三方
+源码目录，也不与另一架构复用。`-z text` 把文本重定位视为链接失败。
+
+`apps/out[/x86_64]/applications.list` 直接从构建依赖图生成；LiveCD 按这份
+清单收录应用并整体复制 `lib/`，不会把遗留输出当作有效程序。i386 磁盘镜像
+也包含动态运行库。镜像中的 `apps.lst` 由 `mshortname` 记录每个应用的真实
+FAT 路径，包括 `/games/doom.bin` 与长文件名别名，供逐项装载验证使用；
+安装清单继续从镜像内容自动生成。
+
+i386 的 `sdk` 目标额外生成 TCC 使用的 `libp.a`、`libcpps.a`、`libabi.a`、
+`crti.obj`，以及内核使用的独立非 PIC `libtcc1.a`；这些是编译器 SDK 归档，
+正常应用链接规则不使用它们。SDK 在 `out/sdk/` 单独编译非 PIC 对象，
+不复用动态运行库的 PIC 归档。TCC 预定义整数/指针位宽、cdecl 可变参数和
+ABI 断言所需的名字，可用当前基础 C 头文件编译、链接并运行程序。
+TCC 自身已动态链接，其现有代码生成器仍按原来的
+固定地址静态 ABI 生成新程序；`crti.c` 完整转发入口参数。
+
+## 匿名 VM ABI
+
+`apps/include/vm.h` 提供 `vm_map`、`vm_protect`、`vm_unmap`，由
+`SYSCALL_VM` (`0x66`) 和固定大小请求承载。映射是进程私有、按页对齐、
+预先提交且清零的内存；指定地址时绝不覆盖已有映射。失败时 `vm_map` 返回
+NULL，其他操作返回 -1，并设置 errno。保护模式支持 R、RW、RX，拒绝 W+X。
+
+VM 自上向下分配，heap 自下向上增长，二者在修改页表前检查冲突。范围及请求
+指针必须验证；失败分配回滚已建立的页。映射直接由地址空间持有，不使用另一份
+任务映射链表；fork、线程共享和进程回收沿用已有页表引用机制。i386 区分真实
+只读页与 COW 页，不能通过写故障把 RELRO 变成可写；用户映射和用户页表不归
+单个创建线程的 GC 所有。同一地址空间的线程沿用调度器的同 CPU 约束。
+
+## 验证
+
+```sh
+python3 scripts/test-x86_64.py --dynamic
+python3 scripts/test-x86_64.py --arch i386 --dynamic --memory 512
+python3 scripts/test-x86_64.py --all-apps --firmware uefi
+python3 scripts/test-x86_64.py --arch i386 --all-apps --memory 512
+```
+
+默认完整回归也会运行 `dyntest.bin`。它覆盖跨库调用、两种哈希表、符号覆盖、
+弱符号、带空格和空参数的 argv、构造/析构顺序、fork/COW、RELRO、VM 页权限、
+创建线程退出后的映射存活、缺库/未定义符号，以及损坏的 LOAD、动态表、
+重定位长度、ELF machine 和 program header。宿主脚本另行核对串口中的析构
+次序。测试只临时修改 `kernel/res/init.mst`，结束后恢复脚本及正常启动镜像。
+
+`--all-apps` 先核对清单中的 ELF class/machine、PIE、PT_INTERP 与 DT_NEEDED，
+再通过 `dyntest --all` 逐项调用 `/lib/ld.so --verify`，实际完成依赖装载、符号
+解析、重定位及权限设置，不执行被检查应用的构造函数或 main。负例 `dynbad`
+必须返回 127，其他应用必须成功。该模式也验证跨盘运行、system 的 cwd 返回
+和普通 exec 的 cwd 隔离；正常完整回归继续执行实际程序功能。

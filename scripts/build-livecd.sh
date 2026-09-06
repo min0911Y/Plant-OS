@@ -118,48 +118,41 @@ make -C "$limine_dir"
 rm -rf "$work_dir"
 mkdir -p "$payload_dir" "$iso_root/boot/limine"
 if [ "$architecture" = i386 ]; then
-mcopy -s -i "$kernel_dir/boot.img" '::/*' "$payload_dir"
-for resource in boot.bin boot32.bin boot_pfs.bin dosldr.bin; do
-  if [ ! -f "$payload_dir/$resource" ]; then
-    echo "build-livecd: missing formatting resource: $resource" >&2
-    exit 1
-  fi
-done
-rm -f "$payload_dir/kernel.bin" "$payload_dir/setup.mst"
-mv "$payload_dir/dosldr.bin" "$payload_dir/DOSLDR.bin"
-cp "$object_dir/kernel.bin" "$payload_dir/kernel.bin"
+  mcopy -s -i "$kernel_dir/boot.img" '::/*' "$payload_dir"
+  for resource in boot.bin boot32.bin boot_pfs.bin dosldr.bin; do
+    if [ ! -f "$payload_dir/$resource" ]; then
+      echo "build-livecd: missing formatting resource: $resource" >&2
+      exit 1
+    fi
+  done
+  rm -f "$payload_dir/kernel.bin" "$payload_dir/setup.mst"
+  mv "$payload_dir/dosldr.bin" "$payload_dir/DOSLDR.bin"
+  cp "$object_dir/kernel.bin" "$payload_dir/kernel.bin"
+else
+  cp "$object_dir"/*.mod "$payload_dir/"
+  cp "$kernel_dir/res/init.mst" "$kernel_dir/res/env.cfg" "$kernel_dir/res/sys.cfg" "$payload_dir/"
+  cp "$repo_dir/font/font.bin" "$repo_dir/font/HZK16" "$kernel_dir/res/font.ttf" "$payload_dir/"
+fi
 
-for program in "$apps_out_dir"/*.bin; do
-  if [ ! -f "$program" ]; then
-    echo "build-livecd: no application binaries found in $apps_out_dir" >&2
-    exit 1
-  fi
-  cp "$program" "$payload_dir/"
-done
+while IFS= read -r program; do
+  cp "$apps_out_dir/$program" "$payload_dir/"
+done < "$apps_out_dir/applications.list"
 
-mkdir -p "$payload_dir/data" "$payload_dir/games" "$payload_dir/tcc/crt" \
-         "$payload_dir/tcc/include" "$payload_dir/tcc/inst" \
-         "$payload_dir/tcc/lib"
+mkdir -p "$payload_dir/data" "$payload_dir/games" "$payload_dir/lib"
 cp -R "$lite_data_dir"/. "$payload_dir/data/"
 mv "$payload_dir/doom.bin" "$payload_dir/games/"
 rm -f "$payload_dir/doom1.wad"
 cp "$kernel_dir/res/doom1.wad" "$payload_dir/games/"
-cp -R "$apps_include_dir"/. "$payload_dir/tcc/include/"
-cp "$apps_lib_dir"/*.a "$payload_dir/tcc/lib/"
-mv "$payload_dir/tcc/lib/libtcc1.a" "$payload_dir/tcc/inst/"
-cp "$apps_out_dir/crti.obj" "$payload_dir/tcc/crt/crti.o"
-cp "$apps_dir/tcc/tcc/crti.c" "$payload_dir/"
+cp -R "$apps_out_dir/lib"/. "$payload_dir/lib/"
 
-else
-  cp "$apps_out_dir"/*.bin "$payload_dir/"
-  cp "$object_dir"/*.mod "$payload_dir/"
-  cp "$kernel_dir/res/init.mst" "$kernel_dir/res/env.cfg" "$kernel_dir/res/sys.cfg" "$payload_dir/"
-  cp "$repo_dir/font/font.bin" "$repo_dir/font/HZK16" "$kernel_dir/res/font.ttf" "$payload_dir/"
-  mkdir -p "$payload_dir/games"
-  mv "$payload_dir/doom.bin" "$payload_dir/games/"
-  cp "$kernel_dir/res/doom1.wad" "$payload_dir/games/"
-  mkdir -p "$payload_dir/data"
-  cp -R "$lite_data_dir"/. "$payload_dir/data/"
+if [ "$architecture" = i386 ]; then
+  mkdir -p "$payload_dir/tcc/crt" "$payload_dir/tcc/include" \
+           "$payload_dir/tcc/inst" "$payload_dir/tcc/lib"
+  cp -R "$apps_include_dir"/. "$payload_dir/tcc/include/"
+  cp "$apps_lib_dir"/*.a "$payload_dir/tcc/lib/"
+  mv "$payload_dir/tcc/lib/libtcc1.a" "$payload_dir/tcc/inst/"
+  cp "$apps_out_dir/crti.obj" "$payload_dir/tcc/crt/crti.o"
+  cp "$apps_dir/tcc/tcc/crti.c" "$payload_dir/"
 fi
 
 payload_kib=$(du -sk "$payload_dir" | awk '{print $1}')
@@ -172,6 +165,15 @@ truncate -s 0 "$initramfs"
 truncate -s "${image_mib}M" "$initramfs"
 mformat -T "$image_sectors" -h 64 -s 16 -i "$initramfs"
 mcopy -s -i "$initramfs" "$payload_dir"/* ::/
+
+# Record the real FAT paths for runtime verification, including long-name aliases.
+while IFS= read -r program; do
+  path=$program
+  if [ "$program" = doom.bin ]; then path=games/$program; fi
+  short=$(fat_short_path "$initramfs" "$path")
+  printf '/%s\n' "$short"
+done < "$apps_out_dir/applications.list" > "$payload_dir/apps.lst"
+mcopy -i "$initramfs" "$payload_dir/apps.lst" ::/apps.lst
 
 if [ "$architecture" = i386 ]; then
 setup_manifest=$payload_dir/setup.mst

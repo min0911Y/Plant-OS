@@ -67,7 +67,7 @@ void __cxa_finalize(void *dso) {
 }
 void exit(unsigned status) {
   __cxa_finalize(NULL);
-  runtime_finalize_static();
+  runtime_finalize();
   __cxa_finalize(NULL);
   stdio_shutdown();
   _exit(status);

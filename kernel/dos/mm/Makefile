@@ -3,7 +3,7 @@ out_path_src := ../../obj/
 incpath_src := ../../include/
 TOOLPATH := ../../../tools/
 MAKE     := $(TOOLPATH)make.exe -r
-obj_dos := $(out_path_src)heap.o $(out_path_src)kasan.o
+obj_dos := $(out_path_src)heap.o $(out_path_src)kasan.o $(out_path_src)user_vm.o
 -include $(call kernel_depfiles,$(obj_dos))
 default : $(obj_dos)
 	

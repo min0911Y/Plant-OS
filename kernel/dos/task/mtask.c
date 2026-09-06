@@ -1228,6 +1228,7 @@ int task_fork() {
   child->tid = tid;
   child->generation = generation;
   child->kind = TASK_PROCESS;
+  child->return_cwd = false;
   child->tgid = tid;
   child->ptid = parent->tgid;
   child->state = ALLOCATING;

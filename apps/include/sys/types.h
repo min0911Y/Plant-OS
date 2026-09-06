@@ -71,13 +71,7 @@ TYPEDEF long wchar_t;
 TYPEDEF float float_t;
 TYPEDEF double double_t;
 #endif
-#if !defined(__cplusplus)
-TYPEDEF struct { _Alignas(8) long long __ll; long double __ld; } max_align_t;
-#elif defined(__GNUC__)
 TYPEDEF struct { __attribute__((__aligned__(8))) long long __ll; long double __ld; } max_align_t;
-#else
-TYPEDEF struct { alignas(8) long long __ll; long double __ld; } max_align_t;
-#endif
 
 
 #if defined(_LARGEFILE64_SOURCE)

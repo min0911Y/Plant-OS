@@ -42,8 +42,6 @@ void task_set_default_drive(char drive);
 void task_to_user_mode_elf(char *filename);
 void task_kill(unsigned tid);
 void task_exit(unsigned status);
-int os_execute(char *filename, char *line);
-int os_execute_shell(const char *line, size_t line_length);
 void idle();
 void init();
 struct FIFO8 *task_get_key_fifo(mtask *task);

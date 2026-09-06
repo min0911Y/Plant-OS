@@ -177,8 +177,6 @@ void timer_free();
 int haveMsg();
 void GetMessageAll(void *data);
 char *api_get_env(char *name, char *value);
-char PhyMemGetByte(int addr);
-void PhyMemSetByte(int addr, char data);
 int format(unsigned drive, char *fs_name);
 void *malloc(size_t size);
 void free(void *p);

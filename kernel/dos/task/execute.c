@@ -1,19 +1,18 @@
 #include <arch.h>
 #include <dos.h>
+#include <elf.h>
 #include <executable.h>
 #include <input_device.h>
 #include <irq.h>
 #include <limits.h>
+#include <loader.h>
 #include <math_util.h>
 #include <user_space.h>
-extern char *shell_data;
-extern unsigned shell_size;
+extern char default_drive;
 #define PAGE_SIZE_BYTES 0x1000u
-void task_to_user_mode_shell(void);
 
 static bool task_map_user_pages(uintptr_t start, size_t count) {
-  if (count != 0 && count - 1 >
-                        ((uintptr_t)-1 - start) / PAGE_SIZE_BYTES) {
+  if (count != 0 && count - 1 > ((uintptr_t)-1 - start) / PAGE_SIZE_BYTES) {
     return false;
   }
   for (size_t i = 0; i < count; i++) {
@@ -26,7 +25,7 @@ static bool task_map_user_pages(uintptr_t start, size_t count) {
 
 bool user_runtime_layout_calculate(uintptr_t aligned_image_end,
                                    size_t heap_pages, size_t stack_pages,
-                                   bool uses_status_page, uintptr_t entry,
+                                   uintptr_t entry,
                                    struct user_runtime_layout *layout) {
   if (layout == NULL || aligned_image_end < USER_SPACE_START ||
       aligned_image_end >= USER_HEAP_END ||
@@ -40,8 +39,7 @@ bool user_runtime_layout_calculate(uintptr_t aligned_image_end,
   uint64_t stack_top =
       (uint64_t)aligned_image_end + (uint64_t)stack_pages * PAGE_SIZE_BYTES;
   if (total_pages > (uintptr_t)-1 || runtime_end > USER_HEAP_END ||
-      stack_top > runtime_end ||
-      (uses_status_page && runtime_end > (uint64_t)USER_HEAP_END)) {
+      stack_top > runtime_end) {
     return false;
   }
   layout->total_pages = (uint32_t)total_pages;
@@ -50,7 +48,8 @@ bool user_runtime_layout_calculate(uintptr_t aligned_image_end,
   return true;
 }
 
-static __attribute__((optimize("O0"))) char *task_app_take_launch_request(void) {
+static __attribute__((optimize("O0"))) char *
+task_app_take_launch_request(void) {
   char *filename;
   irq_state_t state;
   for (;;) {
@@ -90,11 +89,8 @@ static bool task_app_setup_memory_alloc(void) {
     return false;
   }
   current_task()->alloced = 1;
+  *current_task()->alloc_size = 2 * 1024 * 1024;
   return true;
-}
-
-static void task_app_setup_memory_size(void) {
-  *(current_task()->alloc_size) = 2 * 1024 * 1024;
 }
 
 void task_app() {
@@ -103,7 +99,6 @@ void task_app() {
     task_exit(-1);
     return;
   }
-  task_app_setup_memory_size();
   if (!arch_address_space_prepare_exec(current_task()->address_space)) {
     task_exit(-1);
     return;
@@ -112,143 +107,170 @@ void task_app() {
   for (;;)
     ;
 }
-void task_shell() {
-  while (!current_task()->line)
-    ;
-  if (!task_app_setup_fifos() || !task_app_setup_memory_alloc()) {
-    task_exit(-1);
-    return;
+/* The kernel interprets only PT_INTERP. Dynamic sections, shared objects and
+ * all relocations belong to the user program named by that segment. */
+static bool executable_interpreter(int descriptor, char **interpreter) {
+  vfs_context_t *context = current_task()->fs_context;
+  vfs_stat_t status;
+  Elf_Ehdr header;
+  *interpreter = NULL;
+  if (vfs_fd_stat(context, descriptor, &status) < 0 ||
+      status.type != VFS_NODE_FILE || status.size < sizeof(header) ||
+      status.size > INT_MAX ||
+      vfs_fd_read(context, descriptor, &header, sizeof(header)) !=
+          sizeof(header))
+    return false;
+  if (memcmp(header.e_ident, "\177ELF", 4) ||
+      header.e_ident[EI_CLASS] != ELF_NATIVE_CLASS ||
+      header.e_ident[EI_DATA] != ELFDATA2LSB ||
+      header.e_ident[EI_VERSION] != EV_CURRENT ||
+      header.e_version != EV_CURRENT ||
+      header.e_machine != ELF_NATIVE_MACHINE ||
+      (header.e_type != ET_EXEC && header.e_type != ET_DYN) ||
+      header.e_ehsize != sizeof(header) || !header.e_phnum ||
+      header.e_phentsize != sizeof(Elf_Phdr) || header.e_phoff > status.size ||
+      header.e_phnum > (status.size - header.e_phoff) / sizeof(Elf_Phdr))
+    return false;
+  size_t size = header.e_phnum * sizeof(Elf_Phdr);
+  Elf_Phdr *segments = page_malloc(size);
+  if (!segments)
+    return false;
+  change_page_task_id(current_task()->tid, segments, size);
+  bool valid = false;
+  if (vfs_fd_seek(context, descriptor, header.e_phoff, 0) < 0 ||
+      vfs_fd_read(context, descriptor, segments, size) != size)
+    goto done;
+  const Elf_Phdr *interp = NULL;
+  for (size_t i = 0; i < header.e_phnum; i++) {
+    const Elf_Phdr *p = segments + i;
+    if (p->p_type != PT_INTERP)
+      continue;
+    if (interp || p->p_filesz < 2 || p->p_filesz > INT_MAX - 2 ||
+        p->p_offset > status.size || p->p_filesz > status.size - p->p_offset)
+      goto done;
+    interp = p;
   }
-  *(current_task()->alloc_size) = 1 * 1024 * 1024;
-
-  if (!arch_address_space_prepare_exec(current_task()->address_space)) {
-    task_exit(-1);
-    return;
-  }
-  task_to_user_mode_shell();
-  for (;;)
-    ;
-}
-void task_to_user_mode_shell() {
-  mtask *task = current_task();
-  char *p = shell_data;
-  uintptr_t user_eip;
-  uintptr_t image_end;
-  if (!arch_executable_validate(p, shell_size, &user_eip, &image_end) ||
-      image_end > (uintptr_t)-1 - (PAGE_SIZE_BYTES - 1)) {
-
-    if (mouse_use_task == current_task()) {
-      mouse_sleep();
+  if (interp) {
+    size_t path_size = interp->p_filesz + 2;
+    char *path = page_malloc(path_size);
+    if (!path)
+      goto done;
+    change_page_task_id(current_task()->tid, path, path_size);
+    path[0] = default_drive;
+    path[1] = ':';
+    if (vfs_fd_seek(context, descriptor, interp->p_offset, 0) < 0 ||
+        vfs_fd_read(context, descriptor, path + 2, interp->p_filesz) !=
+            interp->p_filesz ||
+        path[2] != '/' || path[path_size - 1] ||
+        strlen(path) != path_size - 1) {
+      page_free(path, path_size);
+      goto done;
     }
-    task_exit(-1);
-    for (;;)
-      ;
+    *interpreter = path;
   }
-  uintptr_t alloc_addr =
-      (image_end + PAGE_SIZE_BYTES - 1) & ~(uintptr_t)(PAGE_SIZE_BYTES - 1);
-  size_t pg = size_div_round_up(*(task->alloc_size), PAGE_SIZE_BYTES);
-  struct user_runtime_layout layout;
-  if (!user_runtime_layout_calculate(alloc_addr, pg, 128, true, user_eip,
-                                     &layout) ||
-      !task_map_user_pages(alloc_addr, layout.total_pages)) {
-    task_exit(-1);
-    return;
-  }
-  if (!page_link(USER_HEAP_END)) {
-    task_exit(-1);
-    return;
-  }
-  task->alloc_addr = layout.allocation_base;
-
-  if (!arch_executable_load(p, shell_size, &user_eip)) {
-    task_exit(-1);
-    return;
-  }
-  *(unsigned char *)(USER_HEAP_END) = 1;
-  task->user_mode = 1;
-  arch_task_set_kernel_stack(task->top);
-
-  kernel_lock_leave();
-  arch_task_enter_user(user_eip, layout.stack_top, 0);
+  valid = true;
+done:
+  page_free(segments, size);
+  return valid;
 }
+
+static char *task_read_executable(int descriptor, int *size) {
+  vfs_context_t *context = current_task()->fs_context;
+  vfs_stat_t status;
+  if (vfs_fd_stat(context, descriptor, &status) < 0 ||
+      status.type != VFS_NODE_FILE || !status.size || status.size > INT_MAX)
+    return NULL;
+  char *image = page_malloc(status.size);
+  if (!image)
+    return NULL;
+  change_page_task_id(current_task()->tid, image, status.size);
+  if (vfs_fd_seek(context, descriptor, 0, 0) < 0 ||
+      vfs_fd_read(context, descriptor, image, status.size) != status.size) {
+    page_free(image, status.size);
+    return NULL;
+  }
+  *size = status.size;
+  return image;
+}
+
 void task_to_user_mode_elf(char *filename) {
   mtask *task = current_task();
-  vfs_handle_t *stream = NULL;
-  vfs_stat_t status;
-  if (vfs_open(task->fs_context, filename, VFS_OPEN_READ, &stream) < 0 ||
-      vfs_fstat(stream, &status) < 0 || status.type != VFS_NODE_FILE ||
-      status.size == 0 || status.size > INT_MAX) {
-    if (stream != NULL) {
-      vfs_close(stream);
-    }
-    task_exit(-1);
-    for (;;) {
-    }
+  int descriptor = vfs_fd_open(task->fs_context, filename, VFS_OPEN_READ);
+  int executable_size = 0;
+  char *p = NULL;
+  char *interpreter = NULL;
+  if (descriptor < 0 || !executable_interpreter(descriptor, &interpreter))
+    goto failed;
+  bool dynamic = interpreter != NULL;
+  int image_fd = descriptor;
+  if (dynamic) {
+    image_fd = vfs_fd_open(task->fs_context, interpreter, VFS_OPEN_READ);
   }
-  int executable_size = status.size;
-  char *p = page_malloc(executable_size);
-  if (p == NULL) {
-    vfs_close(stream);
-    task_exit(-1);
-    for (;;) {
-    }
-  }
-  change_page_task_id(task->tid, p, executable_size);
-  int read = vfs_read(stream, p, executable_size);
-  vfs_close(stream);
-  if (read != executable_size) {
-    task_exit(-1);
-    for (;;) {
-    }
-  }
+  if (image_fd >= 0)
+    p = task_read_executable(image_fd, &executable_size);
+  if (dynamic && image_fd >= 0)
+    vfs_fd_close(task->fs_context, image_fd);
+  if (!p || (dynamic && vfs_fd_seek(task->fs_context, descriptor, 0, 0) < 0))
+    goto failed;
   uintptr_t user_eip;
   uintptr_t image_end;
   if (!arch_executable_validate(p, executable_size, &user_eip, &image_end) ||
       image_end > (uintptr_t)-1 - (PAGE_SIZE_BYTES - 1)) {
-    page_free(p, executable_size);
-
-    if (mouse_use_task == task) {
-      mouse_sleep();
-    }
-    task_exit(-1);
-    for (;;)
-      ;
+    goto failed;
   }
   uintptr_t alloc_addr =
       (image_end + PAGE_SIZE_BYTES - 1) & ~(uintptr_t)(PAGE_SIZE_BYTES - 1);
   size_t pg = size_div_round_up(*(task->alloc_size), PAGE_SIZE_BYTES);
-  bool uses_status_page = task->ptid != (uint32_t)-1;
   struct user_runtime_layout layout;
-  if (!user_runtime_layout_calculate(alloc_addr, pg, 128 * 4,
-                                     uses_status_page, user_eip, &layout) ||
+  if (!user_runtime_layout_calculate(alloc_addr, pg, 512, user_eip, &layout) ||
       !task_map_user_pages(alloc_addr, layout.total_pages)) {
-    task_exit(-1);
-    return;
+    goto failed;
   }
-  if (uses_status_page) {
-    if (!page_link(USER_HEAP_END)) {
-      task_exit(-1);
-      return;
-    }
-  }
-  // *(unsigned int *)(0xb5000000) = 2;
-  // logk("value = %08x\n",*(unsigned int *)(0xb5000000));
   task->alloc_addr = layout.allocation_base;
   if (!arch_executable_load(p, executable_size, &user_eip)) {
-    task_exit(-1);
-    return;
+    goto failed;
   }
   page_free(p, executable_size);
-  if (uses_status_page) {
-    *(unsigned char *)(USER_HEAP_END) = 0;
+  p = NULL;
+  uintptr_t argument = 0;
+  if (dynamic) {
+    size_t path_size = strlen(filename) + 1;
+    size_t interpreter_size = strlen(interpreter) + 1;
+    size_t available = 512 * PAGE_SIZE_BYTES - sizeof(loader_start_t) - 64;
+    if (path_size > available || interpreter_size > available - path_size)
+      goto failed;
+    layout.stack_top -= interpreter_size;
+    char *interpreter_path = (char *)layout.stack_top;
+    memcpy(interpreter_path, interpreter, interpreter_size);
+    page_free(interpreter, interpreter_size);
+    interpreter = NULL;
+    layout.stack_top -= path_size;
+    char *path = (char *)layout.stack_top;
+    memcpy(path, filename, path_size);
+    layout.stack_top =
+        (layout.stack_top - sizeof(loader_start_t)) & ~(uintptr_t)15;
+    loader_start_t *start = (loader_start_t *)layout.stack_top;
+    *start =
+        (loader_start_t){sizeof(*start), descriptor, path, interpreter_path};
+    argument = (uintptr_t)start;
+  } else {
+    vfs_fd_close(task->fs_context, descriptor);
   }
   task->user_mode = 1;
   arch_task_set_kernel_stack(task->top);
 
   kernel_lock_leave();
-  arch_task_enter_user(user_eip, layout.stack_top, 0);
+  arch_task_enter_user(user_eip, layout.stack_top, argument);
+failed:
+  if (interpreter)
+    page_free(interpreter, strlen(interpreter) + 1);
+  if (p)
+    page_free(p, executable_size);
+  if (descriptor >= 0)
+    vfs_fd_close(task->fs_context, descriptor);
+  task_exit(-1);
 }
-int os_execute(char *filename, char *line) {
+int os_execute(char *filename, char *line, execute_mode_t mode) {
   if (filename == NULL || line == NULL) {
     return -1;
   }
@@ -278,6 +300,7 @@ int os_execute(char *filename, char *line) {
     return -1;
   }
   t->ptid = current_task()->tgid;
+  t->return_cwd = mode == EXECUTE_COMMAND;
   int old = current_task()->sigint_up;
   t->sigint_up = 1;
   task_set_name(t, filename);
@@ -316,49 +339,6 @@ int os_execute(char *filename, char *line) {
   }
   current_task()->sigint_up = old;
 
-  return status;
-}
-int os_execute_shell(const char *line, size_t line_length) {
-  if (line == NULL || line_length >= INT_MAX) {
-    return -1;
-  }
-
-  char *line_copy = malloc(line_length + 1);
-  if (line_copy == NULL) {
-    return -1;
-  }
-  memcpy(line_copy, line, line_length);
-  line_copy[line_length] = '\0';
-
-  mtask *t = create_task((uintptr_t)task_shell, 1);
-  if (t == NULL) {
-    free(line_copy);
-    return -1;
-  }
-  task_set_name(t, "psh.bin");
-  int old = current_task()->sigint_up;
-  t->sigint_up = 1;
-  t->ptid = current_task()->tgid;
-  struct tty *tty_backup = current_task()->TTY;
-  t->TTY = current_task()->TTY;
-  t->tty_session = current_task()->tty_session;
-  int o = current_task()->fifosleep;
-  t->line = line_copy;
-  if (!task_publish(t)) {
-    task_abort_creation(t);
-    free(line_copy);
-    return -1;
-  }
-  current_task()->sigint_up = 0;
-  current_task()->TTY = NULL;
-  current_task()->fifosleep = 1;
-  unsigned status = waittid(t->tid);
-  current_task()->fifosleep = o;
-  free(line_copy);
-  current_task()->TTY = current_task()->tty_session == tty_backup
-                            ? tty_backup
-                            : current_task()->tty_session;
-  current_task()->sigint_up = old;
   return status;
 }
 void os_execute_no_ret(char *filename, char *line) {

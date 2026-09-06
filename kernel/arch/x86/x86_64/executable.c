@@ -113,7 +113,7 @@ Elf64_Sym *elf64_symtab(Elf64_Ehdr *header, Elf64_Shdr **section) {
 }
 bool elf64_validate_relocatable(const void *image, size_t size) {
   Elf64_Ehdr *header = (void *)image;
-  if (!image || !header_valid(header, size, ET_ELF) || !header->e_shnum ||
+  if (!image || !header_valid(header, size, ET_REL) || !header->e_shnum ||
       header->e_shoff > size || header->e_shentsize != sizeof(Elf64_Shdr) ||
       header->e_shnum > (size - header->e_shoff) / sizeof(Elf64_Shdr) ||
       header->e_shstrndx >= header->e_shnum)

@@ -7,22 +7,28 @@ extern initializer_t __init_array_end[] __attribute__((weak));
 extern initializer_t __fini_array_start[] __attribute__((weak));
 extern initializer_t __fini_array_end[] __attribute__((weak));
 static bool initialized;
+static const runtime_linker_t *dynamic_linker;
 
-void runtime_initialize_static(void) {
-  if (__init_array_start && __init_array_end) {
+void runtime_initialize(const runtime_linker_t *linker) {
+  dynamic_linker = linker;
+  initialized = true;
+  if (linker) {
+    linker->initialize();
+  } else if (__init_array_start && __init_array_end) {
     for (initializer_t *entry = __init_array_start; entry != __init_array_end;
          entry++) {
       (*entry)();
     }
   }
-  initialized = true;
 }
 
-void runtime_finalize_static(void) {
+void runtime_finalize(void) {
   if (!initialized)
     return;
   initialized = false;
-  if (__fini_array_start && __fini_array_end) {
+  if (dynamic_linker) {
+    dynamic_linker->finalize();
+  } else if (__fini_array_start && __fini_array_end) {
     for (initializer_t *entry = __fini_array_end;
          entry != __fini_array_start;) {
       (*--entry)();

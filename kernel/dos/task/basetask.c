@@ -3,37 +3,30 @@
 #include <pci.h>
 #include <usb.h>
 int init_ok_flag = 0;
-char *shell_data;
-unsigned shell_size;
-static char find_system_drive(void) {
-  static const char *const boot_files[] = {"init.bin", "psh.bin", "sys.cfg"};
-  char path[300];
-
-  for (int i = 0; i < 26; i++) {
-    if (!vfs_check_mount('A' + i)) {
-      continue;
-    }
-    vfs_context_t *context = vfs_context_create('A' + i);
-    if (context == NULL) {
-      continue;
-    }
-    bool complete = true;
-    for (unsigned int j = 0; j < sizeof(boot_files) / sizeof(boot_files[0]);
-         j++) {
-      sprintf(path, "%c:/%s", 'A' + i, boot_files[j]);
-      vfs_stat_t status;
-      if (vfs_stat(context, path, &status) < 0 ||
-          status.type != VFS_NODE_FILE) {
-        complete = false;
-        break;
-      }
-    }
-    vfs_context_release(context);
-    if (complete) {
-      return 'A' + i;
-    }
+static bool system_files_present(vfs_context_t *context) {
+  static const char *const files[] = {"/init.bin", "/psh.bin", "/sys.cfg",
+                                      "/lib/ld.so", "/lib/libp.so"};
+  for (size_t i = 0; i < sizeof(files) / sizeof(*files); i++) {
+    vfs_stat_t status;
+    if (vfs_stat(context, files[i], &status) < 0 ||
+        status.type != VFS_NODE_FILE)
+      return false;
   }
+  return true;
+}
 
+static char find_system_drive(void) {
+  for (char drive = 'A'; drive <= 'Z'; drive++) {
+    if (!vfs_check_mount(drive))
+      continue;
+    vfs_context_t *context = vfs_context_create(drive);
+    if (!context)
+      continue;
+    bool complete = system_files_present(context);
+    vfs_context_release(context);
+    if (complete)
+      return drive;
+  }
   return 0;
 }
 void idle() {
@@ -72,8 +65,8 @@ void init() {
     Panic_K("system disk not found");
   }
   vfs_context_t *system_context = vfs_context_create(system_drive);
-  if (system_context == NULL) {
-    Panic_K("system VFS context unavailable");
+  if (system_context == NULL || !system_files_present(system_context)) {
+    Panic_K("system runtime unavailable");
   }
   vfs_context_release(current_task()->fs_context);
   current_task()->fs_context = system_context;
@@ -108,11 +101,11 @@ void init() {
 
   vfs_stat_t font_status;
   FILE *fp = fopen("font.bin", "rb");
-  if (fp != NULL && vfs_stat(current_task()->fs_context, "font.bin",
-                             &font_status) == 0) {
+  if (fp != NULL &&
+      vfs_stat(current_task()->fs_context, "font.bin", &font_status) == 0) {
     ascfont = malloc(font_status.size);
-    if (ascfont == NULL || fread(ascfont, 1, font_status.size, fp) !=
-                               font_status.size) {
+    if (ascfont == NULL ||
+        fread(ascfont, 1, font_status.size, fp) != font_status.size) {
       Panic_K("unable to load font.bin");
     }
     fclose(fp);
@@ -121,8 +114,8 @@ void init() {
   if (fp != NULL &&
       vfs_stat(current_task()->fs_context, "HZK16", &font_status) == 0) {
     hzkfont = malloc(font_status.size);
-    if (hzkfont == NULL || fread(hzkfont, 1, font_status.size, fp) !=
-                               font_status.size) {
+    if (hzkfont == NULL ||
+        fread(hzkfont, 1, font_status.size, fp) != font_status.size) {
       Panic_K("unable to load HZK16");
     }
     fclose(fp);
@@ -133,19 +126,6 @@ void init() {
 #ifndef KERNEL_USB_DEBUG
   clear();
 #endif
-  vfs_stat_t shell_status;
-  fp = fopen("psh.bin", "rb");
-  if (fp == NULL || vfs_stat(current_task()->fs_context, "psh.bin",
-                             &shell_status) < 0 ||
-      shell_status.size == 0) {
-    Panic_K("unable to open psh.bin");
-  }
-  shell_size = shell_status.size;
-  shell_data = (char *)page_malloc(shell_size);
-  if (shell_data == NULL || fread(shell_data, 1, shell_size, fp) != shell_size) {
-    Panic_K("unable to load psh.bin");
-  }
-  fclose(fp);
   os_execute_no_ret("init.bin", "init.bin");
   task_kill(current_task()->tid);
   for (;;)

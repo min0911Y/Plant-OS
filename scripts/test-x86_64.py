@@ -331,6 +331,8 @@ def main():
     gui_mode.add_argument("--sdl", action="store_true", help="validate SDL2 shared surfaces, renderer, fonts and input")
     gui_mode.add_argument("--desktop-app", choices=("lite", "nk"), help="capture and close an SDL desktop application")
     gui_mode.add_argument("--tools", action="store_true", help="run C4 pointer/VM, NASM object and JavaScript regressions")
+    gui_mode.add_argument("--dynamic", action="store_true", help="run user ELF interpreter, shared libraries and page protection regressions")
+    gui_mode.add_argument("--all-apps", action="store_true", help="validate and relocate every built application, then run dynamic regressions")
     gui_mode.add_argument("--usb", action="store_true", help="validate xHCI enumeration, USB speeds, hotplug and ring wrap")
     parser.add_argument("--out", type=Path, default=Path("/tmp/plant-x86_64-smoke"))
     parser.add_argument("--ovmf", type=Path, default=Path("/usr/share/OVMF"))
@@ -351,7 +353,7 @@ def main():
     native = args.arch == "x86_64"
     kernel_options = [f"USB_DEBUG={int(args.usb_debug)}"]
     commands = (["archtest.bin", "cpptest.bin", "simdtest.bin"] if native else ["fputest.bin"]) + [
-        "timetest.bin", "exc_test.bin", "rpctest.bin", "dktest.bin", "nettest.bin loopback",
+        "timetest.bin", "exc_test.bin", "rpctest.bin", "dktest.bin", "dyntest.bin", "nettest.bin loopback",
         "guitest.bin capacity" if args.capacity else "guitest.bin mouse" if args.mouse else "guitest.bin",
         "psh.bin -c insmod hello.mod", "psh.bin -c rmmod hello_mod",
         "psh.bin -c insmod hello.mod", "psh.bin -c rmmod hello_mod",
@@ -359,7 +361,7 @@ def main():
     ]
     expected = (["ARCHTEST PASS", "CPPTEST PASS", "SIMDTEST PASS"] if native else ["FPUTEST PASS"]) + [
                 "TIMETEST PASS", "EXCEPTION_TEST done checks=5 fails=0", "GUITEST THREAD PASS", "GMOUSE ID =",
-                "RPCTEST done checks=22 fails=0", "DKTEST PASS",
+                "RPCTEST done checks=22 fails=0", "DKTEST PASS", "DYNTEST PASS",
                 "GUISTRESS PASS" if args.capacity else "GUITEST PASS"]
     if args.mouse:
         expected.append("GUIMOUSE PASS events=15")
@@ -373,6 +375,16 @@ def main():
         expected = ["TIMETEST PASS", f"SDLAPP EXIT {args.desktop_app}.bin status=0"]
         if args.desktop_app == "lite":
             expected.append("LITE EDIT PASS")
+    if args.dynamic or args.all_apps:
+        commands = ["dyntest.bin"]
+        expected = ["DYNAMIC PASS", "DYNAMIC DATA PASS", "DYNTEST PASS", "DYNAMIC ATEXIT",
+                    "DYNAMIC FINI main", "DYNAMIC FINI leaf", "DYNAMIC FINI base"]
+        if args.all_apps:
+            programs = subprocess.check_output(
+                ["make", "--no-print-directory", "-s", "-C", str(repo / "apps"),
+                 f"ARCH={args.arch}", "list-apps"], text=True).splitlines()
+            commands = ["dyntest.bin --all"]
+            expected.append(f"DYNAPPS PASS count={len(programs)}")
     if args.tools:
         # Commands and source files enter the guest through init.mst and Lua;
         # keyboard input is never used to execute commands.
@@ -382,6 +394,13 @@ def main():
             return "string.char(" + ",".join(str(byte) for byte in value.encode()) + ")"
         prepare = ("f=assert(io.open([[/c4probe.c]],[[w]]));f:write(" + lua_bytes(source) + ");f:close();"
                    "f=assert(io.open([[/probe.asm]],[[w]]));f:write(" + lua_bytes(assembly) + ");f:close()")
+        if not native:
+            c_source = ('#include <stdlib.h>\n#include <stdio.h>\n'
+                        '_Static_assert(sizeof(void*)==4,"ABI");\nint NowTaskID(void);\n'
+                        'int main(void){void *p=malloc(32);if(!p)return 1;'
+                        'free(p);printf("TCC runtime %d\\n",42);return NowTaskID()<1;}\n')
+            c_prepare = ("f=assert(io.open([[/ccprobe.c]],[[w]]));f:write(" +
+                         lua_bytes(c_source) + ");f:close()")
         bits = 64 if native else 32
         verify = ("f=assert(io.open([[/probe.o]],[[rb]]));h=f:read(20);f:close();"
                   f"assert(h:sub(1,4)==string.char(127)..[[ELF]]);assert(h:byte(5)=={2 if native else 1});"
@@ -392,6 +411,10 @@ def main():
                     "lua.bin -e " + verify,
                     "duktape.bin -e a=[];for(i=0;i<1000;i++)a.push({v:i});if(a[999].v!==999){throw(1);}"]
         expected = []
+        if not native:
+            commands += ["lua.bin -e " + c_prepare,
+                         "tcc.bin /ccprobe.c -o /ccprobe.bin", "/ccprobe.bin",
+                         "lua.bin -e os.remove([[/ccprobe.c]]);os.remove([[/ccprobe.bin]])"]
     if args.usb:
         commands = ["nettest.bin", "usbtest.bin", "guitest.bin usb"]
         expected = ["USBSTORAGE PASS", "USBKEY PASS", "GUIMOUSE PASS events=15", "GUITEST PASS"]
@@ -432,8 +455,19 @@ def main():
                 config.write_bytes(configured if count else configured + b'\n"network" = "enable"\n')
             init.write_text('"todo" = [\n' + ',\n'.join(actions) + '\n]\n')
             subprocess.run(["make", "-C", str(repo / "apps"), f"ARCH={args.arch}",
-                            *(["-j8"] if native else [])],
+                            "-j8"],
                            stdout=build_log, stderr=subprocess.STDOUT, check=True)
+            if args.all_apps:
+                app_output = repo / "apps/out" / ("x86_64" if native else "")
+                for program in programs:
+                    data = (app_output / program).read_bytes()
+                    elf = subprocess.check_output(
+                        ["readelf", "-lWd", str(app_output / program)], text=True)
+                    if (data[:7] != b"\x7fELF" + bytes([2 if native else 1, 1, 1]) or
+                            struct.unpack_from("<HH", data, 16) != (3, 62 if native else 3) or
+                            "[Requesting program interpreter: /lib/ld.so]" not in elf or
+                            not re.search(r"\(NEEDED\).*\[libp\.so\]", elf)):
+                        raise RuntimeError(f"application is not a native dynamic PIE: {program}")
             if not native:
                 subprocess.run(["make", "-C", str(repo / "loader")],
                                stdout=build_log, stderr=subprocess.STDOUT, check=True)
@@ -704,6 +738,12 @@ def main():
                             missing = [marker for marker in expected if marker not in text]
                             if missing:
                                 raise RuntimeError(f"missing {missing}; see {serial}")
+                            if "dyntest.bin" in commands:
+                                markers = ["DYNAMIC PASS", "DYNAMIC ATEXIT", "DYNAMIC FINI main",
+                                           "DYNAMIC FINI leaf", "DYNAMIC FINI base", "DYNTEST PASS"]
+                                positions = [text.index(marker) for marker in markers]
+                                if positions != sorted(positions) or any(text.count(marker) != 1 for marker in markers):
+                                    raise RuntimeError(f"dynamic initialization/finalization order mismatch; see {serial}")
                             if args.usb:
                                 modes = re.findall(r"^xhci: (\S+) .* transport=(\w+) ready$", text, re.M)
                                 expected_mode = "msix" if args.usb_irq == "auto" else args.usb_irq

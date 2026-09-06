@@ -151,6 +151,7 @@ typedef struct mtask {
   uintptr_t entry;
   arch_address_space_t address_space;
   unsigned user_mode;
+  bool return_cwd;
   uintptr_t top;
   unsigned weight;
   enum STATE state; // 此项为1（RUNNING） 即正常调度，为 2（WAITING） 3

@@ -48,7 +48,7 @@ DEL      = rm
 
 OBJS_BOOTPACK = $(OUTPATH)boot_entry.obj $(OUTPATH)boot.o \
 				$(OUTPATH)kernelc.o $(OUTPATH)screen.o $(OUTPATH)command.o $(OUTPATH)timer.o \
-				$(OUTPATH)memory.o $(OUTPATH)heap.o $(LIBALLOC_KERNEL) $(OUTPATH)file.o $(OUTPATH)bios_interrupt.obj \
+				$(OUTPATH)memory.o $(OUTPATH)heap.o $(LIBALLOC_KERNEL) $(OUTPATH)user_vm.o $(OUTPATH)file.o $(OUTPATH)bios_interrupt.obj \
 				$(OUTPATH)interrupt_entries.obj $(OUTPATH)exceptions.obj $(OUTPATH)vga.o $(OUTPATH)tm.o  \
 				$(OUTPATH)mouse.o $(OUTPATH)acpi.o $(OUTPATH)is.o $(OUTPATH)descriptor_tables.o $(OUTPATH)arg.o \
 				$(OUTPATH)other.o $(OUTPATH)floppy.o $(OUTPATH)dma.o $(OUTPATH)init.o $(OUTPATH)main.o \
@@ -189,6 +189,8 @@ Mimg : make_dir $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $
 		mcopy -i ./disk.img $(APPSOUTPATH)copydir.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)dktest.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)rpctest.bin ::
+		mcopy -i ./disk.img $(APPSOUTPATH)dynmain.bin $(APPSOUTPATH)dyncopy.bin $(APPSOUTPATH)dynbad.bin $(APPSOUTPATH)dynempty.bin $(APPSOUTPATH)dyntest.bin ::
+		mcopy -s -i ./disk.img $(APPSOUTPATH)lib ::/
 		mcopy -i ./disk.img $(APPSOUTPATH)guitest.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)timetest.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)sdltest.bin ::
@@ -245,6 +247,8 @@ Mimg : make_dir $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $
 		mcopy -i boot.img $(APPSOUTPATH)curl.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)dktest.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)rpctest.bin ::
+		mcopy -i boot.img $(APPSOUTPATH)dynmain.bin $(APPSOUTPATH)dyncopy.bin $(APPSOUTPATH)dynbad.bin $(APPSOUTPATH)dynempty.bin $(APPSOUTPATH)dyntest.bin ::
+		mcopy -s -i boot.img $(APPSOUTPATH)lib ::/
 		mcopy -i boot.img $(APPSOUTPATH)guitest.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)timetest.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)sdltest.bin ::

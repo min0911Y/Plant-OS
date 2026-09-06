@@ -1,24 +1,2 @@
-ARCH ?= i386
-ifeq ($(ARCH),x86_64)
-NATIVE_TARGETS := out/x86_64/my_basic.bin
+NATIVE_TARGETS := my_basic
 include ../native.mk
-else ifeq ($(ARCH),i386)
-LIBS_PATH := ../libs
-INCLUDE_PATH := ../include
-include ../defs.mk
-NASM = nasm
-OBJS_PACK = ../out/copy.obj
-default: ../out/my_basic.bin
-../out/my_basic.bin: ../out/my_basic.obj ../out/main.obj ../defs.mk
-	$(LINK) ../out/my_basic.obj ../out/main.obj $(BASIC_LIB_C) -o ../out/my_basic.bin
-../out/my_basic.obj: core/my_basic.c core/my_basic.h
-	gcc -m32 -O0 -DMB_FREESTANDING -c -I$(INCLUDE_PATH) -nostdinc -nolibc -nostdlib -fno-stack-protector -ffreestanding core/my_basic.c -o ../out/my_basic.obj
-../out/main.obj: shell/main.c core/my_basic.h
-	gcc -m32 -O0 -DMB_FREESTANDING -I$(INCLUDE_PATH) -nostdinc -nolibc -nostdlib -fno-stack-protector -ffreestanding -c shell/main.c -o ../out/main.obj
-
-clean:
-	rm -f ../out/my_basic.obj ../out/main.obj ../out/my_basic.bin
-
-else
-$(error unsupported ARCH)
-endif

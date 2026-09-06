@@ -1,22 +1,2 @@
-ARCH ?= i386
-ifeq ($(ARCH),x86_64)
-NATIVE_TARGETS := out/x86_64/duktape.bin
+NATIVE_TARGETS := duktape
 include ../native.mk
-else ifeq ($(ARCH),i386)
-LIBS_PATH := ../libs
-INCLUDE_PATH := ../include
-include ../defs.mk
-NASM = nasm
-OBJS_PACK = ../out/duk_cmdline_lowmem.obj ../out/duk_cmdline.obj ../out/duk_console.obj ../out/duktape.obj
-default : $(OBJS_PACK)
-	$(LINK) $(OBJS_PACK) $(BASIC_LIB_C) -o ../out/duktape.bin
-../out/%.obj : %.c Makefile
-	$(C) -c $*.c -o ../out/$*.obj
-../out/%.obj : %.cpp Makefile
-	$(CPP) -c $*.cpp -o ../out/$*.obj
-../out/%.obj : %.asm Makefile
-	nasm -f elf $*.asm -o ../out/$*.obj
-
-else
-$(error unsupported ARCH)
-endif

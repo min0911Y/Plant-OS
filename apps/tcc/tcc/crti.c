@@ -1,5 +1,4 @@
-void Main();
+#include <loader.h>
+void Main(const runtime_linker_t *linker);
 
-int _start() {
-	Main();
-}
+void _start(const runtime_linker_t *linker) { Main(linker); }

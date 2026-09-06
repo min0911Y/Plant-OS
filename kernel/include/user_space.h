@@ -19,7 +19,7 @@ struct user_runtime_layout {
 
 bool user_runtime_layout_calculate(uintptr_t aligned_image_end,
                                    size_t heap_pages, size_t stack_pages,
-                                   bool uses_status_page, uintptr_t entry,
+                                   uintptr_t entry,
                                    struct user_runtime_layout *layout);
 
 #endif

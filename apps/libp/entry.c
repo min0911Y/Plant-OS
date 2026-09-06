@@ -13,7 +13,7 @@ void return_to_app();
 void set_rt(uintptr_t rt);
 void init_float();
 
-void Main() {
+void Main(const runtime_linker_t *linker) {
   set_rt((uintptr_t)return_to_app);
   abi_alloc_init();
   stdio_initialize();
@@ -29,7 +29,7 @@ void Main() {
   }
   init_env();
   init_float();
-  runtime_initialize_static();
+  runtime_initialize(linker);
   int status = main(arguments.argc, arguments.argv);
   runtime_arguments_destroy(&arguments);
   exit(status);
