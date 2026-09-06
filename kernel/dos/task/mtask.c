@@ -6,6 +6,7 @@
 #include <limits.h>
 #include <platform.h>
 #include <smp.h>
+#include <tty_rpc.h>
 #include <usb.h>
 #define STACK_SIZE TASK_KERNEL_STACK_SIZE
 #define REAPER_TID 0u
@@ -548,6 +549,7 @@ static void task_clear_external_refs(mtask *task) {
   high_text_cursor_task_exited(task);
 #endif
   task_clear_ipc_refs(task);
+  fartty_task_cleanup(task);
   net_socket_cancel_waits(task->tid, task->generation);
   if (task->kind == TASK_PROCESS && task->tid == task->tgid) {
     net_socket_task_cleanup(task->tgid);

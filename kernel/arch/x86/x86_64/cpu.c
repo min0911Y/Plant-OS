@@ -55,14 +55,3 @@ void x64_cpu_initialize(x64_cpu_t *cpu) {
   x64_tlb_initialize();
   x64_syscall_initialize();
 }
-
-uintptr_t arch_address_space_call(arch_address_space_t root, uintptr_t entry,
-                                  void *argument) {
-  irq_state_t flags = irq_save();
-  arch_address_space_t original = arch_address_space_current();
-  arch_address_space_activate(root);
-  uintptr_t result = ((uintptr_t(*)(void *))entry)(argument);
-  arch_address_space_activate(original);
-  irq_restore(flags);
-  return result;
-}

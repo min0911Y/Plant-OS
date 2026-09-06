@@ -1,20 +1,11 @@
-// 进程间通讯（消息队列 + 服务名注册）
-// Copyright (C) zhouzhihao & min0911_ 2022
-// 2026: 重写为「带世代号的先进先出消息队列 + 阻塞收发 + 服务名注册」，
-//       用户态的 RPC 库（apps/libp/rpc.c）就建立在这套原语之上。
-//
-// 设计要点：
-//  * 单核内核，临界区直接用关中断实现，不再借用 lock.c 里的锁，
-//    这样收发消息的路径上不会再发生「拿着锁去调度」的情况。
-//  * 负载放在按需扩展的内核堆里，底层 span 由 page_malloc 分配，位于所有
-//    页目录都映射的低端地址，因此收发双方在各自的地址空间里都能访问。
-//  * 每条消息带 seq，接收时取序号最小的匹配消息，保证先进先出；
-//    带过滤条件（只收某个 tid）时顺序也不会乱。
-//  * 阻塞是「置 WAITING + 由对端 task_run 唤醒」，带超时的等待退化为
-//    让出时间片的轮询（内核里的 sleep() 本身也是这么做的）。
+// IPC queues, service discovery and synchronous kernel RPC clients.
+// Payloads belong to the receiving queue; kernel RPC replies go directly to
+// the blocked caller. Queue operations run under the kernel lock and saved
+// interrupt state, and waits yield to the scheduler with a bounded deadline.
 
 #include <dos.h>
 #include <irq.h>
+#include <rpc.h>
 
 #define TASK_ID_NONE ((uint32_t)-1)
 #define IPC_TICK_MS 10 /* 一个时钟节拍 10ms */
@@ -28,6 +19,17 @@ typedef struct {
 
 static ipc_service_t ipc_services[IPC_MAX_SERVICE];
 
+struct rpc_pending {
+  rpc_endpoint_t server;
+  uint32_t id, opcode, deadline;
+  void *reply;
+  unsigned capacity, length;
+  int status;
+  bool completed;
+};
+
+static uint32_t rpc_next_id = RPC_KERNEL_CALL;
+
 /* ------------------------------------------------------------------ */
 /* 队列的基础操作                                                      */
 /* ------------------------------------------------------------------ */
@@ -40,6 +42,7 @@ void ipc_header_init(IPC_Header *ipc) {
   }
   ipc->count = 0;
   ipc->seq = 0;
+  ipc->rpc = NULL;
   for (int i = 0; i < MAX_IPC_MESSAGE; i++) {
     ipc->messages[i].used = 0;
     ipc->messages[i].data = NULL;
@@ -153,6 +156,17 @@ void ipc_task_cleanup(mtask *task) {
   }
   task->ipc_wait_peer = TASK_ID_NONE;
   ipc_wake_senders(task->tid);
+  task_iterator_t iterator = {0};
+  mtask *waiter;
+  while ((waiter = task_iter_next(&iterator)) != NULL) {
+    struct rpc_pending *call = waiter->ipc_header.rpc;
+    if (call != NULL && call->server.tid == task->tid &&
+        call->server.generation == task->generation) {
+      call->status = RPC_ERR_NO_SERVICE;
+      call->completed = true;
+      ipc_wake_receiver(waiter);
+    }
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -226,9 +240,7 @@ int ipc_send(uint32_t to_tid, uint32_t to_generation, uint32_t type, uint32_t id
              const void *data, uint32_t size, uint32_t flags,
              uint32_t timeout_ms) {
   mtask *self = current_task();
-  void *payload = NULL;
   uint32_t deadline = 0;
-  int result;
 
   if (size > IPC_MAX_MSG_SIZE) {
     return IPC_ERR_TOOBIG;
@@ -236,13 +248,40 @@ int ipc_send(uint32_t to_tid, uint32_t to_generation, uint32_t type, uint32_t id
   if (size && !data) {
     return IPC_ERR_INVAL;
   }
-  if (size) {
-    payload = malloc(size);
-    if (!payload) {
-      return IPC_ERR_NOMEM;
+  if (type == RPC_TYPE_REPLY && (id & RPC_KERNEL_CALL)) {
+    irq_state_t state = irq_save();
+    mtask *to = get_task(to_tid);
+    if (to == NULL || to->state == DIED || to->generation != to_generation) {
+      irq_restore(state);
+      return IPC_ERR_NOTASK;
     }
-    // 还在发送者的地址空间里，可以直接拷用户数据
-    memcpy(payload, data, size);
+    struct rpc_pending *call = to->ipc_header.rpc;
+    // Drop late replies without occupying the user's inbox.
+    if (call == NULL || call->completed || call->id != id ||
+        call->server.tid != self->tid ||
+        call->server.generation != self->generation) {
+      irq_restore(state);
+      return IPC_OK;
+    }
+    rpc_wire_t wire;
+    call->status = RPC_ERR_TRANSPORT;
+    if (ipc_deadline_passed(call->deadline)) {
+      call->status = RPC_ERR_TIMEOUT;
+    } else if (size >= sizeof(wire)) {
+      memcpy(&wire, data, sizeof(wire));
+      if (wire.opcode == call->opcode && wire.len == size - sizeof(wire)) {
+        call->status = wire.len > call->capacity ? RPC_ERR_TOOBIG : wire.status;
+        if (wire.len <= call->capacity) {
+          if (wire.len != 0)
+            memcpy(call->reply, (const char *)data + sizeof(wire), wire.len);
+          call->length = wire.len;
+        }
+      }
+    }
+    call->completed = true;
+    ipc_wake_receiver(to);
+    irq_restore(state);
+    return IPC_OK;
   }
   if (timeout_ms) {
     deadline = ipc_deadline(timeout_ms);
@@ -254,12 +293,20 @@ int ipc_send(uint32_t to_tid, uint32_t to_generation, uint32_t type, uint32_t id
     if (!to || to->state == DIED ||
         (to_generation && to->generation != to_generation)) {
       irq_restore(state);
-      result = IPC_ERR_NOTASK;
-      break;
+      return IPC_ERR_NOTASK;
     }
     IPC_Header *ipc = &to->ipc_header;
     IPCMessage *slot = ipc_find_free(ipc);
     if (slot) {
+      // Allocate only after a slot is available: a killed sender owns no
+      // payload.
+      void *payload = size != 0 ? malloc(size) : NULL;
+      if (size != 0 && payload == NULL) {
+        irq_restore(state);
+        return IPC_ERR_NOMEM;
+      }
+      if (size != 0)
+        memcpy(payload, data, size);
       slot->data = payload;
       slot->size = size;
       slot->from_tid = self->tid;
@@ -282,22 +329,75 @@ int ipc_send(uint32_t to_tid, uint32_t to_generation, uint32_t type, uint32_t id
     }
     if (flags & IPC_NOWAIT) {
       irq_restore(state);
-      result = IPC_ERR_FULL;
-      break;
+      return IPC_ERR_FULL;
     }
     if (timeout_ms && ipc_deadline_passed(deadline)) {
       irq_restore(state);
-      result = IPC_ERR_TIMEOUT;
-      break;
+      return IPC_ERR_TIMEOUT;
     }
     // 队列满：等目标取走消息后再试，切回后恢复原中断状态。
     ipc_wait(self, to_tid, deadline, timeout_ms != 0, state);
   }
+}
 
-  if (payload) {
-    free(payload);
+int rpc_call(const rpc_endpoint_t *server, unsigned opcode, const void *arg,
+             unsigned arg_len, void *ret, unsigned ret_cap, unsigned *ret_len,
+             unsigned timeout_ms) {
+  mtask *self = current_task();
+  if (ret_len != NULL)
+    *ret_len = 0;
+  if (server == NULL || server->generation == 0 || server->tid == self->tid ||
+      (arg_len != 0 && arg == NULL) || (ret_cap != 0 && ret == NULL) ||
+      timeout_ms == 0 || timeout_ms > 0x7fffffffu)
+    return RPC_ERR_INVAL;
+  if (arg_len > IPC_MAX_MSG_SIZE - sizeof(rpc_wire_t))
+    return RPC_ERR_TOOBIG;
+  if (self->ipc_header.rpc != NULL)
+    return RPC_ERR_NESTING;
+
+  struct {
+    rpc_wire_t wire;
+    char data[IPC_MAX_MSG_SIZE - sizeof(rpc_wire_t)];
+  } request;
+  request.wire = (rpc_wire_t){.opcode = opcode, .len = arg_len};
+  if (arg_len != 0)
+    memcpy(request.data, arg, arg_len);
+  struct rpc_pending call = {.server = *server,
+                             .opcode = opcode,
+                             .reply = ret,
+                             .capacity = ret_cap,
+                             .status = RPC_ERR_TIMEOUT};
+  irq_state_t state = irq_save();
+  call.id = rpc_next_id++;
+  rpc_next_id |= RPC_KERNEL_CALL;
+  call.deadline = ipc_deadline(timeout_ms);
+  self->ipc_header.rpc = &call;
+  irq_restore(state);
+
+  int result =
+      ipc_send(server->tid, server->generation, RPC_TYPE_REQUEST, call.id,
+               &request, sizeof(rpc_wire_t) + arg_len, 0, timeout_ms);
+  if (result != IPC_OK) {
+    call.status = result == IPC_ERR_NOTASK    ? RPC_ERR_NO_SERVICE
+                  : result == IPC_ERR_NOMEM   ? RPC_ERR_NOMEM
+                  : result == IPC_ERR_TIMEOUT ? RPC_ERR_TIMEOUT
+                                              : RPC_ERR_TRANSPORT;
+  } else {
+    for (;;) {
+      state = irq_save();
+      if (call.completed || ipc_deadline_passed(call.deadline)) {
+        irq_restore(state);
+        break;
+      }
+      ipc_wait(self, TASK_ID_NONE, call.deadline, true, state);
+    }
   }
-  return result;
+  state = irq_save();
+  self->ipc_header.rpc = NULL;
+  if (ret_len != NULL)
+    *ret_len = call.length;
+  irq_restore(state);
+  return call.status;
 }
 
 // 取出一条消息。bufsize 是 buf 的容量，负载超出容量时返回 IPC_ERR_TOOBIG，

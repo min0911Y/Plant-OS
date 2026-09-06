@@ -9,6 +9,7 @@
 #include <platform.h>
 #include <stdint.h>
 #include <syscall.h>
+#include <tty_rpc.h>
 #include <user_space.h>
 #include <user_vm.h>
 #if defined(KERNEL_ARCH_X86_64)
@@ -113,6 +114,9 @@ static int ipc_syscall_send(uintptr_t arg1, uintptr_t arg2) {
   }
 
   ipc_user_msg_t *message = (ipc_user_msg_t *)(uintptr_t)arg1;
+  if ((message->id & RPC_KERNEL_CALL) &&
+      (message->type == RPC_TYPE_REQUEST || message->type == RPC_TYPE_NOTIFY))
+    return IPC_ERR_INVAL;
   if (message->size &&
       !user_range_ok((uintptr_t)message->data, message->size)) {
     return IPC_ERR_INVAL;
@@ -1347,17 +1351,37 @@ static void syscall_yield(syscall_context_t *frame) {
 
 static void syscall_tty_object(syscall_context_t *frame) {
   switch (frame->value) {
-  case SYSCALL_TTY_ALLOC:
-    frame->value = (uintptr_t)fartty_alloc(
-        (void *)(uintptr_t)frame->argument0, frame->argument1, current_task()->address_space,
-        frame->argument2, frame->argument3);
+  case SYSCALL_TTY_ALLOC: {
+    struct tty *tty = NULL;
+    if (frame->argument0 <= UINT_MAX && frame->argument1 <= UINT_MAX &&
+        frame->argument2 <= INT_MAX && frame->argument3 <= INT_MAX) {
+      tty = fartty_alloc(get_task(frame->argument0), frame->argument1,
+                         frame->argument2, frame->argument3);
+    }
+    frame->value = tty != NULL ? tty->remote.handle : 0;
     break;
-  case SYSCALL_TTY_SET:
-    tty_set(get_task(frame->argument0), (struct tty *)(uintptr_t)frame->argument1);
+  }
+  case SYSCALL_TTY_SET: {
+    extern struct tty *tty_default;
+    mtask *task =
+        frame->argument0 <= UINT_MAX ? get_task(frame->argument0) : NULL;
+    struct tty *tty =
+        frame->argument1 == 0 ? tty_default : fartty_lookup(frame->argument1);
+    frame->value = -1;
+    if (task != NULL && task->state != DIED && !task->terminate_pending &&
+        task->tgid == current_task()->tgid && tty != NULL) {
+      tty_set(task, tty);
+      frame->value = 0;
+    }
     break;
-  case SYSCALL_TTY_FREE:
-    tty_free((struct tty *)(uintptr_t)frame->argument0);
+  }
+  case SYSCALL_TTY_FREE: {
+    struct tty *tty = fartty_lookup(frame->argument0);
+    frame->value = tty != NULL ? 0 : -1;
+    if (tty != NULL)
+      tty_free(tty);
     break;
+  }
   }
 }
 
@@ -1812,7 +1836,7 @@ static void syscall_cpu_info(syscall_context_t *frame) {
 }
 
 static void syscall_tty_input_notify(syscall_context_t *frame) {
-  frame->value = tty_notify_input((struct tty *)(uintptr_t)frame->argument0) ? 0 : -1;
+  frame->value = tty_notify_input(fartty_lookup(frame->argument0)) ? 0 : -1;
 }
 
 static void syscall_perf_control(syscall_context_t *frame) {

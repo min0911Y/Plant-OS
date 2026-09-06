@@ -3,6 +3,7 @@
 #include <arch.h>
 #include <ctypes.h>
 #include <mouse.h>
+#include <rpc.h>
 #include <stdarg.h>
 #include <stddef.h>
 typedef unsigned int vram_t;
@@ -115,6 +116,7 @@ typedef struct { // IPC头（在TASK结构体中的头）
   uint32_t count; // 队列中的消息数
   uint64_t seq;   // 下一条消息的入队序号
   IPCMessage messages[MAX_IPC_MESSAGE];
+  struct rpc_pending *rpc;
 } IPC_Header;
 enum STATE {
   EMPTY,
@@ -143,7 +145,8 @@ enum WAIT_REASON {
   WAIT_REASON_SOCKET,
   WAIT_REASON_KEYBOARD,
   WAIT_REASON_INPUT,
-  WAIT_REASON_USB
+  WAIT_REASON_USB,
+  WAIT_REASON_TTY
 };
 enum { TASK_KERNEL_STACK_SIZE = 1024u * 1024u };
 typedef struct mtask {
@@ -378,7 +381,12 @@ struct tty {
                    unsigned char color); // Draw_Box函数
   int (*fifo_status)(struct tty *res);
   int (*fifo_get)(struct tty *res);
-  uintptr_t reserved[4]; // backend-private values
+  struct {
+    rpc_endpoint_t server, busy;
+    uint32_t opcode, handle;
+    bool disconnected;
+  } remote;
+  uint32_t input_sequence;
   bool native_ansi;
 
   //////////////实现VT100需要的//////////////////

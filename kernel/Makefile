@@ -69,7 +69,7 @@ OBJS_BOOTPACK = $(OUTPATH)boot_entry.obj $(OUTPATH)boot.o \
 				$(OUTPATH)vdisk.o $(OUTPATH)rootfs.o $(OUTPATH)interrupt.o $(OUTPATH)mount.o \
 				$(OUTPATH)mtask.o $(OUTPATH)basetask.o $(OUTPATH)execute.o $(OUTPATH)network.o $(OUTPATH)rtl8139.o \
 				$(OUTPATH)vfs.o $(OUTPATH)build.o $(OUTPATH)mst.o $(OUTPATH)str.o $(OUTPATH)pfs.o $(OUTPATH)signal.o \
-				$(OUTPATH)rtc.o $(OUTPATH)ahci.o $(OUTPATH)initramfs.o $(OUTPATH)address_space_call.o $(OUTPATH)fartty.o $(OUTPATH)iso9660.o \
+				$(OUTPATH)rtc.o $(OUTPATH)ahci.o $(OUTPATH)initramfs.o $(OUTPATH)fartty.o $(OUTPATH)iso9660.o \
 				$(OUTPATH)module.o $(OUTPATH)kasan.o $(OUTPATH)perf.o $(OUTPATH)fpu.o $(OUTPATH)irq.o $(OUTPATH)exceptions.o \
 				$(OUTPATH)cpu.o $(OUTPATH)smp.o $(OUTPATH)task_context.o $(OUTPATH)smp_trampoline.obj \
 				$(OUTPATH)syscall_adapter.o $(OUTPATH)x86_irq_dispatch.o \

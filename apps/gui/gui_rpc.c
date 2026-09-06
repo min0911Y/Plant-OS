@@ -319,5 +319,8 @@ int gui_rpc_service_start(void) {
       return result;
     }
   }
-  return RPC_OK;
+  result = rpc_register_handler(TTY_RPC_DISPATCH, console_rpc_dispatch);
+  if (result != RPC_OK)
+    rpc_service_destroy(GUI_SERVICE_NAME);
+  return result;
 }

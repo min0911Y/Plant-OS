@@ -175,9 +175,4 @@ int mount(char *fileName);
 void unmount(char drive);
 // signal.c
 void set_signal_handler(unsigned sig, uintptr_t handler);
-// farcall.c
-// fartty.c
-struct tty *fartty_alloc(void *vram, uintptr_t handle,
-                         arch_address_space_t address_space, int xsize,
-                         int ysize);
 #endif

@@ -14,6 +14,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <syscall.h>
+#include <task.h>
+#include <time.h>
+#include <tty_rpc.h>
 
 #define SERVICE_MATH "plos.math"
 #define SERVICE_CLIENT "plos.client"
@@ -440,6 +443,208 @@ static int client_main(unsigned server_tid) {
   return fails;
 }
 
+/* Kernel TTY calls share the RPC wire protocol, but not the user inbox. */
+#define OP_TTY_FINISH (TTY_RPC_DISPATCH + 1)
+static struct {
+  tty_t handle;
+  unsigned writes, bytes, reads;
+  int failed, finished;
+} tty_test;
+
+static int tty_test_dispatch(rpc_call_t *call) {
+  if (call->arg_len < sizeof(tty_rpc_request_t) ||
+      call->ret_cap < sizeof(tty_rpc_reply_t) ||
+      !(call->call_id & RPC_KERNEL_CALL))
+    return RPC_ERR_INVAL;
+  const tty_rpc_request_t *request = call->arg;
+  tty_test.failed |= request->handle != tty_test.handle;
+  tty_rpc_reply_t reply = {.state = request->state};
+  switch (request->operation) {
+  case TTY_RPC_WRITE: {
+    unsigned length = call->arg_len - sizeof(*request);
+    const char *text = (const char *)(request + 1);
+    tty_test.writes++;
+    tty_test.bytes += length;
+    if (length == 1 && text[0] == '!') {
+      // Reply after the kernel deadline; it must never enter the user inbox.
+      sleep(2500);
+      break;
+    }
+    for (unsigned i = 0; i < length; i++)
+      tty_test.failed |= text[i] != 'x';
+    reply.state.x = (reply.state.x + length) % 80;
+    break;
+  }
+  case TTY_RPC_MOVE:
+    reply.state.x = request->args.cursor.x;
+    reply.state.y = request->args.cursor.y;
+    break;
+  case TTY_RPC_CLEAR:
+    reply.state.x = reply.state.y = 0;
+    break;
+  case TTY_RPC_INPUT_STATUS:
+    reply.value = 1;
+    break;
+  case TTY_RPC_INPUT_GET:
+    tty_test.reads++;
+    reply.value = tty_test.reads == 1 ? -1 : 42;
+    // This wake arrives while the reader is still waiting for the empty reply.
+    if (tty_test.reads == 1)
+      tty_test.failed |= tty_notify_input(tty_test.handle) != 0;
+    break;
+  case TTY_RPC_DRAW_BOX:
+  case TTY_RPC_SCROLL:
+    break;
+  default:
+    return RPC_ERR_BAD_OPCODE;
+  }
+  memcpy(call->ret, &reply, sizeof(reply));
+  call->ret_len = sizeof(reply);
+  return RPC_OK;
+}
+
+static int tty_test_finish(rpc_call_t *call) {
+  if (call->arg_len != sizeof(int))
+    return RPC_ERR_INVAL;
+  int failed;
+  memcpy(&failed, call->arg, sizeof(failed));
+  tty_test.failed |= failed;
+  tty_test.finished = 1;
+  return RPC_OK;
+}
+
+static int tty_test_writer(rpc_endpoint_t server) {
+  int failed = 0;
+  unsigned self = NowTaskID();
+  ipc_msg_t message = {.peer_tid = self, .type = RAW_TYPE, .flags = IPC_NOWAIT};
+  unsigned queued = 0;
+  while (ipc_send_msg(&message) == IPC_OK)
+    queued++;
+  failed |= queued == 0;
+  char text[6001];
+  memset(text, 'x', sizeof(text) - 1);
+  text[sizeof(text) - 1] = 0;
+  print(text);
+  failed |= ipc_pending() != (int)queued;
+  for (unsigned i = 0; i < queued; i++) {
+    ipc_msg_t got;
+    failed |= ipc_recv_any(NULL, 0, &got, 500) < 0 || got.type != RAW_TYPE;
+  }
+  failed |= tty_get_xsize() != 80 || tty_get_ysize() != 25;
+  goto_xy(7, 3);
+  failed |= get_xy() != (7 << 16 | 3);
+  tty_stop_cur_moving();
+  goto_xy(5, 4);
+  tty_start_cur_moving();
+  failed |= get_xy() != (5 << 16 | 4);
+  Text_Draw_Box(0, 0, 1, 1, 0x17);
+  clear();
+  failed |= get_xy() != 0;
+  failed |= input_char_inSM() != 42;
+  failed |=
+      tty_notify_input(tty_test.handle) != -1; // Only the provider can wake it.
+  failed |= tty_free(tty_test.handle) != -1;
+  unsigned start = (unsigned)clock();
+  putch('!');
+  unsigned elapsed = (unsigned)clock() - start;
+  failed |= elapsed < 1900 || elapsed > 5000;
+  start = (unsigned)clock();
+  putch('z'); // A disconnected TTY must not retry or block again.
+  failed |= (unsigned)clock() - start >= 1000;
+  int status = rpc_call(&server, OP_TTY_FINISH, &failed, sizeof(failed), NULL,
+                        0, NULL, 5000);
+  // The late kernel reply was discarded while this ordinary RPC was waiting.
+  failed |= status != RPC_OK || ipc_pending() != 0;
+  return failed;
+}
+
+static int tty_test_server(unsigned parent) {
+  unsigned self = NowTaskID();
+  rpc_endpoint_t server = {self, (unsigned)ipc_generation()};
+  rpc_wire_t wire = {.opcode = TTY_RPC_DISPATCH};
+  ipc_msg_t forged = {.peer_tid = self,
+                      .peer_generation = server.generation,
+                      .type = RPC_TYPE_REQUEST,
+                      .id = RPC_KERNEL_CALL,
+                      .data = &wire,
+                      .size = sizeof(wire),
+                      .flags = IPC_NOWAIT};
+  if (ipc_send_msg(&forged) != IPC_ERR_INVAL ||
+      tty_alloc(self, TTY_RPC_DISPATCH, 0, 25) != 0 ||
+      tty_alloc(self, TTY_RPC_DISPATCH, 80, (unsigned)-1) != 0 ||
+      rpc_register_handler(TTY_RPC_DISPATCH, tty_test_dispatch) != RPC_OK ||
+      rpc_register_handler(OP_TTY_FINISH, tty_test_finish) != RPC_OK)
+    return 1;
+  tty_test.handle = tty_alloc(self, TTY_RPC_DISPATCH, 80, 25);
+  if (tty_test.handle == 0 || tty_set(self, tty_test.handle) != 0)
+    return 1;
+  int writer = fork();
+  if (writer == 0)
+    _exit(tty_test_writer(server));
+  tty_set(self, 0);
+  if (writer < 0) {
+    tty_free(tty_test.handle);
+    return 1;
+  }
+  while (!tty_test.finished) {
+    if (rpc_serve_once(5000) != RPC_OK) {
+      tty_free(tty_test.handle);
+      return 1;
+    }
+  }
+  int status = waittid(writer);
+  int failed = status != 0 || tty_test.failed || tty_test.writes != 3 ||
+               tty_test.bytes != 6001 || tty_test.reads != 2;
+  logkf("FARTTY RPC writes=%u bytes=%u reads=%u status=%d failed=%d\n",
+        tty_test.writes, tty_test.bytes, tty_test.reads, status, failed);
+  failed |= tty_free(tty_test.handle) != 0;
+  failed |=
+      tty_free(tty_test.handle) != -1; // Retired handles cannot be reused.
+  // Exiting a provider retires its TTY and its still-blocked process.
+  tty_test.handle = tty_alloc(self, TTY_RPC_DISPATCH, 80, 25);
+  if (tty_test.handle == 0 || tty_set(self, tty_test.handle) != 0)
+    return 1;
+  int orphan = fork();
+  if (orphan == 0) {
+    for (;;)
+      sleep(60000);
+  }
+  failed |= orphan < 0 || ipc_send_to(parent, RAW_TYPE, 0, &orphan,
+                                      sizeof(orphan), 500) != IPC_OK;
+  return failed;
+}
+
+static int test_tty_rpc(void) {
+  unsigned parent = NowTaskID();
+  int server = fork();
+  if (server < 0)
+    return 1;
+  if (server == 0)
+    _exit(tty_test_server(parent));
+  int status = waittid(server);
+  int orphan;
+  ipc_msg_t got;
+  if (status != 0 || ipc_recv_from(server, &orphan, sizeof(orphan), &got,
+                                   500) != sizeof(orphan))
+    return 1;
+  unsigned deadline = (unsigned)clock() + 1000;
+  for (;;) {
+    task_info_t *tasks;
+    size_t count;
+    if (task_list(&tasks, &count) != 0)
+      return 1;
+    int alive = 0;
+    for (size_t i = 0; i < count; i++)
+      alive |= tasks[i].tid == (unsigned)orphan;
+    free(tasks);
+    if (!alive)
+      return 0;
+    if ((int)((unsigned)clock() - deadline) >= 0)
+      return 1;
+    sleep(10);
+  }
+}
+
 int main(void) {
   int child;
 
@@ -457,6 +662,8 @@ int main(void) {
   }
 
   fails = client_main((unsigned)child);
+  int tty_status = test_tty_rpc();
+  check("tty_rpc", tty_status == 0, tty_status, 0);
   printf("==== Result: %d/%d items passed ====\n", checks - fails, checks);
   logkf("RPCTEST done checks=%d fails=%d\n", checks, fails);
   return fails;

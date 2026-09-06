@@ -356,7 +356,7 @@ int rpc_call_tid(unsigned tid, unsigned generation, unsigned opcode,
     return RPC_ERR_NESTING;
   }
   call_id = rpc_next_id++;
-  if (rpc_next_id == 0) {
+  if (rpc_next_id == RPC_KERNEL_CALL) {
     rpc_next_id = 1;
   }
   rpc_wire_t *wire = (rpc_wire_t *)tx;
@@ -431,7 +431,7 @@ int rpc_notify(rpc_endpoint_t *ep, unsigned opcode, const void *arg,
   out.timeout_ms = 0;
   out.from_filter = IPC_ANY_TID;
   out.data = tx;
-  if (rpc_next_id == 0) {
+  if (rpc_next_id == RPC_KERNEL_CALL) {
     rpc_next_id = 1;
   }
   rc = ipc_send_msg(&out);

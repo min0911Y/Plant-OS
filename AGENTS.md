@@ -77,7 +77,7 @@ make -C kernel ARCH=x86_64 livecd
 - psh/Lua 行编辑共用 `apps/third_party/pl_readline`。PS/2 与 USB 共用 `input_device.c` 的设备状态和逻辑键码；完整鼠标事件由 `mouse_read(mouse_event_t *)` 传递，不在用户态解码 PS/2 字节。
 - 键盘只投递给有效输入 owner 或前台 TTY；TTY 所有权决定前台，阻塞使用 `WAIT_REASON_KEYBOARD`/`input_wait()`。同步执行在发布子进程时原子交接 TTY，仅交接调用者自己的鼠标所有权；返回时不能覆盖其他 owner。
 - `AddThread(name, entry, stack_top, argument)` 显式传四个参数，入口由架构建立对齐调用帧；调用者不手写栈槽。活动 TTY 与 `tty_session` 分开维护，销毁 TTY 前迁移会话并清理相关任务、FIFO、栈与窗口。
-- GUI 是单例 `gui` RPC 服务，须在切换显示和获取输入前注册。客户端只持有不透明窗口句柄及经过 owner/generation 校验的共享区域；焦点显式维护，GUI console 写入输入 FIFO 后调用 `tty_notify_input`。
+- GUI 是单例 `gui` RPC 服务，须在切换显示和获取输入前注册。客户端只持有不透明窗口句柄及经过 owner/generation 校验的共享区域；焦点显式维护，GUI console 写入输入 FIFO 后调用 `tty_notify_input`。`fartty` 通过同一 IPC/RPC 协议调用所属服务，使用不透明 TTY 句柄及 TID/generation 校验；内核不得切换到用户地址空间执行回调，RPC 等待不得消费应用消息。
 - SDL 唯一活动实现为 `apps/sdl2`。GUI 合成读取已提交画面，`window_present` 应答后客户端才复用绘图缓冲，`window_refresh` 保留异步 damage 合并。显示布局以 `framebuffer_info()` 的实际尺寸、pitch 和颜色位序为准；framebuffer 别名保持相同缓存属性。详情见 [显示与 SDL](doc/multiarch.md)。
 
 ### 文件系统与设备

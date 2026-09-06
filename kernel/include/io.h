@@ -42,9 +42,7 @@ void high_text_cursor_task_exited(mtask *task);
 struct tty *tty_set(mtask *task, struct tty *res);
 bool tty_notify_input(struct tty *tty);
 struct tty *tty_set_default(struct tty *res);
-void tty_set_reserved(struct tty *res, uintptr_t reserved1,
-                      uintptr_t reserved2, uintptr_t reserved3,
-                      uintptr_t reserved4);
+void t_putchar(struct tty *tty, char ch);
 // log.c
 void kprint(char *str);
 void logk(char *str, ...);

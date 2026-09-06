@@ -45,8 +45,6 @@ bool arch_task_prepare_signal(struct mtask *task, uintptr_t handler,
 arch_address_space_t arch_address_space_current(void);
 arch_address_space_t arch_address_space_kernel(void);
 void arch_address_space_activate(arch_address_space_t address_space);
-uintptr_t arch_address_space_call(arch_address_space_t address_space,
-                                  uintptr_t entry, void *argument);
 arch_address_space_t
 arch_address_space_clone(arch_address_space_t source_address_space);
 void arch_address_space_retain(arch_address_space_t address_space);

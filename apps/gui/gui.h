@@ -8,24 +8,8 @@ typedef vram_t color_t;
 #include <ctypes.h>
 #include <framebuffer.h>
 #include <gui_rpc.h>
-struct tty {
-  int using1;                              // 使用标志
-  void *vram;                              // 显存（也可以当做图层）
-  int x, y;                                // 目前的 x y 坐标
-  int xsize, ysize;                        // x 坐标大小 y 坐标大小
-  int Raw_y;                               // 换行次数
-  int cur_moving;                          // 光标需要移动吗
-  unsigned char color;                     // 颜色
-  void (*putchar)(struct tty *res, int c); // putchar函数
-  void (*MoveCursor)(struct tty *res, int x, int y);  // MoveCursor函数
-  void (*clear)(struct tty *res);                     // clear函数
-  void (*screen_ne)(struct tty *res);                 // screen_ne函数
-  void (*gotoxy)(struct tty *res, int x, int y);      // gotoxy函数
-  void (*print)(struct tty *res, const char *string); // print函数
-  void (*Draw_Box)(struct tty *res, int x, int y, int x1, int y1,
-                   unsigned char color); // Draw_Box函数
-  uintptr_t reserved[4];                  // 保留项
-};
+#include <rpc.h>
+#include <tty_rpc.h>
 typedef struct desktop desktop_t;
 typedef struct window window_t;
 typedef struct super_window super_window_t;
@@ -165,7 +149,7 @@ gmouse_t *create_gmouse(desktop_t *desktop, int x, int y, int pos);
 
 struct console {
   window_t *window;
-  struct tty *tty;
+  tty_rpc_state_t state;
   uintptr_t tty_handle;
   int xsize, ysize, x, y;
   struct SHTCTL *shtctl;
@@ -178,8 +162,7 @@ struct console {
   void (*close)(console_t *console);
 };
 
-bool now_tty_GraphicMode(struct tty *res);
-color_t text_color_to_real_color(unsigned char text_color, bool back_or_font);
+int console_rpc_dispatch(rpc_call_t *call);
 console_t *create_console(window_t *window, int xsize, int ysize, int x, int y);
 
 struct button {

@@ -240,9 +240,12 @@ typedef enum {
 } input_wait_event_t;
 int input_wait(uint32_t events);
 void api_yield(void);
-tty_t tty_alloc(void *vram, uintptr_t handle, unsigned xsize, unsigned ysize);
-void tty_set(unsigned tid,tty_t tty);
-void tty_free(tty_t tty);
+// Bind a TTY to an RPC handler in the caller's task group.
+tty_t tty_alloc(unsigned server_tid, unsigned opcode, unsigned xsize,
+                unsigned ysize);
+// A zero handle restores the default TTY.
+int tty_set(unsigned tid, tty_t tty);
+int tty_free(tty_t tty);
 int tty_notify_input(tty_t tty);
 int shared_memory_map_to(unsigned target_tid, unsigned target_generation,
                          const void *source, void *target, unsigned size);

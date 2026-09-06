@@ -191,9 +191,11 @@ def exercise_console(qmp_path, output, origin=None):
         qmp.move(700 - origin[0], 500 - origin[1])
         qmp.press("btn", button="left")
 
+        console_x, console_y = 250, 250
+
         def cell_rows(label, row, columns):
             width, height, pixels = qmp.screenshot(output / f"console-{label}.ppm")
-            x, y = 250 + 4, 250 + 24 + row * 16
+            x, y = console_x + 4, console_y + 24 + row * 16
             if x + columns * 8 > width or y + 16 > height:
                 raise RuntimeError("initial console is outside the display")
             return b"".join(pixels[(line * width + x) * 3:
@@ -224,6 +226,31 @@ def exercise_console(qmp_path, output, origin=None):
             raise RuntimeError("GUI console did not scroll completed lines")
         if cell_rows("scrolled-bottom", 24, 7) != prompt:
             raise RuntimeError("GUI console lost its prompt after scrolling")
+        # Retire a blocked shell, then create consoles from the input thread.
+        # Their RPC endpoint must remain the GUI service task, not that thread.
+        mouse_x, mouse_y = 700, 500
+        for cycle in range(2):
+            close_x, close_y = console_x + 635, console_y + 15
+            qmp.move(close_x - mouse_x, close_y - mouse_y)
+            qmp.press("btn", button="left")
+            if cell_rows(f"closed-{cycle}", 1, 7) == prompt:
+                raise RuntimeError("closed GUI console is still visible")
+            qmp.move(300 - close_x, 260 - close_y)
+            qmp.press("btn", button="left")  # Toolbox / NewConsole
+            mouse_x, mouse_y = 300, 260
+            console_x = console_y = 0
+            deadline = time.monotonic() + 10
+            while cell_rows(f"reopened-{cycle}", 1, 7) != prompt:
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("reopened GUI console has no prompt")
+                time.sleep(0.2)
+            before = cell_rows(f"reopened-before-{cycle}", 1, 12)
+            qmp.press("key", key={"type": "qcode", "data": "b"})
+            if cell_rows(f"reopened-echo-{cycle}", 1, 12) == before:
+                raise RuntimeError("reopened GUI console did not receive input")
+            qmp.press("key", key={"type": "qcode", "data": "backspace"})
+            if cell_rows(f"reopened-backspace-{cycle}", 1, 12) != before:
+                raise RuntimeError("reopened GUI console backspace failed")
     finally:
         qmp.close()
 
@@ -367,7 +394,7 @@ def main():
     ]
     expected = (["ARCHTEST PASS", "CPPTEST PASS", "SIMDTEST PASS"] if native else ["FPUTEST PASS"]) + [
                 "TIMETEST PASS", "EXCEPTION_TEST done checks=5 fails=0", "GUITEST THREAD PASS", "GMOUSE ID =",
-                "RPCTEST done checks=22 fails=0", "DKTEST PASS", "DYNTEST PASS", "DYNTEST TLB PASS",
+                "RPCTEST done checks=23 fails=0", "DKTEST PASS", "DYNTEST PASS", "DYNTEST TLB PASS",
                 "GUISTRESS PASS" if args.capacity else "GUITEST PASS"]
     if args.mouse:
         expected.append("GUIMOUSE PASS events=15")
@@ -654,7 +681,7 @@ def main():
                                     qmp.close()
                         if args.console and "GMOUSE ID =" in text:
                             exercise_console(qmp_path, output)
-                            print(f"{args.arch} {args.firmware} GUICONSOLE PASS: prompt, echo, backspace, scroll; {output}")
+                            print(f"{args.arch} {args.firmware} GUICONSOLE PASS: prompt, echo, backspace, scroll, close/reopen; {output}")
                             return
                         if args.desktop_app and f"SDLAPP START {args.desktop_app}.bin" in text:
                             if app_started is None:

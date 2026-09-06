@@ -45,13 +45,18 @@ int tty_fifo_get() {
 }
 int input_char_inSM() {
   for (;;) {
-    if (tty_fifo_status() != 0) {
-      int input = tty_fifo_get();
-      if (input != -1) {
-        return input;
-      }
+    irq_state_t state = irq_save();
+    struct tty *tty = tty_for_input();
+    uint32_t sequence = tty != NULL ? tty->input_sequence : 0;
+    int input = tty != NULL ? tty->fifo_get(tty) : -1;
+    if (input != -1) {
+      irq_restore(state);
+      return input;
     }
-    task_fall_blocked_reason(WAITING, WAIT_REASON_KEYBOARD);
+    // An RPC read can sleep. Do not lose input delivered before its reply.
+    if (tty == NULL || tty->input_sequence == sequence)
+      task_fall_blocked_reason(WAITING, WAIT_REASON_KEYBOARD);
+    irq_restore(state);
   }
 }
 int kbhit() {

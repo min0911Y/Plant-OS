@@ -2,268 +2,224 @@
 #include <stdlib.h>
 #include <string.h>
 #include <syscall.h>
+
 _Static_assert(sizeof(((console_t *)0)->tty_handle) == sizeof(tty_t),
                "console TTY handle must retain the native ABI width");
+
 void draw_window(window_t *window, int x, int y, int x1, int y1, color_t color);
 void puts_window(window_t *window, char *s, int x, int y, color_t color);
-void console_task(tty_t tty) {
-  tty_set(NowTaskID(), tty);
+
+static void console_task(tty_t tty) {
+  if (tty_set(NowTaskID(), tty) != 0)
+    _exit((unsigned)-1);
   int status = exec("psh.bin", "psh.bin");
-  if (status != 0) {
+  if (status != 0)
     logkf("GUI console shell exited with status %d\n", status);
-  }
   _exit(status);
 }
-bool now_tty_GraphicMode(struct tty *res) {
-  console_t *console = (console_t *)res->vram;
-  return console->window->desktop->focused_window == console->window;
+
+static color_t text_color(unsigned color, bool foreground) {
+  static const color_t palette[16] = {
+      COL_000000, COL_000084, COL_008400, argb(0, 36, 36, 36),
+      COL_840000, COL_FFFF00, COL_848400, COL_C6C6C6,
+      COL_848484, COL_0000FF, COL_00FF00, COL_00FFFF,
+      COL_FF0000, COL_FF00FF, COL_FFFF00, COL_FFFFFF};
+  return palette[(foreground ? color : color >> 4) & 15];
 }
-color_t text_color_to_real_color(unsigned char text_color, bool back_or_font) {
-  unsigned char c;
-  if (back_or_font)
-    c = text_color & 0x0f;
-  else
-    c = text_color >> 4;
-  if (c == 0)
-    return COL_000000;
-  else if (c == 1)
-    return COL_000084;
-  else if (c == 2)
-    return COL_008400;
-  else if (c == 3)
-    return argb(0, 36, 36, 36);
-  else if (c == 4)
-    return COL_840000;
-  else if (c == 5)
-    return COL_FFFF00;
-  else if (c == 6)
-    return COL_848400;
-  else if (c == 7)
-    return COL_C6C6C6;
-  else if (c == 8)
-    return COL_848484;
-  else if (c == 9)
-    return COL_0000FF;
-  else if (c == 10)
-    return COL_00FF00;
-  else if (c == 11)
-    return COL_00FFFF;
-  else if (c == 12)
-    return COL_FF0000;
-  else if (c == 13)
-    return COL_FF00FF;
-  else if (c == 14)
-    return COL_FFFF00;
-  else if (c == 15)
-    return COL_FFFFFF;
+
+static void console_refresh(console_t *console, int x, int y, int x1, int y1) {
+  sheet_refresh(console->sht_copy, x, y, x1, y1);
+  sheet_refresh(console->window->sht, x, y, x1, y1);
 }
-void putchar_console(struct tty *res, int c) {
+
+static void console_move(console_t *console, int x, int y) {
+  console->state.x = x;
+  console->state.y = y;
+  bool visible = console->state.cursor_visible && x < console->xsize / 8;
+  sheet_updown(console->sht_cur, visible ? 1 : -1);
+  int old_x = console->sht_cur->vx0;
+  int old_y = console->sht_cur->vy0;
+  sheet_slide(console->sht_cur, console->x + x * 8, console->y + y * 16);
+  console_refresh(console, old_x, old_y, old_x + 8, old_y + 16);
+  int new_x = console->sht_cur->vx0;
+  int new_y = console->sht_cur->vy0;
+  sheet_refresh(console->window->sht, new_x, new_y, new_x + 8, new_y + 16);
+}
+
+static void console_scroll(console_t *console) {
+  unsigned stride = console->window->xsize;
+  for (int row = 0; row < console->ysize - 16; row++) {
+    vram_t *line =
+        console->vram_copy + (console->y + row) * stride + console->x;
+    memcpy(line, line + 16 * stride, console->xsize * sizeof(*line));
+  }
+  console->window->draw(
+      console->window, console->x, console->y + console->ysize - 16,
+      console->x + console->xsize, console->y + console->ysize,
+      text_color(console->state.color, false));
+  console_refresh(console, console->x, console->y, console->x + console->xsize,
+                  console->y + console->ysize);
+  console_move(console, 0, console->ysize / 16 - 1);
+}
+
+static void console_putchar(console_t *console, char c) {
+  tty_rpc_state_t *state = &console->state;
+  int columns = console->xsize / 8, rows = console->ysize / 16;
   if (c == '\r') {
-    res->MoveCursor(res, 0, res->y);
+    console_move(console, 0, state->y);
     return;
   }
   if (c == '\t') {
-    putchar_console(res, ' ');
-    putchar_console(res, ' ');
-    putchar_console(res, ' ');
-    putchar_console(res, ' ');
+    for (int i = 0; i < 4; i++)
+      console_putchar(console, ' ');
     return;
   }
-  console_t *console = (console_t *)res->vram;
-  if (res->x == res->xsize) {
-    if (res->y == res->ysize - 1) {
-      res->screen_ne(res);
-    } else {
-      res->x = 0;
-      res->y++;
-    }
-  }
-  if (c == '\n') {
-    if (res->y == res->ysize - 1) {
-      res->screen_ne(res);
-      return;
-    } else {
-      res->x = 0;
-      res->y++;
-      res->MoveCursor(res, res->x, res->y);
-      return;
-    }
-  }
   if (c == '\b') {
-    if (res->x > 0) {
-      res->x--;
-      console->window->draw(
-          console->window, res->x * 8 + console->x, res->y * 16 + console->y,
-          res->x * 8 + console->x + 8, res->y * 16 + console->y + 16,
-          text_color_to_real_color(res->color, false));
-      res->MoveCursor(res, res->x, res->y);
-      return;
+    if (state->x > 0) {
+      state->x--;
+    } else if (state->y > 0) {
+      state->x = columns - 1;
+      state->y--;
     } else {
-      res->x = res->xsize - 1;
-      res->y--;
-      res->MoveCursor(res, res->x, res->y);
       return;
     }
+  } else if (state->x == columns || c == '\n') {
+    if (state->y == rows - 1)
+      console_scroll(console);
+    else
+      console_move(console, 0, state->y + 1);
+    if (c == '\n')
+      return;
   }
-  char s[2] = {0, 0};
-  s[0] = c;
-  console->window->draw(console->window, res->x * 8 + console->x,
-                        res->y * 16 + console->y, res->x * 8 + console->x + 8,
-                        res->y * 16 + console->y + 16,
-                        text_color_to_real_color(res->color, false));
-  console->window->puts(console->window, s, res->x * 8 + console->x,
-                        res->y * 16 + console->y,
-                        text_color_to_real_color(res->color, true));
-  res->x++;
-  res->MoveCursor(res, res->x, res->y);
-}
-void clear_console(struct tty *res) {
-  console_t *console = (console_t *)res->vram;
-  res->x = 0;
-  res->y = 0;
-  console->window->draw(
-      console->window, console->x, console->y, console->x + console->xsize,
-      console->y + console->ysize, text_color_to_real_color(res->color, false));
-}
-void MoveCursor_console(struct tty *res, int x, int y) {
-  console_t *console = (console_t *)res->vram;
-  res->x = x;
-  res->y = y;
-  int cur_x_old = console->sht_cur->vx0;
-  int cur_y_old = console->sht_cur->vy0;
-  sheet_slide(console->sht_cur, console->x + x * 8, console->y + y * 16);
-  sheet_refresh(console->sht_copy, cur_x_old, cur_y_old, cur_x_old + 8,
-                cur_y_old + 16);
-  sheet_refresh(console->window->sht, cur_x_old, cur_y_old, cur_x_old + 8,
-                cur_y_old + 16);
-  int cur_x_new = console->sht_cur->vx0;
-  int cur_y_new = console->sht_cur->vy0;
-  sheet_refresh(console->window->sht, cur_x_new, cur_y_new, cur_x_new + 8,
-                cur_y_new + 16);
-}
-static void copy_char(vram_t *vram, int off_x, int off_y, int x, int y, int x1,
-                      int y1, int xsize) {
-  for (int i = 0; i < 16; i++) {
-    for (int j = 0; j < 8; j++) {
-      vram[(y + i + off_y) * xsize + (j + x + off_x)] =
-          vram[(y1 + i + off_y) * xsize + (j + x1 + off_x)];
-    }
+  int x = console->x + state->x * 8, y = console->y + state->y * 16;
+  console->window->draw(console->window, x, y, x + 8, y + 16,
+                        text_color(state->color, false));
+  if (c != '\b') {
+    char text[2] = {c, 0};
+    console->window->puts(console->window, text, x, y,
+                          text_color(state->color, true));
+    state->x++;
   }
+  console_move(console, state->x, state->y);
 }
-void screen_ne_console(struct tty *res) {
-  console_t *console = (console_t *)res->vram;
-  for (int i = 0; i < res->ysize - 1; i++) {
-    for (int j = 0; j < res->xsize; j++) {
-      copy_char(console->vram_copy, console->x, console->y, j * 8, i * 16,
-                j * 8, (i + 1) * 16, console->window->xsize);
-    }
+
+static void console_draw_box(console_t *console,
+                             const tty_rpc_request_t *request) {
+  int x = console->x + request->args.box.x * 8;
+  int y = console->y + request->args.box.y * 16;
+  int x1 = console->x + (request->args.box.x1 + 1) * 8;
+  int y1 = console->y + (request->args.box.y1 + 1) * 16;
+  color_t foreground = text_color(console->state.color, true);
+  color_t new_foreground = text_color(request->args.box.color, true);
+  color_t new_background = text_color(request->args.box.color, false);
+  for (int row = y; row < y1; row++) {
+    vram_t *line = console->vram_copy + row * console->window->xsize;
+    for (int column = x; column < x1; column++)
+      line[column] =
+          line[column] == foreground ? new_foreground : new_background;
   }
-  console->window->draw(
-      console->window, console->x, console->y + (res->ysize - 1) * 16,
-      console->x + res->xsize * 8, console->y + res->ysize * 16,
-      text_color_to_real_color(res->color, false));
-  res->x = 0;
-  res->y = res->ysize - 1;
-  sheet_refresh(console->sht_copy, console->x, console->y,
-                console->x + console->xsize, console->y + console->ysize);
-  sheet_refresh(console->window->sht, console->x, console->y,
-                console->x + console->xsize, console->y + console->ysize);
-  res->MoveCursor(res, res->x, res->y);
+  console_refresh(console, x, y, x1, y1);
 }
-void Draw_Box_console(struct tty *res, int x, int y, int x1, int y1,
-                      unsigned char color) {
-  console_t *console = (console_t *)res->vram;
-  for (int i = y * 16 + console->y; i <= y1 * 16 + console->y; i++) {
-    for (int j = x * 8 + console->x; j <= x1 * 8 + console->x; j++) {
-      if (console->vram_copy[i * console->window->xsize + j] ==
-          text_color_to_real_color(res->color, true)) {
-        console->vram_copy[i * console->window->xsize + j] =
-            text_color_to_real_color(color, true);
-      } else {
-        console->vram_copy[i * console->window->xsize + j] =
-            text_color_to_real_color(color, false);
+
+static void draw_console_window(window_t *window, int x, int y, int x1, int y1,
+                                color_t color) {
+  SDraw_Box(window->console->vram_copy, x, y, x1, y1, color, window->xsize);
+  console_refresh(window->console, x, y, x1, y1);
+}
+
+static void puts_console_window(window_t *window, char *text, int x, int y,
+                                color_t color) {
+  Sputs(window->console->vram_copy, text, x, y, color, window->xsize);
+  console_refresh(window->console, x, y, x + strlen(text) * 8, y + 16);
+}
+
+int console_rpc_dispatch(rpc_call_t *call) {
+  if (!(call->call_id & RPC_KERNEL_CALL) ||
+      call->arg_len < sizeof(tty_rpc_request_t) ||
+      call->ret_cap < sizeof(tty_rpc_reply_t))
+    return RPC_ERR_INVAL;
+  const tty_rpc_request_t *request = call->arg;
+  if (request->operation >= TTY_RPC_COUNT ||
+      (request->operation != TTY_RPC_WRITE &&
+       call->arg_len != sizeof(*request)) ||
+      request->state.color > 255 || request->state.cursor_visible > 1)
+    return RPC_ERR_INVAL;
+
+  TaskLock();
+  desktop_t *desktop = get_now_desktop();
+  console_t *console = NULL;
+  if (desktop != NULL) {
+    for (size_t i = 1;; i++) {
+      struct List *entry = list_search_by_count(i, desktop->window_list);
+      if (entry == NULL)
+        break;
+      window_t *window = (window_t *)entry->val;
+      if (window->console != NULL &&
+          window->console->tty_handle == request->handle) {
+        console = window->console;
+        break;
       }
     }
   }
-  sheet_refresh(console->sht_copy, console->x + x * 8, console->y + y * 16,
-                console->x + x1 * 8, console->y + y1 * 16);
-  sheet_refresh(console->window->sht, console->x + x * 8, console->y + y * 16,
-                console->x + x1 * 8, console->y + y1 * 16);
-}
-void draw_console_window(window_t *window, int x, int y, int x1, int y1,
-                         color_t color) {
-  SDraw_Box(window->console->vram_copy, x, y, x1, y1, color, window->xsize);
-  sheet_refresh(window->console->sht_copy, x, y, x1, y1);
-  sheet_refresh(window->sht, x, y, x1, y1);
-}
-void puts_console_window(window_t *window, char *s, int x, int y,
-                         color_t color) {
-  Sputs(window->console->vram_copy, s, x, y, color, window->xsize);
-  sheet_refresh(window->console->sht_copy, x, y, x + strlen(s) * 8, y + 16);
-  sheet_refresh(window->sht, x, y, x + strlen(s) * 8, y + 16);
-}
-struct tty *mtty_alloc(void *vram, int xsize, int ysize,
-                       void (*putchar)(struct tty *res, int c),
-                       void (*MoveCursor)(struct tty *res, int x, int y),
-                       void (*clear)(struct tty *res),
-                       void (*screen_ne)(struct tty *res),
-                       void (*Draw_Box)(struct tty *res, int x, int y, int x1,
-                                        int y1, unsigned char color)) {
-  struct tty *res = (struct tty *)malloc(sizeof(struct tty));
-  if (res == NULL) {
-    return NULL;
+  if (console == NULL) {
+    TaskUnlock();
+    return RPC_ERR_INVAL;
   }
-  res->using1 = 1;
-  res->x = 0;
-  res->y = 0;
-  res->vram = vram;
-  res->xsize = xsize;
-  res->ysize = ysize;
-  res->putchar = putchar;
-  res->MoveCursor = MoveCursor;
-  res->clear = clear;
-  res->screen_ne = screen_ne;
-  res->Draw_Box = Draw_Box;
-  res->color = 0x07;
-  return res;
+  int columns = console->xsize / 8, rows = console->ysize / 16;
+  bool valid = request->state.x >= 0 && request->state.x <= columns &&
+               request->state.y >= 0 && request->state.y < rows;
+  if (request->operation == TTY_RPC_MOVE)
+    valid = valid && request->args.cursor.x >= 0 &&
+            request->args.cursor.x <= columns && request->args.cursor.y >= 0 &&
+            request->args.cursor.y < rows;
+  if (request->operation == TTY_RPC_DRAW_BOX)
+    valid = valid && request->args.box.x >= 0 && request->args.box.y >= 0 &&
+            request->args.box.x1 >= request->args.box.x &&
+            request->args.box.x1 < columns &&
+            request->args.box.y1 >= request->args.box.y &&
+            request->args.box.y1 < rows && request->args.box.color <= 255;
+  if (!valid) {
+    TaskUnlock();
+    return RPC_ERR_INVAL;
+  }
+  console->state = request->state;
+  tty_rpc_reply_t reply = {0};
+  switch (request->operation) {
+  case TTY_RPC_WRITE: {
+    const char *text = (const char *)(request + 1);
+    for (unsigned i = 0; i < call->arg_len - sizeof(*request); i++)
+      console_putchar(console, text[i]);
+    break;
+  }
+  case TTY_RPC_MOVE:
+    console_move(console, request->args.cursor.x, request->args.cursor.y);
+    break;
+  case TTY_RPC_CLEAR:
+    console->window->draw(
+        console->window, console->x, console->y, console->x + console->xsize,
+        console->y + console->ysize, text_color(console->state.color, false));
+    console_move(console, 0, 0);
+    break;
+  case TTY_RPC_SCROLL:
+    console_scroll(console);
+    break;
+  case TTY_RPC_DRAW_BOX:
+    console_draw_box(console, request);
+    break;
+  case TTY_RPC_INPUT_STATUS:
+    reply.value = fifo8_status(console->window->fifo_keypress);
+    break;
+  case TTY_RPC_INPUT_GET:
+    reply.value = fifo8_get(console->window->fifo_keypress);
+    break;
+  }
+  reply.state = console->state;
+  memcpy(call->ret, &reply, sizeof(reply));
+  call->ret_len = sizeof(reply);
+  TaskUnlock();
+  return RPC_OK;
 }
-void mtty_handle(uintptr_t *a) {
-  struct tty *tty;
-  tty = (struct tty *)a[1]; // tty
-  tty->x = a[7];
-  tty->y = a[8];
-  tty->color = a[9];
 
-  console_t *cons = (console_t *)tty->vram;
-  switch (a[0]) {
-  case 0:
-    putchar_console(tty, a[2]);
-    break;
-  case 1:
-    MoveCursor_console(tty, a[2], a[3]);
-    break;
-  case 2:
-    clear_console(tty);
-    break;
-  case 3:
-    screen_ne_console(tty);
-    break;
-  case 4:
-    Draw_Box_console(tty, a[2], a[3], a[4], a[5], a[6]);
-    break;
-  case 5:
-    a[0] = fifo8_status(cons->window->fifo_keypress);
-    break;
-  case 6:
-    a[0] = fifo8_get(cons->window->fifo_keypress);
-    break;
-  default:
-    break;
-  }
-  a[7] = tty->x;
-  a[8] = tty->y;
-  a[9] = tty->color;
-}
 void close_console(console_t *console) {
   if (console == NULL) {
     return;
@@ -291,7 +247,6 @@ void close_console(console_t *console) {
   if (console->shtctl != NULL) {
     ctl_free(console->shtctl);
   }
-  free(console->tty);
   window->console = NULL;
   window->draw = draw_window;
   window->puts = puts_window;
@@ -299,8 +254,11 @@ void close_console(console_t *console) {
 }
 console_t *create_console(window_t *window, int xsize, int ysize, int x,
                           int y) {
-  if (window == NULL || window->super_window != NULL || xsize <= 0 ||
-      ysize <= 0) {
+  if (window == NULL || window->super_window != NULL ||
+      window->console != NULL || xsize < 8 || ysize < 16 || xsize % 8 != 0 ||
+      ysize % 16 != 0 || x < 0 || y < 0 || xsize > window->xsize ||
+      ysize > window->ysize || x > window->xsize - xsize ||
+      y > window->ysize - ysize) {
     return NULL;
   }
   console_t *res = malloc(sizeof(console_t));
@@ -317,11 +275,9 @@ console_t *create_console(window_t *window, int xsize, int ysize, int x,
   res->handle_right = NULL;
   res->handle_stay = NULL;
   res->close = close_console;
-  res->tty = mtty_alloc((void *)res, xsize / 8, ysize / 16, putchar_console,
-                        MoveCursor_console, clear_console, screen_ne_console,
-                        Draw_Box_console);
+  res->state = (tty_rpc_state_t){.color = 7, .cursor_visible = 1};
   res->shtctl = shtctl_init(window->vram, window->xsize, window->ysize);
-  if (res->tty == NULL || res->shtctl == NULL) {
+  if (res->shtctl == NULL) {
     goto fail;
   }
   res->sht_copy = sheet_alloc(res->shtctl);
@@ -344,13 +300,10 @@ console_t *create_console(window_t *window, int xsize, int ysize, int x,
   sheet_updown(res->sht_cur, 1);
   sheet_refresh(res->sht_copy, 0, 0, window->xsize, window->ysize);
   sheet_refresh(res->sht_cur, 0, 0, 8, 16);
-  res->tty_handle =
-      tty_alloc(res->tty, (uintptr_t)mtty_handle, xsize / 8, ysize / 16);
   struct FIFO8 *fifo_keypress = malloc(sizeof(struct FIFO8));
   uint8_t *buf = malloc(128);
   res->task_stack = malloc(32 * 1024);
-  if (res->tty_handle == 0 || fifo_keypress == NULL || buf == NULL ||
-      res->task_stack == NULL) {
+  if (fifo_keypress == NULL || buf == NULL || res->task_stack == NULL) {
     free(fifo_keypress);
     free(buf);
     goto fail;
@@ -360,6 +313,10 @@ console_t *create_console(window_t *window, int xsize, int ysize, int x,
   window->console = res;
   window->draw = draw_console_window;
   window->puts = puts_console_window;
+  res->tty_handle =
+      tty_alloc(window->desktop->tid, TTY_RPC_DISPATCH, xsize / 8, ysize / 16);
+  if (res->tty_handle == 0)
+    goto fail;
   uintptr_t stack_top = (uintptr_t)res->task_stack + 32 * 1024;
   int thread_tid =
       AddThread("console", (uintptr_t)console_task, stack_top, res->tty_handle);
@@ -370,30 +327,6 @@ console_t *create_console(window_t *window, int xsize, int ysize, int x,
   return res;
 
 fail:
-  window->console = NULL;
-  window->draw = draw_window;
-  window->puts = puts_window;
-  if (res->tty_handle != 0) {
-    tty_free(res->tty_handle);
-  }
-  if (window->fifo_keypress != NULL) {
-    free(window->fifo_keypress->buf);
-    free(window->fifo_keypress);
-    window->fifo_keypress = NULL;
-  }
-  free(res->task_stack);
-  if (res->sht_cur != NULL) {
-    sheet_free(res->sht_cur);
-  }
-  if (res->sht_copy != NULL) {
-    sheet_free(res->sht_copy);
-  }
-  free(res->vram_cur);
-  free(res->vram_copy);
-  if (res->shtctl != NULL) {
-    ctl_free(res->shtctl);
-  }
-  free(res->tty);
-  free(res);
+  close_console(res);
   return NULL;
 }

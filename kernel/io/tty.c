@@ -2,7 +2,6 @@
 #include <platform.h>
 struct List *tty_list;
 struct tty *tty_default;
-void t_putchar(struct tty *res,char ch);
 static bool tty_registered(const struct tty *tty) {
   if (tty == NULL || tty_list == NULL) {
     return false;
@@ -92,11 +91,8 @@ struct tty *tty_alloc(void *vram, int xsize, int ysize,
   if (res == NULL) {
     return NULL;
   }
+  memset(res, 0, sizeof(*res));
   res->using1 = 1;
-  res->native_ansi = false;
-  res->Raw_y = 0;
-  res->x = 0;
-  res->y = 0;
   res->vram = vram;
   res->xsize = xsize;
   res->ysize = ysize;
@@ -111,11 +107,6 @@ struct tty *tty_alloc(void *vram, int xsize, int ysize,
   res->fifo_get = fifo_get;
   res->color = 0x07;
   res->cur_moving = 1;
-  res->vt100 = 0;
-  res->buf_p = 0;
-  memset(res->buffer,0,sizeof(res->buffer));
-  res->done = 0;
-  res->mode = 0;
   res->color_saved = -1;
   if (tty_list == NULL || !AddVal((uintptr_t)res, tty_list)) {
     page_free((void *)res, sizeof(struct tty));
@@ -124,7 +115,7 @@ struct tty *tty_alloc(void *vram, int xsize, int ysize,
   return res;
 }
 void tty_free(struct tty *res) {
-  if (!tty_registered(res) || res == tty_default) {
+  if (!tty_registered(res) || !res->using1 || res == tty_default) {
     return;
   }
   res->using1 = 0;
@@ -148,7 +139,11 @@ struct tty *tty_set(mtask *task, struct tty *res) {
   return NULL;
 }
 bool tty_notify_input(struct tty *tty) {
-  return tty_registered(tty) && task_wake_tty(tty) != 0;
+  if (!tty_registered(tty))
+    return false;
+  tty->input_sequence++;
+  task_wake_tty(tty);
+  return true;
 }
 struct tty *tty_set_default(struct tty *res) {
   if (res->using1 == 1) {
@@ -157,14 +152,6 @@ struct tty *tty_set_default(struct tty *res) {
     return old;
   }
   return NULL;
-}
-void tty_set_reserved(struct tty *res, uintptr_t reserved1,
-                      uintptr_t reserved2, uintptr_t reserved3,
-                      uintptr_t reserved4) {
-  res->reserved[0] = reserved1;
-  res->reserved[1] = reserved2;
-  res->reserved[2] = reserved3;
-  res->reserved[3] = reserved4;
 }
 void tty_set_color(struct tty *tty, unsigned char color) {
   tty->color = color;

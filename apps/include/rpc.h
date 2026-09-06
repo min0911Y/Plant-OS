@@ -10,39 +10,14 @@
 #ifndef _PLOS_RPC_H
 #define _PLOS_RPC_H
 #include <ipc.h>
+#include <rpc_wire.h>
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define RPC_TYPE_REQUEST 1
-#define RPC_TYPE_REPLY 2
-#define RPC_TYPE_NOTIFY 3
-
-#define RPC_MAX_NESTING 8 // 最大嵌套调用深度
+#define RPC_MAX_NESTING 8
 #define RPC_MAX_HANDLER 32
-// 单次调用的参数/返回值上限
-#define RPC_MAX_PAYLOAD (IPC_MAX_MSG_SIZE - 12)
-
-#define RPC_OK 0
-#define RPC_ERR_INVAL -100     // 参数错误
-#define RPC_ERR_NO_SERVICE -101 // 找不到服务
-#define RPC_ERR_BAD_OPCODE -102 // 服务端没有这个函数号
-#define RPC_ERR_TIMEOUT -103    // 等待应答超时
-#define RPC_ERR_TOOBIG -104     // 参数或返回值太大
-#define RPC_ERR_TRANSPORT -105  // 底层 IPC 出错（对方可能已经退出）
-#define RPC_ERR_NESTING -106    // 嵌套调用太深
-#define RPC_ERR_NOMEM -107      // 内存不足
-#define RPC_ERR_BUSY -108       // 非阻塞通知的目标队列已满
-
-// 处理函数返回这个值表示「故意不回复」（用于测试超时/单向通知）
-#define RPC_NO_REPLY 0x7ffffffe
-
-// 传输格式（跟在 IPC 负载最前面）
-typedef struct {
-  unsigned opcode; // 函数号
-  int status;      // 应答里的返回状态
-  unsigned len;    // 后面负载的字节数
-} rpc_wire_t;
+#define RPC_MAX_PAYLOAD (IPC_MAX_MSG_SIZE - sizeof(rpc_wire_t))
 
 // 服务端处理函数看到的上下文
 typedef struct {
@@ -58,12 +33,6 @@ typedef struct {
 } rpc_call_t;
 
 typedef int (*rpc_handler_t)(rpc_call_t *call);
-
-// 客户端持有的服务端点
-typedef struct {
-  unsigned tid;
-  unsigned generation;
-} rpc_endpoint_t;
 
 /* ---------------- 服务端 ---------------- */
 // 注册服务名（其它进程用 rpc_connect 按名字找到你）

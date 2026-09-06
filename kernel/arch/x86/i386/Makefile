@@ -1,7 +1,7 @@
 include ../../../cdef.mk
 out_path_src := ../../../obj/
 incpath_src := ../../../include/
-obj_arch := $(out_path_src)address_space_call.o $(out_path_src)boot.o \
+obj_arch := $(out_path_src)boot.o \
 	$(out_path_src)descriptor_tables.o $(out_path_src)exceptions.o \
 	$(out_path_src)executable.o $(out_path_src)module.o \
 	$(out_path_src)cpu.o $(out_path_src)fpu.o $(out_path_src)irq.o \

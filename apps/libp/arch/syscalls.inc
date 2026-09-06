@@ -88,6 +88,7 @@ CALL mouse_enable, 0x4d
 CALL mouse_dat_status, 0x4e
 CALL mouse_read, 0x4f, a0
 CALL api_yield, 0x50
+; TTY allocation: RPC server tid, opcode, columns, rows.
 CALL tty_alloc, 0x51, a0, a1, a2, a3
 CALL tty_set, 0x52, a0, a1
 CALL tty_free, 0x53, a0
