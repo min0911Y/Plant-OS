@@ -4,6 +4,7 @@ section .text
 global arch_task_switch
 global arch_task_start
 extern x64_simd_switch
+extern arch_address_space_activate
 
 arch_task_switch:
   push rbp
@@ -15,17 +16,20 @@ arch_task_switch:
   mov [rdi], rsp
   mov [rcx], r8
   mov rsp, rsi
-  mov cr3, rdx
-  mov rdi, r8
+  mov rdi, rdx
+  mov rsi, r8
   jmp restore_context
 arch_task_start:
   mov [rdx], rcx
   mov rsp, rdi
-  mov cr3, rsi
-  mov rdi, rcx
+  mov rdi, rsi
+  mov rsi, rcx
 restore_context:
   mov rbx, rsp
+  mov r12, rsi
   and rsp, -16
+  call arch_address_space_activate
+  mov rdi, r12
   call x64_simd_switch
   mov rsp, rbx
   pop r15

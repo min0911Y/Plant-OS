@@ -35,8 +35,71 @@ static void map_from_thread(uintptr_t parent) {
   _exit(0);
 }
 
+static int cached_translations(void) {
+  enum { PAGE_COUNT = 64, ROUNDS = 16, LENGTH = PAGE_COUNT * VM_PAGE_SIZE };
+  volatile unsigned *pages = vm_map(NULL, LENGTH);
+  if (!pages)
+    return check(0, "TLB test allocation");
+  for (unsigned i = 0; i < PAGE_COUNT; i++)
+    pages[i * VM_PAGE_SIZE / sizeof(*pages)] = i + 1;
+  unsigned parent = NowTaskID();
+  int child = fork();
+  ipc_msg_t message;
+  if (!child) {
+    for (unsigned round = 1; round <= ROUNDS; round++) {
+      unsigned received = 0;
+      if (ipc_recv_from(parent, &received, sizeof(received), &message, 5000) !=
+              sizeof(received) ||
+          received != round)
+        _exit(1);
+      /* The parent wrote its warm writable pages after fork, then woke us. */
+      for (unsigned i = 0; i < PAGE_COUNT; i++) {
+        unsigned expected = round == 1 ? i + 1 : (round - 1) * 256 + i;
+        if (pages[i * VM_PAGE_SIZE / sizeof(*pages)] != expected)
+          _exit(2);
+      }
+      if (vm_unmap((void *)pages, LENGTH) ||
+          vm_map((void *)pages, LENGTH) != (void *)pages)
+        _exit(3);
+      for (unsigned i = 0; i < PAGE_COUNT; i++) {
+        if (pages[i * VM_PAGE_SIZE / sizeof(*pages)])
+          _exit(4);
+        pages[i * VM_PAGE_SIZE / sizeof(*pages)] = round * 256 + i;
+      }
+      /* Exercise a whole-context invalidation as well as address reuse. */
+      if (vm_protect((void *)pages, LENGTH, VM_READ) ||
+          vm_protect((void *)pages, LENGTH, VM_READ | VM_WRITE) ||
+          ipc_send_to(parent, 0, 0, &round, sizeof(round), 5000) != IPC_OK)
+        _exit(5);
+    }
+    _exit(0);
+  }
+  int failures = child < 0;
+  for (unsigned round = 1; child > 0 && round <= ROUNDS; round++) {
+    for (unsigned i = 0; i < PAGE_COUNT; i++)
+      pages[i * VM_PAGE_SIZE / sizeof(*pages)] = 0x80000000u + round * 256 + i;
+    unsigned received = 0;
+    if (ipc_send_to(child, 0, 0, &round, sizeof(round), 5000) != IPC_OK ||
+        ipc_recv_from(child, &received, sizeof(received), &message, 5000) !=
+            sizeof(received) ||
+        received != round) {
+      failures++;
+      break;
+    }
+    for (unsigned i = 0; i < PAGE_COUNT; i++)
+      failures += pages[i * VM_PAGE_SIZE / sizeof(*pages)] !=
+                  0x80000000u + round * 256 + i;
+  }
+  if (child > 0)
+    failures += waittid(child) != 0;
+  failures += vm_unmap((void *)pages, LENGTH) != 0;
+  if (!failures)
+    logk("DYNTEST TLB PASS\n");
+  return check(!failures, "cached translations, parent COW and address reuse");
+}
+
 int main(int argc, char **argv) {
-  int failures = 0;
+  int failures = cached_translations();
   char *pages = vm_map(NULL, 2 * VM_PAGE_SIZE);
   if (!pages)
     return 1;

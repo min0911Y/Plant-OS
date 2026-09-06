@@ -2,16 +2,6 @@
 #include <dos.h>
 #include <irq.h>
 
-arch_address_space_t arch_address_space_current(void) {
-  uint64_t value;
-  __asm__ volatile("mov %%cr3, %0" : "=r"(value));
-  return value & ~4095ull;
-}
-arch_address_space_t arch_address_space_kernel(void) { return x64_kernel_cr3; }
-void arch_address_space_activate(arch_address_space_t root) {
-  __asm__ volatile("mov %0, %%cr3" : : "r"(root) : "memory");
-}
-
 irq_state_t irq_save(void) {
   irq_state_t flags;
   __asm__ volatile("pushfq; popq %0; cli" : "=r"(flags) : : "memory");
@@ -62,6 +52,7 @@ void x64_cpu_initialize(x64_cpu_t *cpu) {
   x64_msr_write(0xc0000102, 0);
   x64_msr_write(0xc0000100, 0);
   arch_fpu_init_cpu();
+  x64_tlb_initialize();
   x64_syscall_initialize();
 }
 

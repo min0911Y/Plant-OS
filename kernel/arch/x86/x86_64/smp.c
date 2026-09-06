@@ -54,6 +54,10 @@ secondary_entry(struct limine_mp_info *info) {
 }
 
 void smp_start_aps(void) {
+  if (!x64_tlb_prepare()) {
+    Panic_K("unable to allocate PCID contexts");
+    arch_halt();
+  }
   struct limine_mp_response *mp = x64_mp_request.response;
   if (!mp || !apic_ready())
     return;

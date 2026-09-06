@@ -51,6 +51,21 @@ xAPIC 模式下映射 LAPIC MMIO；不需要为此关闭 BIOS 中的 x2APIC。
 
 x86_64 使用四级页表和 Limine HHDM，不探测写物理内存。物理页元数据按内存图分配；用户页优先从高物理地址分配，低地址保留给有 DMA 地址限制的设备。用户页按需建立，并支持 COW、共享映射和 NX；静态 loader 检查原生 ELF 的段、入口和用户地址边界；动态 PIE 的 PT_INTERP 启动独立用户态 `/lib/ld.so`，共享库解析和重定位由它完成，详见 [动态链接](dynamic-linking.md)。
 
+x86_64 的 TLB 后端分别检测 PCID（CPUID.1:ECX[17]）和 INVPCID（CPUID.7.0:EBX[10]）；BSP 选择，AP 验证能力。每个 CPU 启用 CR4.PCIDE 前先清零 CR3 的低 12 位，并在初始化时清理引导器遗留翻译。任务切换、首次调度和临时地址空间调用统一使用 `arch_address_space_activate`：PCID 命中时以 CR3[63] 保留翻译，同根且记录有效时跳过 CR3 写入。每 CPU 的 4096 项目录记录完整页表根，只在支持 PCID 时按实际 CPU 数于 BSP 启动阶段分配，每 CPU 32 KiB；页框号映射到 12 位 PCID，冲突时刷新该标签再替换，不限制进程数量，也不向通用地址空间句柄混入 PCID 位。
+
+页表修改经 `x64_tlb_invalidate` 批量失效：短用户范围使用 INVLPG，超过 32 页或整个地址空间使用 INVPCID single-context，无 INVPCID 时重载当前 CR3。其他 CPU 中匹配的 PCID 记录作废，在下次激活时刷新，因此迁移、fork/COW、共享映射、exec 和页表根物理页复用都不能继承旧翻译。共享的内核高半区使用 INVPCID all-context（包括 global），无该指令时切换 CR4.PGE；其他 CPU 在下次激活时处理挂起的全量失效。失效接口在 kernel lock 内使用并保留调用者 IRQ 状态；这不替代同步跨 CPU shootdown，现有任务组固定 CPU、只修改非运行目标和模块使用新虚拟地址的约束仍适用。
+
+`dyntest.bin` 的 `DYNTEST TLB PASS` 覆盖预热页的父进程 COW、两个进程的同址隔离、连续切换、64 页批量权限修改和同址反复解除/重建映射。基础回归另覆盖共享 GUI 缓冲和模块反复装卸。`--tlb` 强制 QEMU 特性并核对串口 `tlb: pcid=... invpcid=...`，避免静默降级；PCID 可用性取决于加速器，支持这些指令的 KVM 宿主可运行：
+
+```sh
+python3 scripts/test-x86_64.py --accel kvm --cpu host --tlb pcid-invpcid --memory 6144
+python3 scripts/test-x86_64.py --accel kvm --cpu host --tlb pcid --memory 6144
+python3 scripts/test-x86_64.py --accel kvm --cpu host --tlb invpcid --memory 6144
+python3 scripts/test-x86_64.py --tlb cr3 --memory 6144
+```
+
+PCID 要求 IA-32e 分页，i386 保留原来的 CR3 路径；`--arch i386 --dynamic` 验证共用的用户 VM 回归。
+
 系统调用保留 Plant API 的语义编号，但使用完整的 64 位参数：`RAX` 为编号，参数为 `RDI, RSI, RDX, R10, R8, R9`。这不是 Linux ABI。入口通过 `swapgs` 取得每 CPU 内核栈，屏蔽 IF/TF/DF/NT/AC；NMI、双重故障和机器检查有独立 IST。用户中断系统调用门未开放，32 位程序会在 ELF 检查时被拒绝。
 
 用户与内核都以 `-mno-red-zone -msse2 -mfpmath=sse -mlong-double-64` 构建。调度器在 CPU 支持时使用 XSAVEOPT64/XRSTOR64，否则使用 FXSAVE64/FXRSTOR64；BSP 选择后端，AP 验证能力。XSAVEOPT 后端启用 CR4.OSXSAVE，并在每个 CPU 设置 XCR0=3，只保存 x87 和 SSE；任务保存区为 64 字节对齐的 576-byte 标准 XSAVE 格式，任务注册表按页分配。保存区在恢复和下次保存之间保持完整，当前任务 reset 同时重置硬件状态跟踪。

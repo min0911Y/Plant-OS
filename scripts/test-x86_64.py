@@ -311,6 +311,8 @@ def main():
     parser.add_argument("--accel", choices=("tcg", "kvm"), default="tcg")
     parser.add_argument("--apic", choices=("xapic", "x2apic"),
                         help="require a QEMU APIC mode and verify the boot handoff")
+    parser.add_argument("--tlb", choices=("pcid-invpcid", "pcid", "invpcid", "cr3"),
+                        help="require x86_64 TLB capabilities and verify the selected backend")
     parser.add_argument("--usb-debug", action="store_true",
                         help="build USB screen diagnostics and bounded HID report traces")
     parser.add_argument("--usb-irq", choices=("auto", "msix", "msi", "intx"), default="auto",
@@ -341,6 +343,8 @@ def main():
     args = parser.parse_args()
     if args.arch == "i386" and args.firmware == "uefi":
         parser.error("the i386 LiveCD uses BIOS")
+    if args.arch == "i386" and args.tlb:
+        parser.error("--tlb requires x86_64 paging")
     if (args.usb_no_intx or args.usb_irq != "auto" or args.usb_root_bus or args.usb_hubs) and not args.usb:
         parser.error("USB fixture options require --usb")
     if args.usb_no_intx and args.usb_irq == "intx":
@@ -363,7 +367,7 @@ def main():
     ]
     expected = (["ARCHTEST PASS", "CPPTEST PASS", "SIMDTEST PASS"] if native else ["FPUTEST PASS"]) + [
                 "TIMETEST PASS", "EXCEPTION_TEST done checks=5 fails=0", "GUITEST THREAD PASS", "GMOUSE ID =",
-                "RPCTEST done checks=22 fails=0", "DKTEST PASS", "DYNTEST PASS",
+                "RPCTEST done checks=22 fails=0", "DKTEST PASS", "DYNTEST PASS", "DYNTEST TLB PASS",
                 "GUISTRESS PASS" if args.capacity else "GUITEST PASS"]
     if args.mouse:
         expected.append("GUIMOUSE PASS events=15")
@@ -379,7 +383,7 @@ def main():
             expected.append("LITE EDIT PASS")
     if args.dynamic or args.all_apps:
         commands = ["dyntest.bin"]
-        expected = ["DYNAMIC PASS", "DYNAMIC DATA PASS", "DYNTEST PASS", "DYNAMIC ATEXIT",
+        expected = ["DYNAMIC PASS", "DYNAMIC DATA PASS", "DYNTEST PASS", "DYNTEST TLB PASS", "DYNAMIC ATEXIT",
                     "DYNAMIC FINI main", "DYNAMIC FINI leaf", "DYNAMIC FINI base"]
         if args.all_apps:
             programs = subprocess.check_output(
@@ -485,6 +489,10 @@ def main():
     cpu = args.cpu
     if args.apic:
         cpu += "," + ("+" if args.apic == "x2apic" else "-") + "x2apic,enforce"
+    if args.tlb:
+        pcid, invpcid = {"pcid-invpcid": (1, 1), "pcid": (1, 0),
+                        "invpcid": (0, 1), "cr3": (0, 0)}[args.tlb]
+        cpu += f",pcid={'on' if pcid else 'off'},invpcid={'on' if invpcid else 'off'},enforce"
     command = ["qemu-system-x86_64", "-accel", args.accel, "-cpu", cpu, "-smp", str(args.cpus),
                "-machine", args.machine + (",i8042=off" if args.usb else ""),
                "-m", str(args.memory), "-rtc", "base=2026-09-05T04:05:06,clock=vm", "-cdrom", str(iso),
@@ -590,6 +598,9 @@ def main():
                         text = serial.read_text(errors="replace") if serial.exists() else ""
                         if re.search(r"PANIC|x86_64 exception .*cs=8", text):
                             raise RuntimeError(f"kernel failure; see {serial}")
+                        if args.tlb and "init.bin started" in text:
+                            if f"tlb: pcid={pcid} invpcid={invpcid}\n" not in text:
+                                raise RuntimeError(f"TLB backend mismatch; see {serial}")
                         if args.apic and "init.bin started" in text:
                             markers = [f"apic: enabled {args.apic} "]
                             if native:

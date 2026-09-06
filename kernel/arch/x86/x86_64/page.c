@@ -290,7 +290,7 @@ arch_address_space_t arch_address_space_clone(arch_address_space_t source) {
     root[i] = child | PTE_PRESENT | PTE_WRITE | PTE_USER;
   }
   /* The parent's writable translations must not survive the COW conversion. */
-  arch_address_space_activate(arch_address_space_current());
+  x64_tlb_invalidate(source, 0, 0);
   irq_restore(state);
   return result;
 }
@@ -308,8 +308,7 @@ bool arch_address_space_prepare_exec(arch_address_space_t root) {
       table_destroy(table[i] & PTE_ADDRESS, 3);
     table[i] = 0;
   }
-  if (root == arch_address_space_current())
-    arch_address_space_activate(root);
+  x64_tlb_invalidate(root, 0, 0);
   return true;
 }
 void arch_address_space_release(arch_address_space_t root) {
@@ -326,16 +325,19 @@ void arch_address_space_release(arch_address_space_t root) {
 int page_link(uintptr_t address) {
   if (address < USER_SPACE_START || address > USER_HEAP_END || (address & 4095))
     return 0;
-  uint64_t *entry = page_entry(arch_address_space_current(), address, true);
+  arch_address_space_t root = arch_address_space_current();
+  uint64_t *entry = page_entry(root, address, true);
   if (!entry)
     return 0;
   void *page = user_page_allocate();
   if (!page)
     return 0;
-  mapping_release(*entry);
+  uint64_t previous = *entry;
+  mapping_release(previous);
   *entry =
       x64_virtual_physical(page) | PTE_PRESENT | PTE_WRITE | PTE_USER | PTE_NX;
-  __asm__ volatile("invlpg (%0)" : : "r"(address) : "memory");
+  if (previous & PTE_PRESENT)
+    x64_tlb_invalidate(root, address, PAGE_BYTES);
   return 1;
 }
 
@@ -385,17 +387,16 @@ uintptr_t arch_user_find_free(uintptr_t lower, uintptr_t upper, size_t size) {
 
 static bool user_pages_change(uintptr_t address, size_t size,
                               unsigned protection, bool unmap) {
+  arch_address_space_t root = arch_address_space_current();
   for (size_t offset = 0; offset < size; offset += PAGE_BYTES) {
-    uint64_t *entry =
-        page_entry(arch_address_space_current(), address + offset, false);
+    uint64_t *entry = page_entry(root, address + offset, false);
     if (!entry ||
         (*entry & (PTE_PRESENT | PTE_USER)) != (PTE_PRESENT | PTE_USER) ||
         (*entry & (PTE_SHARED | PTE_DEVICE)))
       return false;
   }
   for (size_t offset = 0; offset < size; offset += PAGE_BYTES) {
-    uint64_t *entry =
-        page_entry(arch_address_space_current(), address + offset, false);
+    uint64_t *entry = page_entry(root, address + offset, false);
     if (unmap) {
       mapping_release(*entry);
       *entry = 0;
@@ -407,8 +408,9 @@ static bool user_pages_change(uintptr_t address, size_t size,
                       ? PTE_COW
                       : PTE_WRITE;
     }
-    __asm__ volatile("invlpg (%0)" : : "r"(address + offset) : "memory");
   }
+  if (size)
+    x64_tlb_invalidate(root, address, size);
   return true;
 }
 bool arch_user_protect(uintptr_t address, size_t size, unsigned protection) {
@@ -421,7 +423,8 @@ bool arch_user_unmap(uintptr_t address, size_t size) {
 bool page_fault_try_resolve(uintptr_t address, uint32_t error) {
   if (error != 3 && error != 7)
     return false;
-  uint64_t *entry = page_entry(arch_address_space_current(), address, false);
+  arch_address_space_t root = arch_address_space_current();
+  uint64_t *entry = page_entry(root, address, false);
   if (!entry || !(*entry & PTE_COW))
     return false;
   uint64_t physical = *entry & PTE_ADDRESS;
@@ -434,7 +437,7 @@ bool page_fault_try_resolve(uintptr_t address, uint32_t error) {
     *entry = (*entry & ~PTE_ADDRESS) | x64_virtual_physical(copy);
   }
   *entry = (*entry & ~PTE_COW) | PTE_WRITE;
-  __asm__ volatile("invlpg (%0)" : : "r"(address) : "memory");
+  x64_tlb_invalidate(root, address, PAGE_BYTES);
   return true;
 }
 
@@ -456,14 +459,13 @@ bool arch_address_space_share(uintptr_t source, uintptr_t target, size_t size,
         !(*src & (PTE_WRITE | PTE_COW)) || (*dst & PTE_PRESENT))
       return false;
   }
-  for (size_t offset = 0; offset < size; offset += PAGE_BYTES) {
+  size_t offset = 0;
+  for (; offset < size; offset += PAGE_BYTES) {
     uint64_t *src = page_entry(from, source + offset, false);
     if (*src & PTE_COW) {
       void *copy = user_page_allocate();
-      if (!copy) {
-        arch_address_space_unmap_shared(target, offset, to);
-        return false;
-      }
+      if (!copy)
+        break;
       memcpy(copy, x64_physical_pointer(*src & PTE_ADDRESS), PAGE_BYTES);
       mapping_release(*src);
       *src = x64_virtual_physical(copy) | PTE_PRESENT | PTE_USER | PTE_WRITE |
@@ -473,8 +475,14 @@ bool arch_address_space_share(uintptr_t source, uintptr_t target, size_t size,
     page_retain(*src & PTE_ADDRESS);
     *page_entry(to, target + offset, false) = *src;
   }
-  arch_address_space_activate(arch_address_space_current());
-  return true;
+  if (offset) {
+    x64_tlb_invalidate(from, source, offset);
+    x64_tlb_invalidate(to, target, offset);
+  }
+  if (offset == size)
+    return true;
+  arch_address_space_unmap_shared(target, offset, to);
+  return false;
 }
 
 bool arch_address_space_unmap_shared(uintptr_t target, size_t size,
@@ -489,8 +497,8 @@ bool arch_address_space_unmap_shared(uintptr_t target, size_t size,
       *entry = 0;
     }
   }
-  if (root == arch_address_space_current())
-    arch_address_space_activate(root);
+  if (size)
+    x64_tlb_invalidate(root, target, size);
   return true;
 }
 
@@ -500,11 +508,12 @@ bool arch_address_space_map_user_device(uintptr_t user, uintptr_t physical,
       user < USER_FRAMEBUFFER_START || user >= USER_SPACE_END ||
       size > USER_SPACE_END - user)
     return false;
-  for (size_t offset = 0; offset < size; offset += PAGE_BYTES) {
-    uint64_t *entry =
-        page_entry(arch_address_space_current(), user + offset, true);
+  arch_address_space_t root = arch_address_space_current();
+  size_t offset = 0;
+  for (; offset < size; offset += PAGE_BYTES) {
+    uint64_t *entry = page_entry(root, user + offset, true);
     if (!entry)
-      return false;
+      break;
     mapping_release(*entry);
     uint64_t cache_flags = PTE_UNCACHED;
     /* Keep the kernel and user aliases consistent, including Limine's PAT/WC
@@ -512,9 +521,10 @@ bool arch_address_space_map_user_device(uintptr_t user, uintptr_t physical,
     virtual_translate(x64_physical_pointer(physical + offset), &cache_flags);
     *entry = (physical + offset) | PTE_PRESENT | PTE_USER | PTE_WRITE | PTE_NX |
              PTE_DEVICE | cache_flags;
-    __asm__ volatile("invlpg (%0)" : : "r"(user + offset) : "memory");
   }
-  return true;
+  if (offset)
+    x64_tlb_invalidate(root, user, offset);
+  return offset == size;
 }
 
 void *arch_mmio_map(uint64_t physical, size_t size) {
@@ -523,17 +533,21 @@ void *arch_mmio_map(uint64_t physical, size_t size) {
     return NULL;
   uintptr_t start = (physical & ~(uint64_t)4095) + x64_hhdm;
   uintptr_t last = (physical + size - 1) & ~(uint64_t)4095;
-  for (uint64_t p = physical & ~(uint64_t)4095; p <= last; p += PAGE_BYTES) {
+  uint64_t p = physical & ~(uint64_t)4095;
+  bool changed = false;
+  for (; p <= last; p += PAGE_BYTES) {
     uintptr_t address = x64_hhdm + p;
     if (x64_virtual_physical((void *)address) == p)
       continue;
     uint64_t *entry = page_entry(x64_kernel_cr3, address, true);
     if (!entry)
-      return NULL;
+      break;
     *entry = p | PTE_PRESENT | PTE_WRITE | PTE_NX | PTE_UNCACHED;
-    __asm__ volatile("invlpg (%0)" : : "r"(address) : "memory");
+    changed = true;
   }
-  return (void *)(start + (physical & 4095));
+  if (changed)
+    x64_tlb_invalidate(x64_kernel_cr3, start, size);
+  return p > last ? (void *)(start + (physical & 4095)) : NULL;
 }
 
 /* Fresh virtual addresses prevent a reloaded module from inheriting another
@@ -560,16 +574,18 @@ bool arch_module_protect(void *address, size_t size, bool writable,
                          bool executable) {
   if (writable && executable)
     return false;
-  for (size_t offset = 0; offset < size; offset += PAGE_BYTES) {
+  size_t offset = 0;
+  for (; offset < size; offset += PAGE_BYTES) {
     uintptr_t virtual = (uintptr_t)address + offset;
     uint64_t *entry = page_entry(x64_kernel_cr3, virtual, false);
     if (!entry || !(*entry & PTE_PRESENT))
-      return false;
+      break;
     *entry = (*entry & ~(PTE_WRITE | PTE_NX)) | (writable ? PTE_WRITE : 0) |
              (executable ? 0 : PTE_NX);
-    __asm__ volatile("invlpg (%0)" : : "r"(virtual) : "memory");
   }
-  return true;
+  if (offset)
+    x64_tlb_invalidate(x64_kernel_cr3, (uintptr_t)address, offset);
+  return offset >= size;
 }
 void arch_module_free(void *address, size_t size) {
   for (size_t offset = 0; offset < size; offset += PAGE_BYTES) {
@@ -579,8 +595,9 @@ void arch_module_free(void *address, size_t size) {
       continue;
     page_release(*entry & PTE_ADDRESS);
     *entry = 0;
-    __asm__ volatile("invlpg (%0)" : : "r"(virtual) : "memory");
   }
+  if (size)
+    x64_tlb_invalidate(x64_kernel_cr3, (uintptr_t)address, size);
 }
 
 void init_page(const boot_info_t *info) {

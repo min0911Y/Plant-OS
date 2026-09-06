@@ -66,7 +66,7 @@ make -C kernel ARCH=x86_64 livecd
 - IRQ、异常和 syscall 入口按现有约定进入/离开 kernel lock；可能调度后重新读取当前 CPU。IRQ 回调不分配、不阻塞、不自行 EOI 或切换任务，由统一分派器完成 EOI 和调度；ISA 使用独占注册，PCI INTx 使用共享注册。
 - 任务资源全部构造完成后调用 `task_publish`，失败用 `task_abort_creation`；任务退出取消 waiter/timer 并释放所属资源。任务注册表通过迭代器访问，TID/页引用不得收窄为 8 位，异步引用用 TID/generation 识别。
 - 保持每 CPU 的 current、idle 和运行队列，只有 BSP 推进全局时钟及 timeout。调度器不可自切换；BSP 在资源就绪且释放最外层 kernel lock 后唤醒 AP，AP 等待 release 时休眠。
-- 实现同步跨 CPU TLB shootdown 前，同一地址空间的整个任务组固定在同一 CPU；跨进程共享映射只修改未在 CPU 上运行的目标。i386 BIOS/VBE 仅在 BSP 执行。
+- 实现同步跨 CPU TLB shootdown 前，同一地址空间的整个任务组固定在同一 CPU；跨进程共享映射只修改未在 CPU 上运行的目标。x86_64 页表修改统一经 TLB 失效接口处理当前和缓存的 PCID，不能依赖地址空间切换刷新；共享内核映射须覆盖所有 PCID。i386 BIOS/VBE 仅在 BSP 执行。
 - DMA 使用正式 page/DMA/MMIO API 和驱动持有的缓冲，不指向等待调用者的栈或用户地址。硬件等待使用单调 deadline；失败不自动重放写入。停止设备并确认不再 DMA 后才释放资源，无法确认时禁用 bus master 并隔离相关页。
 
 ## 子系统边界
@@ -119,6 +119,6 @@ python3 scripts/test-x86_64.py --arch i386 --dynamic --memory 512
 | GUI、输入、SDL、工具 | `--mouse`、`--console`、`--sdl`、`--desktop-app`（`lite` 或 `nk`）、`--tools` |
 | 动态链接与全部应用装载 | `--dynamic`、`--all-apps`，见 [动态链接验证](doc/dynamic-linking.md#验证) |
 | USB、PCI、AHCI | `--usb`、`--usb-hubs`、`--usb-irq`、`--usb-root-bus`、`--ahci --machine q35`；故障与模式组合见对应专题文档 |
-| APIC 与 SIMD 后端 | `--apic`、`--cpu`，见 [多架构说明](doc/multiarch.md) |
+| APIC、SIMD 与 TLB 后端 | `--apic`、`--cpu`、`--tlb`，见 [多架构说明](doc/multiarch.md) |
 
 脚本选项按需选择，完整参数用 `python3 scripts/test-x86_64.py --help` 查看。交付前确认只包含任务需要的文件、ABI/构建/打包规则已同步，运行 `git diff --check`，说明实际完成和未完成的验证。

@@ -43,6 +43,13 @@ static inline void *x64_physical_pointer(uint64_t physical) {
 }
 
 void x64_cpu_initialize(x64_cpu_t *cpu);
+void x64_tlb_initialize(void);
+/* Allocate the tag directory on the BSP before APs or tasks can use it. */
+bool x64_tlb_prepare(void);
+/* Under the kernel lock: size=0 flushes a user root;
+ * upper-half addresses invalidate the shared kernel mappings in all PCIDs. */
+void x64_tlb_invalidate(arch_address_space_t root, uintptr_t address,
+                        size_t size);
 uint64_t x64_virtual_physical(const void *pointer);
 bool x64_user_access(uintptr_t address, size_t size, bool writable);
 bool x64_user_protect(uintptr_t address, size_t size, bool writable,
