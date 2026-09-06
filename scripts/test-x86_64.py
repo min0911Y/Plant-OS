@@ -263,6 +263,31 @@ def exercise_console(qmp_path, output, origin=None):
         qmp.close()
 
 
+def exercise_terminal_load(qmp_path, output):
+    qmp = QMP(qmp_path)
+    try:
+        width, height, _ = qmp.screenshot(output / "terminal-load.ppm")
+        qmp.move(700 - width // 2, 500 - height // 2)
+        qmp.press("btn", button="left")
+        x, y = (width - 648) // 2 + 4, (height - 428) // 2 + 40
+        def prompt_pixels(label):
+            _, _, pixels = qmp.screenshot(output / f"terminal-load-{label}.ppm")
+            return b"".join(pixels[(row * width + x) * 3:
+                                  (row * width + x + 12 * 8) * 3]
+                            for row in range(y, y + 16))
+        before = prompt_pixels("prompt")
+        if len(set(before[i:i + 3] for i in range(0, len(before), 3))) <= 1:
+            raise RuntimeError("loaded terminal has no shell prompt")
+        qmp.press("key", key={"type": "qcode", "data": "a"})
+        if prompt_pixels("echo") == before:
+            raise RuntimeError("loaded terminal does not echo input")
+        qmp.press("key", key={"type": "qcode", "data": "backspace"})
+        if prompt_pixels("backspace") != before:
+            raise RuntimeError("loaded terminal backspace failed")
+    finally:
+        qmp.close()
+
+
 def exercise_editor(qmp_path, serial, output):
     qmp = QMP(qmp_path)
 
@@ -475,8 +500,12 @@ def main():
     gui_mode.add_argument("--capacity", action="store_true", help="also cross the 255-task boundary")
     gui_mode.add_argument("--mouse", action="store_true", help="validate PS/2 motion, buttons and wheel using QMP")
     gui_mode.add_argument("--console", action="store_true", help="validate GUI shell rendering, input echo, backspace and scrolling")
+    gui_mode.add_argument("--terminal-load", type=int, metavar="COUNT",
+                          help="keep COUNT term processes open and verify a subsequent program launch")
+    gui_mode.add_argument("--memory-pressure", action="store_true",
+                          help="exhaust free pages, verify failed thread creation rolls back and programs recover")
     gui_mode.add_argument("--editor", action="store_true", help="edit and save files with pl_editor inside term using real keyboard events")
-    gui_mode.add_argument("--sdl", action="store_true", help="validate SDL2 shared surfaces, renderer, fonts and input")
+    gui_mode.add_argument("--sdl", action="store_true", help="validate SDL3 surfaces, renderer, image IO, fonts and input")
     gui_mode.add_argument("--desktop-app", choices=("lite", "nk"), help="capture and close an SDL desktop application")
     gui_mode.add_argument("--tools", action="store_true", help="run C4 pointer/VM, NASM object and JavaScript regressions")
     gui_mode.add_argument("--dynamic", action="store_true", help="run user ELF interpreter, shared libraries and page protection regressions")
@@ -485,6 +514,8 @@ def main():
     parser.add_argument("--out", type=Path, default=Path("/tmp/plant-x86_64-smoke"))
     parser.add_argument("--ovmf", type=Path, default=Path("/usr/share/OVMF"))
     args = parser.parse_args()
+    if args.terminal_load is not None and args.terminal_load <= 0:
+        parser.error("--terminal-load must be positive")
     if args.arch == "i386" and args.firmware == "uefi":
         parser.error("the i386 LiveCD uses BIOS")
     if args.arch == "i386" and args.tlb:
@@ -517,6 +548,12 @@ def main():
         expected.append("GUIMOUSE PASS events=15")
     if args.console:
         commands = ["guitest.bin terminal"]
+    if args.terminal_load:
+        commands = [f"guitest.bin terminal-load {args.terminal_load}"]
+        expected = ["TERMLOAD PASS", "TIMETEST PASS"]
+    if args.memory_pressure:
+        commands = ["guitest.bin memory-pressure"]
+        expected = ["MEMORYPRESSURE PASS", "TIMETEST PASS"]
     if args.editor:
         commands = ["guitest.bin editor"]
         expected = ["EDITORTEST PASS", "GUITEST EDITOR PASS"]
@@ -745,6 +782,12 @@ def main():
                         text = serial.read_text(errors="replace") if serial.exists() else ""
                         if re.search(r"PANIC|x86_64 exception .*cs=8", text):
                             raise RuntimeError(f"kernel failure; see {serial}")
+                        if args.terminal_load and ("TERMLOAD FAIL" in text or "TTY RPC disconnected" in text):
+                            raise RuntimeError(f"terminal load failed; see {serial}")
+                        if args.terminal_load and "TERMLOAD PASS" in text:
+                            exercise_terminal_load(qmp_path, output)
+                            print(f"{args.arch} TERMLOAD PASS: {args.terminal_load} terminals, input, pixels, program launch; {serial}")
+                            return
                         if args.tlb and "init.bin started" in text:
                             if f"tlb: pcid={pcid} invpcid={invpcid}\n" not in text:
                                 raise RuntimeError(f"TLB backend mismatch; see {serial}")
@@ -859,6 +902,7 @@ def main():
                                 qmp.press("btn", button="left")
                                 qmp.press("btn", button="wheel-up")
                                 qmp.press("key", key={"type": "qcode", "data": "a"})
+                                qmp.chord("shift", "a")
                                 qmp.press("key", key={"type": "qcode", "data": "left"})
                                 mouse_sent = True
                             finally:

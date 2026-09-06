@@ -9,6 +9,7 @@ typedef vram_t color_t;
 #include <framebuffer.h>
 #include <gui_rpc.h>
 #include <rpc.h>
+#include <task.h>
 typedef struct desktop desktop_t;
 typedef struct window window_t;
 typedef struct super_window super_window_t;
@@ -43,7 +44,6 @@ queue_t *queue_init();
 void queue_push(queue_t *q, unsigned value);
 unsigned queue_pop(queue_t *q);
 void queue_free(queue_t *q);
-#define MAX_SHEETS 256
 
 
 struct desktop {
@@ -165,18 +165,20 @@ void boxfill(vram_t *vram, int xsize, color_t c, int x0, int y0, int x1,
 bool Collision(int x, int y, int w, int h, int x1, int y1);
 struct SHEET {
   vram_t *buf;
-  int bxsize, bysize, vx0, vy0, col_inv, height, flags;
+  int bxsize, bysize, vx0, vy0, col_inv, height;
   struct SHTCTL *ctl;
   window_t *wnd;
+  struct SHEET *next;
 };
 struct SHTCTL {
   vram_t *vram;
-  unsigned char *map;
+  struct SHEET **map;
   int xsize, ysize, top;
   size_t stride;
   uint8_t red_shift, green_shift, blue_shift;
-  struct SHEET *sheets[MAX_SHEETS];
-  struct SHEET sheets0[MAX_SHEETS];
+  struct SHEET **sheets;
+  struct SHEET *allocated;
+  size_t count, capacity;
 };
 
 struct SHTCTL *shtctl_init(vram_t *vram, int xsize, int ysize);
@@ -192,5 +194,8 @@ void sheet_slide(struct SHEET *sht, int vx0, int vy0);
 void sheet_free(struct SHEET *sht);
 
 int gui_rpc_service_start(void);
+/* The caller holds TaskLock and takes the snapshot under that lock. */
+void gui_rpc_reap_windows(const task_info_t *tasks, size_t count);
+void gui_wake_window(window_t *window);
 
 #endif

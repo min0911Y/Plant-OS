@@ -8,8 +8,6 @@ apps/*/*/*.o
 apps/out
 apps/libs
 apps/doomgeneric/*.o
-apps/sdl2/*.o
-apps/sdl2_old/*.o
 
 # /
 .vscode

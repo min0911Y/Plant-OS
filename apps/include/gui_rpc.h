@@ -181,8 +181,11 @@ enum gui_rpc_opcode {
   GUI_RPC_START_KEYBOARD,
   GUI_RPC_STOP_KEYBOARD,
   GUI_RPC_SET_TITLE,
+  GUI_RPC_EVENT_NOTIFICATIONS,
   GUI_RPC_COUNT,
 };
+
+#define GUI_RPC_EVENT_READY 0x475549u
 
 static inline int gui_window_shared_mapping_size(uint32_t width,
                                                   uint32_t height,
@@ -219,5 +222,10 @@ typedef struct {
 typedef struct {
   uint32_t window_id;
 } gui_rpc_window_request_t;
+
+typedef struct {
+  uint32_t window_id;
+  uint32_t enabled;
+} gui_rpc_event_notifications_t;
 
 #endif

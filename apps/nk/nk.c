@@ -9,7 +9,7 @@
 #include <string.h>
 #include <time.h>
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 #define NK_INCLUDE_FIXED_TYPES
 #define NK_INCLUDE_STANDARD_IO
@@ -77,7 +77,6 @@ int main(int argc, char *argv[]) {
   SDL_Window *win;
   SDL_Renderer *renderer;
   int running = 1;
-  int flags = 0;
   float font_scale = 1;
 
   /* GUI */
@@ -85,37 +84,25 @@ int main(int argc, char *argv[]) {
   struct nk_colorf bg;
 
   /* SDL setup */
-  SDL_SetHint(SDL_HINT_VIDEO_HIGHDPI_DISABLED, "0");
-  if (SDL_Init(SDL_INIT_VIDEO) != 0) {
+  if (!SDL_Init(SDL_INIT_VIDEO)) {
     SDL_Log("SDL initialization failed: %s", SDL_GetError());
     return 1;
   }
-  SDL_DisplayMode display;
-  if (SDL_GetCurrentDisplayMode(0, &display) != 0)
+  const SDL_DisplayMode *display =
+      SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay());
+  if (!display)
     return 1;
 
-  win = SDL_CreateWindow("Demo", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                         SDL_min(WINDOW_WIDTH, display.w - 16),
-                         SDL_min(WINDOW_HEIGHT, display.h - 48),
-                         SDL_WINDOW_SHOWN | SDL_WINDOW_ALLOW_HIGHDPI);
+  win = SDL_CreateWindow("Demo", SDL_min(WINDOW_WIDTH, display->w - 16),
+                         SDL_min(WINDOW_HEIGHT, display->h - 48),
+                         SDL_WINDOW_HIGH_PIXEL_DENSITY);
 
   if (win == NULL) {
     SDL_Log("Error SDL_CreateWindow %s", SDL_GetError());
     exit(-1);
   }
 
-  flags |= SDL_RENDERER_ACCELERATED;
-  flags |= SDL_RENDERER_PRESENTVSYNC;
-
-#if 0
-    SDL_SetHint(SDL_HINT_RENDER_BATCHING, "1");
-    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
-    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
-    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
-    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengles2");
-#endif
-
-  renderer = SDL_CreateRenderer(win, -1, 0);
+  renderer = SDL_CreateRenderer(win, "software");
 
   if (renderer == NULL) {
     SDL_Log("Error SDL_CreateRenderer %s", SDL_GetError());
@@ -127,16 +114,17 @@ int main(int argc, char *argv[]) {
     int render_w, render_h;
     int window_w, window_h;
     float scale_x, scale_y;
-    SDL_GetRendererOutputSize(renderer, &render_w, &render_h);
+    SDL_GetCurrentRenderOutputSize(renderer, &render_w, &render_h);
     SDL_GetWindowSize(win, &window_w, &window_h);
     scale_x = (float)(render_w) / (float)(window_w);
     scale_y = (float)(render_h) / (float)(window_h);
-    SDL_RenderSetScale(renderer, scale_x, scale_y);
+    SDL_SetRenderScale(renderer, scale_x, scale_y);
     font_scale = scale_y;
   }
 
   /* GUI */
   ctx = nk_sdl_init(win, renderer);
+  SDL_StartTextInput(win);
   /* Load Fonts: if none of these are loaded a default font will be used  */
   /* Load Cursor: if you uncomment cursor loading please hide the cursor */
   {
@@ -183,8 +171,8 @@ int main(int argc, char *argv[]) {
     SDL_Event evt;
     nk_input_begin(ctx);
     while (SDL_PollEvent(&evt)) {
-      if (evt.type == SDL_QUIT ||
-          (evt.type == SDL_WINDOWEVENT && evt.window.event == SDL_WINDOWEVENT_CLOSE))
+      if (evt.type == SDL_EVENT_QUIT ||
+          evt.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED)
         goto cleanup;
       nk_sdl_handle_event(&evt);
     }

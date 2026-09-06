@@ -8,6 +8,7 @@
 #include <loader.h>
 #include <math_util.h>
 #include <user_space.h>
+#include <user_vm.h>
 extern char default_drive;
 #define PAGE_SIZE_BYTES 0x1000u
 
@@ -16,7 +17,7 @@ static bool task_map_user_pages(uintptr_t start, size_t count) {
     return false;
   }
   for (size_t i = 0; i < count; i++) {
-    if (!page_link(start + i * PAGE_SIZE_BYTES)) {
+    if (!arch_user_map_zero(start + i * PAGE_SIZE_BYTES)) {
       return false;
     }
   }
@@ -48,65 +49,78 @@ bool user_runtime_layout_calculate(uintptr_t aligned_image_end,
   return true;
 }
 
-static __attribute__((optimize("O0"))) char *
-task_app_take_launch_request(void) {
-  char *filename;
-  irq_state_t state;
-  for (;;) {
-    state = irq_save();
-    if (current_task()->line) {
-      break;
-    }
-    task_next();
-    irq_restore(state);
-  }
-  uintptr_t *r = (uintptr_t *)current_task()->line;
-  filename = (char *)r[0];
-  current_task()->line = (char *)r[1];
-  irq_restore(state);
-  page_free_one(r);
-  return filename;
-}
+typedef struct {
+  size_t filename_size;
+  char text[];
+} task_exec_request_t;
 
-static bool task_app_setup_fifos(void) {
-  char *kfifo = (char *)page_malloc_one();
-  char *mfifo = (char *)page_malloc_one();
-  char *kbuf = (char *)page_malloc_one();
-  char *mbuf = (char *)page_malloc_one();
+bool task_prepare_input(mtask *task) {
+  struct FIFO8 *kfifo = page_malloc_one_no_mark();
+  struct FIFO8 *mfifo = page_malloc_one_no_mark();
+  unsigned char *kbuf = page_malloc_one_no_mark();
+  unsigned char *mbuf = page_malloc_one_no_mark();
   if (kfifo == NULL || mfifo == NULL || kbuf == NULL || mbuf == NULL) {
+    page_free(kfifo, PAGE_SIZE_BYTES);
+    page_free(mfifo, PAGE_SIZE_BYTES);
+    page_free(kbuf, PAGE_SIZE_BYTES);
+    page_free(mbuf, PAGE_SIZE_BYTES);
     return false;
   }
 
-  fifo8_init((struct FIFO8 *)kfifo, 4096, (unsigned char *)kbuf);
-  fifo8_init((struct FIFO8 *)mfifo, 4096, (unsigned char *)mbuf);
-  task_set_fifo(current_task(), (struct FIFO8 *)kfifo, (struct FIFO8 *)mfifo);
+  fifo8_init(kfifo, PAGE_SIZE_BYTES, kbuf);
+  fifo8_init(mfifo, PAGE_SIZE_BYTES, mbuf);
+  task_set_fifo(task, kfifo, mfifo);
   return true;
 }
 
-static bool task_app_setup_memory_alloc(void) {
-  current_task()->alloc_size = malloc(sizeof(*current_task()->alloc_size));
-  if (current_task()->alloc_size == NULL) {
-    return false;
-  }
-  current_task()->alloced = 1;
-  *current_task()->alloc_size = 2 * 1024 * 1024;
-  return true;
-}
-
-void task_app() {
-  char *filename = task_app_take_launch_request();
-  if (!task_app_setup_fifos() || !task_app_setup_memory_alloc()) {
-    task_exit(-1);
-    return;
-  }
-  if (!arch_address_space_prepare_exec(current_task()->address_space)) {
-    task_exit(-1);
+void task_app(void) {
+  mtask *task = current_task();
+  task_exec_request_t *request = (task_exec_request_t *)task->line;
+  char *filename = request->text;
+  task->line = request->text + request->filename_size;
+  if (!arch_address_space_prepare_exec(task->address_space)) {
+    task_exit((unsigned)-1);
     return;
   }
   task_to_user_mode_elf(filename);
-  for (;;)
-    ;
 }
+
+static mtask *task_create_application(const char *filename, const char *line) {
+  if (!filename || !line)
+    return NULL;
+  size_t filename_size = strlen(filename) + 1;
+  size_t command_size = strlen(line) + 1;
+  if (filename_size > INT_MAX - sizeof(task_exec_request_t) ||
+      command_size > INT_MAX - sizeof(task_exec_request_t) - filename_size)
+    return NULL;
+  mtask *task = create_task((uintptr_t)task_app, 1);
+  if (!task)
+    return NULL;
+  size_t bytes = sizeof(task_exec_request_t) + filename_size + command_size;
+  task_exec_request_t *request = page_malloc(bytes);
+  if (!request)
+    goto failed;
+  change_page_task_id(task->tid, request, bytes);
+  request->filename_size = filename_size;
+  memcpy(request->text, filename, filename_size);
+  memcpy(request->text + filename_size, line, command_size);
+  task->line = (char *)request;
+  task->alloc_size = malloc(sizeof(*task->alloc_size));
+  if (!task->alloc_size)
+    goto failed;
+  task->alloced = 1;
+  *task->alloc_size = 2 * 1024 * 1024;
+  if (!task_prepare_input(task))
+    goto failed;
+  task_set_name(task, filename);
+  task->TTY = current_task()->TTY;
+  task->tty_session = current_task()->tty_session;
+  return task;
+failed:
+  task_abort_creation(task);
+  return NULL;
+}
+
 /* The kernel interprets only PT_INTERP. Dynamic sections, shared objects and
  * all relocations belong to the user program named by that segment. */
 static bool executable_interpreter(int descriptor, char **interpreter) {
@@ -271,51 +285,20 @@ failed:
   task_exit(-1);
 }
 int os_execute(char *filename, char *line, execute_mode_t mode) {
-  if (filename == NULL || line == NULL) {
+  mtask *t = task_create_application(filename, line);
+  if (!t)
     return -1;
-  }
-
   bool mouse_owned = mouse_use_task == current_task();
-  char *fm = (char *)malloc(strlen(filename) + 1);
-  char *p1 = malloc(strlen(line) + 1);
-  uintptr_t *r = page_malloc_one_no_mark();
-  if (fm == NULL || p1 == NULL || r == NULL) {
-    free(fm);
-    free(p1);
-    if (r != NULL) {
-      page_free_one(r);
-    }
-    return -1;
-  }
-  strcpy(fm, filename);
-  strcpy(p1, line);
-  r[0] = (uintptr_t)fm;
-  r[1] = (uintptr_t)p1;
-
-  mtask *t = create_task((uintptr_t)task_app, 1);
-  if (t == NULL) {
-    free(fm);
-    free(p1);
-    page_free_one(r);
-    return -1;
-  }
   t->ptid = current_task()->tgid;
   t->return_cwd = mode == EXECUTE_COMMAND;
   int old = current_task()->sigint_up;
   t->sigint_up = 1;
-  task_set_name(t, filename);
   struct tty *tty_backup = current_task()->TTY;
-  t->TTY = current_task()->TTY;
-  t->tty_session = current_task()->tty_session;
   int o = current_task()->fifosleep;
-  t->line = (char *)r;
   irq_state_t state = irq_save();
   if (!task_publish(t)) {
     irq_restore(state);
     task_abort_creation(t);
-    free(p1);
-    free(fm);
-    page_free_one(r);
     return -1;
   }
   current_task()->sigint_up = 0;
@@ -329,8 +312,6 @@ int os_execute(char *filename, char *line, execute_mode_t mode) {
   unsigned status = waittid(t->tid);
   current_task()->fifosleep = o;
 
-  free(p1);
-  free(fm);
   current_task()->TTY = current_task()->tty_session == tty_backup
                             ? tty_backup
                             : current_task()->tty_session;
@@ -342,25 +323,12 @@ int os_execute(char *filename, char *line, execute_mode_t mode) {
   return status;
 }
 void os_execute_no_ret(char *filename, char *line) {
-  uintptr_t *r = page_malloc_one_no_mark();
-  if (r == NULL) {
+  mtask *t = task_create_application(filename, line);
+  if (!t)
     return;
-  }
-  r[0] = (uintptr_t)filename;
-  r[1] = (uintptr_t)line;
-  mtask *t = create_task((uintptr_t)task_app, 1);
-  if (t == NULL) {
-    page_free_one(r);
-    return;
-  }
   t->ptid = 0; /* detached tasks are adopted by the idle reaper */
-  task_set_name(t, filename);
-  t->TTY = current_task()->TTY;
-  t->tty_session = current_task()->tty_session;
-  t->line = (char *)r;
   if (!task_publish(t)) {
     task_abort_creation(t);
-    page_free_one(r);
     return;
   }
   current_task()->TTY = NULL;

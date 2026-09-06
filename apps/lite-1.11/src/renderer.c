@@ -1,9 +1,11 @@
-#include <stdio.h>
-#include <stdbool.h>
+#include "renderer.h"
+#include "lib/stb/stb_truetype.h"
 #include <assert.h>
 #include <math.h>
-#include "lib/stb/stb_truetype.h"
-#include "renderer.h"
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #define MAX_GLYPHSET 256
 

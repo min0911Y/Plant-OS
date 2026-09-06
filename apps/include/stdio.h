@@ -47,6 +47,7 @@ int fprintf (FILE* stream, const char*format, ...);
 int vfprintf(FILE *stream, const char *format, va_list ap);
 int feof(FILE *stream);
 int ferror(FILE *stream);
+void clearerr(FILE *stream);
 int getc(FILE *stream);
 int sscanf(const char * s, const char * fmt, ...);
 int snprintf(char *s, size_t n, const char *fmt, ...);

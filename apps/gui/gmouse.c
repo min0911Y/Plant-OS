@@ -129,13 +129,17 @@ void gmouse(gmouse_t *gmouse) {
 
       window_t *r = gmouse->desktop->focused_window;
       uint8_t i = get_key_press();
-      if (r != NULL && r->shared != NULL && r->keyboard_events)
+      if (r != NULL && r->shared != NULL && r->keyboard_events) {
         gui_event_queue_push(&r->shared->key_press, i);
+        gui_wake_window(r);
+      }
     } else if (key_up_status() != 0) {
       window_t *r = gmouse->desktop->focused_window;
       uint8_t i = get_key_up();
-      if (r != NULL && r->shared != NULL && r->keyboard_events)
+      if (r != NULL && r->shared != NULL && r->keyboard_events) {
         gui_event_queue_push(&r->shared->key_up, i);
+        gui_wake_window(r);
+      }
     }
     window_t *focused = gmouse->desktop->focused_window;
     new = focused != NULL ? focused->tid : 0;

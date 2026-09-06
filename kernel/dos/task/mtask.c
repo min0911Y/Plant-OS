@@ -18,6 +18,7 @@ static void task_slot_reset(mtask *task, uint32_t tid);
 static void task_slot_release(mtask *task);
 static void task_bootstrap(void);
 static void task_finish_pending(mtask *task);
+static void release_task_fifos(mtask *task);
 char default_drive = 'A';
 typedef struct {
   mtask **chunks;
@@ -400,7 +401,7 @@ static mtask *create_task_impl(uintptr_t entry, unsigned weight,
     return NULL;
   }
   uintptr_t esp_alloced = (uintptr_t)stack_base + STACK_SIZE;
-  change_page_task_id(t->tid, (void *)(esp_alloced - STACK_SIZE), STACK_SIZE);
+  t->top = esp_alloced;
   t->context =
       (arch_task_context_t *)(esp_alloced - sizeof(arch_task_context_t));
   t->entry = entry;
@@ -414,15 +415,13 @@ static mtask *create_task_impl(uintptr_t entry, unsigned weight,
     arch_address_space_retain(t->address_space);
     owns_pde = true;
   } else {
-    t->address_space = arch_address_space_clone(current_task()->address_space); // 启用了就复制一个
+    t->address_space = arch_address_space_clone(arch_address_space_kernel());
     if (t->address_space == 0) {
-      page_free(stack_base, STACK_SIZE);
       task_slot_release(t);
       return NULL;
     }
     owns_pde = true;
   }
-  t->top = esp_alloced; // r0的esp
   t->weight = weight;
   extern int init_ok_flag; // init_ok_flag 标记fs等是否初始化完成
   if (init_ok_flag) {
@@ -440,7 +439,6 @@ static mtask *create_task_impl(uintptr_t entry, unsigned weight,
       if (owns_pde) {
         arch_address_space_release(t->address_space);
       }
-      page_free(stack_base, STACK_SIZE);
       task_slot_release(t);
       return NULL;
     }
@@ -570,17 +568,8 @@ static void task_release_resources(mtask *task) {
       task->address_space != arch_address_space_kernel()) {
     arch_address_space_release(task->address_space);
   }
+  release_task_fifos(task);
   gc(tid);
-  if (task->Pkeyfifo) {
-    page_free(task->Pkeyfifo->buf, 4096);
-    free(task->Pkeyfifo);
-    task->Pkeyfifo = NULL;
-  }
-  if (task->Ukeyfifo) {
-    page_free(task->Ukeyfifo->buf, 4096);
-    free(task->Ukeyfifo);
-    task->Ukeyfifo = NULL;
-  }
   if (task->fs_context) {
     vfs_context_release(task->fs_context);
     task->fs_context = NULL;
@@ -1168,7 +1157,7 @@ static bool clone_task_fifo(struct FIFO8 **dest, struct FIFO8 *src,
       return false;
     }
   } else {
-    *dest = (struct FIFO8 *)page_malloc_one();
+    *dest = (struct FIFO8 *)page_malloc_one_no_mark();
     if (*dest == NULL) {
       return false;
     }
@@ -1205,6 +1194,9 @@ static void task_slot_reset(mtask *task, uint32_t tid) {
 static void task_slot_release(mtask *task) {
   irq_state_t state = irq_save();
   uint32_t tid = task->tid;
+  // The scheduler or a waiter retires the slot after leaving its kernel stack.
+  if (task->top)
+    page_free((void *)(task->top - STACK_SIZE), STACK_SIZE);
   task_slot_reset(task, tid);
   if (tid < task_registry.free_hint) {
     task_registry.free_hint = tid;
@@ -1240,19 +1232,8 @@ int task_fork() {
   child->runtime_ticks = 0;
   child->terminate_pending = 0;
   child->terminate_status = 0;
-  uintptr_t stack = (uintptr_t)page_malloc(STACK_SIZE);
-  if (stack == 0) {
-    task_slot_release(child);
-    irq_restore(state);
-    return -1;
-  }
-  change_page_task_id(tid, (void *)stack, STACK_SIZE);
-  uintptr_t old_stack_base = child->top - STACK_SIZE;
-  uintptr_t old_context = (uintptr_t)child->context;
-  uintptr_t context_offset = old_context - old_stack_base;
-  memcpy((void *)stack, (void *)old_stack_base, STACK_SIZE);
-  child->top = stack + STACK_SIZE;
-  child->context = (arch_task_context_t *)(stack + context_offset);
+  child->top = 0;
+  child->address_space = 0;
   child->fs_context = NULL;
   child->Pkeyfifo = NULL;
   child->Ukeyfifo = NULL;
@@ -1272,68 +1253,44 @@ int task_fork() {
   child->urgent = 0;
   child->line = NULL;
   child->signal = 0;
-  if (parent->alloced && parent->alloc_size) {
+  uintptr_t stack = (uintptr_t)page_malloc(STACK_SIZE);
+  if (stack == 0)
+    goto failed;
+  uintptr_t old_stack_base = parent->top - STACK_SIZE;
+  uintptr_t context_offset = (uintptr_t)parent->context - old_stack_base;
+  memcpy((void *)stack, (void *)old_stack_base, STACK_SIZE);
+  child->top = stack + STACK_SIZE;
+  child->context = (arch_task_context_t *)(stack + context_offset);
+  if (parent->alloc_size) {
     child->alloc_size = malloc(sizeof(*child->alloc_size));
-    if (child->alloc_size == NULL) {
-      page_free((void *)stack, STACK_SIZE);
-      task_slot_release(child);
-      irq_restore(state);
-      return -1;
-    }
-    *(child->alloc_size) = *(parent->alloc_size);
+    if (!child->alloc_size)
+      goto failed;
+    *child->alloc_size = *parent->alloc_size;
     child->alloced = 1;
-  } else {
-    child->alloc_size = parent->alloc_size;
-    child->alloced = 0;
   }
   if (!clone_task_fifo(&child->Pkeyfifo, parent->Pkeyfifo, true) ||
       !clone_task_fifo(&child->Ukeyfifo, parent->Ukeyfifo, true) ||
       !clone_task_fifo(&child->keyfifo, parent->keyfifo, false) ||
-      !clone_task_fifo(&child->mousefifo, parent->mousefifo, false)) {
-    release_task_fifos(child);
-    if (child->alloced) {
-      free(child->alloc_size);
-    }
-    page_free((void *)stack, STACK_SIZE);
-    task_slot_release(child);
-    irq_restore(state);
-    return -1;
-  }
+      !clone_task_fifo(&child->mousefifo, parent->mousefifo, false))
+    goto failed;
   child->fs_context = vfs_context_fork(parent->fs_context);
-  if (child->fs_context == NULL) {
-    release_task_fifos(child);
-    if (child->alloced) {
-      free(child->alloc_size);
-    }
-    page_free((void *)stack, STACK_SIZE);
-    task_slot_release(child);
-    irq_restore(state);
-    return -1;
-  }
+  if (!child->fs_context)
+    goto failed;
   child->address_space = arch_address_space_clone(parent->address_space);
-  if (child->address_space == 0) {
-    vfs_context_release(child->fs_context);
-    child->fs_context = NULL;
-    release_task_fifos(child);
-    if (child->alloced) {
-      free(child->alloc_size);
-    }
-    page_free((void *)stack, STACK_SIZE);
-    task_slot_release(child);
-    irq_restore(state);
-    return -1;
-  }
+  if (!child->address_space)
+    goto failed;
   child->weight = 1;
   child->ptid = parent->tgid;
   child->tgid = tid;
   child->kind = TASK_PROCESS;
   child->tid = tid;
   arch_task_fork_context_init(child);
-  if (!task_publish(child)) {
-    task_abort_creation(child);
-    irq_restore(state);
-    return -1;
-  }
+  if (!task_publish(child))
+    goto failed;
   irq_restore(state);
   return (int)tid;
+failed:
+  task_abort_creation(child);
+  irq_restore(state);
+  return -1;
 }

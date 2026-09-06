@@ -1,9 +1,10 @@
-#include <stdio.h>
-#include <SDL.h>
 #include "api/api.h"
 #include "renderer.h"
+#include <SDL3/SDL.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <syscall.h>
-
 
 SDL_Window *window;
 
@@ -18,35 +19,29 @@ static void get_exe_filename(char *buf, int sz) {
 }
 
 
-static void init_window_icon(void) {
-}
-
-
 int main(int argc, char **argv) {
 
-  if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0) {
+  if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) {
     fprintf(stderr, "lite: %s\n", SDL_GetError());
     return 1;
   }
   SDL_EnableScreenSaver();
-  SDL_EventState(SDL_DROPFILE, SDL_ENABLE);
+  SDL_SetEventEnabled(SDL_EVENT_DROP_FILE, true);
   atexit(SDL_Quit);
 
-#if SDL_VERSION_ATLEAST(2, 0, 5)
   SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
-#endif
 
-  SDL_DisplayMode dm;
-  SDL_GetCurrentDisplayMode(0, &dm);
+  const SDL_DisplayMode *dm =
+      SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay());
+  if (!dm)
+    return 1;
 
-  window = SDL_CreateWindow(
-    "Lite", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, dm.w * 0.8, dm.h * 0.8,
-    SDL_WINDOW_SHOWN);
+  window = SDL_CreateWindow("Lite", dm->w * 0.8, dm->h * 0.8, 0);
   if (!window) {
     fprintf(stderr, "lite: %s\n", SDL_GetError());
     return 1;
   }
-  init_window_icon();
+  SDL_StartTextInput(window);
   ren_init(window);
 
 

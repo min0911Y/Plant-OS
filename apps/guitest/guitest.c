@@ -3,12 +3,14 @@
 #include <gui_rpc.h>
 #include <ipc.h>
 #include <rpc.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <syscall.h>
 #include <task.h>
 #include <time.h>
+#include <vm.h>
 
 enum {
   GUI_STRESS_WINDOW_PROCESSES = 48,
@@ -70,6 +72,183 @@ static int gui_test_thread(void) {
   free(stack);
   logkf("GUITEST THREAD %s\n", valid ? "PASS" : "FAIL");
   return !valid;
+}
+
+static int gui_test_memory_pressure(void) {
+  if (gui_test_thread())
+    return 1;
+  struct mapping {
+    void *address;
+    size_t length;
+  };
+  size_t capacity = mem_total() / (1024 * 1024) + 512;
+  struct mapping *mappings = calloc(capacity, sizeof(*mappings));
+  void *stack = malloc(32 * 1024);
+  volatile unsigned char *cow = malloc(2 * 1024 * 1024);
+  if (!mappings || !stack || !cow) {
+    free(mappings);
+    free(stack);
+    free((void *)cow);
+    return 1;
+  }
+  unsigned parent_tid = NowTaskID();
+  int children[2];
+  for (unsigned i = 0; i < 2; i++) {
+    int child = fork();
+    if (child == 0) {
+      ipc_send_to(parent_tid, GUI_STRESS_READY, 0, NULL, 0, 5000);
+      ipc_msg_t message;
+      // The second case faults inside the kernel while copying an IPC payload.
+      void *buffer = i ? (void *)(cow + VM_PAGE_SIZE) : NULL;
+      unsigned size = i ? sizeof(unsigned) : 0;
+      if (ipc_recv_from(parent_tid, buffer, size, &message, 30000) < 0)
+        return 1;
+      if (!i)
+        cow[VM_PAGE_SIZE] = 42;
+      return 0;
+    }
+    ipc_msg_t ready;
+    if (child < 0 || ipc_recv_from(child, NULL, 0, &ready, 5000) < 0)
+      return 1;
+    children[i] = child;
+  }
+  // Make bookkeeping private before exhausting pages shared with the child.
+  memset(mappings, 0, capacity * sizeof(*mappings));
+  (void)vm_map(NULL, 1); // Materialize errno before the eventual ENOMEM result.
+  size_t count = 0;
+  // Leave room for the kernel stack, but insufficient memory to finish a new
+  // thread's input queues. AddThread must fail before publishing that thread.
+  for (size_t length = 1024 * 1024; length >= VM_PAGE_SIZE; length /= 256) {
+    while (count < capacity && mem_total() / VM_PAGE_SIZE - mem_used() >
+                                   19 + length / VM_PAGE_SIZE) {
+      void *address = vm_map(NULL, length);
+      if (!address)
+        break;
+      mappings[count++] = (struct mapping){address, length};
+    }
+  }
+  size_t before = mem_used();
+  int failed = 0;
+  gui_thread_probe_t probe = {.parent_tid = NowTaskID(), .cookie = 0};
+  for (unsigned i = 0; i < 64; i++) {
+    int tid = AddThread("oom-probe", (uintptr_t)gui_thread_probe,
+                        (uintptr_t)stack + 32 * 1024, (uintptr_t)&probe);
+    if (tid >= 0) {
+      SubThread(tid);
+      failed = 1;
+    }
+    if (mem_used() != before)
+      failed = 1;
+  }
+  for (unsigned i = 0; i < 2; i++) {
+    while (count < capacity) {
+      void *address = vm_map(NULL, VM_PAGE_SIZE);
+      if (!address)
+        break;
+      mappings[count++] = (struct mapping){address, VM_PAGE_SIZE};
+    }
+    unsigned payload = 42;
+    failed |=
+        ipc_send_to(children[i], GUI_STRESS_RELEASE, 0, i ? &payload : NULL,
+                    i ? sizeof(payload) : 0, 5000) != IPC_OK;
+    failed |= waittid(children[i]) != -1;
+  }
+  while (count) {
+    struct mapping *mapping = &mappings[--count];
+    failed |= vm_unmap(mapping->address, mapping->length) != 0;
+  }
+  free(stack);
+  free(mappings);
+  free((void *)cow);
+  failed |= gui_test_thread() != 0;
+  failed |= exec("timetest.bin", "timetest.bin") != 0;
+  logkf("MEMORYPRESSURE %s failures=64 rollback, user/kernel COW OOM, thread "
+        "and exec recovery\n",
+        failed ? "FAIL" : "PASS");
+  return failed;
+}
+
+typedef struct {
+  int status;
+  bool finished;
+  unsigned char stack[32 * 1024];
+} gui_terminal_launch_t;
+
+static void gui_terminal_load_worker(gui_terminal_launch_t *launch) {
+  launch->status = exec("term.bin", "term.bin");
+  __atomic_store_n(&launch->finished, true, __ATOMIC_RELEASE);
+  _exit(launch->status);
+}
+
+static unsigned gui_terminal_load_report(unsigned attempted, unsigned requested,
+                                         unsigned *shell_count) {
+  task_info_t *tasks = NULL;
+  size_t count = 0;
+  unsigned terminals = 0, shells = 0;
+  if (task_list(&tasks, &count) == 0) {
+    for (size_t i = 0; i < count; i++) {
+      if (tasks[i].tid != tasks[i].tgid || tasks[i].state == TASK_INFO_ZOMBIE)
+        continue;
+      terminals += strcmp(tasks[i].name, "term.bin") == 0;
+      shells += strcmp(tasks[i].name, "psh.bin") == 0;
+    }
+  }
+  free(tasks);
+  logkf("TERMLOAD attempted=%u/%u terminals=%u shells=%u tasks=%u "
+        "used_pages=%llu\n",
+        attempted, requested, terminals, shells, (unsigned)count,
+        (unsigned long long)mem_used());
+  *shell_count = shells;
+  return terminals;
+}
+
+static int gui_test_terminal_load(unsigned count) {
+  if (sizeof(gui_terminal_launch_t *) > SIZE_MAX / count)
+    return 2;
+  gui_terminal_launch_t **launches = calloc(count, sizeof(*launches));
+  if (!launches)
+    return 2;
+  unsigned failed = 0;
+  for (unsigned i = 0; i < count; i++) {
+    gui_terminal_launch_t *launch = calloc(1, sizeof(*launch));
+    int tid =
+        launch ? AddThread("term-load", (uintptr_t)gui_terminal_load_worker,
+                           (uintptr_t)(launch->stack + sizeof(launch->stack)),
+                           (uintptr_t)launch)
+               : -1;
+    if (tid < 0) {
+      free(launch);
+      failed++;
+      logkf("TERMLOAD launch failed index=%u\n", i + 1);
+    } else {
+      launches[i] = launch;
+    }
+    // Keep every terminal open. Each launch follows the desktop's exec path.
+    sleep(100);
+    if ((i + 1) % 25 == 0 || i + 1 == count) {
+      unsigned shells;
+      gui_terminal_load_report(i + 1, count, &shells);
+    }
+  }
+  sleep(5000);
+  for (unsigned i = 0; i < count; i++) {
+    gui_terminal_launch_t *launch = launches[i];
+    if (launch && __atomic_load_n(&launch->finished, __ATOMIC_ACQUIRE)) {
+      logkf("TERMLOAD exited index=%u status=%d\n", i + 1, launch->status);
+      failed++;
+    }
+  }
+  unsigned shells;
+  unsigned terminals = gui_terminal_load_report(count, count, &shells);
+  int status = exec("timetest.bin", "timetest.bin");
+  logkf("TERMLOAD %s requested=%u terminals=%u shells=%u failed=%u probe=%d\n",
+        !failed && terminals >= count && shells >= count && status == 0
+            ? "PASS"
+            : "FAIL",
+        count, terminals, shells, failed, status);
+  // Preserve windows and launcher stacks for the host's input/pixel checks.
+  for (;;)
+    sleep(1000);
 }
 
 static int gui_test_mouse(void) {
@@ -551,6 +730,8 @@ static int gui_test_editor_client(void) {
 }
 
 int main(int argc, char **argv) {
+  if (argc == 2 && strcmp(argv[1], "memory-pressure") == 0)
+    return gui_test_memory_pressure();
   if (argc == 2 && strcmp(argv[1], "editor-client") == 0)
     return gui_test_editor_client();
   if (argc == 2 && strcmp(argv[1], "terminal-client") == 0)
@@ -591,6 +772,10 @@ int main(int argc, char **argv) {
   result = gui_test_basic();
   if (result != 0) {
     return result;
+  }
+  if (argc == 3 && strcmp(argv[1], "terminal-load") == 0) {
+    int count = atoi(argv[2]);
+    return count > 0 ? gui_test_terminal_load((unsigned)count) : 2;
   }
   if (argc == 2 && strcmp(argv[1], "terminal") == 0) {
     result = exec("term.bin", "term.bin guitest.bin terminal-client");

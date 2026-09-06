@@ -4767,6 +4767,13 @@ int feof(FILE *stream) { return stream != NULL && stream->eof ? EOF : 0; }
 
 int ferror(FILE *stream) { return stream != NULL && stream->error ? EOF : 0; }
 
+void clearerr(FILE *stream) {
+  if (stream) {
+    stream->eof = 0;
+    stream->error = 0;
+  }
+}
+
 int getc(FILE *stream) { return fgetc(stream); }
 
 int ungetc(int character, FILE *stream) {

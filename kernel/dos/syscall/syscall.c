@@ -37,22 +37,6 @@ static void user_thread_entry(void) {
   page_free_one(request);
   task->line = NULL;
 
-  struct FIFO8 *key_fifo = page_malloc_one();
-  struct FIFO8 *mouse_fifo = page_malloc_one();
-  unsigned char *key_buffer = page_malloc_one();
-  unsigned char *mouse_buffer = page_malloc_one();
-  if (key_fifo == NULL || mouse_fifo == NULL || key_buffer == NULL ||
-      mouse_buffer == NULL) {
-    page_free(key_fifo, sizeof(*key_fifo));
-    page_free(mouse_fifo, sizeof(*mouse_fifo));
-    page_free(key_buffer, 4096);
-    page_free(mouse_buffer, 4096);
-    task_exit(-1);
-    return;
-  }
-  fifo8_init(key_fifo, 4096, key_buffer);
-  fifo8_init(mouse_fifo, 4096, mouse_buffer);
-  task_set_fifo(task, key_fifo, mouse_fifo);
   task->user_mode = 1;
   arch_task_set_kernel_stack(task->top);
   kernel_lock_leave();
@@ -934,15 +918,16 @@ static void syscall_task_control(syscall_context_t *frame) {
       task_abort_creation(thread);
       return;
     }
+    change_page_task_id(thread->tid, request, sizeof(*request));
     *request = (user_thread_start_t){
         .entry = frame->argument2,
         .stack_top = stack_top,
         .argument = frame->argument4,
     };
     thread->line = (char *)request;
-    if (!task_publish(thread)) {
+    if (!task_prepare_input(thread) ||
+        !user_vm_prepare_write(stack_top - 32, 32) || !task_publish(thread)) {
       task_abort_creation(thread);
-      page_free_one(request);
       return;
     }
     frame->value = thread->tid;

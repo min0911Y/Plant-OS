@@ -79,7 +79,7 @@ fi
 if [ "$architecture" = i386 ]; then
 for artifact in "$kernel_dir/boot.img" "$object_dir/kernel.bin" \
                 "$apps_out_dir/crti.obj" "$apps_out_dir/doom.bin" \
-                "$apps_lib_dir/libtcc1.a" \
+                "$apps_lib_dir/libtcc1.a" "$apps_out_dir/sdk-libraries.list" \
                 "$apps_dir/tcc/tcc/crti.c" "$kernel_dir/res/doom1.wad"; do
   if [ ! -f "$artifact" ]; then
     echo "build-livecd: missing build artifact: $artifact" >&2
@@ -149,7 +149,9 @@ if [ "$architecture" = i386 ]; then
   mkdir -p "$payload_dir/tcc/crt" "$payload_dir/tcc/include" \
            "$payload_dir/tcc/inst" "$payload_dir/tcc/lib"
   cp -R "$apps_include_dir"/. "$payload_dir/tcc/include/"
-  cp "$apps_lib_dir"/*.a "$payload_dir/tcc/lib/"
+  while IFS= read -r library; do
+    cp "$apps_lib_dir/$library" "$payload_dir/tcc/lib/"
+  done < "$apps_out_dir/sdk-libraries.list"
   mv "$payload_dir/tcc/lib/libtcc1.a" "$payload_dir/tcc/inst/"
   cp "$apps_out_dir/crti.obj" "$payload_dir/tcc/crt/crti.o"
   cp "$apps_dir/tcc/tcc/crti.c" "$payload_dir/"

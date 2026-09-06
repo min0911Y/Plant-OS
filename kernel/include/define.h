@@ -148,7 +148,7 @@ enum WAIT_REASON {
   WAIT_REASON_USB,
   WAIT_REASON_TTY
 };
-enum { TASK_KERNEL_STACK_SIZE = 1024u * 1024u };
+enum { TASK_KERNEL_STACK_SIZE = 64u * 1024u };
 typedef struct mtask {
   arch_task_context_t *context;
   uintptr_t entry;
@@ -172,6 +172,7 @@ typedef struct mtask {
   uint32_t generation;
   enum TASK_KIND kind;
   uintptr_t alloc_addr;
+  uintptr_t vm_hint;
   size_t *alloc_size;
   uint32_t alloced;
   struct tty *TTY;

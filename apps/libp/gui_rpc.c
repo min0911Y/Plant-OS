@@ -189,6 +189,14 @@ int window_set_title(window_t window, const char *title) {
                   NULL, 0, NULL);
 }
 
+int window_set_event_notifications(window_t window, bool enabled) {
+  if (!window)
+    return RPC_ERR_INVAL;
+  gui_rpc_event_notifications_t request = {window->id, enabled};
+  return gui_call(GUI_RPC_EVENT_NOTIFICATIONS, &request, sizeof(request), NULL,
+                  0, NULL);
+}
+
 void draw_px(window_t window, int x, int y, int color) {
   if (window == NULL || (unsigned)x >= window->width ||
       (unsigned)y >= window->height) {

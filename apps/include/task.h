@@ -35,7 +35,20 @@ static_assert(sizeof(task_info_t) == 72, "task snapshot ABI size");
 _Static_assert(sizeof(task_info_t) == 72, "task snapshot ABI size");
 #endif
 
+/* Allocated snapshot in ascending TID order; release it with free(). */
 int task_list(task_info_t **entries, size_t *count);
+static inline const task_info_t *
+task_snapshot_find(const task_info_t *entries, size_t count, unsigned tid) {
+  size_t first = 0, last = count;
+  while (first < last) {
+    size_t middle = first + (last - first) / 2;
+    if (entries[middle].tid < tid)
+      first = middle + 1;
+    else
+      last = middle;
+  }
+  return first < count && entries[first].tid == tid ? &entries[first] : NULL;
+}
 unsigned cpu_count(void);
 unsigned cpu_current(void);
 

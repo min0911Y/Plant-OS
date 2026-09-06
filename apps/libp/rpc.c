@@ -425,15 +425,14 @@ int rpc_notify(rpc_endpoint_t *ep, unsigned opcode, const void *arg,
   out.peer_tid = ep->tid;
   out.peer_generation = ep->generation;
   out.type = RPC_TYPE_NOTIFY;
-  out.id = rpc_next_id++;
+  // Notifications have no reply to correlate and can be sent by a worker
+  // without touching the receiving thread's request state.
+  out.id = 0;
   out.size = sizeof(rpc_wire_t) + arg_len;
   out.flags = IPC_NOWAIT | IPC_DELIVER_NOW;
   out.timeout_ms = 0;
   out.from_filter = IPC_ANY_TID;
   out.data = tx;
-  if (rpc_next_id == RPC_KERNEL_CALL) {
-    rpc_next_id = 1;
-  }
   rc = ipc_send_msg(&out);
   return rc == IPC_OK ? RPC_OK : rpc_map_ipc_error(rc);
 }

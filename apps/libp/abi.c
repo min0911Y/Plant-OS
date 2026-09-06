@@ -98,6 +98,7 @@ static void *_bottom, *_top, *_empty;
 uintptr_t alloc_start_addr;
 static size_t sz;
 static size_t sz_left;
+static uintptr_t dirty_end;
 static volatile unsigned allocator_lock;
 
 static void allocator_lock_acquire(void) {
@@ -117,8 +118,9 @@ static uintptr_t msbrk(size_t size) {
     return (uintptr_t)-1;
   uintptr_t result = alloc_start_addr + sz;
   if (sz_left < size) {
-    size_t request = (size + 0xfff) & ~(size_t)0xfff;
-    if (request < size || sbrk(request) < 0 || sz_left > SIZE_MAX - request)
+    size_t missing = size - sz_left;
+    size_t request = (missing + 0xfff) & ~(size_t)0xfff;
+    if (request < missing || sbrk(request) < 0 || sz_left > SIZE_MAX - request)
       return (uintptr_t)-1;
     sz_left += request;
   }
@@ -132,6 +134,7 @@ void abi_alloc_init() {
   alloc_start_addr = api_malloc(1);
   sz = 0;
   sz_left = api_heapsize();
+  dirty_end = alloc_start_addr;
   _bottom = NULL;
   _top = NULL;
   _empty = NULL;
@@ -203,9 +206,15 @@ static void *malloc_unlocked(size_t size) {
         NextFree(prev) = NextFree(p);
       else
         _empty = NextFree(p);
-      /* clear data */
-      //printf("will memset %p\n",memset);
-      __builtin_memset(p, 0, size);
+      // Fresh heap pages already read as zero. Clear reused storage and the
+      // free-list link, without materializing untouched copy-on-write pages.
+      size_t clear = (uintptr_t)p < dirty_end ? dirty_end - (uintptr_t)p : 0;
+      if (clear < sizeof(void *))
+        clear = sizeof(void *);
+      __builtin_memset(p, 0, clear < size ? clear : size);
+      uintptr_t end = (uintptr_t) new + PTRSIZE;
+      if (end > dirty_end)
+        dirty_end = end;
       return p;
     }
     if (grow(len) == 0)
@@ -264,6 +273,9 @@ static void *realloc_unlocked(void *oldp, size_t size) {
       NextSlot(old) = new;
       free_unlocked(new);
     }
+    uintptr_t end = (uintptr_t) new + PTRSIZE;
+    if (end > dirty_end)
+      dirty_end = end;
     return old;
   }
   if ((new = malloc_unlocked(size)) == NULL) /* it didn't fit */
@@ -287,6 +299,10 @@ static void free_unlocked(void *ptr) {
 
   if (!p)
     return;
+
+  uintptr_t end = (uintptr_t)p + PTRSIZE;
+  if (end > dirty_end)
+    dirty_end = end;
 
   ASSERT((char *)NextSlot(p) > p);
   for (prev = 0, next = _empty; next != 0; prev = next, next = NextFree(next))

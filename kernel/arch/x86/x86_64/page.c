@@ -23,6 +23,7 @@ typedef struct {
 } physical_page_t;
 static physical_page_t *pages;
 static size_t page_count, allocation_hint, user_hint;
+static uint64_t zero_page;
 arch_address_space_t x64_kernel_cr3;
 
 static __attribute__((noreturn)) void page_panic(void) {
@@ -341,6 +342,25 @@ int page_link(uintptr_t address) {
   return 1;
 }
 
+bool arch_user_map_zero(uintptr_t address) {
+  if (address < USER_SPACE_START || address >= USER_HEAP_END ||
+      (address & 4095))
+    return false;
+  uint64_t *entry = page_entry(arch_address_space_current(), address, true);
+  if (!entry || (*entry & PTE_PRESENT))
+    return false;
+  if (!zero_page) {
+    void *page = user_page_allocate();
+    if (!page)
+      return false;
+    zero_page = x64_virtual_physical(page);
+  }
+  // Keep one permanent reference so the shared zero page is never writable.
+  page_retain(zero_page);
+  *entry = zero_page | PTE_PRESENT | PTE_USER | PTE_COW | PTE_NX;
+  return true;
+}
+
 bool x64_user_access(uintptr_t address, size_t size, bool writable) {
   if (address < USER_SPACE_START || address >= USER_SPACE_END ||
       size > USER_SPACE_END - address)
@@ -392,7 +412,7 @@ static bool user_pages_change(uintptr_t address, size_t size,
     uint64_t *entry = page_entry(root, address + offset, false);
     if (!entry ||
         (*entry & (PTE_PRESENT | PTE_USER)) != (PTE_PRESENT | PTE_USER) ||
-        (*entry & (PTE_SHARED | PTE_DEVICE)))
+        (*entry & PTE_DEVICE) || (!unmap && (*entry & PTE_SHARED)))
       return false;
   }
   for (size_t offset = 0; offset < size; offset += PAGE_BYTES) {
@@ -420,25 +440,25 @@ bool arch_user_unmap(uintptr_t address, size_t size) {
   return user_pages_change(address, size, 0, true);
 }
 
-bool page_fault_try_resolve(uintptr_t address, uint32_t error) {
+page_fault_result_t arch_page_fault_resolve(uintptr_t address, uint32_t error) {
   if (error != 3 && error != 7)
-    return false;
+    return PAGE_FAULT_UNHANDLED;
   arch_address_space_t root = arch_address_space_current();
   uint64_t *entry = page_entry(root, address, false);
   if (!entry || !(*entry & PTE_COW))
-    return false;
+    return PAGE_FAULT_UNHANDLED;
   uint64_t physical = *entry & PTE_ADDRESS;
   if (pages[physical / PAGE_BYTES].references > 1) {
     void *copy = user_page_allocate();
     if (!copy)
-      return false;
+      return PAGE_FAULT_NO_MEMORY;
     memcpy(copy, x64_physical_pointer(physical), PAGE_BYTES);
     page_release(physical);
     *entry = (*entry & ~PTE_ADDRESS) | x64_virtual_physical(copy);
   }
   *entry = (*entry & ~PTE_COW) | PTE_WRITE;
   x64_tlb_invalidate(root, address, PAGE_BYTES);
-  return true;
+  return PAGE_FAULT_RESOLVED;
 }
 
 bool arch_address_space_share(uintptr_t source, uintptr_t target, size_t size,

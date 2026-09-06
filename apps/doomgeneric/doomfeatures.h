@@ -33,7 +33,9 @@
 
 // Enables sound output
 
-//#undef FEATURE_SOUND
+#ifdef FEATURE_SOUND
+#error Plant OS Doom audio has no native backend
+#endif
 
 #endif /* #ifndef DOOM_FEATURES_H */
 

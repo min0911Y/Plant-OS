@@ -29,9 +29,6 @@
 #else
 #endif
 
-#ifdef ORIGCODE
-#include "SDL.h"
-#endif
 
 #include "config.h"
 

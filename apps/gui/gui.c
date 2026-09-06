@@ -1,6 +1,8 @@
 #include "gui.h"
 #include "../libutf/include/utf.h"
+#include <ipc.h>
 #include <math.h>
+#include <rpc.h>
 #include <stb_ttf.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,7 +10,6 @@
 #include <sys/stat.h>
 #include <syscall.h>
 #include <time.h>
-#include <rpc.h>
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_NO_THREAD_LOCALS
 #include "stb_image.h"
@@ -39,17 +40,17 @@ static void *load_file(const char *path, uint32_t *size) {
 typedef struct gui_launch {
   struct gui_launch *next;
   int tid;
-  bool finished;
+  unsigned generation;
   unsigned char stack[32 * 1024];
 } gui_launch_t;
 
 static gui_launch_t *launches;
 
 static void terminal_task(gui_launch_t *launch) {
+  __atomic_store_n(&launch->generation, ipc_generation(), __ATOMIC_RELEASE);
   int status = exec("term.bin", "term.bin");
   if (status != 0)
     logkf("GUI: term exited with status %d\n", status);
-  __atomic_store_n(&launch->finished, true, __ATOMIC_RELEASE);
   _exit(status);
 }
 
@@ -341,16 +342,26 @@ void main() {
     if (elapsed >= 1000) {
       clock1 = clock();
       TaskLock();
-      for (gui_launch_t **link = &launches; *link;) {
-        gui_launch_t *launch = *link;
-        if (!__atomic_load_n(&launch->finished, __ATOMIC_ACQUIRE)) {
-          link = &launch->next;
-          continue;
+      task_info_t *tasks = NULL;
+      size_t count = 0;
+      if (task_list(&tasks, &count) == 0) {
+        gui_rpc_reap_windows(tasks, count);
+        for (gui_launch_t **link = &launches; *link;) {
+          gui_launch_t *launch = *link;
+          unsigned generation =
+              __atomic_load_n(&launch->generation, __ATOMIC_ACQUIRE);
+          const task_info_t *task =
+              task_snapshot_find(tasks, count, launch->tid);
+          if (!generation || (task && task->generation == generation)) {
+            link = &launch->next;
+            continue;
+          }
+          // A reused TID belongs to a different thread. Its stack is unrelated.
+          *link = launch->next;
+          free(launch);
         }
-        SubThread(launch->tid);
-        *link = launch->next;
-        free(launch);
       }
+      free(tasks);
       TaskUnlock();
       time_t now = time(NULL);
       if (now == (time_t)-1)

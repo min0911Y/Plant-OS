@@ -5,6 +5,8 @@
 
 typedef enum { EXECUTE_PROGRAM, EXECUTE_COMMAND } execute_mode_t;
 int os_execute(char *filename, char *line, execute_mode_t mode);
+struct mtask;
+bool task_prepare_input(struct mtask *task);
 
 bool arch_executable_validate(const void *image, size_t image_size,
                               uintptr_t *entry_out, uintptr_t *image_end_out);

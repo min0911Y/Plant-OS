@@ -1,5 +1,6 @@
 #include <framebuffer.h>
 #include <gui.h>
+#include <ipc.h>
 #include <os_terminal.h>
 #include <rpc.h>
 #include <runtime_args.h>
@@ -34,6 +35,7 @@ static struct {
   window_t window;
   void *emulator;
   tty_t tty;
+  rpc_endpoint_t endpoint;
   tty_rpc_state_t state;
   int width, height, columns, rows;
   stream_state_t stream;
@@ -210,6 +212,7 @@ static void shell_task(uintptr_t unused) {
     status = exec(term.program, term.command);
   term.shell_status = status;
   __atomic_store_n(&term.shell_finished, true, __ATOMIC_RELEASE);
+  rpc_notify(&term.endpoint, GUI_RPC_EVENT_READY, NULL, 0);
   _exit(status);
 }
 
@@ -241,7 +244,7 @@ static int terminal_run(void) {
                              (term.height - BORDER)) != RPC_OK)
         return 1;
     }
-    int status = rpc_serve_once(FRAME_MS);
+    int status = rpc_serve_once(term.dirty ? FRAME_MS : 1000);
     if (status != RPC_OK && status != RPC_ERR_TIMEOUT)
       return 1;
   }
@@ -256,6 +259,7 @@ int main(int argc, char **argv) {
                                  &term.command, &command_length) != 0)
     return 1;
   term.program = command[0];
+  term.endpoint = (rpc_endpoint_t){NowTaskID(), ipc_generation()};
   term.state = (tty_rpc_state_t){.color = 7, .cursor_visible = 1};
   int status = 1, shell = -1;
   void *stack = NULL;
@@ -302,6 +306,8 @@ int main(int argc, char **argv) {
   term.rows = rows;
   terminal_write("\033[2J\033[H", 7);
   if (rpc_register_handler(TTY_RPC_DISPATCH, terminal_dispatch) != RPC_OK)
+    goto done;
+  if (window_set_event_notifications(term.window, true) != RPC_OK)
     goto done;
   term.tty = tty_alloc(NowTaskID(), TTY_RPC_DISPATCH, term.columns, term.rows);
   stack = malloc(32 * 1024);

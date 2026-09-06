@@ -43,7 +43,7 @@ make -C kernel ARCH=x86_64 livecd
 - 局部构建可用 `make -C apps/gui ARCH=x86_64` 或 `make -C kernel/dos/task ARCH=i386`；首次先完成对应架构构建，交付前按改动范围运行上层链接与打包。`make -C kernel full` 不能替代 i386 干净构建顺序。
 - 内核新增源文件须接入对应构建图：i386 同步子目录对象列表与 `OBJS_BOOTPACK`，x86_64 检查 `kernel/arch/x86/x86_64/build.mk`。保留 `.d` 依赖和配置指纹，保证头文件、编译选项变化后自动重编；公共声明放入职责明确的头文件，避免继续扩大 `dos.h`。
 - 应用统一使用 `apps/build.mk`、`apps/native-apps.mk` 和 `apps/dynamic.mk`；新增应用通过 `application` 宏注册，子目录 Makefile 只设置 `NATIVE_TARGETS` 并包含 `../native.mk`。两种架构共用源码清单，第三方对象不写回源目录。
-- LiveCD 按构建图生成的 `applications.list` 收录应用，不能扫描残留 `.bin` 或手写第二份应用清单；磁盘镜像仍由 `kernel/Makefile` 的显式 `mcopy`/`mmd` 控制。改名或新增资源时同步打包规则。
+- LiveCD 按构建图生成的 `applications.list` 收录应用，不能扫描残留 `.bin` 或手写第二份应用清单；i386 TCC SDK 只按构建图生成的 `sdk-libraries.list` 收录静态自举库，不能扫描残留归档或混入应用私有 PIC 库；磁盘镜像仍由 `kernel/Makefile` 的显式 `mcopy`/`mmd` 控制。改名或新增资源时同步打包规则。
 - i386 LiveCD 保留 FAT/PFS 引导模板和 `DOSLDR.bin` 安装资源。`setup.mst` 从已填充镜像生成，使用 `mshortname` 得到真实 FAT 别名，覆盖全部目录和文件，`DOSLDR.bin` 为首个文件；安装器继续支持 FAT/PFS。布局见 [LiveCD](doc/livecd.md)，应用清单以当前脚本为准。
 - 日常交付保持默认 `USB_DEBUG=0`，诊断时显式启用 `USB_DEBUG=1`。`KASAN=1`、`PERF=1` 仅支持 i386；`BENCH=1` 才启用启动计时基准，`MEMTEST=0` 必须同时指定 `MEMSIZE_MB`。这些选项及 `VT100` 必须纳入构建配置指纹。
 
@@ -57,14 +57,14 @@ make -C kernel ARCH=x86_64 livecd
 - 汇编保存顺序与 C 结构是内部 ABI；修改时检查任务初始栈、切换、fork、信号和返回路径。返回用户态前校验完整 frame；除合法 COW 和 lazy-FPU 恢复外，普通用户异常终止任务，内核异常及 NMI/双重故障/机器检查停机。
 - 正式应用使用原生 `ET_DYN` PIE、`/lib/ld.so` 和 `libp.so`，C++ 另用 `libcpp.so`；统一经 `apps/libp/entry.c` 初始化后调用 `main`。静态自举解释器与 i386 TCC SDK 单独构建，不混用 PIC/非 PIC 归档。
 - 动态链接只在 `apps/ldso/` 中实现。内核经 `loader_start_t` 交付原 ELF fd 和路径，从系统启动盘加载解释器；ELF 与启动 ABI 由 `apps/include/elf.h`、`loader.h` 单源定义。库搜索、重定位、构造/析构及 VM 权限规则见 [动态链接](doc/dynamic-linking.md)。
-- ELF/VM 映射须检查大小、溢出、地址冲突和权限，失败回滚，拒绝 W+X；i386 保持 CR0.WP，区分 COW 与真正只读页。用户页表先分离内核共享映射，物理页引用只经正式 page API 维护；线程退出不能回收地址空间仍持有的页。
+- ELF/VM 映射须检查大小、溢出、地址冲突和权限，失败回滚，拒绝 W+X；i386 保持 CR0.WP，区分 COW 与真正只读页。用户初始栈和堆用共享零页按需分配，写入时走 COW；COW 缺页分配失败终止所属任务。用户页表先分离内核共享映射，物理页引用只经正式 page API 维护；线程退出不能回收地址空间仍持有的页。
 - 系统盘必须含 `init.bin`、`psh.bin`、`sys.cfg`、`lib/ld.so` 和 `lib/libp.so`，探测失败必须 panic。启动扇区、加载地址、ELF 入口或磁盘布局变化须检查 loader/kernel 两侧并完整构建、冷启动。
 
 ## 并发与资源生命周期
 
 - 普通临界区成对使用 `irq_save()`/`irq_restore()`，保留调用者中断状态。等待路径在同一临界区检查条件、发布等待并处理 ready 竞态；调度启动后用 waiter/timer 阻塞，不持有 kernel lock 忙等。
 - IRQ、异常和 syscall 入口按现有约定进入/离开 kernel lock；可能调度后重新读取当前 CPU。IRQ 回调不分配、不阻塞、不自行 EOI 或切换任务，由统一分派器完成 EOI 和调度；ISA 使用独占注册，PCI INTx 使用共享注册。
-- 任务资源全部构造完成后调用 `task_publish`，失败用 `task_abort_creation`；任务退出取消 waiter/timer 并释放所属资源。任务注册表通过迭代器访问，TID/页引用不得收窄为 8 位，异步引用用 TID/generation 识别。
+- 任务资源全部构造完成后调用 `task_publish`，失败用 `task_abort_creation`；启动参数及输入队列归新任务所有；任务退出取消 waiter/timer 并释放所属资源，内核栈只在切离后随任务槽回收。任务注册表通过迭代器访问，TID/页引用不得收窄为 8 位，异步引用用 TID/generation 识别。
 - 保持每 CPU 的 current、idle 和运行队列，只有 BSP 推进全局时钟及 timeout。调度器不可自切换；BSP 在资源就绪且释放最外层 kernel lock 后唤醒 AP，AP 等待 release 时休眠。
 - 实现同步跨 CPU TLB shootdown 前，同一地址空间的整个任务组固定在同一 CPU；跨进程共享映射只修改未在 CPU 上运行的目标。x86_64 页表修改统一经 TLB 失效接口处理当前和缓存的 PCID，不能依赖地址空间切换刷新；共享内核映射须覆盖所有 PCID。i386 BIOS/VBE 仅在 BSP 执行。
 - DMA 使用正式 page/DMA/MMIO API 和驱动持有的缓冲，不指向等待调用者的栈或用户地址。硬件等待使用单调 deadline；失败不自动重放写入。停止设备并确认不再 DMA 后才释放资源，无法确认时禁用 bus master 并隔离相关页。
@@ -78,8 +78,8 @@ make -C kernel ARCH=x86_64 livecd
 - `getch()` 的字符、Ctrl 控制字符与导航键统一由内核转换，键值单源定义在 `apps/include/key_input.h`；Escape 为 ASCII 27。`editor.bin` 使用 `apps/third_party/pl_editor` 的 C 核心和 `apps/editor/` 平台层，经 VFS 读写文件、经 ANSI 终端显示，不引入私有键盘解码器或终端解析器。使用与回归见 [编辑器](doc/editor.md)。
 - 键盘只投递给有效输入 owner 或前台 TTY；TTY 所有权决定前台，阻塞使用 `WAIT_REASON_KEYBOARD`/`input_wait()`。同步执行在发布子进程时原子交接 TTY，仅交接调用者自己的鼠标所有权；返回时不能覆盖其他 owner。
 - `AddThread(name, entry, stack_top, argument)` 显式传四个参数，入口由架构建立对齐调用帧；调用者不手写栈槽。活动 TTY 与 `tty_session` 分开维护，销毁 TTY 前迁移会话并清理相关任务、FIFO、栈与窗口。
-- GUI 是单例 `gui` RPC 服务，须在切换显示和获取输入前注册。客户端只持有不透明窗口句柄及经过 owner/generation 校验的共享区域；焦点显式维护。终端由独立的 C 应用 `term.bin` 提供，直接链接 os-terminal 的对应架构静态库，默认通过 fartty 启动 `psh.bin`；GUI 不内置终端。fartty 原样转发 ANSI 字节，绕过内核旧 VT100 解析器；term 关闭 auto-flush，合并输出后显式刷新并同步提交窗口，有按键时调用 `tty_notify_input`。`fartty` 通过同一 IPC/RPC 协议调用所属服务，使用不透明 TTY 句柄及 TID/generation 校验；内核不得切换到用户地址空间执行回调，RPC 等待不得消费应用消息。依赖与验证见 [终端](doc/terminal.md)。
-- SDL 唯一活动实现为 `apps/sdl2`。GUI 合成读取已提交画面，`window_present` 应答后客户端才复用绘图缓冲，`window_refresh` 保留异步 damage 合并。显示布局以 `framebuffer_info()` 的实际尺寸、pitch 和颜色位序为准；framebuffer 别名保持相同缓存属性。详情见 [显示与 SDL](doc/multiarch.md)。
+- GUI 是单例 `gui` RPC 服务，须在切换显示和获取输入前注册。客户端只持有不透明窗口句柄及经过 owner/generation 校验的共享区域；焦点显式维护。终端由独立的 C 应用 `term.bin` 提供，直接链接 os-terminal 的对应架构静态库，默认通过 fartty 启动 `psh.bin`；GUI 不内置终端；图层动态增长，像素归属使用稳定指针。窗口绘图与提交缓冲使用独立 VM 映射，关闭或 owner 退出后解除映射。终端订阅窗口事件通知并在空闲时阻塞。fartty 原样转发 ANSI 字节，绕过内核旧 VT100 解析器；term 关闭 auto-flush，合并输出后显式刷新并同步提交窗口，有按键时调用 `tty_notify_input`。`fartty` 通过同一 IPC/RPC 协议调用所属服务，使用不透明 TTY 句柄及 TID/generation 校验；内核不得切换到用户地址空间执行回调，RPC 等待不得消费应用消息。依赖与验证见 [终端](doc/terminal.md)。
+- SDL 唯一实现为 `apps/sdl3`，应用直接使用 SDL3、SDL3_image 与 SDL3_ttf API，不引入 SDL2 兼容层。GUI 合成读取已提交画面，`window_present` 应答后客户端才复用绘图缓冲，`window_refresh` 保留异步 damage 合并。显示布局以 `framebuffer_info()` 的实际尺寸、pitch 和颜色位序为准；framebuffer 别名保持相同缓存属性。详情见 [显示与 SDL](doc/multiarch.md)。
 
 ### 文件系统与设备
 
@@ -116,8 +116,8 @@ python3 scripts/test-x86_64.py --arch i386 --dynamic --memory 512
 | 改动范围 | 回归入口或脚本选项 |
 | --- | --- |
 | IPC/RPC、磁盘、网络 | `rpctest.bin`、`dktest.bin`、`nettest.bin` |
-| 任务、异常、浮点 | `guitest.bin stress`/`capacity`、`exc_test.bin`、i386 `fputest.bin`、x86_64 `simdtest.bin` |
-| GUI、输入、SDL、工具 | `--mouse`、`--console`、`--editor`、`--sdl`、`--desktop-app`（`lite` 或 `nk`）、`--tools` |
+| 任务、异常、浮点 | `guitest.bin stress`/`capacity`、`--memory-pressure`、`exc_test.bin`、i386 `fputest.bin`、x86_64 `simdtest.bin` |
+| GUI、输入、SDL、工具 | `--mouse`、`--console`、`--editor`、`--sdl`、`--terminal-load COUNT`、`--desktop-app`（`lite` 或 `nk`）、`--tools` |
 | 动态链接与全部应用装载 | `--dynamic`、`--all-apps`，见 [动态链接验证](doc/dynamic-linking.md#验证) |
 | USB、PCI、AHCI | `--usb`、`--usb-hubs`、`--usb-irq`、`--usb-root-bus`、`--ahci --machine q35`；故障与模式组合见对应专题文档 |
 | APIC、SIMD 与 TLB 后端 | `--apic`、`--cpu`、`--tlb`，见 [多架构说明](doc/multiarch.md) |

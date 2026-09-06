@@ -24,8 +24,7 @@ Limine 菜单的默认项直接启动 `kernel.bin + initramfs`。第二项会 ch
 用于启动仍由 `Mimg` 生成的 `boot.img` 和现有 DOSLDR 链；LiveCD 默认启动路径不经过
 DOSLDR。原有 `make -C kernel img_run` 也保持不变。
 
-initramfs 会动态收录 `apps/out/*.bin` 中的全部应用，新产物无需再逐项加入内核
-Makefile。除 `doom.bin` 与配套的 `doom1.wad` 放在 `/games` 外，应用默认位于根目录。
+initramfs 按对应架构构建图生成的 `applications.list` 收录应用；应用注册后自动进入镜像。除 `doom.bin` 与配套的 `doom1.wad` 放在 `/games` 外，应用默认位于根目录。
 Lite 的完整 `apps/lite-1.11/data` 运行时资源复制到 `/data`，包括 core、字体、插件和
 用户配置。
 `boot.bin`、`boot32.bin`、`boot_pfs.bin` 与 `DOSLDR.bin` 保留在 initramfs 中，作为
@@ -34,7 +33,8 @@ initramfs，不执行其中的 DOSLDR。
 TCC 开发文件沿用 `tcc.img` 的绝对路径布局：完整的 `apps/include` 位于
 `/tcc/include`，静态库位于 `/tcc/lib`，`libtcc1.a` 位于 `/tcc/inst`，根目录保留
 供 `tccinst.bin` 使用的 `crti.c`；TCC 构建生成的 `crti.o` 位于 `/tcc/crt`，因此
-LiveCD 上的编译器可以直接链接应用。
+LiveCD 上的编译器可以直接链接应用。SDK 归档由 `apps/build.mk` 的 `sdk` 目标生成，
+打包脚本按 `sdk-libraries.list` 复制到镜像。
 
 LiveCD 构建在 FAT initramfs 完成后自动生成 `/setup.mst`。清单覆盖 initramfs 中的全部
 目录和文件，`DOSLDR.bin` 固定为第一个安装文件，并同时记录源盘的实际 FAT 短别名、

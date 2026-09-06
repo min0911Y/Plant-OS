@@ -791,6 +791,34 @@ int page_link(uintptr_t addr) {
   return page_link_pde(addr, current_task()->address_space);
 }
 
+bool arch_user_map_zero(uintptr_t address) {
+  static uintptr_t zero_page;
+  if (address < USER_SPACE_START || address >= USER_HEAP_END ||
+      (address & (PAGE_SIZE_BYTES - 1)))
+    return false;
+  bool result = false;
+  page_table_access_t access = page_table_access_begin();
+  uint32_t *directory = page_dir_entry(access.active_address_space, address);
+  if (!page_prepare_user_table(directory))
+    goto done;
+  uint32_t *entry = page_table_entry_from_dir(*directory, address);
+  if (*entry & PG_P)
+    goto done;
+  if (!zero_page) {
+    void *page = page_alloc_single_high();
+    if (!page)
+      goto done;
+    memset(page, 0, PAGE_SIZE_BYTES);
+    zero_page = (uintptr_t)page;
+  }
+  page_ref_inc_idx(IDX(zero_page));
+  *entry = page_entry_make(zero_page, PAGE_USER_PRESENT_FLAGS | PG_COW);
+  result = true;
+done:
+  page_table_access_end(&access);
+  return result;
+}
+
 unsigned arch_user_page_flags(uintptr_t address) {
   page_table_access_t access = page_table_access_begin();
   uint32_t directory = *page_dir_entry(access.active_address_space, address);
@@ -836,7 +864,7 @@ static bool user_pages_change(uintptr_t address, size_t size,
       goto done;
     uint32_t entry = *page_table_entry_from_dir(*directory, address + offset);
     if (!page_entry_has_all(entry, PAGE_USER_PRESENT_FLAGS) ||
-        (entry & (PG_SHARED | PG_DEVICE)) ||
+        (entry & PG_DEVICE) || (!unmap && (entry & PG_SHARED)) ||
         !page_prepare_user_table(directory))
       goto done;
   }
@@ -1036,24 +1064,24 @@ void change_page_task_id(uint32_t task_id, void *p, unsigned int size) {
     pages[idx].task_id = task_id;
   }
 }
-bool page_fault_try_resolve(uintptr_t address, uint32_t error) {
+page_fault_result_t arch_page_fault_resolve(uintptr_t address, uint32_t error) {
   if ((error != 0x3u && error != 0x7u) ||
       address < USER_SPACE_START || address > USER_HEAP_END) {
-    return false;
+    return PAGE_FAULT_UNHANDLED;
   }
 
   arch_address_space_t active_address_space = arch_address_space_current();
   if (active_address_space < PAGE_SIZE_BYTES ||
       (active_address_space & (PAGE_SIZE_BYTES - 1)) != 0 ||
       page_refcount_idx(IDX(active_address_space)) == 0) {
-    return false;
+    return PAGE_FAULT_UNHANDLED;
   }
   unsigned owner_tid = task_address_space_owner(active_address_space);
   if (owner_tid == (uint32_t)-1) {
-    return false;
+    return PAGE_FAULT_UNHANDLED;
   }
 
-  bool resolved = false;
+  page_fault_result_t resolved = PAGE_FAULT_UNHANDLED;
   void *new_table = NULL;
   void *new_page = NULL;
   arch_address_space_activate(arch_address_space_kernel());
@@ -1079,7 +1107,7 @@ bool page_fault_try_resolve(uintptr_t address, uint32_t error) {
     /* Another CPU may have completed COW before this CPU consumed its stale
      * read-only TLB entry.  Reloading CR3 below is sufficient once the current
      * page tables already describe a writable mapping. */
-    resolved = true;
+    resolved = PAGE_FAULT_RESOLVED;
     goto restore;
   }
   if (!(old_pte_value & PG_COW))
@@ -1092,12 +1120,14 @@ bool page_fault_try_resolve(uintptr_t address, uint32_t error) {
   if (copy_table) {
     new_table = page_alloc_single_high();
     if (new_table == NULL) {
+      resolved = PAGE_FAULT_NO_MEMORY;
       goto restore;
     }
   }
   if (copy_page) {
     new_page = page_alloc_single_high();
     if (new_page == NULL) {
+      resolved = PAGE_FAULT_NO_MEMORY;
       if (new_table != NULL) {
         page_free_one(new_table);
       }
@@ -1133,7 +1163,7 @@ bool page_fault_try_resolve(uintptr_t address, uint32_t error) {
   if (new_table != NULL) {
     page_ref_dec_entry(old_pde);
   }
-  resolved = true;
+  resolved = PAGE_FAULT_RESOLVED;
 
 restore:
   arch_address_space_activate(active_address_space);

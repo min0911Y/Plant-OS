@@ -177,7 +177,8 @@ ASTATIC void aFree(void *p, AInt sz)
 	#define AKEYBUFSIZ		1024
 #endif
 
-#include "sdl2.c"
+#include "sdl3.c"
+
 #include "graphics.c"
 
 int main(int argc, char **argv)
@@ -187,8 +188,8 @@ int main(int argc, char **argv)
 	#if (!defined(ANOUSE_FASTMALLOC))
 		aMalloc_indexTableInit();
 	#endif
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) < 0)
-		aErrExit("SDL2 init error");
-	aMain();
-	return 0;
+                if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS))
+                  aErrExit("SDL3 init error");
+                aMain();
+                return 0;
 }

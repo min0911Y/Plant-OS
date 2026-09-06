@@ -116,7 +116,10 @@ $(LIBS)/libtcc1.a: $(BUILD)/sdk/libtcc1.o
 $(BUILD)/crti.obj: tcc/tcc/crti.c build.mk
 	$(CC) $(SDK_CFLAGS) -c $< -o $@
 .PHONY: sdk libtcc1
-sdk: $(LIBS)/libp.a $(LIBS)/libcpps.a $(LIBS)/libabi.a $(LIBS)/libtcc1.a $(BUILD)/crti.obj
+SDK_LIBRARIES := $(addprefix $(LIBS)/,libp.a libcpps.a libabi.a libtcc1.a)
+sdk: $(SDK_LIBRARIES) $(BUILD)/crti.obj $(BUILD)/sdk-libraries.list
+$(BUILD)/sdk-libraries.list: $(SDK_LIBRARIES) build.mk
+	printf '%s\n' $(notdir $(SDK_LIBRARIES)) > $@
 libtcc1: $(LIBS)/libtcc1.a
 default all: sdk
 UNSUPPORTED_PROGRAMS := archtest simdtest cpptest

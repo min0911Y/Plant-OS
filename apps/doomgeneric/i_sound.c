@@ -18,17 +18,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#ifdef FEATURE_SOUND
-#include <SDL_mixer.h>
-#endif
 
 #include "config.h"
 #include "doomfeatures.h"
 #include "doomtype.h"
 
-#ifdef ORIGCODE
-#include "gusconf.h"
-#endif
 #include "i_sound.h"
 #include "i_video.h"
 #include "m_argv.h"
@@ -63,10 +57,6 @@ int snd_sfxdevice = SNDDEVICE_SB;
 // Sound modules
 
 extern void I_InitTimidityConfig(void);
-#ifdef FEATURE_SOUND
-extern sound_module_t* DG_sound_module;
-extern music_module_t* DG_music_module;
-#endif
 extern sound_module_t sound_pcsound_module;
 extern music_module_t music_opl_module;
 
@@ -91,9 +81,6 @@ static int snd_mport = 0;
 
 static sound_module_t *sound_modules[] = 
 {
-    #ifdef FEATURE_SOUND
-    &DG_sound_module,
-    #endif
     NULL,
 };
 
@@ -148,9 +135,6 @@ static void InitSfxModule(boolean use_sfx_prefix)
 
 static void InitMusicModule(void)
 {
-#ifdef FEATURE_SOUND
-    music_module = &DG_music_module;
-#endif /* FEATURE_SOUND */
 }
 
 //
@@ -426,10 +410,6 @@ void I_BindSoundVariables(void)
     M_BindVariable("snd_samplerate",    &snd_samplerate);
     M_BindVariable("snd_cachesize",     &snd_cachesize);
 
-#ifdef FEATURE_SOUND
-    M_BindVariable("use_libsamplerate",   &use_libsamplerate);
-    M_BindVariable("libsamplerate_scale", &libsamplerate_scale);
-#endif
 
     // Before SDL_mixer version 1.2.11, MIDI music caused the game
     // to crash when it looped.  If this is an old SDL_mixer version,

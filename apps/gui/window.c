@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <syscall.h>
+#include <vm.h>
 
 void putfonts_asc(vram_t *vram, int xsize, int x, int y, color_t c,
                   unsigned char *s);
@@ -209,7 +210,9 @@ int window_set_title(window_t *window, const char *title) {
 
 window_t *create_window(desktop_t *desktop, const char *title, int xsize,
                         int ysize, unsigned tid) {
-  if (desktop == NULL || title == NULL || xsize <= 0 || ysize <= 0) {
+  if (desktop == NULL || title == NULL || xsize < 40 || ysize < 28 ||
+      (size_t)xsize >
+          (SIZE_MAX - (VM_PAGE_SIZE - 1)) / sizeof(vram_t) / (size_t)ysize) {
     return NULL;
   }
   window_t *res = (window_t *)malloc(sizeof(window_t));
@@ -218,7 +221,9 @@ window_t *create_window(desktop_t *desktop, const char *title, int xsize,
   }
   memset(res, 0, sizeof(*res));
   res->desktop = desktop;
-  res->vram = malloc((size_t)xsize * ysize * sizeof(vram_t));
+  size_t bytes = ((size_t)xsize * ysize * sizeof(vram_t) + VM_PAGE_SIZE - 1) &
+                 ~(size_t)(VM_PAGE_SIZE - 1);
+  res->vram = vm_map(NULL, bytes);
   if (res->vram == NULL) {
     free(res);
     return NULL;
@@ -227,7 +232,7 @@ window_t *create_window(desktop_t *desktop, const char *title, int xsize,
   res->ysize = ysize;
   res->title = malloc(strlen(title) + 1);
   if (res->title == NULL) {
-    free(res->vram);
+    vm_unmap(res->vram, bytes);
     free(res);
     return NULL;
   }
@@ -235,7 +240,7 @@ window_t *create_window(desktop_t *desktop, const char *title, int xsize,
   res->sht = sheet_alloc(desktop->shtctl);
   if (res->sht == NULL) {
     free(res->title);
-    free(res->vram);
+    vm_unmap(res->vram, bytes);
     free(res);
     return NULL;
   }
@@ -258,7 +263,7 @@ window_t *create_window(desktop_t *desktop, const char *title, int xsize,
     res->sht->wnd = NULL;
     sheet_free(res->sht);
     free(res->title);
-    free(res->vram);
+    vm_unmap(res->vram, bytes);
     free(res);
     return NULL;
   }
@@ -304,7 +309,10 @@ void destroy_window(window_t *window) {
   if (focused) {
     desktop_focus_top_window(window->desktop);
   }
-  free(window->vram);
+  size_t bytes = ((size_t)window->xsize * window->ysize * sizeof(vram_t) +
+                  VM_PAGE_SIZE - 1) &
+                 ~(size_t)(VM_PAGE_SIZE - 1);
+  vm_unmap(window->vram, bytes);
   free(window->title);
   free(window);
 }

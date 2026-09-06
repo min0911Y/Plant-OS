@@ -96,13 +96,25 @@ flanterm 自己处理 ANSI/VT100，默认 TTY 不再经过内核旧解析器。G
 
 `rpctest.bin` 的 `tty_rpc` 项验证批量文本、原始及分段 ANSI、光标/清屏、已满的应用队列、输入通知竞态、句柄权限、超时、迟到应答及服务退出后的会话回收。`--console` 验证独立 term 的输出协议，并通过实际键盘事件及连续像素比较验证 psh 提示符、回显、退格、滚屏及关闭后重新启动终端。
 
-## SDL2 与桌面程序
+## SDL3 与桌面程序
 
-两种架构使用同一份 `apps/sdl2` 后端，lite、Doom、invader 不再链接 `sdl2_old`。原生构建同时提供 SDL2、SDL2_ttf、SDL2_image、FreeType、zlib、libpng 和 JPEG 库。
+两种架构使用同一份 `apps/sdl3` 的 `plos` 后端，所有 SDL 应用直接使用 SDL3 API。原生构建提供 SDL3、SDL3_ttf、SDL3_image、FreeType、zlib、libpng 和 JPEG 库；应用私有归档为 PIC，随应用静态链接，运行库仍由 `/lib/ld.so` 装载。旧 SDL 源码与重复头文件已删除。
+
+| 路径 | 上游版本 | 发布源码 SHA-256 |
+| --- | --- | --- |
+| `apps/sdl3` | [SDL 3.4.16](https://github.com/libsdl-org/SDL/releases/tag/release-3.4.16) | `7322236cd12090c3eb40b9728be4d49c76f66ad17d04369584d4ecad5cf77c68` |
+| `apps/SDL3_image` | [SDL_image 3.4.6](https://github.com/libsdl-org/SDL_image/releases/tag/release-3.4.6) | `d2e4637ae700f72e5196b8fbd749850ed2e5e1e09c5a5be8d06ff55aaccf3b01` |
+| `apps/SDL3_ttf` | [SDL_ttf 3.2.2](https://github.com/libsdl-org/SDL_ttf/releases/tag/release-3.2.2) | `63547d58d0185c833213885b635a2c0548201cc8f301e6587c0be1a67e1e045d` |
+
+仓库保留上游公共头文件、可移植源码、软件渲染器及选用后端，许可证位于各目录的 `LICENSE.txt`。SDL 源码清单维护在 `apps/sdl3/sources.mk`；Plant OS 配置位于 `config/SDL_build_config.h`，平台扩展位于 `src/{video,timer,time}/plos/`。平台识别屏蔽宿主的 Linux/Unix 宏，i386 禁用 SIMD，x86_64 使用 SSE2；内存、数学和标准文件接口使用 libp；配置中的 `HAVE_LIBC=1` 表示标准库符号由 libp 唯一提供。`SDL_iostream.c` 的描述符和同步调用接入项目 VFS 接口，不能使用宿主 `unistd.h` 或 POSIX `clock_gettime` ABI。
 
 在系统中先运行 `gui.bin`，再从 GUI 终端运行 `lite.bin` 或 `nk.bin`。Doom 与 WAD 位于 `/games`，可在该目录运行 `doom.bin`。SDL 软件 surface 直接写 GUI 提供的共享绘图缓冲，pitch 包含窗口边框；GUI 保留独立的已提交画面用于合成和遮挡恢复。Present 只按行复制 damage，并等刷新 RPC 应答后才复用共享绘图缓冲，避免 nk 清屏或绘制中的半成品帧被显示。SDL 不再额外持有第三份像素缓冲。普通 `window_refresh` 仍可合并异步更新；需要完整帧边界的程序使用 `window_present`。显示尺寸通过 `framebuffer_info()` 查询，SDL 不请求 BIOS 模式切换。每个窗口独立处理键盘前缀和鼠标状态，支持文字、方向键、滚轮、标题更新与关闭。
 
-当前支持软件渲染、字体、图片、键鼠及纳秒性能计时；窗口尺寸固定。OpenGL/Vulkan、音频设备、SDL 线程和 `SDL_AddTimer` 的异步回调尚未实现，不能把 `SDL_INIT_TIMER` 当成受支持的线程服务。`SDL_GetTicks64`、`SDL_GetPerformanceCounter` 和 `SDL_Delay` 可独立使用。
+当前支持软件渲染、字体、图片、键鼠、文件/内存 IOStream 及纳秒性能计时；窗口尺寸固定。OpenGL/Vulkan、音频设备、SDL 线程和 `SDL_AddTimer` 的异步回调尚未实现，相关创建或初始化返回失败。SDL3 不再使用 `SDL_INIT_TIMER`；`SDL_GetTicks` 返回 64 位毫秒，`SDL_GetTicksNS` 和性能计数器返回纳秒。延时调用转换为内核阻塞 sleep。
+
+SDL3 操作普遍以 `true` 表示成功，窗口事件直接使用 `SDL_EVENT_WINDOW_*`，鼠标坐标为浮点数。文本输入按窗口显式开启，字体接口统一接收 UTF-8；i386 非 ASCII 字面量须显式保留 UTF-8 字节。SDL3 的文本/拖放事件字符串由 SDL 管理，不能保留到下一次事件泵或自行释放。nk 顶点颜色使用浮点 RGBA。初始窗口坐标通过 `SDL_CreateWindowWithProperties` 设置，不依赖创建后移动。
+
+`sdltest.bin` 验证 SDL3 版本、软件渲染、PNG 内存流往返、VFS 文件流、字体、计时、真实鼠标/方向键与 Shift 文本输入，以及未提交画面隔离、局部 damage 和遮挡恢复。
 
 lite 的渲染器按 surface pitch 寻址，命令缓存按结构对齐；文件查询和路径接口使用真实 VFS 结果。nk 根据实际屏幕尺寸限制窗口，字体来自 `/data/fonts/mono.ttf`。两者均可通过 GUI 窗口关闭按钮退出。
 
@@ -135,7 +147,7 @@ python3 scripts/test-x86_64.py --arch i386 --mouse --memory 512
 # C4 的原生指针/虚拟机、NASM ELF 输出与 JavaScript 对象
 python3 scripts/test-x86_64.py --tools --firmware uefi
 
-# SDL2 帧提交隔离、局部 damage、遮挡恢复、字体和键鼠输入
+# SDL3 帧提交隔离、局部 damage、遮挡恢复、图片/文件流、字体和键鼠输入
 python3 scripts/test-x86_64.py --sdl --firmware uefi
 python3 scripts/test-x86_64.py --arch i386 --sdl --memory 512
 

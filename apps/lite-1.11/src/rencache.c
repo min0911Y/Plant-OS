@@ -1,5 +1,7 @@
-#include <stdio.h>
 #include "rencache.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 /* a cache over the software renderer -- all drawing operations are stored as
 ** commands when issued. At the end of the frame we write the commands to a grid
