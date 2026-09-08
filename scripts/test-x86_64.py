@@ -509,6 +509,10 @@ def main():
     gui_mode.add_argument("--desktop-app", choices=("lite", "nk"), help="capture and close an SDL desktop application")
     gui_mode.add_argument("--tools", action="store_true", help="run C4 pointer/VM, NASM object and JavaScript regressions")
     gui_mode.add_argument("--dynamic", action="store_true", help="run user ELF interpreter, shared libraries and page protection regressions")
+    gui_mode.add_argument("--futex", action="store_true", help="validate native futex wait/wake, cancellation and concurrent allocation")
+    gui_mode.add_argument("--threads", action="store_true", help="validate pthreads, ELF TLS, synchronization and thread resource release")
+    gui_mode.add_argument("--llvm", action="store_true", help="validate native LLVM MCJIT, relocations, W^X and concurrent compilation")
+    gui_mode.add_argument("--lavapipe", action="store_true", help="validate native Vulkan compute, SDL triangle pixels and window presentation")
     gui_mode.add_argument("--all-apps", action="store_true", help="validate and relocate every built application, then run dynamic regressions")
     gui_mode.add_argument("--usb", action="store_true", help="validate xHCI enumeration, USB speeds, hotplug and ring wrap")
     parser.add_argument("--out", type=Path, default=Path("/tmp/plant-x86_64-smoke"))
@@ -533,15 +537,15 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     native = args.arch == "x86_64"
     kernel_options = [f"USB_DEBUG={int(args.usb_debug)}"]
-    commands = (["archtest.bin", "cpptest.bin", "simdtest.bin"] if native else ["fputest.bin"]) + [
-        "timetest.bin", "exc_test.bin", "rpctest.bin", "dktest.bin", "dyntest.bin", "nettest.bin loopback",
+    commands = (["archtest.bin", "cpptest.bin", "simdtest.bin", "llvmtest.bin"] if native else ["fputest.bin"]) + [
+        "timetest.bin", "thrdtest.bin", "libctest.bin", "cxxcheck.bin", "futest.bin", "exc_test.bin", "rpctest.bin", "dktest.bin", "dyntest.bin", "nettest.bin loopback",
         "guitest.bin capacity" if args.capacity else "guitest.bin mouse" if args.mouse else "guitest.bin",
         "psh.bin -c insmod hello.mod", "psh.bin -c rmmod hello_mod",
         "psh.bin -c insmod hello.mod", "psh.bin -c rmmod hello_mod",
         'lua.bin -e assert(math.sqrt(81)==9);assert(math.abs(math.sin(0.5)-0.479425538604203)<1e-12)',
     ]
-    expected = (["ARCHTEST PASS", "CPPTEST PASS", "SIMDTEST PASS"] if native else ["FPUTEST PASS"]) + [
-                "TIMETEST PASS", "EXCEPTION_TEST done checks=5 fails=0", "GUITEST THREAD PASS", "GMOUSE ID =",
+    expected = (["ARCHTEST PASS", "CPPTEST PASS", "SIMDTEST PASS", "LLVMTEST PASS"] if native else ["FPUTEST PASS"]) + [
+                "TIMETEST PASS", "THRDTEST PASS", "LIBCTEST PASS", "CXXCHECK PASS", "FUTEXTEST PASS", "EXCEPTION_TEST done checks=5 fails=0", "GUITEST THREAD PASS", "GMOUSE ID =",
                 "RPCTEST done checks=23 fails=0", "DKTEST PASS", "DYNTEST PASS", "DYNTEST TLB PASS",
                 "GUISTRESS PASS" if args.capacity else "GUITEST PASS"]
     if args.mouse:
@@ -575,6 +579,22 @@ def main():
                  f"ARCH={args.arch}", "list-apps"], text=True).splitlines()
             commands = ["dyntest.bin --all"]
             expected.append(f"DYNAPPS PASS count={len(programs)}")
+    if args.futex:
+        commands = ["futest.bin", "dyntest.bin"]
+        expected = ["FUTEXTEST PASS", "DYNTEST PASS", "DYNTEST TLB PASS"]
+    if args.threads:
+        commands = ["thrdtest.bin", "libctest.bin", "cxxcheck.bin", "futest.bin", "timetest.bin", "dyntest.bin"]
+        expected = ["THRDTEST PASS", "LIBCTEST PASS", "CXXCHECK PASS", "FUTEXTEST PASS", "TIMETEST PASS", "DYNTEST PASS"]
+    if args.llvm:
+        if not native:
+            parser.error("--llvm currently requires x86_64")
+        commands = ["llvmtest.bin"]
+        expected = ["LLVMTEST PASS"]
+    if args.lavapipe:
+        if not native:
+            parser.error("--lavapipe requires x86_64")
+        commands = ["llvmtest.bin", "lvptest.bin --test"]
+        expected = ["LLVMTEST PASS", "LVPCOMPUTE PASS", "LVPHEADLESS PASS", "LVPTEST PASS"]
     if args.tools:
         # Commands and source files enter the guest through init.mst and Lua;
         # keyboard input is never used to execute commands.
@@ -923,6 +943,33 @@ def main():
                                     actual = tuple(pixels[offset:offset + 3])
                                     if actual != color:
                                         raise RuntimeError(f"SDL {phase} exposed incorrect pixels at {x},{y}: {actual} != {color}")
+                                qmp.press("key", key={"type": "qcode", "data": "spc"})
+                                frames_checked.add(phase)
+                            finally:
+                                qmp.close()
+                        for phase, left, top in re.findall(r"LVPFRAME READY phase=(\d+) x=(-?\d+) y=(-?\d+)", text):
+                            if not args.lavapipe or phase in frames_checked:
+                                continue
+                            qmp = QMP(qmp_path)
+                            try:
+                                width, height, pixels = qmp.screenshot(output / f"lavapipe-{phase}.ppm")
+                                origin_x, origin_y = int(left) + 4, int(top) + 24
+                                samples = [(8, 8), (65, 190), (255, 190), (160, 70), (160, 140)]
+                                colors = []
+                                for x, y in samples:
+                                    x, y = x + origin_x, y + origin_y
+                                    if not (0 <= x < width and 0 <= y < height):
+                                        raise RuntimeError("lavapipe window is outside the framebuffer")
+                                    offset = (y * width + x) * 3
+                                    colors.append(tuple(pixels[offset:offset + 3]))
+                                background = (16, 32, 48) if phase == "0" else (48, 32, 16)
+                                if colors[0] != background:
+                                    raise RuntimeError(f"lavapipe background: {colors[0]} != {background}")
+                                for color, dominant in zip(colors[1:4], (0, 1, 2)):
+                                    if color[dominant] <= 180 or any(color[i] >= 60 for i in range(3) if i != dominant):
+                                        raise RuntimeError(f"lavapipe triangle has incorrect interpolation: {colors}")
+                                if min(colors[4]) <= 50:
+                                    raise RuntimeError(f"lavapipe triangle center: {colors[4]}")
                                 qmp.press("key", key={"type": "qcode", "data": "spc"})
                                 frames_checked.add(phase)
                             finally:

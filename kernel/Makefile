@@ -56,7 +56,7 @@ OBJS_BOOTPACK = $(OUTPATH)boot_entry.obj $(OUTPATH)boot.o \
 				$(OUTPATH)usb.o $(OUTPATH)xhci.o $(OUTPATH)usb_hub.o $(OUTPATH)usb_hid.o $(OUTPATH)usb_storage.o $(OUTPATH)input_device.o \
 				$(OUTPATH)std.o $(OUTPATH)format.o $(OUTPATH)sheet.o $(OUTPATH)vbe.o $(OUTPATH)cmos.o $(OUTPATH)pci.o $(OUTPATH)fat.o \
 				$(OUTPATH)beep.o $(OUTPATH)syscall.o $(OUTPATH)fifo.o $(OUTPATH)list.o $(OUTPATH)input.o $(OUTPATH)keyboard.o \
-				$(OUTPATH)pcnet.o $(OUTPATH)ipc.o $(OUTPATH)tty.o $(OUTPATH)page.o $(OUTPATH)serial.o $(OUTPATH)log.o \
+				$(OUTPATH)pcnet.o $(OUTPATH)ipc.o $(OUTPATH)futex.o $(OUTPATH)tty.o $(OUTPATH)page.o $(OUTPATH)serial.o $(OUTPATH)log.o \
 				$(OUTPATH)path.o $(OUTPATH)draw.o $(OUTPATH)httm.o $(OUTPATH)interrupt_controller.o $(OUTPATH)bmp.o \
 				$(OUTPATH)lock.o $(OUTPATH)executable.o $(OUTPATH)md5.o $(OUTPATH)libcpp.o $(OUTPATH)rand.o \
 				$(OUTPATH)time.o $(OUTPATH)net_stack.o $(OUTPATH)socket.o $(OUTPATH)lwip_port.o $(OUTPATH)lwip_core_init.o $(OUTPATH)lwip_core_def.o \
@@ -67,7 +67,7 @@ OBJS_BOOTPACK = $(OUTPATH)boot_entry.obj $(OUTPATH)boot.o \
 				$(OUTPATH)lwip_ipv4_icmp.o $(OUTPATH)lwip_ipv4_ip4.o $(OUTPATH)lwip_ipv4_ip4_addr.o $(OUTPATH)lwip_ipv4_ip4_frag.o \
 				$(OUTPATH)lwip_netif_ethernet.o $(OUTPATH)bit.o $(OUTPATH)linux_style_file.o $(OUTPATH)ide.o \
 				$(OUTPATH)vdisk.o $(OUTPATH)rootfs.o $(OUTPATH)interrupt.o $(OUTPATH)mount.o \
-				$(OUTPATH)mtask.o $(OUTPATH)basetask.o $(OUTPATH)execute.o $(OUTPATH)network.o $(OUTPATH)rtl8139.o \
+				$(OUTPATH)mtask.o $(OUTPATH)user_thread.o $(OUTPATH)basetask.o $(OUTPATH)execute.o $(OUTPATH)network.o $(OUTPATH)rtl8139.o \
 				$(OUTPATH)vfs.o $(OUTPATH)build.o $(OUTPATH)mst.o $(OUTPATH)str.o $(OUTPATH)pfs.o $(OUTPATH)signal.o \
 				$(OUTPATH)rtc.o $(OUTPATH)ahci.o $(OUTPATH)initramfs.o $(OUTPATH)fartty.o $(OUTPATH)iso9660.o \
 				$(OUTPATH)module.o $(OUTPATH)kasan.o $(OUTPATH)perf.o $(OUTPATH)fpu.o $(OUTPATH)irq.o $(OUTPATH)exceptions.o \
@@ -195,6 +195,8 @@ Mimg : make_dir $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $
 		mcopy -s -i ./disk.img $(APPSOUTPATH)lib ::/
 		mcopy -i ./disk.img $(APPSOUTPATH)guitest.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)timetest.bin ::
+		mcopy -i ./disk.img $(APPSOUTPATH)futest.bin ::
+		mcopy -i ./disk.img $(APPSOUTPATH)thrdtest.bin $(APPSOUTPATH)libctest.bin $(APPSOUTPATH)cxxcheck.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)sdltest.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)exc_test.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)fputest.bin ::
@@ -253,6 +255,8 @@ Mimg : make_dir $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $
 		mcopy -s -i boot.img $(APPSOUTPATH)lib ::/
 		mcopy -i boot.img $(APPSOUTPATH)guitest.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)timetest.bin ::
+		mcopy -i boot.img $(APPSOUTPATH)futest.bin ::
+		mcopy -i boot.img $(APPSOUTPATH)thrdtest.bin $(APPSOUTPATH)libctest.bin $(APPSOUTPATH)cxxcheck.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)sdltest.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)exc_test.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)fputest.bin ::

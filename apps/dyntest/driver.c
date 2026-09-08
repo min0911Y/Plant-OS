@@ -214,7 +214,8 @@ int main(int argc, char **argv) {
       failures += malformed(image, size, 127, "segment overflow");
       segments[i] = saved;
       segments[i].p_type = PT_TLS;
-      failures += malformed(image, size, 127, "unsupported TLS");
+      failures +=
+          malformed(image, size, 127, "TLS cannot replace a load segment");
       segments[i] = saved;
       break;
     }

@@ -1,0 +1,88 @@
+--- a/src/util/detect_os.h
++++ b/src/util/detect_os.h
+@@ -14,6 +14,11 @@
+ 
+ #ifndef DETECT_OS_H
+ #define DETECT_OS_H
++
++#if defined(__plantos__)
++#define DETECT_OS_PLANTOS 1
++#define DETECT_OS_POSIX 1
++#endif
+ 
+ #if defined(__linux__)
+ #define DETECT_OS_LINUX 1
+@@ -134,6 +139,9 @@
+ #ifndef DETECT_OS_SOLARIS
+ #define DETECT_OS_SOLARIS 0
+ #endif
++#ifndef DETECT_OS_PLANTOS
++#define DETECT_OS_PLANTOS 0
++#endif
+ #ifndef DETECT_OS_POSIX
+ #define DETECT_OS_POSIX 0
+ #endif
+--- a/src/gallium/targets/lavapipe/meson.build
++++ b/src/gallium/targets/lavapipe/meson.build
+@@ -1,7 +1,8 @@
+ 
+ 
++lvp_library_name = host_machine.system() == 'plantos' ? 'lvp' : 'vulkan_lvp'
+ libvulkan_lvp = shared_library(
+-  'vulkan_lvp',
++  lvp_library_name,
+   [ 'lavapipe_target.c' ],
+   vs_module_defs : vulkan_api_def,
+   include_directories : [ inc_src, inc_util, inc_include, inc_gallium, inc_gallium_aux, inc_gallium_winsys, inc_gallium_drivers ],
+@@ -18,7 +19,7 @@
+   install : true,
+ )
+ 
+-icd_file_name = libname_prefix + 'vulkan_lvp.' + libname_suffix
++icd_file_name = libname_prefix + lvp_library_name + '.' + libname_suffix
+ 
+ icd_command = [
+   prog_python, '@INPUT0@',
+--- a/src/gallium/auxiliary/gallivm/lp_bld_misc.cpp
++++ b/src/gallium/auxiliary/gallivm/lp_bld_misc.cpp
+@@ -556,11 +556,22 @@
+ 
+    lp_build_fill_mattrs(MAttrs);
+ 
++#if DETECT_OS_PLANTOS
++   MAttrs.push_back("-mmx");
++#endif
++
+    builder.setMAttrs(MAttrs);
+ 
+    lp_build_dump_mattrs(MAttrs);
+ 
++#if DETECT_OS_PLANTOS
++   // The base CPU must not re-enable register sets absent from the native ABI.
++   // MAttrs carries the CPUID/XCR0-checked features from Mesa's CPU detection.
++   StringRef MCPU = "x86-64";
++   builder.setCodeModel(CodeModel::Large);
++#else
+    StringRef MCPU = llvm::sys::getHostCPUName();
++#endif
+    /*
+     * The cpu bits are no longer set automatically, so need to set mcpu manually.
+     * Note that the MAttrs set above will be sort of ignored (since we should
+--- a/src/gallium/auxiliary/gallivm/lp_bld_init.c
++++ b/src/gallium/auxiliary/gallivm/lp_bld_init.c
+@@ -460,6 +460,15 @@
+     */
+  skip_cached:
+ 
++#if DETECT_OS_PLANTOS
++   // Apply after optimization so every generated definition obeys the ABI.
++   unsigned kind = LLVMGetEnumAttributeKindForName("noredzone", 9);
++   LLVMAttributeRef attr = LLVMCreateEnumAttribute(gallivm->context, kind, 0);
++   for (LLVMValueRef function = LLVMGetFirstFunction(gallivm->module); function;
++        function = LLVMGetNextFunction(function))
++      LLVMAddAttributeAtIndex(function, LLVMAttributeFunctionIndex, attr);
++#endif
++
+    ++gallivm->compiled;
+ 
+    lp_init_printf_hook(gallivm);

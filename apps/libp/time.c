@@ -1,6 +1,11 @@
 #include <errno.h>
+#include <futex.h>
 #include <limits.h>
+#include <pthread.h>
 #include <rand.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <sys/time.h>
 #include <time.h>
 
 /* The RTC stores UTC; the system's local timezone is UTC+08:00. */
@@ -28,13 +33,17 @@ static struct tm *breakdown(int64_t seconds, struct tm *result) {
   unsigned year_of_era = (day_of_era - day_of_era / 1460 + day_of_era / 36524 -
                           day_of_era / 146096) /
                          365;
-  int year = year_of_era + era * 400;
+  int64_t year = year_of_era + era * 400;
   unsigned day_of_year =
       day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
   unsigned march_month = (5 * day_of_year + 2) / 153;
   result->tm_mday = day_of_year - (153 * march_month + 2) / 5 + 1;
   result->tm_mon = march_month + (march_month < 10 ? 2 : -10);
   year += result->tm_mon < 2;
+  if (year - 1900 < INT_MIN || year - 1900 > INT_MAX) {
+    errno = EOVERFLOW;
+    return NULL;
+  }
   result->tm_year = year - 1900;
   static const int month_days[] = {0,   31,  59,  90,  120, 151,
                                    181, 212, 243, 273, 304, 334};
@@ -67,7 +76,7 @@ struct tm *localtime(const time_t *timer) {
   return localtime_r(timer, &calendar);
 }
 
-time_t mktime(struct tm *tm) {
+static time_t make_time(struct tm *tm, int offset) {
   int64_t year = (int64_t)tm->tm_year + 1900 + tm->tm_mon / 12;
   int month = tm->tm_mon % 12;
   if (month < 0) {
@@ -82,23 +91,158 @@ time_t mktime(struct tm *tm) {
                  year_of_era / 100 + (153 * march_month + 2) / 5 +
                  (int64_t)tm->tm_mday - 1 - 719468;
   int64_t seconds = days * DAY_SECONDS + (int64_t)tm->tm_hour * 3600 +
-                    (int64_t)tm->tm_min * 60 + tm->tm_sec -
-                    LOCAL_OFFSET_SECONDS;
-  if (seconds < 0 || seconds >= UINT_MAX) {
-    errno = EOVERFLOW;
-    return (time_t)-1;
-  }
+                    (int64_t)tm->tm_min * 60 + tm->tm_sec - offset;
   time_t result = seconds;
-  localtime_r(&result, tm);
+  if (!breakdown(seconds + offset, tm))
+    return (time_t)-1;
   return result;
 }
+time_t mktime(struct tm *tm) { return make_time(tm, LOCAL_OFFSET_SECONDS); }
 
 double difftime(time_t end, time_t beginning) {
   return (double)end - (double)beginning;
 }
 
-void clock_gettime(int *seconds, int *microseconds) {
-  uint64_t nanoseconds = monotonic_ns();
-  *seconds = (int)(nanoseconds / 1000000000ull);
-  *microseconds = (int)((nanoseconds % 1000000000ull) / 1000ull);
+time_t timegm(struct tm *value) { return make_time(value, 0); }
+
+static pthread_once_t realtime_once = PTHREAD_ONCE_INIT;
+static uint64_t realtime_epoch;
+
+static void initialize_realtime(void) {
+  realtime_epoch = (uint64_t)time(NULL) * 1000000000ull - monotonic_ns();
+}
+
+int clock_gettime(clockid_t clock, struct timespec *value) {
+  if (!value || (clock != CLOCK_REALTIME && clock != CLOCK_MONOTONIC)) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (clock == CLOCK_REALTIME)
+    pthread_once(&realtime_once, initialize_realtime);
+  uint64_t ns = monotonic_ns();
+  if (clock == CLOCK_REALTIME)
+    ns += realtime_epoch;
+  value->tv_sec = ns / 1000000000ull;
+  value->tv_nsec = ns % 1000000000ull;
+  return 0;
+}
+int clock_getres(clockid_t clock, struct timespec *value) {
+  if (clock != CLOCK_REALTIME && clock != CLOCK_MONOTONIC) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (value)
+    *value = (struct timespec){0, 1};
+  return 0;
+}
+int timespec_get(struct timespec *value, int base) {
+  return base == TIME_UTC && clock_gettime(CLOCK_REALTIME, value) == 0 ? base
+                                                                       : 0;
+}
+
+int gettimeofday(struct timeval *value, void *zone) {
+  struct timespec now;
+  if (value) {
+    if (clock_gettime(CLOCK_REALTIME, &now))
+      return -1;
+    *value = (struct timeval){now.tv_sec, now.tv_nsec / 1000};
+  }
+  if (zone)
+    *(struct timezone *)zone = (struct timezone){-LOCAL_OFFSET_SECONDS / 60, 0};
+  return 0;
+}
+
+int runtime_deadline(clockid_t clock, const struct timespec *time,
+                     uint64_t *deadline) {
+  if (!time || time->tv_nsec < 0 || time->tv_nsec >= 1000000000 ||
+      (clock != CLOCK_REALTIME && clock != CLOCK_MONOTONIC))
+    return EINVAL;
+  if (time->tv_sec < 0) {
+    *deadline = 0;
+    return 0;
+  }
+  if ((uint64_t)time->tv_sec > (UINT64_MAX - 1 - time->tv_nsec) / 1000000000ull)
+    return EOVERFLOW;
+  uint64_t ns = (uint64_t)time->tv_sec * 1000000000ull + time->tv_nsec;
+  if (clock == CLOCK_REALTIME) {
+    pthread_once(&realtime_once, initialize_realtime);
+    ns = ns > realtime_epoch ? ns - realtime_epoch : 0;
+  }
+  *deadline = ns;
+  return 0;
+}
+
+int clock_nanosleep(clockid_t clock, int flags, const struct timespec *duration,
+                    struct timespec *remaining) {
+  if (flags & ~TIMER_ABSTIME || !duration || duration->tv_sec < 0 ||
+      duration->tv_nsec < 0 || duration->tv_nsec >= 1000000000 ||
+      (clock != CLOCK_REALTIME && clock != CLOCK_MONOTONIC))
+    return EINVAL;
+  uint64_t deadline;
+  if (flags & TIMER_ABSTIME) {
+    int error = runtime_deadline(clock, duration, &deadline);
+    if (error)
+      return error;
+  } else {
+    uint64_t now = monotonic_ns();
+    if (now >= UINT64_MAX - 1 - duration->tv_nsec ||
+        (uint64_t)duration->tv_sec >
+            (UINT64_MAX - 1 - now - duration->tv_nsec) / 1000000000ull)
+      return EOVERFLOW;
+    deadline =
+        now + (uint64_t)duration->tv_sec * 1000000000ull + duration->tv_nsec;
+  }
+  if (monotonic_ns() >= deadline)
+    return 0;
+  uint32_t word = 0;
+  int result = os_futex_wait(&word, 0, deadline);
+  if (result == FUTEX_TIMED_OUT)
+    return 0;
+  if (remaining && !(flags & TIMER_ABSTIME)) {
+    uint64_t now = monotonic_ns();
+    uint64_t ns = deadline > now ? deadline - now : 0;
+    *remaining = (struct timespec){ns / 1000000000ull, ns % 1000000000ull};
+  }
+  return result == FUTEX_INTERRUPTED ? EINTR : EINVAL;
+}
+int nanosleep(const struct timespec *duration, struct timespec *remaining) {
+  int result = clock_nanosleep(CLOCK_MONOTONIC, 0, duration, remaining);
+  if (!result)
+    return 0;
+  errno = result;
+  return -1;
+}
+
+char *asctime_r(const struct tm *value, char *buffer) {
+  static const char *const days[] = {"Sun", "Mon", "Tue", "Wed",
+                                     "Thu", "Fri", "Sat"};
+  static const char *const months[] = {"Jan", "Feb", "Mar", "Apr",
+                                       "May", "Jun", "Jul", "Aug",
+                                       "Sep", "Oct", "Nov", "Dec"};
+  if (!value || !buffer || value->tm_wday < 0 || value->tm_wday >= 7 ||
+      value->tm_mon < 0 || value->tm_mon >= 12) {
+    errno = EINVAL;
+    return NULL;
+  }
+  int64_t year = (int64_t)value->tm_year + 1900;
+  if (year < 0 || year > 9999 ||
+      snprintf(buffer, 26, "%s %s%3d %02d:%02d:%02d %04d\n",
+               days[value->tm_wday], months[value->tm_mon], value->tm_mday,
+               value->tm_hour, value->tm_min, value->tm_sec, (int)year) != 25) {
+    errno = EOVERFLOW;
+    return NULL;
+  }
+  return buffer;
+}
+char *asctime(const struct tm *value) {
+  static char buffer[26];
+  return asctime_r(value, buffer);
+}
+char *ctime_r(const time_t *value, char *buffer) {
+  struct tm time;
+  return localtime_r(value, &time) ? asctime_r(&time, buffer) : NULL;
+}
+char *ctime(const time_t *value) {
+  static char buffer[26];
+  return ctime_r(value, buffer);
 }

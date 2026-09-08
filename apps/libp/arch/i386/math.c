@@ -1,15 +1,21 @@
 #include <math.h>
 
-double sin(double value) {
-  double result;
-  __asm__("fsin" : "=t"(result) : "0"(value));
+long double scalbnl(long double value, int exponent) {
+  long double result;
+  __asm__("fscale" : "=t"(result) : "0"(value), "u"((long double)exponent));
   return result;
 }
-
-double cos(double value) {
-  double result;
-  __asm__("fcos" : "=t"(result) : "0"(value));
+long double fmodl(long double value, long double divisor) {
+  long double result;
+  __asm__("1: fprem; fnstsw %%ax; test $0x400, %%ax; jnz 1b"
+          : "=t"(result)
+          : "0"(value), "u"(divisor)
+          : "ax", "cc");
   return result;
+}
+long double fabsl(long double value) { return __builtin_fabsl(value); }
+long double copysignl(long double value, long double sign) {
+  return __builtin_copysignl(value, sign);
 }
 
 double sqrt(double value) {

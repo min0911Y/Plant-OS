@@ -1,6 +1,7 @@
 # Application sources and private library dependencies, shared by both architectures.
 SDL_ROOT := sdl3
 include sdl3/sources.mk
+SDL_RUNTIME := $(if $(filter x86_64,$(ARCH)),$(DYN_LIB)/liblvp.so)
 
 OS_TERMINAL_DIR ?= $(HOME)/os-terminal
 OS_TERMINAL_LIB := $(OS_TERMINAL_DIR)/libos_terminal_$(if $(filter i386,$(ARCH)),x86,x64).a
@@ -15,6 +16,7 @@ $(BUILD)/term/.config: FORCE_TERM_CONFIG
 	@if cmp -s $@.tmp $@; then rm $@.tmp; else mv $@.tmp $@; fi
 
 define library
+LIBRARY_OBJECTS += $(call objects,$(2))
 .PHONY: $(1)
 $(1): $(LIBS)/$(1).a
 $(LIBS)/$(1).a: $(call objects,$(2)) build.mk native-apps.mk
@@ -25,7 +27,8 @@ endef
 
 $(eval $(call library,sdl3,$(SDL_SOURCES)))
 SDL_CFLAGS := -Isdl3/include -ISDL3_image/include -ISDL3_ttf/include
-$(BUILD)/sdl3/%.o: CFLAGS += $(SDL_CFLAGS) -Isdl3/config -Isdl3/src
+$(BUILD)/sdl3/%.o: CFLAGS += $(SDL_CFLAGS) -Isdl3/config -Isdl3/src \
+  -Isdl3/src/video/khronos -Imesa/include
 $(call objects,$(SDL_SOURCES)): sdl3/sources.mk
 
 LITE_ROOT := lite-1.11
@@ -89,6 +92,13 @@ $(eval $(call application,ndisasm,$(LIBS)/libnasm.a,nasm-master/disasm/ndisasm.c
 default all: $(BUILD)/nasm.bin $(BUILD)/ndisasm.bin
 
 $(eval $(call application,timetest,,timetest/timetest.c))
+$(eval $(call application,futest))
+$(eval $(call application,thrdtest,$(DYN_LIB)/libtls.so))
+$(eval $(call application,libctest))
+$(eval $(call application,cxxcheck,,cxxcheck/cxxcheck.cpp))
+ifeq ($(ARCH),x86_64)
+include mesa/build.mk
+endif
 $(BUILD)/sdltest/%.o: CFLAGS += $(SDL_CFLAGS)
 $(eval $(call application,sdltest,$(addprefix $(LIBS)/,sdl3.a sdl3_ttf.a sdl3_image.a libft.a libpng.a libjpg.a libz.a),sdltest/sdltest.c))
 default all: $(BUILD)/timetest.bin $(BUILD)/sdltest.bin

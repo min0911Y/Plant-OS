@@ -1,0 +1,65 @@
+--- a/llvm/lib/Support/Unix/Process.inc
++++ b/llvm/lib/Support/Unix/Process.inc
+@@ -19,9 +19,13 @@
+ #include <optional>
+ #include <fcntl.h>
+ #include <sys/time.h>
++#if !defined(__plantos__)
+ #include <sys/resource.h>
++#endif
+ #include <sys/stat.h>
++#if !defined(__plantos__)
+ #include <signal.h>
++#endif
+ #if defined(HAVE_MALLINFO) || defined(HAVE_MALLINFO2)
+ #include <malloc.h>
+ #endif
+@@ -136,6 +140,7 @@
+ // their operation. To prevent the disk from filling up, this function
+ // does what's necessary to prevent their generation.
+ void Process::PreventCoreFiles() {
++#if !defined(__plantos__)
+   struct rlimit rlim;
+   getrlimit(RLIMIT_CORE, &rlim);
+ #ifdef __linux__
+@@ -187,6 +192,7 @@
+   signal(SIGBUS, _exit);
+ #endif
+ 
++#endif
+   coreFilesPrevented = true;
+ }
+ 
+@@ -218,6 +224,10 @@
+ } // namespace
+ 
+ std::error_code Process::FixupStandardFileDescriptors() {
++#if defined(__plantos__)
++  // Standard descriptors are reserved TTY channels and cannot be closed.
++  return {};
++#else
+   int NullFD = -1;
+   FDCloser FDC(NullFD);
+   const int StandardFDs[] = {STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO};
+@@ -249,9 +259,13 @@
+       return errnoAsErrorCode();
+   }
+   return std::error_code();
++#endif
+ }
+ 
+ std::error_code Process::SafelyCloseFileDescriptor(int FD) {
++#if defined(__plantos__)
++  return ::close(FD) < 0 ? errnoAsErrorCode() : std::error_code();
++#else
+   // Create a signal set filled with *all* signals.
+   sigset_t FullSet, SavedSet;
+   if (sigfillset(&FullSet) < 0 || sigfillset(&SavedSet) < 0)
+@@ -284,6 +298,7 @@
+   if (ErrnoFromClose)
+     return std::error_code(ErrnoFromClose, std::generic_category());
+   return std::error_code(EC, std::generic_category());
++#endif
+ }
+ 
+ bool Process::StandardInIsUserInput() {

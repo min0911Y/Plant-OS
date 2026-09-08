@@ -1,0 +1,35 @@
+--- a/libcxx/include/__config
++++ b/libcxx/include/__config
+@@ -342,6 +342,8 @@
+ #    define _LIBCPP_USING_NACL_RANDOM
+ #  elif defined(_LIBCPP_WIN32API)
+ #    define _LIBCPP_USING_WIN32_RANDOM
++#  elif defined(__plantos__)
++#    define _LIBCPP_USING_PLOS_RANDOM
+ #  else
+ #    define _LIBCPP_USING_DEV_RANDOM
+ #  endif
+--- a/libcxx/src/random.cpp
++++ b/libcxx/src/random.cpp
+@@ -37,9 +37,20 @@
+ #  include <zircon/syscalls.h>
+ #endif
+ 
++#if defined(_LIBCPP_USING_PLOS_RANDOM)
++extern "C" unsigned os_random32(void);
++#endif
++
+ _LIBCPP_BEGIN_NAMESPACE_STD
+ 
+-#if defined(_LIBCPP_USING_GETENTROPY)
++#if defined(_LIBCPP_USING_PLOS_RANDOM)
++
++// The platform uses a deterministic engine; entropy() reports zero.
++random_device::random_device(const string&) {}
++random_device::~random_device() {}
++unsigned random_device::operator()() { return os_random32(); }
++
++#elif defined(_LIBCPP_USING_GETENTROPY)
+ 
+ random_device::random_device(const string& __token) {
+   if (__token != "/dev/urandom")

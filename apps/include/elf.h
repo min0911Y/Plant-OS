@@ -56,6 +56,7 @@ enum {
   STB_LOCAL = 0,
   STB_GLOBAL = 1,
   STB_WEAK = 2,
+  STB_GNU_UNIQUE = 10,
   STT_NOTYPE = 0,
   STT_OBJECT = 1,
   STT_FUNC = 2,
@@ -126,6 +127,10 @@ enum {
   R_386_GLOB_DAT = 6,
   R_386_JMP_SLOT = 7,
   R_386_RELATIVE = 8,
+  R_386_TLS_TPOFF = 14,
+  R_386_TLS_DTPMOD32 = 35,
+  R_386_TLS_DTPOFF32 = 36,
+  R_386_TLS_TPOFF32 = 37,
   R_X86_64_NONE = 0,
   R_X86_64_64 = 1,
   R_X86_64_PC32 = 2,
@@ -135,6 +140,9 @@ enum {
   R_X86_64_RELATIVE = 8,
   R_X86_64_32 = 10,
   R_X86_64_32S = 11,
+  R_X86_64_DTPMOD64 = 16,
+  R_X86_64_DTPOFF64 = 17,
+  R_X86_64_TPOFF64 = 18,
 };
 
 typedef uint32_t Elf32_Addr, Elf32_Off, Elf32_Word;

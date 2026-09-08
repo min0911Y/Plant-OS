@@ -23,6 +23,7 @@ void arch_interrupt_init_secondary(void);
 bool arch_irq_message(unsigned irq, struct irq_message *message);
 void arch_task_state_init(void);
 void arch_task_set_kernel_stack(uintptr_t stack_top);
+void arch_thread_pointer_set(uintptr_t pointer);
 void arch_task_context_init(arch_task_context_t *context, uintptr_t entry);
 void arch_task_switch(arch_task_context_t **current_context_slot,
                       arch_task_context_t *next_context,

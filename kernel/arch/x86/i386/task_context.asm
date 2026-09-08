@@ -3,6 +3,7 @@
 section .text
 
 extern kernel_lock_leave
+extern x86_user_frame_set_tls
 
 global arch_task_switch
 global arch_task_start
@@ -74,7 +75,9 @@ arch_task_start:
 ; Resume the x86_interrupt_frame_t copied by task_fork. This is intentionally
 ; byte-for-byte equivalent to the normal interrupt_entries.asm restore tail.
 arch_task_interrupt_return:
-  xchg bx, bx
+  push esp
+  call x86_user_frame_set_tls
+  add esp, 4
   call kernel_lock_leave
   popa
   pop gs

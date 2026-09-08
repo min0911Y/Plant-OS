@@ -7,13 +7,14 @@
 #include <syscall.h>
 
 int main(int argc, char **argv);
-void init_env();
 void abi_alloc_init();
 void return_to_app();
 void set_rt(uintptr_t rt);
 void init_float();
 
 void Main(const runtime_linker_t *linker) {
+  if (runtime_thread_initialize(linker))
+    _exit((unsigned)-1);
   set_rt((uintptr_t)return_to_app);
   abi_alloc_init();
   stdio_initialize();
@@ -27,7 +28,6 @@ void Main(const runtime_linker_t *linker) {
     stdio_shutdown();
     exit((unsigned)-1);
   }
-  init_env();
   init_float();
   runtime_initialize(linker);
   int status = main(arguments.argc, arguments.argv);

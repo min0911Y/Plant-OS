@@ -1,0 +1,250 @@
+--- a/include/drm-uapi/drm.h
++++ b/include/drm-uapi/drm.h
+@@ -47,7 +47,7 @@
+ #include <sys/types.h>
+ #if defined(__GNU__)
+ #include <sys/ioctl.h>
+-#else
++#elif !defined(__plantos__)
+ #include <sys/ioccom.h>
+ #endif
+ typedef int8_t   __s8;
+--- a/src/util/log.c
++++ b/src/util/log.c
+@@ -31,7 +31,7 @@
+ #include "util/ralloc.h"
+ #include "util/u_debug.h"
+ 
+-#if DETECT_OS_POSIX
++#if DETECT_OS_POSIX && !DETECT_OS_PLANTOS
+ #include <syslog.h>
+ #include "util/u_process.h"
+ #endif
+@@ -168,7 +168,7 @@
+    }
+ #endif
+ 
+-#if DETECT_OS_POSIX
++#if DETECT_OS_POSIX && !DETECT_OS_PLANTOS
+    if (mesa_log_control & MESA_LOG_CONTROL_SYSLOG)
+       openlog(util_get_process_name(), LOG_NDELAY | LOG_PID, LOG_USER);
+ #endif
+@@ -316,7 +316,7 @@
+       free(msg);
+ }
+ 
+-#if DETECT_OS_POSIX
++#if DETECT_OS_POSIX && !DETECT_OS_PLANTOS
+ 
+ static inline int
+ level_to_syslog(enum mesa_log_level l)
+@@ -452,7 +452,7 @@
+                   va_list va);
+    } loggers[] = {
+       { MESA_LOG_CONTROL_FILE, logger_file },
+-#if DETECT_OS_POSIX
++#if DETECT_OS_POSIX && !DETECT_OS_PLANTOS
+       { MESA_LOG_CONTROL_SYSLOG, logger_syslog },
+ #endif
+ #if DETECT_OS_ANDROID
+--- a/src/util/os_misc.c
++++ b/src/util/os_misc.c
+@@ -60,7 +60,7 @@
+ #  include <unistd.h>
+ #  include <android/log.h>
+ #  include <sys/system_properties.h>
+-#elif DETECT_OS_LINUX || DETECT_OS_CYGWIN || DETECT_OS_SOLARIS || DETECT_OS_HURD || DETECT_OS_MANAGARM
++#elif DETECT_OS_PLANTOS || DETECT_OS_LINUX || DETECT_OS_CYGWIN || DETECT_OS_SOLARIS || DETECT_OS_HURD || DETECT_OS_MANAGARM
+ #  include <unistd.h>
+ #elif DETECT_OS_OPENBSD || DETECT_OS_FREEBSD
+ #  include <sys/resource.h>
+@@ -416,7 +416,14 @@
+ bool
+ os_get_available_system_memory(uint64_t *size)
+ {
+-#if DETECT_OS_LINUX
++#if DETECT_OS_PLANTOS
++   long pages = sysconf(_SC_AVPHYS_PAGES);
++   long page_size = sysconf(_SC_PAGESIZE);
++   if (pages < 0 || page_size <= 0)
++      return false;
++   *size = (uint64_t)pages * page_size;
++   return true;
++#elif DETECT_OS_LINUX
+    char *meminfo = os_read_file("/proc/meminfo", NULL);
+    if (!meminfo)
+       return false;
+--- a/src/util/anon_file.c
++++ b/src/util/anon_file.c
+@@ -31,7 +31,14 @@
+ #include "anon_file.h"
+ #include "detect_os.h"
+ 
+-#ifndef _WIN32
++#if DETECT_OS_PLANTOS
++#include <errno.h>
++int os_create_anonymous_file(int64_t size, const char *debug_name)
++{
++   errno = ENOTSUP;
++   return -1;
++}
++#elif !defined(_WIN32)
+ 
+ #include <unistd.h>
+ #include <fcntl.h>
+--- a/src/util/os_file.c
++++ b/src/util/os_file.c
+@@ -55,6 +55,13 @@
+     */
+    return dup(fd);
+ }
++#elif DETECT_OS_PLANTOS
++int
++os_dupfd_cloexec(int fd)
++{
++   errno = ENOTSUP;
++   return -1;
++}
+ #else
+ int
+ os_dupfd_cloexec(int fd)
+--- a/src/util/meson.build
++++ b/src/util/meson.build
+@@ -178,11 +178,11 @@
+   'vma.c',
+   'vma.h',
+   'xxhash.h',
+-  'mesa_cache_db.c',
+-  'mesa_cache_db.h',
+-  'mesa_cache_db_multipart.c',
+-  'mesa_cache_db_multipart.h',
+-)
++
++)
++if with_shader_cache
++  files_mesa_util += files('mesa_cache_db.c', 'mesa_cache_db_multipart.c')
++endif
+ 
+ libmesa_util_links = []
+ 
+--- a/meson.build
++++ b/meson.build
+@@ -1862,7 +1862,9 @@
+ # it's not linux and wont
+ dep_m = cc.find_library('m', required : false)
+ 
+-if host_machine.system() == 'windows'
++if host_machine.system() == 'plantos'
++  dep_regex = declare_dependency(compile_args : ['-DNO_REGEX'])
++elif host_machine.system() == 'windows'
+   dep_regex = meson.get_compiler('c').find_library('regex', required : false)
+   if not dep_regex.found()
+     dep_regex = declare_dependency(compile_args : ['-DNO_REGEX'])
+--- a/src/util/u_thread.c
++++ b/src/util/u_thread.c
+@@ -70,10 +70,13 @@
+    struct u_thread_param *paramp = malloc(sizeof(*paramp));
+    int ret = thrd_error;
+ 
++   if (!paramp)
++      return thrd_nomem;
++
+    paramp->routine = routine;
+    paramp->arg = param;
+ 
+-#if defined(HAVE_PTHREAD) && !DETECT_OS_FUCHIA
++#if defined(HAVE_PTHREAD) && !DETECT_OS_FUCHIA && !DETECT_OS_PLANTOS
+    sigset_t saved_set, new_set;
+ 
+    sigfillset(&new_set);
+@@ -91,6 +94,8 @@
+    ret = thrd_create(thrd, thread_routine, paramp);
+ #endif
+ 
++   if (ret != thrd_success)
++      free(paramp);
+    return ret;
+ }
+ 
+@@ -176,7 +181,7 @@
+ int64_t
+ util_thread_get_time_nano(thrd_t thread)
+ {
+-#if defined(HAVE_PTHREAD) && !defined(__APPLE__) && !defined(__HAIKU__) && !defined(__managarm__)
++#if defined(HAVE_PTHREAD) && !defined(__APPLE__) && !defined(__HAIKU__) && !defined(__managarm__) && !DETECT_OS_PLANTOS
+    struct timespec ts;
+    clockid_t cid;
+ 
+--- a/src/util/u_process.c
++++ b/src/util/u_process.c
+@@ -56,7 +56,15 @@
+ 
+ #undef GET_PROGRAM_NAME_NOT_AVAILABLE
+ 
+-#if defined(__linux__) && defined(HAVE_PROGRAM_INVOCATION_NAME)
++#if DETECT_OS_PLANTOS
++static char *
++__getProgramName(void)
++{
++   const char *path = getexecname();
++   const char *name = path ? strrchr(path, '/') : NULL;
++   return strdup(name ? name + 1 : path ? path : "unknown");
++}
++#elif defined(__linux__) && defined(HAVE_PROGRAM_INVOCATION_NAME)
+ static char *
+ __getProgramName()
+ {
+@@ -236,6 +244,13 @@
+    process_path[len - 1] = '\0';
+ 
+    return len;
++#elif DETECT_OS_PLANTOS
++   const char *path = getexecname();
++   if (!path || strlen(path) >= len)
++      return 0;
++   size_t size = strlen(path);
++   memcpy(process_path, path, size + 1);
++   return size;
+ #elif DETECT_OS_POSIX
+    ssize_t r;
+ 
+--- a/src/gallium/auxiliary/driver_ddebug/dd_draw.c
++++ b/src/gallium/auxiliary/driver_ddebug/dd_draw.c
+@@ -737,7 +737,7 @@
+ static void
+ dd_kill_process(void)
+ {
+-#if DETECT_OS_POSIX
++#if DETECT_OS_POSIX && !DETECT_OS_PLANTOS
+    sync();
+ #endif
+    fprintf(stderr, "dd: Aborting the process...\n");
+--- a/src/gallium/auxiliary/hud/hud_context.c
++++ b/src/gallium/auxiliary/hud/hud_context.c
+@@ -80,7 +80,7 @@
+ static int hud_rotate = HUD_DEFAULT_ROTATION;
+ static float hud_opacity = HUD_DEFAULT_OPACITY / 100.0f;
+ 
+-#if DETECT_OS_POSIX
++#if DETECT_OS_POSIX && !DETECT_OS_PLANTOS
+ static void
+ signal_visible_handler(int sig, siginfo_t *siginfo, void *context)
+ {
+@@ -1984,7 +1984,7 @@
+    }
+    const char *env = debug_get_option("GALLIUM_HUD",
+       emulate_libgl_show_fps ? "stdout,fps" : NULL);
+-#if DETECT_OS_POSIX
++#if DETECT_OS_POSIX && !DETECT_OS_PLANTOS
+    unsigned signo = debug_get_num_option("GALLIUM_HUD_TOGGLE_SIGNAL", 0);
+    static bool sig_handled = false;
+    struct sigaction action;
+@@ -2078,7 +2078,7 @@
+    list_inithead(&hud->pane_list);
+ 
+    /* setup sig handler once for all hud contexts */
+-#if DETECT_OS_POSIX
++#if DETECT_OS_POSIX && !DETECT_OS_PLANTOS
+    if (!sig_handled && signo != 0) {
+       action.sa_sigaction = &signal_visible_handler;
+       action.sa_flags = SA_SIGINFO;

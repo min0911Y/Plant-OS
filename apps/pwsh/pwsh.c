@@ -49,7 +49,7 @@ void Draw_UI() {
     goto_xy(36, 4 + i);
     if (file_list[roll + i].type == FLE) {
       printf("FILE");
-    } else if (file_list[roll + i].type == DIR) {
+    } else if (file_list[roll + i].type == FILE_DIRECTORY) {
       printf("DIR");
     } else if (file_list[roll + i].type == RDO) {
       printf("READ-ONLY");

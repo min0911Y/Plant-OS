@@ -73,6 +73,7 @@ typedef struct {
 
 void x86_user_frame_init(x86_interrupt_frame_t *frame, uint32_t eip,
                          uint32_t esp);
+void x86_user_frame_set_tls(x86_interrupt_frame_t *frame);
 
 typedef void (*x86_interrupt_entry_t)(void);
 

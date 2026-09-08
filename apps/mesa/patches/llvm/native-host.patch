@@ -1,0 +1,14 @@
+--- a/llvm/lib/TargetParser/Host.cpp
++++ b/llvm/lib/TargetParser/Host.cpp
+@@ -24,7 +24,10 @@
+ #include <string.h>
+ 
+ // Include the platform-specific parts of this class.
+-#ifdef LLVM_ON_UNIX
++#if defined(__plantos__)
++static std::string updateTripleOSVersion(std::string Triple) { return Triple; }
++std::string llvm::sys::getDefaultTargetTriple() { return LLVM_DEFAULT_TARGET_TRIPLE; }
++#elif defined(LLVM_ON_UNIX)
+ #include "Unix/Host.inc"
+ #include <sched.h>
+ #endif

@@ -2,6 +2,7 @@
 #include <dos.h>
 #include <executable.h>
 #include <framebuffer.h>
+#include <futex.h>
 #include <input_device.h>
 #include <irq.h>
 #include <limits.h>
@@ -11,6 +12,7 @@
 #include <syscall.h>
 #include <tty_rpc.h>
 #include <user_space.h>
+#include <user_thread.h>
 #include <user_vm.h>
 #if defined(KERNEL_ARCH_X86_64)
 #include <arch/x86/x86_64/cpu.h>
@@ -24,25 +26,6 @@ static void keyboard_release(uint8_t data, uint32_t tid) {
   fifo8_put(get_task(tid)->Ukeyfifo, data);
 }
 
-typedef struct {
-  uintptr_t entry;
-  uintptr_t stack_top;
-  uintptr_t argument;
-} user_thread_start_t;
-
-static void user_thread_entry(void) {
-  mtask *task = current_task();
-  user_thread_start_t *request = (user_thread_start_t *)task->line;
-  user_thread_start_t start = *request;
-  page_free_one(request);
-  task->line = NULL;
-
-  task->user_mode = 1;
-  arch_task_set_kernel_stack(task->top);
-  kernel_lock_leave();
-  arch_task_enter_user(start.entry, start.stack_top, start.argument);
-}
-
 static int user_range_ok(uintptr_t addr, size_t size) {
 #if defined(KERNEL_ARCH_X86_64)
   return x64_user_access(addr, size, false);
@@ -52,28 +35,36 @@ static int user_range_ok(uintptr_t addr, size_t size) {
 #endif
 }
 
-static char *copy_user_string(uintptr_t addr, size_t *length_out) {
-  if (!user_range_ok(addr, 1)) {
-    return NULL;
-  }
-
-  const char *source = (const char *)(uintptr_t)addr;
-  const size_t available = USER_HEAP_END - addr;
+static char *copy_user_string(uintptr_t address, size_t *length_out) {
+  irq_state_t state = irq_save();
+  char *copy = NULL;
+  if (address < USER_SPACE_START || address >= USER_HEAP_END)
+    goto finished;
+  const char *source = (const char *)address;
+  size_t available = USER_HEAP_END - address;
+  if (available > INT_MAX)
+    available = INT_MAX;
   size_t length = 0;
-  while (length < available && source[length] != '\0') {
-    length++;
+  while (length < available) {
+    size_t count = VM_PAGE_SIZE - ((address + length) & (VM_PAGE_SIZE - 1));
+    if (count > available - length)
+      count = available - length;
+    if (!user_vm_readable(address + length, count))
+      break;
+    size_t end = length + count;
+    for (; length < end; length++) {
+      if (source[length])
+        continue;
+      copy = malloc(length + 1);
+      if (copy) {
+        memcpy(copy, source, length + 1);
+        *length_out = length;
+      }
+      goto finished;
+    }
   }
-  if (length == available || length >= INT_MAX) {
-    return NULL;
-  }
-
-  char *copy = malloc(length + 1);
-  if (copy == NULL) {
-    return NULL;
-  }
-  memcpy(copy, source, length);
-  copy[length] = '\0';
-  *length_out = length;
+finished:
+  irq_restore(state);
   return copy;
 }
 
@@ -296,6 +287,8 @@ enum syscall_id {
   SYSCALL_INPUT_WAIT = 0x64,
   SYSCALL_SIGNAL_RETURN = SYSCALL_ARCH_SIGNAL_RETURN,
   SYSCALL_VIRTUAL_MEMORY = SYSCALL_VM,
+  SYSCALL_USER_FUTEX = SYSCALL_FUTEX,
+  SYSCALL_NATIVE_THREAD = SYSCALL_THREAD,
   SYSCALL_COUNT,
 };
 
@@ -567,27 +560,27 @@ static int vfs_syscall_sync(const vfs_syscall_request_t *request) {
 }
 
 static int vfs_syscall_stat(const vfs_syscall_request_t *request) {
-  if (!user_range_ok(request->arguments.stat.status, sizeof(vfs_stat_t))) {
-    return VFS_ERROR_INVALID;
-  }
   char *path = vfs_syscall_path(request->arguments.stat.path);
   if (path == NULL) {
     return VFS_ERROR_INVALID;
   }
-  int status = vfs_stat(
-      current_task()->fs_context, path,
-      (vfs_stat_t *)(uintptr_t)request->arguments.stat.status);
+  vfs_stat_t result;
+  int status = vfs_stat(current_task()->fs_context, path, &result);
   free(path);
+  if (status == VFS_OK &&
+      !user_vm_copy_to(request->arguments.stat.status, &result, sizeof(result)))
+    return VM_ERROR_FAULT;
   return status;
 }
 
 static int vfs_syscall_fstat(const vfs_syscall_request_t *request) {
-  if (!user_range_ok(request->arguments.fstat.status, sizeof(vfs_stat_t))) {
-    return VFS_ERROR_INVALID;
-  }
-  return vfs_fd_stat(
-      current_task()->fs_context, request->arguments.fstat.descriptor,
-      (vfs_stat_t *)(uintptr_t)request->arguments.fstat.status);
+  vfs_stat_t result;
+  int status = vfs_fd_stat(current_task()->fs_context,
+                           request->arguments.fstat.descriptor, &result);
+  if (status == VFS_OK && !user_vm_copy_to(request->arguments.fstat.status,
+                                           &result, sizeof(result)))
+    return VM_ERROR_FAULT;
+  return status;
 }
 
 static int vfs_syscall_list(const vfs_syscall_request_t *request) {
@@ -705,6 +698,33 @@ static int vfs_syscall_format(const vfs_syscall_request_t *request) {
   return status;
 }
 
+static int vfs_syscall_truncate(const vfs_syscall_request_t *request) {
+  return vfs_fd_truncate(current_task()->fs_context,
+                         request->arguments.truncate.descriptor,
+                         request->arguments.truncate.length);
+}
+
+static int vfs_syscall_realpath(const vfs_syscall_request_t *request) {
+  char *path = vfs_syscall_path(request->arguments.canonical.path);
+  if (!path)
+    return VFS_ERROR_INVALID;
+  char *result;
+  int length = vfs_realpath(current_task()->fs_context, path, &result);
+  free(path);
+  if (length < 0)
+    return length;
+  int status = length;
+  if (request->arguments.canonical.capacity) {
+    if (request->arguments.canonical.capacity <= (uint32_t)length)
+      status = VFS_ERROR_OVERFLOW;
+    else if (!user_vm_copy_to(request->arguments.canonical.buffer, result,
+                              (size_t)length + 1))
+      status = VM_ERROR_FAULT;
+  }
+  free(result);
+  return status;
+}
+
 static const vfs_syscall_handler_t vfs_syscall_handlers[VFS_SYSCALL_COUNT] = {
     [VFS_SYSCALL_OPEN] = vfs_syscall_open,
     [VFS_SYSCALL_CLOSE] = vfs_syscall_close,
@@ -727,6 +747,8 @@ static const vfs_syscall_handler_t vfs_syscall_handlers[VFS_SYSCALL_COUNT] = {
     [VFS_SYSCALL_UNMOUNT] = vfs_syscall_unmount,
     [VFS_SYSCALL_CHANGE_DRIVE] = vfs_syscall_change_drive,
     [VFS_SYSCALL_FORMAT] = vfs_syscall_format,
+    [VFS_SYSCALL_TRUNCATE] = vfs_syscall_truncate,
+    [VFS_SYSCALL_REALPATH] = vfs_syscall_realpath,
 };
 
 static void syscall_vfs(syscall_context_t *frame) {
@@ -737,8 +759,8 @@ static void syscall_vfs(syscall_context_t *frame) {
     return;
   }
   vfs_syscall_request_t request;
-  memcpy(&request, (const void *)(uintptr_t)frame->argument1, sizeof(request));
-  if (request.size != sizeof(request)) {
+  if (!user_vm_copy_from(&request, frame->argument1, sizeof(request)) ||
+      request.size != sizeof(request)) {
     frame->value = VFS_ERROR_INVALID;
     return;
   }
@@ -774,10 +796,8 @@ static void syscall_keyboard_hit(syscall_context_t *frame) {
   frame->value = kbhit();
 }
 
-static void syscall_exit(syscall_context_t *frame) {
-  mtask *task = current_task();
-  unsigned status = frame->argument0;
-  if (task->return_cwd) {
+static unsigned syscall_exit_status(mtask *task, unsigned status) {
+  if (task && task->return_cwd) {
     mtask *parent = task->ptid == 0 || task->ptid == (uint32_t)-1
                         ? NULL
                         : get_task(task->ptid);
@@ -788,9 +808,11 @@ static void syscall_exit(syscall_context_t *frame) {
       }
     }
   }
-  task_exit(status);
-  for (;;) {
-  }
+  return status;
+}
+
+static void syscall_exit(syscall_context_t *frame) {
+  task_exit(syscall_exit_status(current_task(), frame->argument0));
 }
 
 static void syscall_video_control(syscall_context_t *frame) {
@@ -884,55 +906,18 @@ static void syscall_task_control(syscall_context_t *frame) {
   case 0x07:
     frame->value = get_tid(task);
     break;
+  case 0x0e:
+    frame->value = task->tgid;
+    break;
+  case 0x0f:
+    frame->value = task->ptid;
+    break;
   case 0x08:
     frame->value = have_msg();
     break;
   case 0x09:
     get_msg_all((void *)(uintptr_t)frame->argument2);
     break;
-  case 0x0a: {
-    /* Both native C entry frames fit in the final 32 bytes of the stack. */
-    uintptr_t stack_top = frame->argument3 & ~(uintptr_t)15;
-    frame->value = -1;
-    if (!user_range_ok(frame->argument2, 1) ||
-        stack_top < USER_SPACE_START + 32 || stack_top > USER_HEAP_END ||
-        !user_range_ok(stack_top - 32, 32)) {
-      return;
-    }
-#if defined(KERNEL_ARCH_X86_64)
-    if (!x64_user_access(stack_top - 32, 32, true)) {
-      return;
-    }
-#endif
-    mtask *thread = create_thread_task((uintptr_t)user_thread_entry, 1);
-    if (thread == NULL) {
-      return;
-    }
-    thread->alloc_addr = task->alloc_addr;
-    thread->alloc_size = task->alloc_size;
-    thread->TTY = task->TTY;
-    thread->tty_session = task->tty_session;
-    task_set_name(thread, "thread");
-    user_thread_start_t *request = page_malloc_one_no_mark();
-    if (request == NULL) {
-      task_abort_creation(thread);
-      return;
-    }
-    change_page_task_id(thread->tid, request, sizeof(*request));
-    *request = (user_thread_start_t){
-        .entry = frame->argument2,
-        .stack_top = stack_top,
-        .argument = frame->argument4,
-    };
-    thread->line = (char *)request;
-    if (!task_prepare_input(thread) ||
-        !user_vm_prepare_write(stack_top - 32, 32) || !task_publish(thread)) {
-      task_abort_creation(thread);
-      return;
-    }
-    frame->value = thread->tid;
-    break;
-  }
   case 0x0b:
     task_lock();
     break;
@@ -1214,27 +1199,105 @@ static void syscall_virtual_memory(syscall_context_t *frame) {
     frame->value = VM_ERROR_INVALID;
     return;
   }
-  uintptr_t last = (address + sizeof(vm_request_t) - 1) & ~(uintptr_t)4095;
-  for (uintptr_t page = address & ~(uintptr_t)4095; page <= last;
-       page += 4096) {
-    if (!(arch_user_page_flags(page) & VM_READ)) {
-      frame->value = VM_ERROR_FAULT;
-      return;
-    }
-  }
   vm_request_t request;
-  memcpy(&request, (const void *)address, sizeof(request));
+  if (!user_vm_copy_from(&request, address, sizeof(request))) {
+    frame->value = VM_ERROR_FAULT;
+    return;
+  }
   frame->value = user_vm_operation(frame->argument0, &request);
 }
 
-static void syscall_read_env(syscall_context_t *frame) {
-  char *value = env_read((char *)(uintptr_t)frame->argument0);
-  if (value) {
-    strcpy((char *)(uintptr_t)frame->argument1, value);
-    frame->value = 1;
-  } else {
-    frame->value = 0;
+static void syscall_futex(syscall_context_t *frame) {
+  if (frame->argument0 >= FUTEX_OPERATION_COUNT ||
+      frame->argument2 != sizeof(futex_request_t)) {
+    frame->value = FUTEX_INVALID;
+    return;
   }
+  futex_request_t request;
+  if (!user_vm_copy_from(&request, frame->argument1, sizeof(request))) {
+    frame->value = FUTEX_FAULT;
+    return;
+  }
+  frame->value = futex_operation(frame->argument0, &request);
+}
+
+static void syscall_thread(syscall_context_t *frame) {
+  if (frame->argument0 == THREAD_EXIT_PROCESS)
+    task_exit_process(syscall_exit_status(get_task(current_task()->tgid),
+                                          (unsigned)frame->argument1));
+  if (frame->argument0 == THREAD_WAIT_GROUP) {
+    irq_state_t state = irq_save();
+    task_wait_threads();
+    frame->value = 0;
+    irq_restore(state);
+    return;
+  }
+  if (frame->argument0 == THREAD_GET_POINTER) {
+    frame->value = current_task()->thread_pointer;
+    return;
+  }
+  if (frame->argument0 >= THREAD_OPERATION_COUNT ||
+      frame->argument2 != sizeof(native_thread_request_t)) {
+    frame->value = -22;
+    return;
+  }
+  irq_state_t state = irq_save();
+  native_thread_request_t request;
+  if (!user_vm_copy_from(&request, frame->argument1, sizeof(request)) ||
+      (frame->argument0 == THREAD_CREATE &&
+       !user_vm_prepare_write(frame->argument1, sizeof(request)))) {
+    frame->value = -14;
+    irq_restore(state);
+    return;
+  }
+  switch (frame->argument0) {
+  case THREAD_CREATE:
+    frame->value = user_thread_create(&request);
+    if (!frame->value)
+      memcpy((void *)frame->argument1, &request, sizeof(request));
+    break;
+  case THREAD_SET_POINTER:
+    frame->value = user_thread_set_pointer(&request);
+    break;
+  case THREAD_JOIN:
+    frame->value = task_join_thread(request.tid, request.generation);
+    break;
+  case THREAD_DETACH:
+    frame->value = task_detach_thread(request.tid, request.generation);
+    break;
+  case THREAD_TERMINATE:
+    frame->value = task_terminate_thread(request.tid, request.generation);
+    break;
+  }
+  irq_restore(state);
+}
+
+static void syscall_read_env(syscall_context_t *frame) {
+  irq_state_t state = irq_save();
+  size_t name_size = frame->argument1;
+  if (!name_size || !user_vm_readable(frame->argument0, name_size) ||
+      ((const char *)frame->argument0)[name_size - 1]) {
+    frame->value = -14;
+    irq_restore(state);
+    return;
+  }
+  const char *value = env_read((char *)frame->argument0);
+  if (!value) {
+    frame->value = -2;
+    irq_restore(state);
+    return;
+  }
+  size_t length = strlen(value);
+  frame->value = length;
+  if (frame->argument3) {
+    if (frame->argument3 <= length)
+      frame->value = -75;
+    else if (!user_vm_prepare_write(frame->argument2, length + 1))
+      frame->value = -14;
+    else
+      memcpy((void *)frame->argument2, value, length + 1);
+  }
+  irq_restore(state);
 }
 
 static void syscall_execute(syscall_context_t *frame) {
@@ -1932,6 +1995,8 @@ static const syscall_handler_t syscall_handlers[SYSCALL_COUNT] = {
     [SYSCALL_TTY_INPUT_NOTIFY] = syscall_tty_input_notify,
     [SYSCALL_PERF_CONTROL] = syscall_perf_control,
     [SYSCALL_INPUT_WAIT] = syscall_input_wait,
+    [SYSCALL_USER_FUTEX] = syscall_futex,
+    [SYSCALL_NATIVE_THREAD] = syscall_thread,
     [SYSCALL_VIRTUAL_MEMORY] = syscall_virtual_memory,
 };
 

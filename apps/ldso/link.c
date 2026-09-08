@@ -1,4 +1,5 @@
 #include "ldso.h"
+#include <dlfcn.h>
 #include <fcntl.h>
 #include <runtime_args.h>
 
@@ -15,7 +16,8 @@ static bool symbol_exported(object_t *object, size_t index, const char *name) {
   unsigned binding = ELF32_ST_BIND(symbol->st_info);
   unsigned visibility = symbol->st_other & 3;
   return symbol->st_shndx != SHN_UNDEF &&
-         (binding == STB_GLOBAL || binding == STB_WEAK) &&
+         (binding == STB_GLOBAL || binding == STB_WEAK ||
+          binding == STB_GNU_UNIQUE) &&
          visibility != STV_HIDDEN && visibility != STV_INTERNAL &&
          !strcmp(object_string(object, symbol->st_name), name);
 }
@@ -65,10 +67,16 @@ static const Elf_Sym *object_lookup(object_t *object, const char *name,
 
 static definition_t symbol_definition(object_t *object, const Elf_Sym *symbol) {
   unsigned type = ELF32_ST_TYPE(symbol->st_info);
-  if (type != STT_NOTYPE && type != STT_OBJECT && type != STT_FUNC)
-    fail(object->path, "unsupported symbol type (TLS/IFUNC)");
+  if (type != STT_NOTYPE && type != STT_OBJECT && type != STT_FUNC &&
+      type != STT_TLS)
+    fail(object->path, "unsupported symbol type");
   uintptr_t address;
-  if (symbol->st_shndx == SHN_ABS) {
+  if (type == STT_TLS) {
+    if (!object->tls || symbol->st_value > object->tls->p_memsz ||
+        symbol->st_size > object->tls->p_memsz - symbol->st_value)
+      fail(object->path, "TLS symbol outside its segment");
+    address = symbol->st_value;
+  } else if (symbol->st_shndx == SHN_ABS) {
     address = symbol->st_value;
   } else {
     if (symbol->st_shndx >= 0xff00 || symbol->st_shndx == SHN_UNDEF)
@@ -86,11 +94,13 @@ static definition_t symbol_resolve(object_t *requester, size_t index,
   const Elf_Sym *reference = requester->symbols + index;
   unsigned binding = ELF32_ST_BIND(reference->st_info);
   unsigned visibility = reference->st_other & 3;
-  if (binding != STB_LOCAL && binding != STB_GLOBAL && binding != STB_WEAK)
+  if (binding != STB_LOCAL && binding != STB_GLOBAL && binding != STB_WEAK &&
+      binding != STB_GNU_UNIQUE)
     fail(requester->path, "unsupported symbol binding");
   unsigned type = ELF32_ST_TYPE(reference->st_info);
-  if (type != STT_NOTYPE && type != STT_FUNC && type != STT_OBJECT)
-    fail(requester->path, "unsupported symbol type (TLS/IFUNC)");
+  if (type != STT_NOTYPE && type != STT_FUNC && type != STT_OBJECT &&
+      type != STT_TLS)
+    fail(requester->path, "unsupported symbol type");
   if (reference->st_shndx == SHN_UNDEF &&
       (binding == STB_LOCAL || visibility != STV_DEFAULT)) {
     if (binding == STB_WEAK && !copy)
@@ -168,7 +178,34 @@ static void relocate_one(object_t *object, uintptr_t offset, uint64_t info,
     definition_t definition =
         index ? symbol_resolve(object, index, false) : (definition_t){0};
     uintptr_t symbol = definition.address;
+    object_t *module = definition.object ? definition.object : object;
     switch (type) {
+#if __SIZEOF_POINTER__ == 8
+    case R_X86_64_DTPMOD64:
+    case R_X86_64_DTPOFF64:
+    case R_X86_64_TPOFF64:
+#else
+    case R_386_TLS_DTPMOD32:
+    case R_386_TLS_DTPOFF32:
+    case R_386_TLS_TPOFF:
+    case R_386_TLS_TPOFF32:
+#endif
+      if (!module->tls ||
+          (index && (!definition.symbol ||
+                     ELF32_ST_TYPE(definition.symbol->st_info) != STT_TLS)))
+        fail(object->path, "TLS relocation without a TLS definition");
+#if __SIZEOF_POINTER__ == 8
+      value = type == R_X86_64_DTPMOD64 ? module->tls_module : symbol + addend;
+      if (type == R_X86_64_TPOFF64)
+        value -= module->tls_offset;
+#else
+      value = type == R_386_TLS_DTPMOD32 ? module->tls_module : symbol + addend;
+      if (type == R_386_TLS_TPOFF)
+        value -= module->tls_offset;
+      if (type == R_386_TLS_TPOFF32)
+        value = module->tls_offset - symbol + addend;
+#endif
+      break;
     case R_386_GLOB_DAT:
     case R_386_JMP_SLOT:
       value = symbol;
@@ -379,6 +416,143 @@ static void finalize(void) {
   }
 }
 
+static void prepare_tls(void) {
+  linker.tls_alignment = _Alignof(tls_control_t);
+  for (object_t *object = linker.first; object; object = object->next) {
+    const Elf_Phdr *tls = object->tls;
+    if (!tls)
+      continue;
+    size_t alignment = tls->p_align ? tls->p_align : 1;
+    size_t skew = tls->p_vaddr & (alignment - 1);
+    if (tls->p_memsz > SIZE_MAX - linker.tls_size ||
+        linker.tls_size + tls->p_memsz > SIZE_MAX - skew ||
+        linker.tls_size + tls->p_memsz + skew > SIZE_MAX - (alignment - 1))
+      fail(object->path, "TLS layout overflow");
+    object->tls_offset =
+        ((linker.tls_size + tls->p_memsz + skew + alignment - 1) &
+         ~(alignment - 1)) -
+        skew;
+    linker.tls_size = object->tls_offset;
+    if (alignment > linker.tls_alignment)
+      linker.tls_alignment = alignment;
+    object->tls_module = ++linker.tls_count;
+    if (tls->p_filesz) {
+      object_at(object, tls->p_vaddr, tls->p_filesz, PF_R);
+      bool covered = false;
+      for (size_t i = 0; i < object->segment_count; i++) {
+        const Elf_Phdr *load = object->segments + i;
+        if (load->p_type != PT_LOAD || tls->p_vaddr < load->p_vaddr)
+          continue;
+        uintptr_t offset = tls->p_vaddr - load->p_vaddr;
+        if (offset <= load->p_filesz &&
+            tls->p_filesz <= load->p_filesz - offset &&
+            tls->p_offset >= load->p_offset &&
+            tls->p_offset - load->p_offset == offset)
+          covered = true;
+      }
+      if (!covered)
+        fail(object->path, "TLS template outside file-backed load segment");
+    }
+  }
+}
+
+static tls_control_t *tls_allocate(size_t runtime_size,
+                                   thread_region_t *region) {
+  size_t alignment = linker.tls_alignment;
+  size_t count = linker.tls_count + 1;
+  if (runtime_size > SIZE_MAX - sizeof(tls_control_t) - sizeof(void *) ||
+      count > SIZE_MAX / sizeof(void *))
+    return NULL;
+  size_t control = (sizeof(tls_control_t) + runtime_size + sizeof(void *) - 1) &
+                   ~(sizeof(void *) - 1);
+  size_t vectors = count * sizeof(void *);
+  if (control > SIZE_MAX - vectors ||
+      control + vectors > SIZE_MAX - linker.tls_size ||
+      control + vectors + linker.tls_size > SIZE_MAX - alignment ||
+      control + vectors + linker.tls_size + alignment > SIZE_MAX - VM_PAGE_SIZE)
+    return NULL;
+  size_t size =
+      (control + vectors + linker.tls_size + alignment + VM_PAGE_SIZE - 1) &
+      ~(size_t)(VM_PAGE_SIZE - 1);
+  char *memory = vm_map(NULL, size);
+  if (!memory)
+    return NULL;
+  tls_control_t *pointer =
+      (void *)(((uintptr_t)memory + linker.tls_size + alignment - 1) &
+               ~(uintptr_t)(alignment - 1));
+  pointer->self = pointer;
+  pointer->module_count = linker.tls_count;
+  pointer->modules = (void **)((char *)pointer + control);
+  for (object_t *object = linker.first; object; object = object->next) {
+    if (!object->tls)
+      continue;
+    void *base = (char *)pointer - object->tls_offset;
+    pointer->modules[object->tls_module] = base;
+    if (object->tls->p_filesz)
+      memcpy(base, (const void *)(object->bias + object->tls->p_vaddr),
+             object->tls->p_filesz);
+  }
+  *region = (thread_region_t){(uintptr_t)memory, size};
+  return pointer;
+}
+
+static int lookup_symbol(const char *name, void **address) {
+  uint32_t sysv = 0, gnu = 5381;
+  for (const unsigned char *s = (const void *)name; *s; s++) {
+    sysv = (sysv << 4) + *s;
+    uint32_t high = sysv & 0xf0000000;
+    if (high)
+      sysv ^= high >> 24;
+    sysv &= ~high;
+    gnu = gnu * 33 + *s;
+  }
+  for (object_t *object = linker.first; object; object = object->next) {
+    const Elf_Sym *symbol = object_lookup(object, name, sysv, gnu);
+    if (!symbol)
+      continue;
+    definition_t definition = symbol_definition(object, symbol);
+    *address = ELF32_ST_TYPE(symbol->st_info) == STT_TLS
+                   ? (char *)tls_current()->modules[object->tls_module] +
+                         definition.address
+                   : (void *)definition.address;
+    return 0;
+  }
+  return -1;
+}
+
+static int address_info(const void *pointer, Dl_info *information) {
+  uintptr_t address = (uintptr_t)pointer;
+  for (object_t *object = linker.first; object; object = object->next) {
+    bool found = false;
+    for (size_t i = 0; i < object->segment_count; i++) {
+      const Elf_Phdr *segment = object->segments + i;
+      uintptr_t start = object->bias + segment->p_vaddr;
+      if (segment->p_type == PT_LOAD && address >= start &&
+          address - start < segment->p_memsz)
+        found = true;
+    }
+    if (!found)
+      continue;
+    *information =
+        (Dl_info){.dli_fname = object->path, .dli_fbase = (void *)object->bias};
+    for (size_t i = 0; i < object->symbol_count; i++) {
+      const Elf_Sym *symbol = object->symbols + i;
+      unsigned type = ELF32_ST_TYPE(symbol->st_info);
+      if (symbol->st_shndx == SHN_UNDEF || symbol->st_shndx >= 0xff00 ||
+          (type != STT_FUNC && type != STT_OBJECT))
+        continue;
+      uintptr_t value = object->bias + symbol->st_value;
+      if (value <= address && value >= (uintptr_t)information->dli_saddr &&
+          (!symbol->st_size || address - value < symbol->st_size)) {
+        information->dli_saddr = (void *)value;
+        information->dli_sname = object_string(object, symbol->st_name);
+      }
+    }
+    return 1;
+  }
+  return 0;
+}
+
 void Main(const loader_start_t *start) {
   bool verify = start == NULL;
   loader_start_t request;
@@ -419,6 +593,7 @@ void Main(const loader_start_t *start) {
             object_dependency(object, object_string(object, d->d_un.d_val));
     }
   }
+  prepare_tls();
   for (object_t *object = linker.first; object; object = object->next)
     object_relocate(object, false);
   for (object_t *object = linker.first; object; object = object->next)
@@ -435,7 +610,9 @@ void Main(const loader_start_t *start) {
   if (linker.count > SIZE_MAX / sizeof(object_t *))
     fail(NULL, "dependency graph size overflow");
   linker.initialized = allocate(linker.count * sizeof(object_t *));
-  static const runtime_linker_t hooks = {initialize, finalize};
+  const runtime_linker_t hooks = {initialize,   finalize,
+                                  tls_allocate, lookup_symbol,
+                                  address_info, linker.first->path};
   ((void (*)(const runtime_linker_t *))linker.first->entry)(&hooks);
   fail(NULL, "application entry returned");
 }

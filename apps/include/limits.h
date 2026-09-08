@@ -31,13 +31,13 @@
 * TODO: Is MB_LEN_MAX correct?
 */
 #define CHAR_BIT 8
-#define MB_LEN_MAX 2
+#define MB_LEN_MAX 4
 #define SCHAR_MIN (-128)
 #define SCHAR_MAX 127
 #define UCHAR_MAX 255
 /* TODO: Is this safe? I think it might just be testing the preprocessor,
 * not the compiler itself... */
-#if ('\x80' < 0)
+#if !defined(__CHAR_UNSIGNED__)
 #define CHAR_MIN SCHAR_MIN
 #define CHAR_MAX SCHAR_MAX
 #else
@@ -63,11 +63,11 @@
 */
 #define LONG_MAX __LONG_MAX__
 #define LONG_MIN (-LONG_MAX-1)
-#define ULONG_MAX 0xffffffffUL
+#define ULONG_MAX (2UL * LONG_MAX + 1UL)
 /*
 * The GNU C compiler also allows 'long long int'
 */
-#define LONG_LONG_MAX 9223370L
+#define LONG_LONG_MAX __LONG_LONG_MAX__
 #define LONG_LONG_MIN (-LONG_LONG_MAX-1)
 #define ULONG_LONG_MAX (2ULL * LONG_LONG_MAX + 1)
 /* ISO C9x macro names */

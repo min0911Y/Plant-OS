@@ -6,6 +6,10 @@
 extern "C" {
 #endif
 #include <ctypes.h>
+#include <locale.h>
+char *strerror(int error_number);
+int strerror_r(int error_number, char *buffer, size_t size);
+char *strtok(char *text, const char *separators);
 int strcmp(const char* s1, const char* s2);
 int strcasecmp(const char *s1, const char *s2);
 int strncasecmp(const char *s1, const char *s2, size_t length);
@@ -25,8 +29,12 @@ void F2S(double d, char* str, int l);
 char *strchr(const char *s, int c);
 char *strrchr(const char *s1, int ch);
 char *strpbrk(const char *s, const char *accept);
-const char *strstr(const char *p1, const char *p2);
+char *strstr(const char *p1, const char *p2);
 int strcoll(const char *str1, const char *str2);
+size_t strxfrm(char *destination, const char *source, size_t size);
+int strcoll_l(const char *left, const char *right, locale_t locale);
+size_t strxfrm_l(char *destination, const char *source, size_t size,
+                 locale_t locale);
 double strtod(const char * nptr, char ** endptr);
 size_t strcspn(const char *s, const char *c);
 size_t strspn(const char* s, const char *c);
@@ -36,6 +44,7 @@ void *memcpy(void *dest, const void *src, size_t n);
 void *mempcpy(void *dest, const void *src, size_t n);
 void *memmove(void *_d, const void *_s, size_t _n);
 char *strdup(const char *s);
+char *strndup(const char *s, size_t limit);
 char *strsep(char **string, const char *separators);
 #ifdef __cplusplus
 }

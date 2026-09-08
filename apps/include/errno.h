@@ -95,6 +95,7 @@
 #define EPROTONOSUPPORT 93 /* Protocol not supported */
 #define ESOCKTNOSUPPORT 94 /* Socket type not supported */
 #define EOPNOTSUPP 95 /* Operation not supported on transport endpoint */
+#define ENOTSUP EOPNOTSUPP
 #define EPFNOSUPPORT 96 /* Protocol family not supported */
 #define EAFNOSUPPORT 97 /* Address family not supported by protocol */
 #define EADDRINUSE 98 /* Address already in use */
@@ -124,6 +125,19 @@
 #define EDQUOT 122 /* Quota exceeded */
 #define ENOMEDIUM 123 /* No medium found */
 #define EMEDIUMTYPE 124 /* Wrong medium type */
-extern int errno;
-char *strerror(int errno);
+#define ECANCELED 125
+#define ENOKEY 126
+#define EKEYEXPIRED 127
+#define EKEYREVOKED 128
+#define EKEYREJECTED 129
+#define EOWNERDEAD 130
+#define ENOTRECOVERABLE 131
+#ifdef __cplusplus
+extern "C" {
+#endif
+int *__errno_location(void);
+#ifdef __cplusplus
+}
+#endif
+#define errno (*__errno_location())
 #endif

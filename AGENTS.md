@@ -27,6 +27,7 @@
 ## 构建与打包
 
 需要 GNU make、GCC/G++、binutils、NASM、mtools 和 QEMU；i386 工具链须支持 `-m32`/`elf_i386`。LiveCD 另需 `curl`、`tar` 和 `xorriso` 或 `genisoimage`。
+原生 C++ 运行库还需 Clang、CMake 和 Ninja；x86_64 默认包含 lavapipe，另需 Meson、匹配 LLVM 源码的宿主 TableGen、glslangValidator 和 Python 生成器模块。版本、缓存与构建说明见 [lavapipe](doc/lavapipe.md)。
 
 ```sh
 # i386：按顺序构建应用、DOSLDR、内核与磁盘镜像
@@ -52,10 +53,12 @@ make -C kernel ARCH=x86_64 livecd
 - 通用内核通过 `arch.h`、`platform.h`、`irq.h` 使用后端；x86 汇编、寄存器、GDT/IDT/TSS 布局及 PC 端口操作留在架构/平台目录。共享代码不引入固定指针宽度、私有 CPUID/port I/O 包装或 BIOS 细节。
 - i386 磁盘链为启动扇区 → DOSLDR → `kernel.bin`；Limine LiveCD 通过 Multiboot2 直接加载内核与 FAT initramfs。保持链接脚本的地址断言和前 32 KiB 内的 Multiboot2 header；initramfs 物理页须及时保留，不能被内存探测覆盖，作为可写但不持久化的 `R:` 根盘。
 - x86_64 使用 Limine native/base revision 3 的内存图、HHDM 和固件信息，不探测写 RAM、不扫描 BIOS 区或调用实模式服务。MP request 必须声明 x2APIC 支持，保留固件已启用的模式。启动协议、SSE2/XSAVE 与 syscall/信号帧约束见 [多架构说明](doc/multiarch.md)。
+- 页元数据须覆盖启动器和模块占用的 RAM，不能只覆盖最高空闲区；这些页保持保留，不纳入分配。MMIO 和普通固件保留地址不能被当作 RAM 扩大范围。
 - 内核保持 freestanding 编译约束，C++ 禁用异常和 RTTI。i386 使用 x87、禁用 MMX/SSE；x86_64 两侧使用 `-mno-red-zone -msse2 -mfpmath=sse -mlong-double-64`。i386 执行字符集为 GB2312，x86_64 应用为 UTF-8；修改文字输出时检查编码和字节长度。
 - 用户 syscall 编号和参数顺序统一维护在 `apps/libp/arch/syscalls.inc`。修改 ABI 时同步内核处理器、`apps/include/`、两种架构包装及调用方，保留结构大小断言；i386 包装必须保存 EBX、ESI、EDI、EBP。用户指针及其完整范围必须验证，变长结果使用 query + capacity。
 - 汇编保存顺序与 C 结构是内部 ABI；修改时检查任务初始栈、切换、fork、信号和返回路径。返回用户态前校验完整 frame；除合法 COW 和 lazy-FPU 恢复外，普通用户异常终止任务，内核异常及 NMI/双重故障/机器检查停机。
 - 正式应用使用原生 `ET_DYN` PIE、`/lib/ld.so` 和 `libp.so`，C++ 另用 `libcpp.so`；统一经 `apps/libp/entry.c` 初始化后调用 `main`。静态自举解释器与 i386 TCC SDK 单独构建，不混用 PIC/非 PIC 归档。
+- `libcpp.so` 使用配套的原生 libc++/libc++abi，禁用异常和 RTTI；C++ 头文件取对应架构的构建产物，不恢复旧 GNU C++ 头文件或第二套 ABI。每个 ELF 对象拥有独立 hidden `__dso_handle`，依赖装载与 TLS 保持在现有解释器中。
 - 动态链接只在 `apps/ldso/` 中实现。内核经 `loader_start_t` 交付原 ELF fd 和路径，从系统启动盘加载解释器；ELF 与启动 ABI 由 `apps/include/elf.h`、`loader.h` 单源定义。库搜索、重定位、构造/析构及 VM 权限规则见 [动态链接](doc/dynamic-linking.md)。
 - ELF/VM 映射须检查大小、溢出、地址冲突和权限，失败回滚，拒绝 W+X；i386 保持 CR0.WP，区分 COW 与真正只读页。用户初始栈和堆用共享零页按需分配，写入时走 COW；COW 缺页分配失败终止所属任务。用户页表先分离内核共享映射，物理页引用只经正式 page API 维护；线程退出不能回收地址空间仍持有的页。
 - 系统盘必须含 `init.bin`、`psh.bin`、`sys.cfg`、`lib/ld.so` 和 `lib/libp.so`，探测失败必须 panic。启动扇区、加载地址、ELF 入口或磁盘布局变化须检查 loader/kernel 两侧并完整构建、冷启动。
@@ -63,6 +66,8 @@ make -C kernel ARCH=x86_64 livecd
 ## 并发与资源生命周期
 
 - 普通临界区成对使用 `irq_save()`/`irq_restore()`，保留调用者中断状态。等待路径在同一临界区检查条件、发布等待并处理 ready 竞态；调度启动后用 waiter/timer 阻塞，不持有 kernel lock 忙等。
+- 用户态地址等待统一使用 `apps/include/futex.h` 的进程私有 futex，使用绝对单调 deadline 和原子谓词，不能消费 IPC 消息或自旋替代阻塞；任务回收前必须摘除内核栈上的等待记录。运行库与渲染器依赖见 [lavapipe 移植](doc/lavapipe.md)。
+- 原生线程通过 `native_thread.h` 管理 TLS 指针及可选托管栈/TLS 映射；退出后由内核释放映射。pthread 和 `AddThread` 共用 TLS 初始化，errno、locale、TSS、C++ 线程析构与浮点环境按线程处理；x86_64 使用 FS，i386 使用 GS。修改线程运行库时同步 fork 的锁交接和子线程身份恢复。
 - IRQ、异常和 syscall 入口按现有约定进入/离开 kernel lock；可能调度后重新读取当前 CPU。IRQ 回调不分配、不阻塞、不自行 EOI 或切换任务，由统一分派器完成 EOI 和调度；ISA 使用独占注册，PCI INTx 使用共享注册。
 - 任务资源全部构造完成后调用 `task_publish`，失败用 `task_abort_creation`；启动参数及输入队列归新任务所有；任务退出取消 waiter/timer 并释放所属资源，内核栈只在切离后随任务槽回收。任务注册表通过迭代器访问，TID/页引用不得收窄为 8 位，异步引用用 TID/generation 识别。
 - 保持每 CPU 的 current、idle 和运行队列，只有 BSP 推进全局时钟及 timeout。调度器不可自切换；BSP 在资源就绪且释放最外层 kernel lock 后唤醒 AP，AP 等待 release 时休眠。
@@ -80,12 +85,15 @@ make -C kernel ARCH=x86_64 livecd
 - `AddThread(name, entry, stack_top, argument)` 显式传四个参数，入口由架构建立对齐调用帧；调用者不手写栈槽。活动 TTY 与 `tty_session` 分开维护，销毁 TTY 前迁移会话并清理相关任务、FIFO、栈与窗口。
 - GUI 是单例 `gui` RPC 服务，须在切换显示和获取输入前注册。客户端只持有不透明窗口句柄及经过 owner/generation 校验的共享区域；焦点显式维护。终端由独立的 C 应用 `term.bin` 提供，直接链接 os-terminal 的对应架构静态库，默认通过 fartty 启动 `psh.bin`；GUI 不内置终端；图层动态增长，像素归属使用稳定指针。窗口绘图与提交缓冲使用独立 VM 映射，关闭或 owner 退出后解除映射。终端订阅窗口事件通知并在空闲时阻塞。fartty 原样转发 ANSI 字节，绕过内核旧 VT100 解析器；term 关闭 auto-flush，合并输出后显式刷新并同步提交窗口，有按键时调用 `tty_notify_input`。`fartty` 通过同一 IPC/RPC 协议调用所属服务，使用不透明 TTY 句柄及 TID/generation 校验；内核不得切换到用户地址空间执行回调，RPC 等待不得消费应用消息。依赖与验证见 [终端](doc/terminal.md)。
 - SDL 唯一实现为 `apps/sdl3`，应用直接使用 SDL3、SDL3_image 与 SDL3_ttf API，不引入 SDL2 兼容层。GUI 合成读取已提交画面，`window_present` 应答后客户端才复用绘图缓冲，`window_refresh` 保留异步 damage 合并。显示布局以 `framebuffer_info()` 的实际尺寸、pitch 和颜色位序为准；framebuffer 别名保持相同缓存属性。详情见 [显示与 SDL](doc/multiarch.md)。
+- JIT 编译器及其目标库运行在原生用户态；生成代码也必须遵循当前架构的调用约定、SIMD、无 red zone 和 W^X 约束，不能仅依赖构建编译器本体的选项。Mesa/lavapipe 的依赖、移植阶段和实际支持状态见 [lavapipe 移植](doc/lavapipe.md)。
+- x86_64 SDL renderer 可选择原生 lavapipe；普通应用使用 SDL 的后端选择，回归显式固定软件后端并断言默认选择为 Vulkan。SDL window surface 默认使用直接共享缓冲。Vulkan WSI 使用 `window_get_buffer` 的实际布局，在渲染完成且同步 present 应答后才复用图像；平台代码、上游补丁与宿主生成器统一维护在 `apps/mesa/` 和 `scripts/build-mesa.py`，不引入宿主驱动或装载器。
 
 ### 文件系统与设备
 
 - 路径解析唯一实现在 VFS；驱动只接收目录 node 和单个 component。`X:` 从指定盘根开始，`/` 从当前盘根开始，相对路径从 cwd 开始；rename 不跨挂载，打开文件和 cwd/祖先目录的 unlink/rename 返回 `EBUSY`。
 - `vfs_context` 封装 cwd 与 fd 表：线程共享，普通新进程继承 cwd，fork 复制 fd 表并共享 open-file description。挂载区分 `INITIALIZING`、`ACTIVE`、`RETIRED`；卸载先摘除再等引用归零，format 与挂载初始化/销毁互斥且拒绝有引用的盘。存在旧挂载引用或 format reservation 的盘符不能复用，旧句柄不得访问新介质。
 - 用户文件操作统一经 `SYSCALL_VFS`，`FILE` 为不透明类型。读写返回实际字节数或错误；`mkdir`、`chdir`、`format` 等包装成功返回 0，失败返回 -1 并设置 `errno`，调用方按标准语义判断。
+- 目录流持有真实目录描述符；stat 的设备/节点身份由 VFS 维护，不暴露内核地址。realpath 和 truncate 走统一 VFS 操作。stdio 的文件与内存流共用实现，共享流须加锁，注册表与流锁按统一顺序获取；fork、失败回滚和部分写入必须保留一致状态。
 - `vdisk` 保留 64 位容量/LBA、真实 I/O 状态及设备传输能力，分批 I/O 间响应重调度，`fsync` 下传设备同步。FAT/PFS 只探测 512-byte 块盘，ISO9660 使用 2048-byte 光盘接口；保留 A:/B:/C: 的软驱/DEVFS/legacy IDE 槽位。
 - 文件缓存保持 write-through，写成功后才更新或失效缓存；连续簇/扇区批量 I/O，避免逐页拆分及多余复制。格式化先校验全部输入和布局，初始化保留区并回读验证，底层失败传播到 VFS、shell 和安装器。
 - PCI 统一经 `pci.h` 枚举与访问，驱动从注册表查询；ECAM 覆盖范围内的独立根总线不能遗漏，无对应 ECAM 时仅 segment 0 可用 CF8/CFC。BAR 探测只在接管静止设备时进行，配置访问遵守真实寄存器宽度及 W1C 语义。
@@ -96,6 +104,7 @@ make -C kernel ARCH=x86_64 livecd
 - 网络协议唯一实现为 `kernel/net/third_party/lwip`，使用 `NO_SYS=1` raw API；`net_stack.c` 管链路/异步 DHCP，`socket.c` 管用户端点，网卡驱动只管帧、DMA 和 IRQ。普通路径以 IRQ 临界区串行 raw API，回环 drain 不在 output callback 中重入协议栈。
 - `lo` 独立于网卡和 DHCP；socket 句柄按 task group 所有，阻塞由 `WAIT_REASON_SOCKET` 与 callback/timeout 唤醒。用户网络统一经 `SYSCALL_SOCKET`，不向用户暴露内核指针或增加第二套协议实现。
 - `clock()` 保持毫秒 ABI，高分辨率计时使用 `monotonic_ns()`；调度后的 sleep 使用阻塞 timer。RTC 提供 UTC，`localtime`/`mktime` 当前为 UTC+08:00。
+- `time_t` 在两个架构均为有符号 64 位秒；标准 timespec/clock_gettime/nanosleep 由原生包装提供。标量数学与 `fenv` 保留舍入及异常标志语义，i386 不执行 SSE；不能以简化公式替代 FMA 等要求单次舍入的操作。
 - 正常热路径不输出逐次分配、裸地址或输入报告。性能采样 IRQ 仅写固定聚合表，格式与控制 ABI 同宿主解析器同步；采集和火焰图说明见 [性能分析](doc/performance.md)。
 
 ## 验证与交付
@@ -117,6 +126,8 @@ python3 scripts/test-x86_64.py --arch i386 --dynamic --memory 512
 | --- | --- |
 | IPC/RPC、磁盘、网络 | `rpctest.bin`、`dktest.bin`、`nettest.bin` |
 | 任务、异常、浮点 | `guitest.bin stress`/`capacity`、`--memory-pressure`、`exc_test.bin`、i386 `fputest.bin`、x86_64 `simdtest.bin` |
+| 用户态线程、TLS、运行库 | `--threads`、`--futex`，覆盖同步、分配、C/C++、stdio、浮点环境和动态链接/VM |
+| LLVM、Vulkan 与 WSI | x86_64 `--llvm`、`--lavapipe --memory 3072 --timeout 600`，同时验证着色器结果、窗口像素与输入 |
 | GUI、输入、SDL、工具 | `--mouse`、`--console`、`--editor`、`--sdl`、`--terminal-load COUNT`、`--desktop-app`（`lite` 或 `nk`）、`--tools` |
 | 动态链接与全部应用装载 | `--dynamic`、`--all-apps`，见 [动态链接验证](doc/dynamic-linking.md#验证) |
 | USB、PCI、AHCI | `--usb`、`--usb-hubs`、`--usb-irq`、`--usb-root-bus`、`--ahci --machine q35`；故障与模式组合见对应专题文档 |

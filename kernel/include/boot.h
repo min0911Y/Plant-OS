@@ -10,6 +10,8 @@ enum { BOOT_MEMORY_RANGE_CAPACITY = 64 };
 typedef enum {
   BOOT_MEMORY_RESERVED,
   BOOT_MEMORY_USABLE,
+  /* RAM occupied by boot modules, firmware data or the bootloader. */
+  BOOT_MEMORY_RESERVED_RAM,
 } boot_memory_type_t;
 
 typedef struct {

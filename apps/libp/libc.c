@@ -1,12 +1,13 @@
-#include <errno.h>
 #include <ctype.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <locale.h>
 #include <math.h>
 #include <rand.h>
-#include <stdio.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <syscall.h>
@@ -20,42 +21,6 @@ static inline float eval_as_float(float value) {
 #define SZ_4K 0x1000u
 
 int __rem_pio2f(float x, double *y);
-int errno = 0;
-FILE *stdout;
-FILE *stdin;
-FILE *stderr;
-int vsnprintf(char *buf, size_t n, const char *fmt, va_list ap);
-
-enum stdio_mode {
-  STDIO_READ = 1u << 0,
-  STDIO_WRITE = 1u << 1,
-  STDIO_APPEND = 1u << 2,
-};
-
-enum stdio_direction {
-  STDIO_DIRECTION_NONE,
-  STDIO_DIRECTION_READ,
-  STDIO_DIRECTION_WRITE,
-};
-
-struct FILE {
-  struct FILE *previous;
-  struct FILE *next;
-  unsigned char *buffer;
-  size_t buffer_length;
-  size_t buffer_position;
-  int descriptor;
-  unsigned int mode;
-  enum stdio_direction direction;
-  int unget_character;
-  unsigned char eof;
-  unsigned char error;
-  unsigned char registered;
-};
-
-static FILE *stdio_streams;
-static FILE *stdio_fdopen_impl(int descriptor, const char *mode);
-
 // strcmp
 int strcmp(const char *s1, const char *s2) {
   while (*s1 == *s2) {
@@ -72,6 +37,19 @@ char *strdup(const char *s) {
   if (!d)
     return NULL;
   return memcpy(d, s, l + 1);
+}
+char *strndup(const char *s, size_t limit) {
+  size_t length = strnlen(s, limit);
+  if (length == SIZE_MAX) {
+    errno = EOVERFLOW;
+    return NULL;
+  }
+  char *result = malloc(length + 1);
+  if (result) {
+    memcpy(result, s, length);
+    result[length] = 0;
+  }
+  return result;
 }
 // strcpy
 char *strcpy(char *dest, const char *src) {
@@ -332,7 +310,6 @@ void *mempcpy(void *dest, const void *src, size_t n) {
   return (char *)memcpy(dest, src, n) + n;
 }
 
-int vprintf(const char *fmt, va_list ap) { return vfprintf(stdout, fmt, ap); }
 static char *twobyte_memmem(const unsigned char *h, size_t k,
                             const unsigned char *n) {
   uint16_t nw = n[0] << 8 | n[1], hw = h[0] << 8 | h[1];
@@ -517,443 +494,8 @@ char *strtok(char *restrict s, const char *restrict sep) {
     p = 0;
   return s;
 }
-int putchar(int ch) { putch((char)ch);
-  return ch;
-}
 
-enum flags1 {
-  FL_SPLAT = 0x01,  /* Drop the value, do not assign */
-  FL_INV = 0x02,    /* Character-set with inverse */
-  FL_WIDTH = 0x04,  /* Field width specified */
-  FL_MINUS1 = 0x08, /* Negative number */
-};
 
-enum rank1s1 {
-  rank1_char = -2,
-  rank1_short = -1,
-  rank1_int = 0,
-  rank1_long = 1,
-  rank1_longlong = 2,
-  rank1_ptr = INT_MAX, /* Special value used for pointers */
-};
-
-#define MIN_rank1 rank1_char
-#define MAX_rank1 rank1_longlong
-#define INTMAX_rank1 rank1_longlong
-#define SIZE_T_rank1 rank1_long
-#define PTRDIFF_T_rank1 rank1_long
-
-enum bail {
-  bail_none = 0, /* No error condition */
-  bail_eof,      /* Hit EOF */
-  bail_err,      /* Conversion mismatch */
-};
-
-static inline const char *skipspace(const char *p) {
-  while (isspace((unsigned char)*p))
-    p++;
-  return p;
-}
-
-static inline void set_bit(unsigned long *bitmap, unsigned int bit) {
-  bitmap[bit / (8 * sizeof(long))] |= 1UL << (bit % (8 * sizeof(long)));
-}
-
-static inline int test_bit(unsigned long *bitmap, unsigned int bit) {
-  return (int)(bitmap[bit / (8 * sizeof(long))] >> (bit % (8 * sizeof(long)))) &
-         1;
-}
-uintmax_t strntoumax(const char *str, char **endptr, int base, size_t n) {
-  // 检查参数是否合法
-  if (str == NULL || (base != 0 && (base < 2 || base > 36))) {
-    errno = EINVAL; // 设置错误码
-    return 0;
-  }
-
-  uintmax_t result = 0; // 用于存储转换结果
-  int neg = 0;          // 是否是负数
-  size_t count = 0;
-
-  // 跳过空白符
-  while (isspace(*str) && count < n) {
-    ++str;
-    ++count;
-  }
-
-  // 处理正负号
-  if (*str == '-' && count < n) {
-    neg = 1;
-    ++str;
-    ++count;
-  } else if (*str == '+' && count < n) {
-    ++str;
-    ++count;
-  }
-
-  // 确定进制
-  if (base == 0) {
-    // 自动判断进制
-    if (*str == '0' && count < n) {
-      ++str;
-      ++count;
-      if ((*str == 'x' || *str == 'X') && count < n) {
-        base = 16;
-        ++str;
-        ++count;
-      } else {
-        base = 8;
-      }
-    } else {
-      base = 10;
-    }
-  } else if (base == 16) {
-    // 处理0x/0X前缀
-    if (*str == '0' && count < n) {
-      ++str;
-      ++count;
-      if ((*str == 'x' || *str == 'X') && count < n) {
-        ++str;
-        ++count;
-      }
-    }
-  }
-
-  // 转换数字部分
-  int digit;
-  while ((digit = isalnum(*str) ? toupper(*str) - '0' : 36) < base &&
-         count < n) {
-    result = result * base + digit;
-    ++str;
-    ++count;
-  }
-
-  // 检查是否有未处理的部分
-  if (endptr != NULL) {
-    *endptr = (char *)str;
-  }
-  while (count < n && isspace(*str)) {
-    ++str;
-    ++count;
-  }
-  if (count >= n) {
-    errno = ERANGE; // 设置错误码
-  }
-
-  // 添加符号位
-  if (neg) {
-    result = -result;
-  }
-
-  return result;
-}
-
-int vsscanf(const char *buf, const char *fmt, va_list ap) {
-  const char *p = fmt;
-  char ch;
-  unsigned char uc;
-  const char *q = buf;
-  const char *qq;
-  uintmax_t val = 0;
-  int rank1 = rank1_int;
-  unsigned int width = INT_MAX;
-  int base;
-  enum flags1 flags1 = 0;
-  enum {
-    st_normal,      /* Ground state */
-    st_flags1,      /* Special flags1 */
-    st_width,       /* Field width */
-    st_modifiers,   /* Length or conversion modifiers */
-    st_match_init,  /* Initial state of %[ sequence */
-    st_match,       /* Main state of %[ sequence */
-    st_match_range, /* After - in a %[ sequence */
-  } state = st_normal;
-  char *sarg = NULL; /* %s %c or %[ string argument */
-  enum bail bail = bail_none;
-  int converted = 0; /* Successful conversions */
-  unsigned long
-      matchmap[((1 << 8) + ((8 * sizeof(long)) - 1)) / (8 * sizeof(long))];
-  int matchinv = 0; /* Is match map inverted? */
-  unsigned char range_start = 0;
-
-  while ((ch = *p++) && !bail) {
-    switch (state) {
-    case st_normal:
-      if (ch == '%') {
-        state = st_flags1;
-        flags1 = 0;
-        rank1 = rank1_int;
-        width = INT_MAX;
-      } else if (isspace((unsigned char)ch)) {
-        q = skipspace(q);
-      } else {
-        if (*q == ch)
-          q++;
-        else
-          bail = bail_err;
-      }
-      break;
-
-    case st_flags1:
-      switch (ch) {
-      case '*':
-        flags1 |= FL_SPLAT;
-        break;
-      case '0' ... '9':
-        width = (ch - '0');
-        state = st_width;
-        flags1 |= FL_WIDTH;
-        break;
-      default:
-        state = st_modifiers;
-        p--; /* Process this character again */
-        break;
-      }
-      break;
-
-    case st_width:
-      if (ch >= '0' && ch <= '9') {
-        width = width * 10 + (ch - '0');
-      } else {
-        state = st_modifiers;
-        p--; /* Process this character again */
-      }
-      break;
-
-    case st_modifiers:
-      switch (ch) {
-      /* Length modifiers - nonterminal sequences */
-      case 'h':
-        rank1--; /* Shorter rank1 */
-        break;
-      case 'l':
-        rank1++; /* Longer rank1 */
-        break;
-      case 'j':
-        rank1 = INTMAX_rank1;
-        break;
-      case 'z':
-        rank1 = SIZE_T_rank1;
-        break;
-      case 't':
-        rank1 = PTRDIFF_T_rank1;
-        break;
-      case 'L':
-      case 'q':
-        rank1 = rank1_longlong; /* long double/long long */
-        break;
-
-      default:
-        /* Output modifiers - terminal sequences */
-        /* Next state will be normal */
-        state = st_normal;
-
-        /* Canonicalize rank1 */
-        if (rank1 < MIN_rank1)
-          rank1 = MIN_rank1;
-        else if (rank1 > MAX_rank1)
-          rank1 = MAX_rank1;
-
-        switch (ch) {
-        case 'P': /* Upper case pointer */
-        case 'p': /* Pointer */
-          rank1 = rank1_ptr;
-          base = 0;
-          goto scan_int;
-
-        case 'i': /* Base-independent integer */
-          base = 0;
-          goto scan_int;
-
-        case 'd': /* Decimal integer */
-          base = 10;
-          goto scan_int;
-
-        case 'o': /* Octal integer */
-          base = 8;
-          goto scan_int;
-
-        case 'u': /* Unsigned decimal integer */
-          base = 10;
-          goto scan_int;
-
-        case 'x': /* Hexadecimal integer */
-        case 'X':
-          base = 16;
-          goto scan_int;
-
-        case 'n': /* # of characters consumed */
-          val = (q - buf);
-          goto set_integer;
-
-        scan_int:
-          q = skipspace(q);
-          if (!*q) {
-            bail = bail_eof;
-            break;
-          }
-          val = strntoumax(q, (char **)&qq, base, width);
-          if (qq == q) {
-            bail = bail_err;
-            break;
-          }
-          q = qq;
-          if (!(flags1 & FL_SPLAT))
-            converted++;
-
-        set_integer:
-          if (!(flags1 & FL_SPLAT)) {
-            switch (rank1) {
-            case rank1_char:
-              *va_arg(ap, unsigned char *) = val;
-              break;
-            case rank1_short:
-              *va_arg(ap, unsigned short *) = val;
-              break;
-            case rank1_int:
-              *va_arg(ap, unsigned int *) = val;
-              break;
-            case rank1_long:
-              *va_arg(ap, unsigned long *) = val;
-              break;
-            case rank1_longlong:
-              *va_arg(ap, unsigned long long *) = val;
-              break;
-            case rank1_ptr:
-              *va_arg(ap, void **) = (void *)(uintptr_t)val;
-              break;
-            }
-          }
-          break;
-
-        case 'c': /* Character */
-          width = (flags1 & FL_WIDTH) ? width : 1;
-          if (flags1 & FL_SPLAT) {
-            while (width--) {
-              if (!*q) {
-                bail = bail_eof;
-                break;
-              }
-            }
-          } else {
-            sarg = va_arg(ap, char *);
-            while (width--) {
-              if (!*q) {
-                bail = bail_eof;
-                break;
-              }
-              *sarg++ = *q++;
-            }
-            if (!bail)
-              converted++;
-          }
-          break;
-
-        case 's': /* String */
-          uc = 1; /* Anything nonzero */
-          if (flags1 & FL_SPLAT) {
-            while (width-- && (uc = *q) && !isspace(uc)) {
-              q++;
-            }
-          } else {
-            char *sp;
-            sp = sarg = va_arg(ap, char *);
-            while (width-- && (uc = *q) && !isspace(uc)) {
-              *sp++ = uc;
-              q++;
-            }
-            if (sarg != sp) {
-              /*
-               * Terminate output
-               */
-              *sp = '\0';
-              converted++;
-            }
-          }
-          if (!uc)
-            bail = bail_eof;
-          break;
-
-        case '[': /* Character range */
-          sarg = (flags1 & FL_SPLAT) ? NULL : va_arg(ap, char *);
-          state = st_match_init;
-          matchinv = 0;
-          memset(matchmap, 0, sizeof matchmap);
-          break;
-
-        case '%': /* %% sequence */
-          if (*q == '%')
-            q++;
-          else
-            bail = bail_err;
-          break;
-
-        default: /* Anything else */
-          /* Unknown sequence */
-          bail = bail_err;
-          break;
-        }
-        break;
-      }
-      break;
-
-    case st_match_init: /* Initial state for %[ match */
-      if (ch == '^' && !(flags1 & FL_INV)) {
-        matchinv = 1;
-      } else {
-        set_bit(matchmap, (unsigned char)ch);
-        state = st_match;
-      }
-      break;
-
-    case st_match: /* Main state for %[ match */
-      if (ch == ']') {
-        goto match_run;
-      } else if (ch == '-') {
-        range_start = (unsigned char)ch;
-        state = st_match_range;
-      } else {
-        set_bit(matchmap, (unsigned char)ch);
-      }
-      break;
-
-    case st_match_range: /* %[ match after - */
-      if (ch == ']') {
-        /* - was last character */
-        set_bit(matchmap, (unsigned char)'-');
-        goto match_run;
-      } else {
-        int i;
-        for (i = range_start; i < (unsigned char)ch; i++)
-          set_bit(matchmap, i);
-        state = st_match;
-      }
-      break;
-
-    match_run: /* Match expression finished */
-      qq = q;
-      uc = 1; /* Anything nonzero */
-      while (width && (uc = *q) && (test_bit(matchmap, uc) ^ matchinv)) {
-        if (sarg)
-          *sarg++ = uc;
-        q++;
-      }
-      if (q != qq && sarg) {
-        *sarg = '\0';
-        converted++;
-      } else {
-        bail = bail_err;
-      }
-      if (!uc)
-        bail = bail_eof;
-      break;
-    }
-  }
-
-  if (bail == bail_eof && !converted)
-    converted = -1;
-
-  return converted;
-}
 int sscanf(const char *s, const char *fmt, ...) {
   int ret;
   va_list ap;
@@ -1094,7 +636,7 @@ static void trinkle(unsigned char *head, size_t width, cmpfun cmp, void *arg,
   }
 }
 
-void qsort(void *base, size_t nel, size_t width, cmpfun cmp, void *arg) {
+void qsort_r(void *base, size_t nel, size_t width, cmpfun cmp, void *arg) {
   size_t lp[12 * sizeof(size_t)];
   size_t i, size = width * nel;
   unsigned char *head, *high;
@@ -1165,26 +707,6 @@ int snprintf(char *s, size_t n, const char *fmt, ...) {
   ret = vsnprintf(s, n, fmt, ap);
   va_end(ap);
   return ret;
-}
-#define MAX_ENV_VARIABLES 100
-#define MAX_ENV_LENGTH 100
-char environment[MAX_ENV_VARIABLES][MAX_ENV_LENGTH];
-void init_env() {
-  for (int i = 0; i < MAX_ENV_LENGTH; i++) {
-    environment[i][0] = 0;
-  }
-}
-char *getenv(char *name) {
-  for (int i = 0; i < MAX_ENV_VARIABLES; i++) {
-    if (!environment[i][0])
-      if (api_get_env(name, environment[i]) != NULL) {
-        char *delim = environment[i];
-        return delim;
-      }
-  }
-
-  // 没有找到匹配的环境变量
-  return NULL;
 }
 #define weak __attribute__((__weak__))
 #define hidden __attribute__((__visibility__("hidden")))
@@ -1509,13 +1031,6 @@ double log2(double x) {
   y = lo + r2 * p + hi;
   return eval_as_double(y);
 }
-int fileno(FILE *fp) {
-  if (fp == NULL) {
-    errno = EINVAL;
-    return -1;
-  }
-  return fp->descriptor;
-}
 char *tmpnam(char *str) {
   static char charset[] =
       "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -1547,7 +1062,7 @@ int remove(const char *filename) {
   }
   return 0;
 }
-int rename(char *filename1, char *filename2) {
+int rename(const char *filename1, const char *filename2) {
   vfs_syscall_request_t request = {0};
   request.size = sizeof(request);
   request.arguments.rename.source = (uintptr_t)filename1;
@@ -1755,45 +1270,6 @@ size_t strftime(char *s, size_t max, const char *fmt, const struct tm *t) {
   *p = '\0';
   return p - s;
 }
-void rewind(FILE *stream) { fseek(stream, 0, SEEK_SET); }
-int fscanf(FILE *f, const char *fmt, ...) {
-  va_list ap;
-  char *buf;
-  int rv;
-
-  buf = malloc(SZ_4K);
-  if (!buf)
-    return 0;
-
-  memset(buf, 0, SZ_4K);
-  fread(buf, 1, SZ_4K, f);
-
-  va_start(ap, fmt);
-  rv = vsscanf(buf, fmt, ap);
-  va_end(ap);
-
-  free(buf);
-  return rv;
-}
-int scanf(const char *fmt, ...) {
-  va_list ap;
-  char *buf;
-  int rv;
-
-  buf = malloc(SZ_4K);
-  if (!buf)
-    return 0;
-
-  memset(buf, 0, SZ_4K);
-  fread(buf, 1, SZ_4K, stdin);
-
-  va_start(ap, fmt);
-  rv = vsscanf(buf, fmt, ap);
-  va_end(ap);
-
-  free(buf);
-  return rv;
-}
 char pwd[255];
 
 char *getcwd(char *buf, size_t size) {
@@ -1813,302 +1289,12 @@ char *getcwd(char *buf, size_t size) {
   return buf;
 }
 int unlink(const char *pathname) { return remove(pathname); }
-unsigned long strtoul(const char *s, char **endptr, int base) {
-  unsigned long result = 0;
-  int sign = 1;
 
-  // 跳过空白字符
-  while (isspace(*s)) {
-    s++;
-  }
 
-  // 检查正负号
-  if (*s == '-' || *s == '+') {
-    sign = (*s++ == '-') ? -1 : 1;
-  }
 
-  // 检查进制前缀
-  if ((base == 0 || base == 16) && s[0] == '0' &&
-      (s[1] == 'x' || s[1] == 'X')) {
-    base = 16;
-    s += 2;
-  } else if (base == 0 && s[0] == '0') {
-    base = 8;
-    s++;
-  } else if (base == 0) {
-    base = 10;
-  }
 
-  // 转换字符为数字并累加
-  while (isalnum(*s)) {
-    int digit;
-    if (isdigit(*s)) {
-      digit = *s - '0';
-    } else {
-      digit = toupper(*s) - 'A' + 10;
-    }
 
-    if (digit >= base) {
-      break;
-    }
 
-    result = result * base + digit;
-    s++;
-  }
-
-  // 设置结束指针
-  if (endptr != NULL) {
-    *endptr = (char *)s;
-  }
-
-  return sign * result;
-}
-
-float strtof(const char *nptr, char **endptr) {
-  return (float)strtod(nptr, endptr);
-}
-FILE *fdopen(int fd, const char *mode) { return stdio_fdopen_impl(fd, mode); }
-
-long long strtoll(const char *nptr, char **endptr, int base) {
-  const char *s;
-  long long acc, cutoff;
-  int c;
-  int neg, any, cutlim;
-
-  /*
-   * Skip white space and pick up leading +/- sign if any.
-   * If base is 0, allow 0x for hex and 0 for octal, else
-   * assume decimal; if base is already 16, allow 0x.
-   */
-  s = nptr;
-  do {
-    c = (unsigned char)*s++;
-  } while (isspace(c));
-
-  if (c == '-') {
-    neg = 1;
-    c = *s++;
-  } else {
-    neg = 0;
-    if (c == '+')
-      c = *s++;
-  }
-
-  if ((base == 0 || base == 16) && c == '0' && (*s == 'x' || *s == 'X')) {
-    c = s[1];
-    s += 2;
-    base = 16;
-  }
-
-  if (base == 0)
-    base = c == '0' ? 8 : 10;
-
-  /*
-   * Compute the cutoff value between legal numbers and illegal
-   * numbers.  That is the largest legal value, divided by the
-   * base.  An input number that is greater than this value, if
-   * followed by a legal input character, is too big.  One that
-   * is equal to this value may be valid or not; the limit
-   * between valid and invalid numbers is then based on the last
-   * digit.  For instance, if the range for long long is
-   * [-9223372036854775808..9223372036854775807] and the input base
-   * is 10, cutoff will be set to 922337203685477580 and cutlim to
-   * either 7 (neg==0) or 8 (neg==1), meaning that if we have
-   * accumulated a value > 922337203685477580, or equal but the
-   * next digit is > 7 (or 8), the number is too big, and we will
-   * return a range error.
-   *
-   * Set any if any 'digits' consumed; make it negative to indicate
-   * overflow.
-   */
-
-  switch (base) {
-  case 4:
-    if (neg) {
-      cutlim = LLONG_MIN % 4;
-      cutoff = LLONG_MIN / 4;
-    } else {
-      cutlim = LLONG_MAX % 4;
-      cutoff = LLONG_MAX / 4;
-    }
-    break;
-
-  case 8:
-    if (neg) {
-      cutlim = LLONG_MIN % 8;
-      cutoff = LLONG_MIN / 8;
-    } else {
-      cutlim = LLONG_MAX % 8;
-      cutoff = LLONG_MAX / 8;
-    }
-    break;
-
-  case 10:
-    if (neg) {
-      cutlim = LLONG_MIN % 10;
-      cutoff = LLONG_MIN / 10;
-    } else {
-      cutlim = LLONG_MAX % 10;
-      cutoff = LLONG_MAX / 10;
-    }
-    break;
-
-  case 16:
-    if (neg) {
-      cutlim = LLONG_MIN % 16;
-      cutoff = LLONG_MIN / 16;
-    } else {
-      cutlim = LLONG_MAX % 16;
-      cutoff = LLONG_MAX / 16;
-    }
-    break;
-
-  default:
-    cutoff = neg ? LLONG_MIN : LLONG_MAX;
-    cutlim = cutoff % base;
-    cutoff /= base;
-    break;
-  }
-
-  if (neg) {
-    if (cutlim > 0) {
-      cutlim -= base;
-      cutoff += 1;
-    }
-    cutlim = -cutlim;
-  }
-
-  for (acc = 0, any = 0;; c = (unsigned char)*s++) {
-    if (isdigit(c))
-      c -= '0';
-    else if (isalpha(c))
-      c -= isupper(c) ? 'A' - 10 : 'a' - 10;
-    else
-      break;
-
-    if (c >= base)
-      break;
-
-    if (any < 0)
-      continue;
-
-    if (neg) {
-      if (acc < cutoff || (acc == cutoff && c > cutlim)) {
-        any = -1;
-        acc = LLONG_MIN;
-        errno = ERANGE;
-      } else {
-        any = 1;
-        acc *= base;
-        acc -= c;
-      }
-    } else {
-      if (acc > cutoff || (acc == cutoff && c > cutlim)) {
-        any = -1;
-        acc = LLONG_MAX;
-        errno = ERANGE;
-      } else {
-        any = 1;
-        acc *= base;
-        acc += c;
-      }
-    }
-  }
-
-  if (endptr != 0)
-    *endptr = (char *)(any ? s - 1 : nptr);
-
-  return (acc);
-}
-unsigned long long strtoull(const char *nptr, char **endptr, int base) {
-  const char *s;
-  unsigned long long acc, cutoff;
-  int c;
-  int neg, any, cutlim;
-
-  s = nptr;
-  do {
-    c = (unsigned char)*s++;
-  } while (isspace(c));
-
-  if (c == '-') {
-    neg = 1;
-    c = *s++;
-  } else {
-    neg = 0;
-    if (c == '+')
-      c = *s++;
-  }
-
-  if ((base == 0 || base == 16) && c == '0' && (*s == 'x' || *s == 'X')) {
-    c = s[1];
-    s += 2;
-    base = 16;
-  }
-
-  if (base == 0)
-    base = c == '0' ? 8 : 10;
-
-  switch (base) {
-  case 4:
-    cutoff = ULLONG_MAX / 4;
-    cutlim = ULLONG_MAX % 4;
-    break;
-
-  case 8:
-    cutoff = ULLONG_MAX / 8;
-    cutlim = ULLONG_MAX % 8;
-    break;
-
-  case 10:
-    cutoff = ULLONG_MAX / 10;
-    cutlim = ULLONG_MAX % 10;
-    break;
-
-  case 16:
-    cutoff = ULLONG_MAX / 16;
-    cutlim = ULLONG_MAX % 16;
-    break;
-
-  default:
-    cutoff = ULLONG_MAX / base;
-    cutlim = ULLONG_MAX % base;
-    break;
-  }
-
-  for (acc = 0, any = 0;; c = (unsigned char)*s++) {
-    if (isdigit(c))
-      c -= '0';
-    else if (isalpha(c))
-      c -= isupper(c) ? 'A' - 10 : 'a' - 10;
-    else
-      break;
-
-    if (c >= base)
-      break;
-
-    if (any < 0)
-      continue;
-
-    if (acc > cutoff || (acc == cutoff && c > cutlim)) {
-      any = -1;
-      acc = ULLONG_MAX;
-      errno = ERANGE;
-    } else {
-      any = 1;
-      acc *= (unsigned long long)base;
-      acc += c;
-    }
-  }
-
-  if (neg && any > 0)
-    acc = -acc;
-
-  if (endptr != 0)
-    *endptr = (char *)(any ? s - 1 : nptr);
-
-  return (acc);
-}
 int atoi(const char *nptr) { return (int)strtol(nptr, NULL, 10); }
 
 // int _Znaj(uint32_t size) {
@@ -2704,129 +1890,15 @@ void *memchr(const void *s, int c, size_t n) {
 
   return NULL;
 }
-/*
- * Convert string to double
- */
-double strtod(const char *nptr, char **endptr) {
-  double number;
-  int exponent;
-  int negative;
-  char *p = (char *)nptr;
-  double p10;
-  int n;
-  int num_digits;
-  int num_decimals;
 
-  /* Skip leading whitespace */
-  while (isspace(*p))
-    p++;
+void abort(void) { _Exit(134); }
 
-  /* Handle optional sign */
-  negative = 0;
-  switch (*p) {
-  case '-':
-    negative = 1;
-    p++;
-    break;
-  case '+':
-    p++;
-    break;
-  }
-
-  number = 0.;
-  exponent = 0;
-  num_digits = 0;
-  num_decimals = 0;
-
-  /* Process string of digits */
-  while (isdigit(*p)) {
-    number = number * 10. + (*p - '0');
-    p++;
-    num_digits++;
-  }
-
-  /* Process decimal part */
-  if (*p == '.') {
-    p++;
-
-    while (isdigit(*p)) {
-      number = number * 10. + (*p - '0');
-      p++;
-      num_digits++;
-      num_decimals++;
-    }
-
-    exponent -= num_decimals;
-  }
-
-  if (num_digits == 0) {
-    return 0.0;
-  }
-
-  /* Correct for sign */
-  if (negative)
-    number = -number;
-
-  /* Process an exponent string */
-  if (*p == 'e' || *p == 'E') {
-    /* Handle optional sign */
-    negative = 0;
-    switch (*++p) {
-    case '-':
-      negative = 1;
-      p++;
-      break;
-    case '+':
-      p++;
-      break;
-    }
-
-    /* Process string of digits */
-    n = 0;
-    while (isdigit(*p)) {
-      n = n * 10 + (*p - '0');
-      p++;
-    }
-
-    if (negative)
-      exponent -= n;
-    else
-      exponent += n;
-  }
-
-  if (exponent < -307 || exponent > 308) {
-    return 0.0;
-  }
-
-  /* Scale the result */
-  p10 = 10.;
-  n = exponent;
-  if (n < 0)
-    n = -n;
-  while (n) {
-    if (n & 1) {
-      if (exponent < 0)
-        number /= p10;
-      else
-        number *= p10;
-    }
-    n >>= 1;
-    p10 *= p10;
-  }
-
-  if (endptr)
-    *endptr = p;
-
-  return number;
-}
-void abort(void) { exit(-1); }
-
-const char *strstr(const char *p1, const char *p2) {
+char *strstr(const char *p1, const char *p2) {
   char *s1 = (char *)p1;
   char *s2 = (char *)p2;
   char *cur = (char *)p1;
   if (*p2 == '\0') {
-    return p1;
+    return (char *)p1;
   }
   while (*cur) {
     s1 = cur;
@@ -3004,11 +2076,7 @@ char *gets(char *str) {
   scan(str, 1024);
   return str;
 }
-int puts(char *str) {
-  print(str);
-  putchar('\n');
-  return strlen(str);
-}
+
 #define FLAG_ALTNT_FORM 0x01
 #define FLAG_ALTNT_FORM_CH '#'
 
@@ -4102,12 +3170,6 @@ int vsprintf(char *buf, const char *fmt, va_list args) {
   int rv = vsnprintf(buf, ~(size_t)0, fmt, args);
   return rv;
 }
-int vfprintf(FILE *fp, const char *fmt, va_list args) {
-  char buf[1000];
-  int rv = vsnprintf(buf, ~(size_t)0, fmt, args);
-  fputs(buf, fp);
-  return rv;
-}
 // sprintf
 int sprintf(char *buf, const char *fmt, ...) {
   va_list ap;
@@ -4135,17 +3197,6 @@ void strrev(char *s) {
 
     ++pBegin, --pEnd;
   }
-}
-int printf(const char *format, ...) {
-  va_list ap;
-  int rv;
-  char buf[5000];
-  va_start(ap, format);
-  rv = vsnprintf(buf, ~(size_t)0, format, ap);
-  print(buf);
-  va_end(ap);
-
-  return rv;
 }
 int logkf(const char *format, ...) {
   va_list ap;
@@ -4233,81 +3284,7 @@ char *strncat(char *dest, const char *src, size_t n) {
 }
 
 // strtol
-long strtol(const char *nptr, char **endptr, int base) {
-  long acc = 0;
-  int c;
-  unsigned long cutoff;
-  int neg = 0, any, cutlim;
 
-  /*
-   * Skip white space and pick up leading +/- sign if any.
-   * If base is 0, allow 0x for hex and 0 for octal, else
-   * assume decimal; if base is already 16, allow 0x.
-   */
-  do {
-    c = *nptr++;
-  } while (isspace(c));
-  if (c == '-') {
-    neg = 1;
-    c = *nptr++;
-  } else if (c == '+')
-    c = *nptr++;
-  if ((base == 0 || base == 16) && c == '0' && (*nptr == 'x' || *nptr == 'X')) {
-    c = nptr[1];
-    nptr += 2;
-    base = 16;
-  } else if ((base == 0 || base == 2) && c == '0' &&
-             (*nptr == 'b' || *nptr == 'B')) {
-    c = nptr[1];
-    nptr += 2;
-    base = 2;
-  } else if (base == 0)
-    base = c == '0' ? 8 : 10;
-
-  /*
-   * Compute the cutoff value between legal numbers and illegal
-   * numbers.  That is the largest legal value, divided by the
-   * base.  An input number that is greater than this value, if
-   * followed by a legal input character, is too big.  One that
-   * is equal to this value may be valid or not; the limit
-   * between valid and invalid numbers is then based on the last
-   * digit.  For instance, if the range for longs is
-   * [-2147483648..2147483647] and the input base is 10,
-   * cutoff will be set to 214748364 and cutlim to either
-   * 7 (neg==0) or 8 (neg==1), meaning that if we have accumulated
-   * a value > 214748364, or equal but the next digit is > 7 (or 8),
-   * the number is too big, and we will return a range error.
-   */
-  cutoff = neg ? -(unsigned long)LONG_MIN : LONG_MAX;
-  cutlim = cutoff % (unsigned long)base;
-  cutoff /= (unsigned long)base;
-  for (acc = 0, any = 0;; c = *nptr++) {
-    if (isdigit(c))
-      c -= '0';
-    else if (isalpha(c))
-      c -= isupper(c) ? 'A' - 10 : 'a' - 10;
-    else
-      break;
-    if (c >= base)
-      break;
-    if (any < 0 || acc > cutoff || (acc == cutoff && c > cutlim))
-      any = -1;
-    else {
-      any = 1;
-      acc *= base;
-      acc += c;
-    }
-  }
-  if (any < 0) {
-    acc = neg ? LONG_MIN : LONG_MAX;
-    // errno = ERANGE;
-    print("panic: strtol: overflow\n");
-  } else if (neg)
-    acc = -acc;
-  if (endptr != 0)
-    *endptr = (char *)(any ? nptr : (char *)nptr - 1);
-  return (acc);
-}
 
 // isspace
 int isspace(int c) {
@@ -4422,404 +3399,7 @@ int get_command_line(char **line, size_t *length) {
   }
 }
 
-static int stdio_parse_mode(const char *mode, unsigned int *stdio_mode,
-                            int *open_flags) {
-  if (mode == NULL || *mode == '\0') {
-    return -1;
-  }
-  unsigned int stream_mode;
-  int flags;
-  if (*mode == 'r') {
-    stream_mode = STDIO_READ;
-    flags = O_RDONLY;
-  } else if (*mode == 'w') {
-    stream_mode = STDIO_WRITE;
-    flags = O_WRONLY | O_CREAT | O_TRUNC;
-  } else if (*mode == 'a') {
-    stream_mode = STDIO_WRITE | STDIO_APPEND;
-    flags = O_WRONLY | O_CREAT | O_APPEND;
-  } else {
-    return -1;
-  }
-  bool plus = false;
-  for (mode++; *mode != '\0'; mode++) {
-    if (*mode == 'b') {
-      continue;
-    }
-    if (*mode == '+' && !plus) {
-      plus = true;
-      stream_mode |= STDIO_READ | STDIO_WRITE;
-      flags = (flags & ~O_ACCMODE) | O_RDWR;
-      continue;
-    }
-    return -1;
-  }
-  *stdio_mode = stream_mode;
-  *open_flags = flags;
-  return 0;
-}
-
-static void stdio_register(FILE *stream) {
-  stream->registered = 1;
-  stream->next = stdio_streams;
-  if (stdio_streams != NULL) {
-    stdio_streams->previous = stream;
-  }
-  stdio_streams = stream;
-}
-
-static void stdio_unregister(FILE *stream) {
-  if (!stream->registered) {
-    return;
-  }
-  if (stream->previous != NULL) {
-    stream->previous->next = stream->next;
-  } else {
-    stdio_streams = stream->next;
-  }
-  if (stream->next != NULL) {
-    stream->next->previous = stream->previous;
-  }
-  stream->registered = 0;
-}
-
-static FILE *stdio_stream_create(int descriptor, unsigned int mode) {
-  FILE *stream = malloc(sizeof(*stream));
-  if (stream == NULL) {
-    return NULL;
-  }
-  memset(stream, 0, sizeof(*stream));
-  if (descriptor > 2) {
-    stream->buffer = malloc(BUFSIZ);
-    if (stream->buffer == NULL) {
-      free(stream);
-      return NULL;
-    }
-  }
-  stream->descriptor = descriptor;
-  stream->mode = mode;
-  stream->unget_character = EOF;
-  stdio_register(stream);
-  return stream;
-}
-
-static FILE *stdio_fdopen_impl(int descriptor, const char *mode) {
-  unsigned int stream_mode;
-  int ignored_flags;
-  if (descriptor < 0 ||
-      stdio_parse_mode(mode, &stream_mode, &ignored_flags) != 0) {
-    errno = EINVAL;
-    return NULL;
-  }
-  if (descriptor > 2) {
-    struct stat status;
-    if (fstat(descriptor, &status) != 0) {
-      return NULL;
-    }
-  }
-  return stdio_stream_create(descriptor, stream_mode);
-}
-
-FILE *fopen(const char *filename, const char *mode) {
-  unsigned int stream_mode;
-  int flags;
-  if (filename == NULL || stdio_parse_mode(mode, &stream_mode, &flags) != 0) {
-    errno = EINVAL;
-    return NULL;
-  }
-  int descriptor = open(filename, flags, 0);
-  if (descriptor < 0) {
-    return NULL;
-  }
-  FILE *stream = stdio_stream_create(descriptor, stream_mode);
-  if (stream == NULL) {
-    close(descriptor);
-    errno = ENOMEM;
-  }
-  return stream;
-}
-
-static int stdio_write_all(FILE *stream, const unsigned char *buffer,
-                           size_t length) {
-  size_t completed = 0;
-  while (completed < length) {
-    ssize_t written =
-        write(stream->descriptor, buffer + completed, length - completed);
-    if (written <= 0) {
-      stream->error = 1;
-      return -1;
-    }
-    completed += written;
-  }
-  return 0;
-}
-
-int fflush(FILE *stream) {
-  if (stream == NULL) {
-    int status = 0;
-    for (FILE *current = stdio_streams; current != NULL;
-         current = current->next) {
-      if (fflush(current) != 0) {
-        status = EOF;
-      }
-    }
-    return status;
-  }
-  if (stream->direction == STDIO_DIRECTION_WRITE &&
-      stream->buffer_length != 0) {
-    if (stdio_write_all(stream, stream->buffer, stream->buffer_length) != 0) {
-      return EOF;
-    }
-  } else if (stream->direction == STDIO_DIRECTION_READ) {
-    size_t unread = stream->buffer_length - stream->buffer_position;
-    if (stream->unget_character != EOF) {
-      unread++;
-    }
-    if (unread != 0 && stream->descriptor > 2 &&
-        lseek(stream->descriptor, -(off_t)unread, SEEK_CUR) < 0) {
-      stream->error = 1;
-      return EOF;
-    }
-  }
-  stream->buffer_length = 0;
-  stream->buffer_position = 0;
-  stream->direction = STDIO_DIRECTION_NONE;
-  stream->unget_character = EOF;
-  if (stream->descriptor > 2 && fsync(stream->descriptor) != 0) {
-    stream->error = 1;
-    return EOF;
-  }
-  return 0;
-}
-
-int fclose(FILE *stream) {
-  if (stream == NULL) {
-    return EOF;
-  }
-  int status = fflush(stream);
-  stdio_unregister(stream);
-  if (close(stream->descriptor) != 0) {
-    status = EOF;
-  }
-  free(stream->buffer);
-  free(stream);
-  return status;
-}
-
-static int stdio_prepare(FILE *stream, enum stdio_direction direction) {
-  if (stream->direction != STDIO_DIRECTION_NONE &&
-      stream->direction != direction && fflush(stream) != 0) {
-    return -1;
-  }
-  stream->direction = direction;
-  return 0;
-}
-
-size_t fread(void *buffer, size_t size, size_t count, FILE *stream) {
-  if (stream == NULL || (stream->mode & STDIO_READ) == 0 || size == 0 ||
-      count == 0 || count > UINT_MAX / size ||
-      stdio_prepare(stream, STDIO_DIRECTION_READ) != 0) {
-    return 0;
-  }
-  if (stream->descriptor == 0) {
-    scan(buffer, size * count);
-    return count;
-  }
-  size_t requested = size * count;
-  size_t completed = 0;
-  unsigned char *output = buffer;
-  if (stream->unget_character != EOF && requested != 0) {
-    output[completed++] = stream->unget_character;
-    stream->unget_character = EOF;
-  }
-  while (completed < requested) {
-    if (stream->buffer_position == stream->buffer_length) {
-      ssize_t read_count = read(stream->descriptor, stream->buffer, BUFSIZ);
-      if (read_count < 0) {
-        stream->error = 1;
-        break;
-      }
-      if (read_count == 0) {
-        stream->eof = 1;
-        break;
-      }
-      stream->buffer_length = read_count;
-      stream->buffer_position = 0;
-    }
-    size_t chunk = stream->buffer_length - stream->buffer_position;
-    if (chunk > requested - completed) {
-      chunk = requested - completed;
-    }
-    memcpy(output + completed, stream->buffer + stream->buffer_position,
-           chunk);
-    stream->buffer_position += chunk;
-    completed += chunk;
-  }
-  return completed / size;
-}
-
-size_t fwrite(const void *buffer, size_t size, size_t count, FILE *stream) {
-  if (stream == NULL || (stream->mode & STDIO_WRITE) == 0 || size == 0 ||
-      count == 0 || count > UINT_MAX / size ||
-      stdio_prepare(stream, STDIO_DIRECTION_WRITE) != 0) {
-    return 0;
-  }
-  size_t requested = size * count;
-  if (stream->descriptor == 1 || stream->descriptor == 2) {
-    return stdio_write_all(stream, buffer, requested) == 0 ? count : 0;
-  }
-  size_t completed = 0;
-  const unsigned char *input = buffer;
-  while (completed < requested) {
-    if (stream->buffer_length == BUFSIZ && fflush(stream) != 0) {
-      break;
-    }
-    stream->direction = STDIO_DIRECTION_WRITE;
-    size_t chunk = BUFSIZ - stream->buffer_length;
-    if (chunk > requested - completed) {
-      chunk = requested - completed;
-    }
-    memcpy(stream->buffer + stream->buffer_length, input + completed, chunk);
-    stream->buffer_length += chunk;
-    completed += chunk;
-  }
-  return completed / size;
-}
-
-int fseek(FILE *stream, long offset, int whence) {
-  if (stream == NULL || fflush(stream) != 0 ||
-      lseek(stream->descriptor, offset, whence) < 0) {
-    if (stream != NULL) {
-      stream->error = 1;
-    }
-    return -1;
-  }
-  stream->eof = 0;
-  return 0;
-}
-
-long ftell(FILE *stream) {
-  if (stream == NULL) {
-    return -1;
-  }
-  off_t position = lseek(stream->descriptor, 0, SEEK_CUR);
-  if (position < 0) {
-    stream->error = 1;
-    return -1;
-  }
-  if (stream->direction == STDIO_DIRECTION_READ) {
-    position -= stream->buffer_length - stream->buffer_position;
-    if (stream->unget_character != EOF) {
-      position--;
-    }
-  } else if (stream->direction == STDIO_DIRECTION_WRITE) {
-    position += stream->buffer_length;
-  }
-  return position;
-}
-
-int fgetc(FILE *stream) {
-  unsigned char value;
-  return fread(&value, 1, 1, stream) == 1 ? value : EOF;
-}
-
-int fputc(int value, FILE *stream) {
-  unsigned char byte = value;
-  return fwrite(&byte, 1, 1, stream) == 1 ? byte : EOF;
-}
-
-char *fgets(char *buffer, int capacity, FILE *stream) {
-  if (buffer == NULL || capacity <= 0 || stream == NULL) {
-    return NULL;
-  }
-  int length = 0;
-  while (length + 1 < capacity) {
-    int value = fgetc(stream);
-    if (value == EOF) {
-      break;
-    }
-    buffer[length++] = value;
-    if (value == '\n') {
-      break;
-    }
-  }
-  if (length == 0) {
-    return NULL;
-  }
-  buffer[length] = '\0';
-  return buffer;
-}
-
-int fputs(const char *text, FILE *stream) {
-  size_t length = strlen(text);
-  return fwrite(text, 1, length, stream) == length ? 0 : EOF;
-}
-
-int fprintf(FILE *stream, const char *format, ...) {
-  va_list arguments;
-  va_start(arguments, format);
-  int result = vfprintf(stream, format, arguments);
-  va_end(arguments);
-  return result;
-}
-
-int feof(FILE *stream) { return stream != NULL && stream->eof ? EOF : 0; }
-
-int ferror(FILE *stream) { return stream != NULL && stream->error ? EOF : 0; }
-
-void clearerr(FILE *stream) {
-  if (stream) {
-    stream->eof = 0;
-    stream->error = 0;
-  }
-}
-
-int getc(FILE *stream) { return fgetc(stream); }
-
-int ungetc(int character, FILE *stream) {
-  if (stream == NULL || character == EOF || stream->unget_character != EOF) {
-    return EOF;
-  }
-  stream->unget_character = (unsigned char)character;
-  stream->eof = 0;
-  return stream->unget_character;
-}
-
-char *strerror(int value) {
-  if (value == ENOENT) {
-    return "No such file or directory";
-  }
-  if (value == EBADF) {
-    return "Bad file descriptor";
-  }
-  if (value == EINVAL) {
-    return "Invalid argument";
-  }
-  if (value == ENOSPC) {
-    return "No space left on device";
-  }
-  return "I/O error";
-}
-
-void stdio_initialize(void) {
-  if (stdin != NULL || stdout != NULL || stderr != NULL) {
-    return;
-  }
-  stdin = stdio_fdopen_impl(0, "r");
-  stdout = stdio_fdopen_impl(1, "w");
-  stderr = stdio_fdopen_impl(2, "w");
-}
-
-void stdio_shutdown(void) {
-  while (stdio_streams != NULL) {
-    fclose(stdio_streams);
-  }
-  stdin = NULL;
-  stdout = NULL;
-  stderr = NULL;
-}
 double atof(const char *s) { return strtod(s, 0); }
-int setenv(const char *name, const char *value, int overwrite) {}
 
 static const float atanhi1[] = {
     4.6364760399e-01, /* atan(0.5)hi 0x3eed6338 */

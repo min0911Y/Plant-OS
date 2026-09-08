@@ -1,6 +1,7 @@
 // 多任务重构 -- mtask.c (区别与以前的多任务)
 #include <arch.h>
 #include <dos.h>
+#include <futex.h>
 #include <input_device.h>
 #include <irq.h>
 #include <limits.h>
@@ -366,6 +367,7 @@ void task_next(void) {
   }
   arch_fpu_flush_cpu();
 
+  arch_thread_pointer_set(next->thread_pointer);
   arch_task_switch(&current->context, next->context, next->address_space, &cpu->current,
                    next);
 }
@@ -543,6 +545,7 @@ static void task_clear_external_refs(mtask *task) {
     keyboard_use_task = NULL;
   }
   timer_cancel_for_task(task);
+  futex_cancel_task(task);
 #if defined(KERNEL_ARCH_I386)
   high_text_cursor_task_exited(task);
 #endif
@@ -561,6 +564,7 @@ static void task_release_resources(mtask *task) {
 
   arch_fpu_reset(task);
   task_clear_external_refs(task);
+  user_thread_release(task);
   if (task == current_task()) {
     arch_address_space_activate(arch_address_space_kernel());
   }
@@ -622,16 +626,17 @@ void task_abort_creation(mtask *task) {
 }
 
 static void wake_child_waiter(mtask *child) {
-  if (child->ptid == TASK_ID_NONE || child->ptid == REAPER_TID) {
+  uint32_t owner = child->kind == TASK_THREAD ? child->tgid : child->ptid;
+  if (owner == TASK_ID_NONE || owner == REAPER_TID) {
     return;
   }
   for (uint32_t i = 0; i < task_registry.slot_count; i++) {
     mtask *waiter = task_slot_at(i);
-    if (!task_slot_in_use(waiter) || waiter->tgid != child->ptid ||
-        waiter->state != WAITING ||
-        waiter->wait_reason != WAIT_REASON_CHILD ||
-        waiter->waittid != child->tid ||
-        waiter->wait_generation != child->generation) {
+    if (!task_slot_in_use(waiter) || waiter->tgid != owner ||
+        waiter->state != WAITING || waiter->wait_reason != WAIT_REASON_CHILD ||
+        (waiter->waittid != TASK_ID_NONE &&
+         (waiter->waittid != child->tid ||
+          waiter->wait_generation != child->generation))) {
       continue;
     }
     task_run(waiter);
@@ -663,9 +668,9 @@ static void finish_task(mtask *task, unsigned status, bool waitable) {
   bool is_current = task == current_task();
   task_release_resources(task);
   task->status = status;
+  wake_child_waiter(task);
   if (waitable) {
     task->state = DIED;
-    wake_child_waiter(task);
   } else if (is_current) {
     task->state = WILL_EMPTY;
   } else {
@@ -682,8 +687,9 @@ static void request_task_termination(mtask *task, unsigned status) {
     return;
   }
   finish_task(task, status,
-              task->kind == TASK_PROCESS && task->ptid != TASK_ID_NONE &&
-                  task->ptid != REAPER_TID);
+              task->joinable ||
+                  (task->kind == TASK_PROCESS && task->ptid != TASK_ID_NONE &&
+                   task->ptid != REAPER_TID));
 }
 
 static void terminate_thread_group(uint32_t tgid, mtask *except) {
@@ -693,7 +699,11 @@ static void terminate_thread_group(uint32_t tgid, mtask *except) {
         thread->kind != TASK_THREAD || thread->tgid != tgid) {
       continue;
     }
-    request_task_termination(thread, TASK_KILLED_STATUS);
+    thread->joinable = false;
+    if (thread->state == DIED)
+      task_slot_release(thread);
+    else
+      request_task_termination(thread, TASK_KILLED_STATUS);
   }
 }
 
@@ -704,8 +714,9 @@ static void task_finish_pending(mtask *task) {
     terminate_thread_group(task->tgid, task);
     reparent_children(task->tgid, REAPER_TID);
   }
-  bool waitable = task->kind == TASK_PROCESS && task->ptid != TASK_ID_NONE &&
-                  task->ptid != REAPER_TID;
+  bool waitable = task->joinable ||
+                  (task->kind == TASK_PROCESS && task->ptid != TASK_ID_NONE &&
+                   task->ptid != REAPER_TID);
   finish_task(task, status, waitable);
 }
 
@@ -728,14 +739,29 @@ void task_kill(unsigned tid) {
     terminate_thread_group(task->tgid, task);
     reparent_children(task->tgid, REAPER_TID);
   }
-  bool waitable = task->kind == TASK_PROCESS && task->ptid != TASK_ID_NONE &&
-                  task->ptid != REAPER_TID;
+  bool waitable = task->joinable ||
+                  (task->kind == TASK_PROCESS && task->ptid != TASK_ID_NONE &&
+                   task->ptid != REAPER_TID);
   finish_task(task, TASK_KILLED_STATUS, waitable);
   if (is_current) {
     task_next();
     arch_halt();
   }
   irq_restore(interrupt_state);
+}
+
+void task_exit_process(unsigned status) {
+  (void)irq_save();
+  mtask *self = current_task();
+  mtask *leader = get_task(self->tgid);
+  terminate_thread_group(self->tgid, self);
+  reparent_children(self->tgid, REAPER_TID);
+  if (leader && leader != self)
+    request_task_termination(leader, status);
+  self->terminate_status = status;
+  task_finish_pending(self);
+  task_next();
+  arch_halt();
 }
 
 mtask *current_task() {
@@ -1072,13 +1098,20 @@ void task_exit(unsigned status) {
   task_next();
   arch_halt();
 }
-int waittid(uint32_t tid) {
+static bool task_can_join(const mtask *self, const mtask *target, bool thread) {
+  return target && target != self &&
+         (thread ? target->kind == TASK_THREAD && target->joinable &&
+                       target->tgid == self->tgid
+                 : target->kind == TASK_PROCESS && target->ptid == self->tgid);
+}
+
+static int task_wait(uint32_t tid, uint32_t generation, bool thread) {
   mtask *self = current_task();
-  uint32_t generation;
 
   irq_state_t interrupt_state = irq_save();
   mtask *child = get_task(tid);
-  if (!child || child->kind != TASK_PROCESS || child->ptid != self->tgid) {
+  if (!task_can_join(self, child, thread) ||
+      (generation && child->generation != generation)) {
     irq_restore(interrupt_state);
     return -1;
   }
@@ -1088,8 +1121,8 @@ int waittid(uint32_t tid) {
   for (;;) {
     interrupt_state = irq_save();
     child = get_task(tid);
-    if (!child || child->generation != generation ||
-        child->kind != TASK_PROCESS || child->ptid != self->tgid) {
+    if (!task_can_join(self, child, thread) ||
+        child->generation != generation) {
       self->waittid = TASK_ID_NONE;
       self->wait_generation = 0;
       self->wait_reason = WAIT_REASON_NONE;
@@ -1103,7 +1136,8 @@ int waittid(uint32_t tid) {
       self->wait_reason = WAIT_REASON_NONE;
       task_slot_release(child);
       irq_restore(interrupt_state);
-      logk("task exit with code %d\n", status);
+      if (!thread)
+        logk("task exit with code %d\n", status);
       return status;
     }
     self->waittid = tid;
@@ -1113,6 +1147,54 @@ int waittid(uint32_t tid) {
     self->ready = 0;
     task_next();
     irq_restore(interrupt_state);
+  }
+}
+int waittid(uint32_t tid) { return task_wait(tid, 0, false); }
+
+int task_join_thread(uint32_t tid, uint32_t generation) {
+  return generation ? task_wait(tid, generation, true) : -1;
+}
+
+int task_detach_thread(uint32_t tid, uint32_t generation) {
+  mtask *thread = get_task(tid);
+  if (!generation || !thread || thread->generation != generation ||
+      thread->kind != TASK_THREAD || thread->tgid != current_task()->tgid ||
+      !thread->joinable)
+    return -22;
+  thread->joinable = false;
+  if (thread->state == DIED)
+    task_slot_release(thread);
+  return 0;
+}
+
+int task_terminate_thread(uint32_t tid, uint32_t generation) {
+  mtask *thread = get_task(tid);
+  if (!generation || !thread || thread->generation != generation ||
+      thread->kind != TASK_THREAD || thread->tgid != current_task()->tgid)
+    return -22;
+  task_kill(tid);
+  return 0;
+}
+
+void task_wait_threads(void) {
+  mtask *self = current_task();
+  for (;;) {
+    bool running = false;
+    task_iterator_t iterator = {0};
+    mtask *thread;
+    while ((thread = task_iter_next(&iterator)) != NULL) {
+      if (thread != self && thread->kind == TASK_THREAD &&
+          thread->tgid == self->tgid && thread->state != DIED &&
+          thread->state != WILL_EMPTY && thread->state != READY) {
+        running = true;
+        break;
+      }
+    }
+    if (!running)
+      return;
+    self->waittid = TASK_ID_NONE;
+    self->wait_generation = 0;
+    task_fall_blocked_reason(WAITING, WAIT_REASON_CHILD);
   }
 }
 void mtask_run_now(mtask *obj) {
@@ -1224,6 +1306,7 @@ int task_fork() {
   child->generation = generation;
   child->kind = TASK_PROCESS;
   child->return_cwd = false;
+  child->joinable = false;
   child->tgid = tid;
   child->ptid = parent->tgid;
   child->state = ALLOCATING;

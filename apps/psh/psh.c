@@ -152,7 +152,7 @@ static int print_directory(const char *path) {
     return 1;
   }
   for (size_t i = 0; i < count; i++) {
-    if (entries[i].type == DIR) {
+    if (entries[i].type == FILE_DIRECTORY) {
       int c = get_cons_color();
       set_cons_color(0x0a);
       printf("%s ", entries[i].name);

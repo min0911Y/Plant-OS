@@ -1,0 +1,85 @@
+--- a/include/vulkan/vk_icd.h
++++ b/include/vulkan/vk_icd.h
+@@ -119,6 +119,9 @@
+     VK_ICD_WSI_PLATFORM_GGP,
+     VK_ICD_WSI_PLATFORM_SCREEN,
+     VK_ICD_WSI_PLATFORM_FUCHSIA,
++#ifdef __plantos__
++    VK_ICD_WSI_PLATFORM_PLANTOS,
++#endif
+ } VkIcdWsiPlatform;
+ 
+ typedef struct {
+--- a/src/vulkan/wsi/wsi_common.h
++++ b/src/vulkan/wsi/wsi_common.h
+@@ -52,7 +52,11 @@
+ 
+ struct driOptionCache;
+ 
++#ifdef __plantos__
++#define VK_ICD_WSI_PLATFORM_MAX (VK_ICD_WSI_PLATFORM_PLANTOS + 1)
++#else
+ #define VK_ICD_WSI_PLATFORM_MAX (VK_ICD_WSI_PLATFORM_METAL + 1)
++#endif
+ 
+ struct wsi_device {
+    /* Allocator for the instance */
+--- a/src/vulkan/wsi/wsi_common_private.h
++++ b/src/vulkan/wsi/wsi_common_private.h
+@@ -575,6 +575,11 @@
+ wsi_display_setup_syncobj_fd(struct wsi_device *wsi_device,
+                              int fd);
+ 
++#ifdef __plantos__
++VkResult wsi_plantos_init_wsi(struct wsi_device *wsi, const VkAllocationCallbacks *alloc);
++void wsi_plantos_finish_wsi(struct wsi_device *wsi, const VkAllocationCallbacks *alloc);
++#endif
++
+ VkResult wsi_headless_init_wsi(struct wsi_device *wsi_device,
+                                const VkAllocationCallbacks *alloc,
+                                VkPhysicalDevice physical_device);
+--- a/src/vulkan/wsi/wsi_common.c
++++ b/src/vulkan/wsi/wsi_common.c
+@@ -275,6 +275,12 @@
+       goto fail;
+ #endif
+ 
++#ifdef __plantos__
++   result = wsi_plantos_init_wsi(wsi, alloc);
++   if (result != VK_SUCCESS)
++      goto fail;
++#endif
++
+    present_mode = os_get_option("MESA_VK_WSI_PRESENT_MODE");
+    if (present_mode) {
+       if (!strcmp(present_mode, "fifo")) {
+@@ -342,6 +348,9 @@
+ {
+ #ifndef VK_USE_PLATFORM_WIN32_KHR
+    wsi_headless_finish_wsi(wsi, alloc);
++#endif
++#ifdef __plantos__
++   wsi_plantos_finish_wsi(wsi, alloc);
+ #endif
+ #ifdef VK_USE_PLATFORM_DISPLAY_KHR
+    wsi_display_finish_wsi(wsi, alloc);
+--- a/src/vulkan/wsi/meson.build
++++ b/src/vulkan/wsi/meson.build
+@@ -2,6 +2,9 @@
+ # SPDX-License-Identifier: MIT
+ 
+ files_vulkan_wsi = files('wsi_common.c')
++if host_machine.system() == 'plantos'
++  files_vulkan_wsi += files(get_option('plantos-port') / 'wsi_plantos.c')
++endif
+ links_vulkan_wsi = []
+ platform_deps = []
+ 
+--- a/meson.options
++++ b/meson.options
+@@ -915,3 +915,5 @@
+   value : false,
+   description : 'Build panfrost Rust components.'
+ )
++
++option('plantos-port', type : 'string', value : '', description : 'Plant OS native WSI source directory')

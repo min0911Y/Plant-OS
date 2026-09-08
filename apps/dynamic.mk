@@ -4,6 +4,7 @@ ifeq ($(.DEFAULT_GOAL),)
 .DEFAULT_GOAL := dynamic
 endif
 ARCH ?= i386
+MESA_JOBS ?= 2
 DYN_OUT := out$(if $(filter x86_64,$(ARCH)),/x86_64)
 DYN_BUILD := $(DYN_OUT)/dynamic
 DYN_LIB := $(DYN_OUT)/lib
@@ -20,15 +21,37 @@ DYN_BASE := 0x100000000
 else
 $(error unsupported dynamic linker architecture '$(ARCH)')
 endif
+DYN_FREESTANDING := -nostdlib -ffreestanding -fno-builtin -fno-stack-protector -fPIC \
+  -fno-asynchronous-unwind-tables -ffunction-sections -fdata-sections \
+  -U__linux__ -U__linux -Ulinux -U__unix__ -U__unix -Uunix -D__plantos__
 DYN_CFLAGS := $(DYN_ARCH) -std=gnu17 -Iinclude -nostdinc -isystem $(shell gcc -print-file-name=include) \
-  -nostdlib -ffreestanding -fno-builtin -fno-stack-protector -fPIC \
-  -fno-asynchronous-unwind-tables -ffunction-sections -fdata-sections -MMD -MP \
+  $(DYN_FREESTANDING) -MMD -MP \
   -O2 -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare -Werror=implicit-function-declaration
 DYN_LDFLAGS := -m $(DYN_EMULATION) -z max-page-size=4096 -z noexecstack -z relro -z now -z text
-DYN_SOURCES := $(filter-out libp/entry.c libp/tinyalloc.c,$(wildcard libp/*.c)) libp/arch/$(ARCH)/math.c
+.PHONY: print-runtime-flags print-link-flags
+print-runtime-flags:
+	@printf '%s\n' '$(DYN_ARCH) $(DYN_FREESTANDING)'
+print-link-flags:
+	@printf '%s\n' '$(DYN_LDFLAGS)'
+DYN_SOURCES := $(filter-out libp/entry.c libp/dso.c libp/tinyalloc.c,$(wildcard libp/*.c)) \
+  libp/arch/$(ARCH)/math.c libp/arch/x86/fenv.c third_party/musl/floatscan.c \
+  third_party/musl/intscan.c third_party/musl/scanf.c \
+  $(addprefix third_party/musl/math/,cosh.c sinh.c tanh.c erf.c log1p.c log2f.c \
+    log2f_data.c logb.c rint.c round.c expm1.c ilogb.c __expo2.c exp2f.c \
+    fma.c fmaf.c fmax.c fmaxf.c fmin.c fminf.c frexpf.c ldexpf.c llrint.c \
+    lrint.c lrintf.c nextafterf.c rintf.c trunc.c truncf.c sin.c cos.c)
 DYN_OBJECTS := $(patsubst %.c,$(DYN_BUILD)/%.o,$(DYN_SOURCES)) \
   $(DYN_BUILD)/libp/arch/$(ARCH)/syscall.obj
 DYN_BUILTINS := $(if $(filter i386,$(ARCH)),$(DYN_BUILD)/libtcc1.a)
+DYN_DSO := $(DYN_BUILD)/libp/dso.o
+CXX_BUILD := $(DYN_OUT)/mesa/libcxx
+CXX_HEADERS := $(CXX_BUILD)/include/c++/v1
+CXX_ARCHIVE := $(CXX_BUILD)/lib/libc++.a
+CXX_CONFIG := $(DYN_OUT)/mesa/libcxx.stamp
+
+.PHONY: FORCE_CXX
+$(CXX_CONFIG): FORCE_CXX $(DYN_LIB)/libp.so
+	python3 ../scripts/build-mesa.py --arch $(ARCH) --component libcxx --jobs $(MESA_JOBS)
 
 $(DYN_BUILD)/libp/arch/$(ARCH)/syscall.obj: libp/arch/syscalls.inc
 
@@ -43,9 +66,9 @@ $(DYN_BUILD)/%.o: %.c dynamic.mk
 $(DYN_BUILD)/%.obj: %.asm dynamic.mk
 	@mkdir -p $(dir $@)
 	nasm -I$(dir $<) -f $(DYN_FORMAT) $< -o $@
-$(DYN_BUILD)/%.o: %.cpp dynamic.mk
+$(DYN_BUILD)/%.o: %.cpp dynamic.mk $(CXX_CONFIG)
 	@mkdir -p $(dir $@)
-	g++ $(filter-out -std=gnu17 -Werror=implicit-function-declaration,$(DYN_CFLAGS)) \
+	g++ -nostdinc++ -I$(CXX_HEADERS) $(filter-out -std=gnu17 -Werror=implicit-function-declaration,$(DYN_CFLAGS)) \
 	  -std=gnu++17 -fno-exceptions -fno-rtti -fno-use-cxa-atexit -c $< -o $@
 $(DYN_BUILD)/libp.a: $(DYN_OBJECTS)
 	rm -f $@
@@ -53,19 +76,22 @@ $(DYN_BUILD)/libp.a: $(DYN_OBJECTS)
 $(DYN_BUILD)/libtcc1.a: $(DYN_BUILD)/libtcc1/libtcc1.o
 	rm -f $@
 	ar rcs $@ $^
-$(DYN_LIB)/libp.so: $(DYN_BUILD)/libp.a $(DYN_BUILTINS)
+$(DYN_LIB)/libp.so: $(DYN_BUILD)/libp.a $(DYN_BUILTINS) $(DYN_DSO)
 	@mkdir -p $(dir $@)
 	ld $(DYN_LDFLAGS) -shared --no-undefined --hash-style=both -soname libp.so -o $@ \
-	  --whole-archive $(DYN_BUILD)/libp.a --no-whole-archive $(DYN_BUILTINS)
-$(DYN_LIB)/libcpp.so: $(DYN_BUILD)/libp/cxx.o $(DYN_LIB)/libp.so
-	ld $(DYN_LDFLAGS) -shared --no-undefined --hash-style=both -soname libcpp.so -o $@ $^
-$(DYN_LIB)/ld.so: $(DYN_BUILD)/ldso/object.o $(DYN_BUILD)/ldso/link.o $(DYN_BUILD)/libp.a ldso/static.ld $(DYN_BUILTINS)
+  --whole-archive $(DYN_BUILD)/libp.a --no-whole-archive $(DYN_BUILTINS) $(DYN_DSO)
+$(DYN_LIB)/libcpp.so: $(CXX_CONFIG) $(DYN_LIB)/libp.so $(DYN_DSO)
+	ld $(DYN_LDFLAGS) -shared --no-undefined --hash-style=both -soname libcpp.so -o $@ \
+	  $(DYN_DSO) --whole-archive $(CXX_ARCHIVE) --no-whole-archive $(DYN_LIB)/libp.so
+$(DYN_LIB)/ld.so: $(DYN_BUILD)/ldso/object.o $(DYN_BUILD)/ldso/link.o $(DYN_BUILD)/libp.a ldso/static.ld $(DYN_BUILTINS) $(DYN_DSO)
 	@mkdir -p $(dir $@)
 	ld $(DYN_LDFLAGS) -static --gc-sections --defsym=USER_BASE=$(DYN_BASE) -T ldso/static.ld -o $@ \
 	  $(filter %.o,$^) --start-group $(DYN_BUILD)/libp.a $(DYN_BUILTINS) --end-group
 
 $(DYN_LIB)/libbase.so: $(DYN_BUILD)/dyntest/base.o $(DYN_LIB)/libp.so
 	ld $(DYN_LDFLAGS) -shared --no-undefined --hash-style=sysv -soname libbase.so -o $@ $< -L$(DYN_LIB) -lp
+$(DYN_LIB)/libtls.so: $(DYN_BUILD)/dyntest/tls.o $(DYN_LIB)/libp.so
+	ld $(DYN_LDFLAGS) -shared --no-undefined --hash-style=both -soname libtls.so -o $@ $< -L$(DYN_LIB) -lp
 $(DYN_LIB)/libleaf.so: $(DYN_BUILD)/dyntest/leaf.o $(DYN_LIB)/libbase.so $(DYN_LIB)/libp.so
 	ld $(DYN_LDFLAGS) -shared --no-undefined --hash-style=gnu -soname libleaf.so -rpath '$$ORIGIN' -o $@ $< -L$(DYN_LIB) -lbase -lp
 $(DYN_OUT)/dynmain.bin: $(DYN_BUILD)/dyntest/main.o $(DYN_BUILD)/libp/entry.o $(DYN_LIB)/libleaf.so $(DYN_LIB)/libp.so

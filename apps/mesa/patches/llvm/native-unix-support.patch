@@ -1,0 +1,42 @@
+--- a/llvm/lib/Support/Unix/Unix.h
++++ b/llvm/lib/Support/Unix/Unix.h
+@@ -30,7 +30,9 @@
+ #include <cstring>
+ #include <string>
+ #include <sys/types.h>
++#if !defined(__plantos__)
+ #include <sys/wait.h>
++#endif
+ 
+ #ifdef HAVE_UNISTD_H
+ #include <unistd.h>
+--- a/llvm/lib/Support/RandomNumberGenerator.cpp
++++ b/llvm/lib/Support/RandomNumberGenerator.cpp
+@@ -25,6 +25,10 @@
+ #include "llvm/Support/Windows/WindowsSupport.h"
+ #else
+ #include "Unix/Unix.h"
++#endif
++
++#if defined(__plantos__)
++#include <rand.h>
+ #endif
+ 
+ using namespace llvm;
+@@ -77,6 +81,16 @@
+       return std::error_code();
+   }
+   return std::error_code(GetLastError(), std::system_category());
++#elif defined(__plantos__)
++  auto *Bytes = static_cast<unsigned char *>(Buffer);
++  while (Size) {
++    uint32_t Value = os_random32();
++    size_t Count = std::min(Size, sizeof(Value));
++    memcpy(Bytes, &Value, Count);
++    Bytes += Count;
++    Size -= Count;
++  }
++  return {};
+ #else
+   int Fd = open("/dev/urandom", O_RDONLY);
+   if (Fd != -1) {

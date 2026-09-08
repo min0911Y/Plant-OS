@@ -143,7 +143,7 @@ void DG_Init() {
 
   if (!window)
     goto failed;
-  renderer = SDL_CreateRenderer(window, "software");
+  renderer = SDL_CreateRenderer(window, NULL);
   if (!renderer)
     goto failed;
   // Clear winow

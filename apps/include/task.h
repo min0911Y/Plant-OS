@@ -36,6 +36,9 @@ _Static_assert(sizeof(task_info_t) == 72, "task snapshot ABI size");
 #endif
 
 /* Allocated snapshot in ascending TID order; release it with free(). */
+#ifdef __cplusplus
+extern "C" {
+#endif
 int task_list(task_info_t **entries, size_t *count);
 static inline const task_info_t *
 task_snapshot_find(const task_info_t *entries, size_t count, unsigned tid) {
@@ -51,5 +54,8 @@ task_snapshot_find(const task_info_t *entries, size_t count, unsigned tid) {
 }
 unsigned cpu_count(void);
 unsigned cpu_current(void);
+#ifdef __cplusplus
+}
+#endif
 
 #endif

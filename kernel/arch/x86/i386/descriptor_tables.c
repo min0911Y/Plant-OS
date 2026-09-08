@@ -19,6 +19,7 @@ enum {
   X86_GDT_KERNEL_CODE_INDEX = 2,
   X86_GDT_USER_DATA_INDEX = 3,
   X86_GDT_USER_CODE_INDEX = 4,
+  X86_GDT_TLS_INDEX = 5,
   X86_GDT_TSS_INDEX = 103,
   X86_GDT_BIOS_CODE32_INDEX = 1000,
   X86_GDT_BIOS_CODE16_INDEX = 1001,
@@ -284,6 +285,21 @@ void arch_task_set_kernel_stack(uintptr_t stack_top) {
   task_states[smp_current_cpu()].esp0 = stack_top;
 }
 
+void arch_thread_pointer_set(uintptr_t pointer) {
+  _Static_assert(X86_GDT_TLS_INDEX + SMP_MAX_CPUS <= X86_GDT_TSS_INDEX,
+                 "per-CPU TLS descriptors overlap TSS entries");
+  x86_segment_descriptor_set(&x86_gdt()[X86_GDT_TLS_INDEX + smp_current_cpu()],
+                             0xffffffffu, pointer,
+                             X86_USER_ACCESS(X86_ACCESS_DATA32_RW));
+}
+
+void x86_user_frame_set_tls(x86_interrupt_frame_t *frame) {
+  if ((frame->cs & 3) == 3)
+    frame->gs = current_task()->thread_pointer
+                    ? X86_USER_SELECTOR(X86_GDT_TLS_INDEX + smp_current_cpu())
+                    : X86_USER_SELECTOR(X86_GDT_USER_DATA_INDEX);
+}
+
 void x86_user_frame_init(x86_interrupt_frame_t *frame, uint32_t eip,
                          uint32_t esp) {
   frame->edi = 1;
@@ -303,6 +319,7 @@ void x86_user_frame_init(x86_interrupt_frame_t *frame, uint32_t eip,
   frame->eflags = 0x202u;
   frame->esp = esp;
   frame->ss = X86_USER_SELECTOR(X86_GDT_USER_DATA_INDEX);
+  x86_user_frame_set_tls(frame);
 }
 
 void x86_bios_interrupt(uint8_t interrupt_number, regs16_t *registers) {

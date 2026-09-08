@@ -1,0 +1,13 @@
+--- a/llvm/lib/Support/Program.cpp
++++ b/llvm/lib/Support/Program.cpp
+@@ -97,7 +97,9 @@
+ }
+ 
+ // Include the platform-specific parts of this class.
+-#ifdef LLVM_ON_UNIX
++#if defined(__plantos__)
++#include "PlantOS/Program.inc"
++#elif defined(LLVM_ON_UNIX)
+ #include "Unix/Program.inc"
+ #endif
+ #ifdef _WIN32

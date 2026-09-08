@@ -9,8 +9,8 @@ CFLAGS := $(DYN_CFLAGS) -Ilibutf/include -Ithird_party/pl_readline/include \
 ifeq ($(ARCH),i386)
 CFLAGS += -finput-charset=UTF-8 -fexec-charset=GB2312
 endif
-LDFLAGS := $(DYN_LDFLAGS) -pie --gc-sections -e Main --dynamic-linker /lib/ld.so
-APP_RUNTIME := $(DYN_BUILD)/libp/entry.o $(DYN_LIB)/libp.so
+LDFLAGS := $(DYN_LDFLAGS) -pie --gc-sections -e Main --dynamic-linker /lib/ld.so -rpath-link $(DYN_LIB)
+APP_RUNTIME := $(DYN_BUILD)/libp/entry.o $(DYN_DSO) $(DYN_LIB)/libp.so
 APP_LIBS := $(LIBS)/libmst.a $(LIBS)/libutf.a
 MST_OBJECTS := $(patsubst %.c,$(BUILD)/%.o,$(wildcard miniset/*.c))
 UTF_OBJECTS := $(patsubst %.c,$(BUILD)/%.o,$(wildcard libutf/utf/*.c libutf/runestr/*.c libutf/runetype/*.c))
@@ -28,9 +28,9 @@ ldso: $(DYN_LIB)/ld.so
 $(BUILD)/%.o: %.c build.mk native-apps.mk dynamic.mk
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
-$(BUILD)/%.o: %.cpp build.mk native-apps.mk dynamic.mk
+$(BUILD)/%.o: %.cpp build.mk native-apps.mk dynamic.mk $(CXX_CONFIG)
 	@mkdir -p $(dir $@)
-	g++ $(filter-out -std=gnu17 -Werror=implicit-function-declaration,$(CFLAGS)) \
+	g++ -nostdinc++ -I$(CXX_HEADERS) $(filter-out -std=gnu17 -Werror=implicit-function-declaration,$(CFLAGS)) \
 	  -std=gnu++17 -fno-exceptions -fno-rtti -fno-use-cxa-atexit -c $< -o $@
 $(BUILD)/%.obj: %.asm
 	@mkdir -p $(dir $@)
@@ -53,9 +53,10 @@ objects = $(addprefix $(BUILD)/,$(patsubst %.cpp,%.o,$(patsubst %.c,%.o,$(1))))
 # Application-private archives are PIC, while C++ support is a separate DSO.
 define application
 APP_TARGETS += $(BUILD)/$(1).bin
+APP_OBJECTS += $(call objects,$(if $(3),$(3),$(wildcard $(1)/*.c))) $(filter %.o,$(2))
 .PHONY: $(1)
 $(1): $(BUILD)/$(1).bin
-$(BUILD)/$(1).bin: $(call objects,$(if $(3),$(3),$(wildcard $(1)/*.c))) $(2) $(APP_LIBS) $(APP_RUNTIME) $(if $(filter %.cpp,$(3)),$(DYN_LIB)/libcpp.so)
+$(BUILD)/$(1).bin: $(call objects,$(if $(3),$(3),$(wildcard $(1)/*.c))) $(2) $(APP_LIBS) $(APP_RUNTIME) $(if $(filter %.cpp,$(3)),$(DYN_LIB)/libcpp.so) $(if $(filter $(LIBS)/sdl3.a,$(2)),$(SDL_RUNTIME))
 	ld $$(LDFLAGS) -o $$@ $$(filter %.o %.obj,$$^) --start-group $$(filter %.a %.so,$$^) --end-group
 endef
 $(foreach program,$(PROGRAMS),$(eval $(call application,$(program),$(if $(filter psh,$(program)),$(READLINE_OBJECTS)))))
@@ -86,7 +87,7 @@ $(eval $(call application,fputest,$(BUILD)/fputest/arch/i386/fputest.obj))
 # shipped executables. They remain explicit products of the common source graph.
 SDK_CFLAGS := $(filter-out -fPIC,$(DYN_CFLAGS)) -fno-pic -fno-pie
 SDK_LIBP := $(patsubst %.c,$(BUILD)/sdk/%.o,$(filter-out libp/abi.c,$(DYN_SOURCES)) libp/entry.c) \
-  $(DYN_BUILD)/libp/arch/$(ARCH)/syscall.obj
+  $(DYN_BUILD)/libp/arch/$(ARCH)/syscall.obj $(BUILD)/sdk/libp/dso.o
 $(BUILD)/sdk/%.o: %.c build.mk dynamic.mk
 	@mkdir -p $(dir $@)
 	$(CC) $(SDK_CFLAGS) -c $< -o $@
@@ -98,10 +99,11 @@ $(LIBS)/libp.a: $(SDK_LIBP)
 	@mkdir -p $(dir $@)
 	rm -f $@
 	ar rcs $@ $^
-$(LIBS)/libcpps.a: $(SDK_LIBP) $(BUILD)/sdk/libp/cxx.o
+$(LIBS)/libcpps.a: $(SDK_LIBP) $(CXX_CONFIG)
 	@mkdir -p $(dir $@)
-	rm -f $@
-	ar rcs $@ $^
+	cp $(CXX_ARCHIVE) $@.tmp
+	ar rcs $@.tmp $(SDK_LIBP)
+	mv $@.tmp $@
 $(LIBS)/libabi.a: $(BUILD)/sdk/libp/abi.o
 	@mkdir -p $(dir $@)
 	rm -f $@
@@ -122,7 +124,7 @@ $(BUILD)/sdk-libraries.list: $(SDK_LIBRARIES) build.mk
 	printf '%s\n' $(notdir $(SDK_LIBRARIES)) > $@
 libtcc1: $(LIBS)/libtcc1.a
 default all: sdk
-UNSUPPORTED_PROGRAMS := archtest simdtest cpptest
+UNSUPPORTED_PROGRAMS := archtest simdtest cpptest llvmtest lvptest lavapipe
 else
 UNSUPPORTED_PROGRAMS := tcc tccinst setup1 fputest
 endif
@@ -141,4 +143,6 @@ $(BUILD)/applications.list: $(APP_TARGETS) $(DYN_TARGETS) build.mk native-apps.m
 list-apps:
 	@printf '%s\n' $(sort $(notdir $(APP_TARGETS) $(DYN_TARGETS)))
 
--include $(shell test ! -d $(BUILD) || find $(BUILD) -path '$(BUILD)/x86_64' -prune -o -name '*.d' -print)
+-include $(patsubst %.o,%.d,$(filter %.o,$(APP_OBJECTS) $(LIBRARY_OBJECTS) \
+  $(MST_OBJECTS) $(UTF_OBJECTS) $(LUA_READLINE_OBJECTS) $(SDK_LIBP))) \
+  $(BUILD)/sdk/libtcc1.d $(BUILD)/crti.d

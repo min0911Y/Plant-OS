@@ -9,6 +9,7 @@ extern scheduler_reschedule_interrupt
 extern signal_deal
 extern x86_irq_dispatch
 extern x86_syscall_dispatch
+extern x86_user_frame_set_tls
 
 global null_inthandler
 global x86_irq_entries
@@ -30,6 +31,9 @@ global x86_syscall_entry
 %endmacro
 
 %macro X86_FRAME_RESTORE 0
+  push esp
+  call x86_user_frame_set_tls
+  add esp, 4
   popa
   pop gs
   pop fs

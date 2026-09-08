@@ -1,3 +1,7 @@
+#include "runtime_lifecycle.h"
+#include <errno.h>
+#include <futex.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <syscall.h>
 
@@ -69,7 +73,7 @@ int64_t __divmoddi4(int64_t num, int64_t den, int64_t *rem_p) {
 #else
 #define BRKSIZE 4096
 #endif
-#define PTRSIZE ((int)(sizeof(void *) == 8 ? 16 : sizeof(void *)))
+#define PTRSIZE ((int)(sizeof(void *) == 8 ? 16 : _Alignof(max_align_t)))
 #define Align(x, a) (((x) + (a - 1)) & ~(a - 1))
 #define NextSlot(p) (*(void **)((p)-PTRSIZE))
 #define NextFree(p) (*(void **)(p))
@@ -99,15 +103,20 @@ uintptr_t alloc_start_addr;
 static size_t sz;
 static size_t sz_left;
 static uintptr_t dirty_end;
-static volatile unsigned allocator_lock;
+static uint32_t allocator_lock;
 
-static void allocator_lock_acquire(void) {
-  while (__atomic_exchange_n(&allocator_lock, 1, __ATOMIC_ACQUIRE)) {
-  }
+void allocator_lock_acquire(void) {
+  uint32_t expected = 0;
+  if (__atomic_compare_exchange_n(&allocator_lock, &expected, 1, false,
+                                  __ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
+    return;
+  while (__atomic_exchange_n(&allocator_lock, 2, __ATOMIC_ACQUIRE))
+    os_futex_wait(&allocator_lock, 2, UINT64_MAX);
 }
 
-static void allocator_lock_release(void) {
-  __atomic_store_n(&allocator_lock, 0, __ATOMIC_RELEASE);
+void allocator_lock_release(void) {
+  if (__atomic_exchange_n(&allocator_lock, 0, __ATOMIC_RELEASE) == 2)
+    os_futex_wake(&allocator_lock, 1);
 }
 
 static void free_unlocked(void *ptr);
@@ -172,7 +181,7 @@ static void *malloc_unlocked(size_t size) {
   register size_t len;
   register unsigned ntries;
 
-  if (size == 0)
+  if (size == 0 || size > SIZE_MAX - (2 * PTRSIZE - 1))
     return NULL;
   for (ntries = 0; ntries < 2; ntries++) {
     if ((len = Align(size, PTRSIZE) + PTRSIZE) < 2 * PTRSIZE)
@@ -229,6 +238,8 @@ void *malloc(size_t size) {
   allocator_lock_acquire();
   result = malloc_unlocked(size);
   allocator_lock_release();
+  if (!result && size)
+    errno = ENOMEM;
   return result;
 }
 
@@ -337,12 +348,71 @@ void free(void *ptr) {
   allocator_lock_release();
 }
 
-/**
- * Only call malloc, boundary not used, it's not a good idea.
- */
-void *memalign(size_t boundary, size_t size) { return malloc(size); }
+static void *aligned_unlocked(size_t alignment, size_t size) {
+  if (alignment <= PTRSIZE)
+    return malloc_unlocked(size ? size : 1);
+  if (alignment > SIZE_MAX - 2 * PTRSIZE ||
+      size > SIZE_MAX - alignment - 2 * PTRSIZE)
+    return NULL;
+  char *base = malloc_unlocked(size + alignment + 2 * PTRSIZE);
+  if (!base)
+    return NULL;
+  char *aligned = (void *)Align((uintptr_t)base, alignment);
+  if (aligned != base && aligned - base < 2 * PTRSIZE)
+    aligned += alignment;
+  if (aligned != base) {
+    NextSlot(aligned) = NextSlot(base);
+    NextSlot(base) = aligned;
+    free_unlocked(base);
+  }
+  size_t used = Align(size ? size : 1, PTRSIZE) + PTRSIZE;
+  char *end = NextSlot(aligned);
+  if ((size_t)(end - aligned) - used >= 2 * PTRSIZE) {
+    char *tail = aligned + used;
+    NextSlot(tail) = end;
+    NextSlot(aligned) = tail;
+    free_unlocked(tail);
+  }
+  return aligned;
+}
+
+int posix_memalign(void **pointer, size_t alignment, size_t size) {
+  if (!pointer || alignment < sizeof(void *) || (alignment & (alignment - 1)))
+    return EINVAL;
+  allocator_lock_acquire();
+  void *result = aligned_unlocked(alignment, size);
+  allocator_lock_release();
+  if (!result)
+    return ENOMEM;
+  *pointer = result;
+  return 0;
+}
+
+void *memalign(size_t alignment, size_t size) {
+  if (!alignment || (alignment & (alignment - 1))) {
+    errno = EINVAL;
+    return NULL;
+  }
+  void *result = NULL;
+  int error = posix_memalign(
+      &result, alignment < sizeof(void *) ? sizeof(void *) : alignment, size);
+  if (error)
+    errno = error;
+  return result;
+}
+void *aligned_alloc(size_t alignment, size_t size) {
+  if (!alignment || (alignment & (alignment - 1)) || size % alignment) {
+    errno = EINVAL;
+    return NULL;
+  }
+  return memalign(alignment, size);
+}
 
 void *calloc(size_t num, size_t size) {
+  if (num && size > SIZE_MAX / num) {
+    errno = ENOMEM;
+    return NULL;
+  }
   void *p;
   p = malloc(num * size);
   if (p)

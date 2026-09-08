@@ -1,5 +1,6 @@
 #include <arch/x86/io.h>
 #include <dos.h>
+#include <futex.h>
 #include <input_device.h>
 #include <irq.h>
 #include <limits.h>
@@ -196,6 +197,7 @@ static bool timer_interrupt(unsigned irq) {
   net_stack_tick();
   net_socket_tick();
   ipc_tick(); /* 唤醒等到超时的 IPC 等待者 */
+  futex_tick();
 
   timer = timerctl.t0; /* 首先把最前面的地址赋给timer */
   if (timer == NULL) {

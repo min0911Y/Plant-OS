@@ -55,7 +55,7 @@ static bool copy_directory_recursive(const char *source_directory,
     }
 
     size_t name_length = strlen(files[i].name);
-    size_t suffix_length = files[i].type == DIR ? 2 : 1;
+    size_t suffix_length = files[i].type == FILE_DIRECTORY ? 2 : 1;
     if (base_length >= destination_size ||
         suffix_length > destination_size - base_length ||
         name_length > destination_size - base_length - suffix_length) {
@@ -66,7 +66,7 @@ static bool copy_directory_recursive(const char *source_directory,
     }
 
     memcpy(destination + base_length, files[i].name, name_length + 1);
-    if (files[i].type == DIR) {
+    if (files[i].type == FILE_DIRECTORY) {
       if (!ensure_directory(destination)) {
         printf("Unable to create destination directory %s.\n", destination);
         success = false;

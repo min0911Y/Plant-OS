@@ -1,5 +1,6 @@
 #ifndef __XLIBC_LOCALE_H__
 #define __XLIBC_LOCALE_H__
+#include <ctypes.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -46,7 +47,19 @@ struct lconv {
 char * setlocale(int category, const char * locale);
 struct lconv * localeconv(void);
 typedef unsigned locale_t;
-#define CURRENT_LOCALE 0
+#define LC_GLOBAL_LOCALE ((locale_t)-1)
+#define LC_CTYPE_MASK (1 << LC_CTYPE)
+#define LC_NUMERIC_MASK (1 << LC_NUMERIC)
+#define LC_TIME_MASK (1 << LC_TIME)
+#define LC_COLLATE_MASK (1 << LC_COLLATE)
+#define LC_MONETARY_MASK (1 << LC_MONETARY)
+#define LC_MESSAGES_MASK (1 << LC_MESSAGES)
+#define LC_ALL_MASK ((1 << LC_ALL) - 1)
+locale_t newlocale(int mask, const char *name, locale_t base);
+locale_t duplocale(locale_t locale);
+void freelocale(locale_t locale);
+locale_t uselocale(locale_t locale);
+size_t __mb_cur_max(void);
 #ifdef __cplusplus
 }
 #endif

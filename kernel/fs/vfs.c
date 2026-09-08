@@ -1,6 +1,7 @@
 #include <dos.h>
 #include <irq.h>
 #include <limits.h>
+#include <stdint.h>
 
 #define VFS_MAX_FILESYSTEMS 26
 #define VFS_MAX_MOUNTS 26
@@ -11,6 +12,14 @@
 #define VFS_CACHE_MIN_BYTES (256u * 1024u)
 #define VFS_CACHE_MAX_BYTES (8u * 1024u * 1024u)
 #define VFS_INITIAL_FD_CAPACITY 16u
+#define VFS_IDENTITY_BUCKETS 64u
+
+typedef struct vfs_identity {
+  struct vfs_identity *next;
+  vfs_node_id_t node;
+  uint64_t number;
+} vfs_identity_t;
+static uint64_t vfs_identity_sequence;
 
 enum vfs_mount_state {
   VFS_MOUNT_INITIALIZING,
@@ -36,6 +45,8 @@ struct vfs_mount {
   uint8_t drive;
   enum vfs_mount_state state;
   bool retired_registered;
+  uint64_t device_identity;
+  vfs_identity_t *identities[VFS_IDENTITY_BUCKETS];
 };
 
 struct vfs_handle {
@@ -351,6 +362,13 @@ static void vfs_destroy_mount(struct vfs_mount *mount) {
   }
   free(mount->root->name);
   free(mount->root);
+  for (unsigned i = 0; i < VFS_IDENTITY_BUCKETS; i++) {
+    while (mount->identities[i]) {
+      vfs_identity_t *entry = mount->identities[i];
+      mount->identities[i] = entry->next;
+      free(entry);
+    }
+  }
   if (mount->retired_registered && disk_index < VFS_MAX_MOUNTS) {
     irq_state_t state = irq_save();
     if (vfs_disks[disk_index].retired_count != 0) {
@@ -1102,19 +1120,21 @@ int vfs_context_chdir(vfs_context_t *context, const char *path) {
   return VFS_OK;
 }
 
-int vfs_context_getcwd(vfs_context_t *context, char *buffer,
-                       size_t capacity) {
-  if (context == NULL || context->cwd == NULL) {
-    return VFS_ERROR_INVALID;
-  }
+static int vfs_dentry_path(struct vfs_dentry *directory, char *buffer,
+                           size_t capacity, bool drive) {
   size_t length = 0;
-  for (struct vfs_dentry *dentry = context->cwd; dentry->parent != NULL;
+  for (struct vfs_dentry *dentry = directory; dentry->parent != NULL;
        dentry = dentry->parent) {
-    length += strlen(dentry->name) + 1;
+    size_t size = strlen(dentry->name) + 1;
+    if (size > INT_MAX - length - 3)
+      return VFS_ERROR_OVERFLOW;
+    length += size;
   }
   if (length == 0) {
     length = 1;
   }
+  size_t prefix = drive ? 2 : 0;
+  length += prefix;
   if (buffer == NULL) {
     return length;
   }
@@ -1123,17 +1143,48 @@ int vfs_context_getcwd(vfs_context_t *context, char *buffer,
   }
   buffer[length] = '\0';
   size_t cursor = length;
-  for (struct vfs_dentry *dentry = context->cwd; dentry->parent != NULL;
+  for (struct vfs_dentry *dentry = directory; dentry->parent != NULL;
        dentry = dentry->parent) {
     size_t name_length = strlen(dentry->name);
     cursor -= name_length;
     memcpy(buffer + cursor, dentry->name, name_length);
     buffer[--cursor] = '/';
   }
-  if (cursor != 0) {
-    buffer[0] = '/';
+  if (cursor != prefix) {
+    buffer[prefix] = '/';
+  }
+  if (drive) {
+    buffer[0] = directory->mount->drive;
+    buffer[1] = ':';
   }
   return length;
+}
+
+int vfs_context_getcwd(vfs_context_t *context, char *buffer, size_t capacity) {
+  return context && context->cwd
+             ? vfs_dentry_path(context->cwd, buffer, capacity, false)
+             : VFS_ERROR_INVALID;
+}
+
+int vfs_realpath(vfs_context_t *context, const char *path, char **result) {
+  *result = NULL;
+  struct vfs_dentry *dentry;
+  int status = vfs_resolve(context, path, &dentry);
+  if (status < 0)
+    return status;
+  status = vfs_dentry_path(dentry, NULL, 0, true);
+  if (status >= 0) {
+    *result = malloc((size_t)status + 1);
+    status = *result
+                 ? vfs_dentry_path(dentry, *result, (size_t)status + 1, true)
+                 : VFS_ERROR_NO_MEMORY;
+  }
+  vfs_dentry_release(dentry);
+  if (status < 0) {
+    free(*result);
+    *result = NULL;
+  }
+  return status;
 }
 
 uint8_t vfs_context_drive(const vfs_context_t *context) {
@@ -1143,7 +1194,10 @@ uint8_t vfs_context_drive(const vfs_context_t *context) {
 int vfs_open(vfs_context_t *context, const char *path, uint32_t flags,
              vfs_handle_t **handle_out) {
   if (context == NULL || path == NULL || *path == '\0' || handle_out == NULL ||
-      (flags & (VFS_OPEN_READ | VFS_OPEN_WRITE)) == 0) {
+      (flags & (VFS_OPEN_READ | VFS_OPEN_WRITE)) == 0 ||
+      ((flags & VFS_OPEN_DIRECTORY) &&
+       (flags & (VFS_OPEN_WRITE | VFS_OPEN_CREATE | VFS_OPEN_TRUNCATE |
+                 VFS_OPEN_APPEND)))) {
     return VFS_ERROR_INVALID;
   }
   struct vfs_dentry *dentry = NULL;
@@ -1183,7 +1237,11 @@ int vfs_open(vfs_context_t *context, const char *path, uint32_t flags,
   if (status < 0) {
     return status;
   }
-  if (dentry->node.type != VFS_NODE_FILE) {
+  if ((flags & VFS_OPEN_DIRECTORY) && dentry->node.type != VFS_NODE_DIRECTORY) {
+    vfs_dentry_release(dentry);
+    return VFS_ERROR_NOT_DIRECTORY;
+  }
+  if (!(flags & VFS_OPEN_DIRECTORY) && dentry->node.type != VFS_NODE_FILE) {
     vfs_dentry_release(dentry);
     return VFS_ERROR_IS_DIRECTORY;
   }
@@ -1264,6 +1322,8 @@ int vfs_read(vfs_handle_t *handle, void *buffer, uint32_t length) {
       (handle->flags & VFS_OPEN_READ) == 0) {
     return VFS_ERROR_BAD_DESCRIPTOR;
   }
+  if (handle->dentry->node.type != VFS_NODE_FILE)
+    return VFS_ERROR_IS_DIRECTORY;
   if (length == 0 || handle->offset >= handle->dentry->node.size) {
     return 0;
   }
@@ -1422,6 +1482,42 @@ int vfs_sync(vfs_handle_t *handle) {
   return status;
 }
 
+static int vfs_dentry_stat(struct vfs_dentry *dentry, vfs_stat_t *status) {
+  struct vfs_mount *mount = dentry->mount;
+  irq_state_t state = irq_save();
+  unsigned bucket =
+      vfs_cache_bucket(mount, &dentry->node.id, 0) % VFS_IDENTITY_BUCKETS;
+  vfs_identity_t *entry = mount->identities[bucket];
+  while (entry && !vfs_node_equal(&entry->node, &dentry->node.id))
+    entry = entry->next;
+  if (!entry) {
+    if (vfs_identity_sequence > UINT64_MAX - (mount->device_identity ? 1 : 2)) {
+      irq_restore(state);
+      return VFS_ERROR_OVERFLOW;
+    }
+    entry = malloc(sizeof(*entry));
+    if (!entry) {
+      irq_restore(state);
+      return VFS_ERROR_NO_MEMORY;
+    }
+    if (!mount->device_identity)
+      mount->device_identity = ++vfs_identity_sequence;
+    *entry = (vfs_identity_t){mount->identities[bucket], dentry->node.id,
+                              ++vfs_identity_sequence};
+    mount->identities[bucket] = entry;
+  }
+  *status = (vfs_stat_t){.type = dentry->node.type,
+                         .attributes = disk_writable(mount->disk_number)
+                                           ? dentry->node.attributes
+                                           : RDO,
+                         .size = dentry->node.size,
+                         .modified_time = dentry->node.modified_time,
+                         .device = mount->device_identity,
+                         .inode = entry->number};
+  irq_restore(state);
+  return VFS_OK;
+}
+
 int vfs_fstat(vfs_handle_t *handle, vfs_stat_t *status) {
   if (handle == NULL || status == NULL) {
     return VFS_ERROR_INVALID;
@@ -1429,11 +1525,7 @@ int vfs_fstat(vfs_handle_t *handle, vfs_stat_t *status) {
   if (vfs_mount_status(handle->dentry->mount, VFS_OK) < 0) {
     return VFS_ERROR_IO;
   }
-  status->type = handle->dentry->node.type;
-  status->attributes = handle->dentry->node.attributes;
-  status->size = handle->dentry->node.size;
-  status->modified_time = handle->dentry->node.modified_time;
-  return VFS_OK;
+  return vfs_dentry_stat(handle->dentry, status);
 }
 
 int vfs_stat(vfs_context_t *context, const char *path, vfs_stat_t *status) {
@@ -1445,12 +1537,9 @@ int vfs_stat(vfs_context_t *context, const char *path, vfs_stat_t *status) {
   if (result < 0) {
     return result;
   }
-  status->type = dentry->node.type;
-  status->attributes = dentry->node.attributes;
-  status->size = dentry->node.size;
-  status->modified_time = dentry->node.modified_time;
+  result = vfs_dentry_stat(dentry, status);
   vfs_dentry_release(dentry);
-  return VFS_OK;
+  return result;
 }
 
 int vfs_list_directory(vfs_context_t *context, const char *path,
@@ -1712,4 +1801,33 @@ int vfs_fd_sync(vfs_context_t *context, int descriptor) {
 int vfs_fd_stat(vfs_context_t *context, int descriptor, vfs_stat_t *status) {
   vfs_handle_t *handle = vfs_fd_get(context, descriptor);
   return handle == NULL ? VFS_ERROR_BAD_DESCRIPTOR : vfs_fstat(handle, status);
+}
+
+int vfs_fd_truncate(vfs_context_t *context, int descriptor, uint32_t length) {
+  irq_state_t state = irq_save();
+  vfs_handle_t *handle = vfs_fd_get(context, descriptor);
+  if (!handle || !(handle->flags & VFS_OPEN_WRITE)) {
+    irq_restore(state);
+    return VFS_ERROR_BAD_DESCRIPTOR;
+  }
+  vfs_handle_retain(handle);
+  irq_restore(state);
+  struct vfs_mount *mount = handle->dentry->mount;
+  lock(&mount->lock);
+  int result = vfs_mount_status(mount, VFS_OK);
+  if (result == VFS_OK &&
+      (!disk_writable(mount->disk_number) || !mount->filesystem->truncate))
+    result = VFS_ERROR_READ_ONLY;
+  if (result == VFS_OK)
+    result = mount->filesystem->truncate(mount, &handle->dentry->node, length);
+  if (result == VFS_OK) {
+    handle->dentry->node.size = length;
+    vfs_update_open_sizes(mount, &handle->dentry->node.id, length);
+    vfs_cache_invalidate_node(mount, &handle->dentry->node.id);
+  }
+  unlock(&mount->lock);
+  state = irq_save();
+  vfs_close(handle);
+  irq_restore(state);
+  return result;
 }

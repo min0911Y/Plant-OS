@@ -258,9 +258,28 @@ int window_present(window_t window, int first, int last) {
 }
 
 void *window_get_fb(window_t window) {
-  return window == NULL ? NULL
-                        : (unsigned char *)window->shared +
-                              sizeof(*window->shared);
+  window_buffer_t buffer;
+  return window_get_buffer(window, &buffer) == 0 ? buffer.pixels : NULL;
+}
+
+int window_get_buffer(window_t window, window_buffer_t *buffer) {
+  if (!buffer)
+    return -1;
+  gui_lock();
+  struct gui_window *entry = gui_windows;
+  while (entry && entry != window)
+    entry = entry->next;
+  bool valid = entry && entry->id;
+  if (valid) {
+    *buffer = (window_buffer_t){
+        .pixels = (uint32_t *)(entry->shared + 1),
+        .pitch = (size_t)entry->width * sizeof(uint32_t),
+        .width = entry->width,
+        .height = entry->height,
+    };
+  }
+  gui_unlock();
+  return valid ? 0 : -1;
 }
 
 static void window_keyboard_set(window_t window, unsigned opcode) {

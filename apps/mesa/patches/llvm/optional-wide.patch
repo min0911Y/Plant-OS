@@ -1,0 +1,37 @@
+--- a/llvm/include/llvm/Support/ConvertUTF.h
++++ b/llvm/include/llvm/Support/ConvertUTF.h
+@@ -236,6 +236,7 @@
+ LLVM_ABI bool ConvertUTF8toWide(unsigned WideCharWidth, llvm::StringRef Source,
+                                 char *&ResultPtr, const UTF8 *&ErrorPtr);
+ 
++#if !defined(_LIBCPP_HAS_WIDE_CHARACTERS) || _LIBCPP_HAS_WIDE_CHARACTERS
+ /**
+ * Converts a UTF-8 StringRef to a std::wstring.
+ * \return true on success.
+@@ -254,6 +255,7 @@
+ */
+ LLVM_ABI bool convertWideToUTF8(const std::wstring &Source,
+                                 std::string &Result);
++#endif
+ 
+ /**
+  * Convert an Unicode code point to UTF8 sequence.
+--- a/llvm/lib/Support/ConvertUTFWrapper.cpp
++++ b/llvm/lib/Support/ConvertUTFWrapper.cpp
+@@ -234,6 +234,7 @@
+   return true;
+ }
+ 
++#if !defined(_LIBCPP_HAS_WIDE_CHARACTERS) || _LIBCPP_HAS_WIDE_CHARACTERS
+ static_assert(sizeof(wchar_t) == 1 || sizeof(wchar_t) == 2 ||
+                   sizeof(wchar_t) == 4,
+               "Expected wchar_t to be 1, 2, or 4 bytes");
+@@ -303,6 +304,8 @@
+   }
+ }
+ 
++#endif
++
+ bool IsSingleCodeUnitUTF8Codepoint(unsigned V) { return V <= 0x7F; }
+ 
+ bool IsSingleCodeUnitUTF16Codepoint(unsigned V) {

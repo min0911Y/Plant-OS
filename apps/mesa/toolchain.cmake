@@ -1,0 +1,45 @@
+set(CMAKE_SYSTEM_NAME PlantOS)
+set(PLOS_ARCH x86_64 CACHE STRING "Plant OS target architecture")
+if(NOT PLOS_ARCH STREQUAL "x86_64" AND NOT PLOS_ARCH STREQUAL "i386")
+  message(FATAL_ERROR "Unsupported Plant OS architecture: ${PLOS_ARCH}")
+endif()
+set(CMAKE_SYSTEM_PROCESSOR "${PLOS_ARCH}")
+list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
+get_filename_component(PLOS_APPS "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
+set(PLOS_OUTPUT "${PLOS_APPS}/out")
+if(PLOS_ARCH STREQUAL "x86_64")
+  string(APPEND PLOS_OUTPUT "/x86_64")
+endif()
+file(MAKE_DIRECTORY "${PLOS_OUTPUT}/mesa/sysroot/lib")
+foreach(library c m pthread rt dl)
+  file(WRITE "${PLOS_OUTPUT}/mesa/sysroot/lib/lib${library}.so"
+    "INPUT ( \"${PLOS_OUTPUT}/lib/libp.so\" )\n")
+endforeach()
+execute_process(COMMAND make --no-print-directory -s -C "${PLOS_APPS}"
+  -f dynamic.mk "ARCH=${PLOS_ARCH}" print-runtime-flags
+  OUTPUT_VARIABLE PLOS_COMPILE_FLAGS OUTPUT_STRIP_TRAILING_WHITESPACE
+  COMMAND_ERROR_IS_FATAL ANY)
+execute_process(COMMAND make --no-print-directory -s -C "${PLOS_APPS}"
+  -f dynamic.mk "ARCH=${PLOS_ARCH}" print-link-flags
+  OUTPUT_VARIABLE PLOS_LINK_FLAGS OUTPUT_STRIP_TRAILING_WHITESPACE
+  COMMAND_ERROR_IS_FATAL ANY)
+set(CMAKE_C_COMPILER clang)
+set(CMAKE_CXX_COMPILER clang++)
+set(CMAKE_C_COMPILER_TARGET "${PLOS_ARCH}-unknown-none-elf")
+set(CMAKE_CXX_COMPILER_TARGET "${CMAKE_C_COMPILER_TARGET}")
+execute_process(COMMAND clang -print-resource-dir OUTPUT_VARIABLE PLOS_CLANG_RESOURCE
+  OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
+set(PLOS_COMPILE_FLAGS "${PLOS_COMPILE_FLAGS} -nostdinc -isystem ${PLOS_CLANG_RESOURCE}/include -I${PLOS_APPS}/include")
+set(CMAKE_C_FLAGS_INIT "${PLOS_COMPILE_FLAGS}")
+set(CMAKE_CXX_FLAGS_INIT "${PLOS_COMPILE_FLAGS} -nostdinc++ -I${PLOS_APPS}/mesa/llvm")
+set(PLOS_USE_LIBCXX OFF CACHE BOOL "Use the native C++ runtime")
+if(PLOS_USE_LIBCXX)
+  set(CMAKE_CXX_FLAGS_INIT "-I${PLOS_OUTPUT}/mesa/libcxx/include/c++/v1 ${CMAKE_CXX_FLAGS_INIT}")
+  set(CMAKE_CXX_STANDARD_LIBRARIES "${PLOS_OUTPUT}/lib/libcpp.so" CACHE STRING "Native C++ library" FORCE)
+endif()
+set(CMAKE_FIND_ROOT_PATH "${PLOS_OUTPUT}/mesa/sysroot")
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
+set(CMAKE_TRY_COMPILE_PLATFORM_VARIABLES PLOS_ARCH PLOS_USE_LIBCXX)

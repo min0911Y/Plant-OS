@@ -16,7 +16,7 @@ int main(int argc, char **argv) {
   window = SDL_CreateWindow("SDL text", 800, 640, 0);
   if (!window)
     goto done;
-  renderer = SDL_CreateRenderer(window, "software");
+  renderer = SDL_CreateRenderer(window, NULL);
   font = TTF_OpenFont(argc > 1 ? argv[1] : "/data/fonts/mono.ttf", 60);
   if (!renderer || !font)
     goto done;

@@ -1,0 +1,29 @@
+--- a/llvm/lib/Support/ProgramStack.cpp
++++ b/llvm/lib/Support/ProgramStack.cpp
+@@ -10,7 +10,9 @@
+ #include "llvm/Config/config.h"
+ #include "llvm/Support/Compiler.h"
+ 
+-#ifdef LLVM_ON_UNIX
++#if defined(__plantos__)
++# include <pthread.h>
++#elif defined(LLVM_ON_UNIX)
+ # include <sys/resource.h> // for getrlimit
+ #endif
+ 
+@@ -42,7 +44,14 @@
+ }
+ 
+ unsigned llvm::getDefaultStackSize() {
+-#ifdef LLVM_ON_UNIX
++#if defined(__plantos__)
++  pthread_attr_t Attributes;
++  pthread_attr_init(&Attributes);
++  size_t Size;
++  pthread_attr_getstacksize(&Attributes, &Size);
++  pthread_attr_destroy(&Attributes);
++  return Size;
++#elif defined(LLVM_ON_UNIX)
+   rlimit RL;
+   getrlimit(RLIMIT_STACK, &RL);
+   return RL.rlim_cur;

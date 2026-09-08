@@ -48,4 +48,7 @@ SDL_SOURCE_DIRS := src \
   src/timer/plos \
   src/video/plos \
   src/time/plos
+ifeq ($(ARCH),x86_64)
+SDL_SOURCE_DIRS += src/render/vulkan
+endif
 SDL_SOURCES := $(foreach dir,$(SDL_SOURCE_DIRS),$(wildcard $(SDL_ROOT)/$(dir)/*.c))

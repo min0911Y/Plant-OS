@@ -1,0 +1,16 @@
+--- a/src/util/u_cpu_detect.c
++++ b/src/util/u_cpu_detect.c
+@@ -766,7 +766,13 @@
+ void
+ _util_cpu_detect_once(void)
+ {
++#if DETECT_OS_PLANTOS
++   /* An address space is pinned to one CPU until synchronous TLB shootdown
++    * supports scheduling its threads on multiple CPUs. */
++   int available_cpus = 1;
++#else
+    int available_cpus = 0;
++#endif
+    int total_cpus = 0;
+    bool zen = false;
+ 

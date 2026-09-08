@@ -6,6 +6,7 @@
 #include <rpc.h>
 #include <stdarg.h>
 #include <stddef.h>
+#include <user_thread.h>
 typedef unsigned int vram_t;
 typedef vram_t color_t;
 
@@ -146,7 +147,8 @@ enum WAIT_REASON {
   WAIT_REASON_KEYBOARD,
   WAIT_REASON_INPUT,
   WAIT_REASON_USB,
-  WAIT_REASON_TTY
+  WAIT_REASON_TTY,
+  WAIT_REASON_FUTEX
 };
 enum { TASK_KERNEL_STACK_SIZE = 64u * 1024u };
 typedef struct mtask {
@@ -155,6 +157,9 @@ typedef struct mtask {
   arch_address_space_t address_space;
   unsigned user_mode;
   bool return_cwd;
+  bool joinable;
+  uintptr_t thread_pointer;
+  thread_region_t user_tls, user_stack;
   uintptr_t top;
   unsigned weight;
   enum STATE state; // 此项为1（RUNNING） 即正常调度，为 2（WAITING） 3

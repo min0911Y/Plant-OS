@@ -1,0 +1,11 @@
+--- a/src/gallium/include/pipe/p_defines.h
++++ b/src/gallium/include/pipe/p_defines.h
+@@ -1416,7 +1416,7 @@
+ #define PIPE_UUID_SIZE 16
+ #define PIPE_LUID_SIZE 8
+ 
+-#if DETECT_OS_POSIX
++#if DETECT_OS_POSIX && !DETECT_OS_PLANTOS
+ #define PIPE_MEMORY_FD
+ #endif
+ 

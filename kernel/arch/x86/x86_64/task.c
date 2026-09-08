@@ -2,6 +2,10 @@
 #include <dos.h>
 #include <user_space.h>
 
+void arch_thread_pointer_set(uintptr_t pointer) {
+  x64_msr_write(0xc0000100, pointer);
+}
+
 void arch_task_context_init(arch_task_context_t *context, uintptr_t entry) {
   memset(context, 0, sizeof(*context));
   context->rip = entry;

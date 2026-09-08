@@ -88,7 +88,7 @@ int main() {
   }
   printf("now, copy headers\n");
   for (size_t i = 0; i < header_count; i++) {
-    if (headers[i].type == DIR) {
+    if (headers[i].type == FILE_DIRECTORY) {
       continue;
     }
     for (size_t j = 0; headers[i].name[j] != '\0'; j++) {

@@ -20,8 +20,8 @@ Plant OS 的 ELF 动态链接器是独立程序 `/lib/ld.so`，源文件位于
 `ld.so` 本身是无 `PT_INTERP`、无 `PT_DYNAMIC` 的静态 ELF，不需要自举
 重定位或另一份链接器。它使用独立匿名映射保存元数据，不初始化或占用应用
 的 malloc arena。随后由它装载 PIE 和依赖库，完成重定位、设置页面权限，
-最后调用程序的 `Main(runtime_linker_t *)`。`libp` 初始化分配器、stdio、
-命令行和环境后，调用链接器的初始化钩子；普通 `exit()` 调用析构钩子。
+最后调用程序的 `Main(runtime_linker_t *)`。`libp` 先建立当前线程的 TLS，
+再初始化分配器、stdio 和命令行，随后调用链接器的初始化钩子；普通 `exit()` 调用析构钩子。
 内核不搜索共享库、不解释动态符号，也不执行用户 ELF 重定位。
 
 `init`、shell 和普通应用使用同一启动路径。内核不再缓存静态 shell 镜像或维护
@@ -41,10 +41,12 @@ Plant OS 的 ELF 动态链接器是独立程序 `/lib/ld.so`，源文件位于
   字符串和动态表范围。装载地址由 VM 在空闲地址空间内选择。
 - `DT_NEEDED` 依赖图、SONAME/规范路径去重，以及广度优先的全局符号范围。
   支持 SysV 和 GNU hash，包括只有导入符号的空 GNU hash。
-- 全局/弱符号、未定义弱符号、符号覆盖、hidden/protected visibility 和
+- 全局/弱符号、未定义弱符号、单一全局范围内的 GNU UNIQUE、符号覆盖、hidden/protected visibility 和
   `DT_SYMBOLIC`。所有 PLT 槽都在进入程序前解析，不依赖延迟绑定 trampoline。
 - REL/RELA 中的相对、绝对、PC-relative、GLOB_DAT、JUMP_SLOT 和 COPY
   重定位；x86_64 的 32-bit 结果检查溢出。COPY 在其他重定位完成后执行。
+- `PT_TLS`、STT_TLS 和 x86 的 DTPMOD/DTPOFF/TPOFF 重定位。每个线程拥有
+  独立 TLS 模板副本，初始化数据和 TBSS 按 ELF 对齐布局。
 - `DT_RUNPATH` 的直接依赖搜索、无 RUNPATH 时沿装载祖先搜索 `DT_RPATH`、
   `$ORIGIN`/`${ORIGIN}`，最后搜索系统解释器所在的 `lib` 目录。包含路径分隔符的 NEEDED 项直接
   按路径查找；空搜索项表示当前目录。
@@ -56,17 +58,19 @@ Plant OS 的 ELF 动态链接器是独立程序 `/lib/ld.so`，源文件位于
   校验基于实际 LOAD 页面，不能误拒绝 GNU ld 生成的这种合法布局。
 
 当前仅接收 PIE 动态主程序，普通固定地址 `ET_EXEC` 主程序仍采用静态链接。
-尚未实现 TLS、IFUNC、符号版本、RELR、`dlopen`/`dlsym`/`dlclose`、
-`LD_PRELOAD` 或 `LD_LIBRARY_PATH`。不支持的 ELF 元数据会明确失败，
+支持 `dlopen(NULL)`、`RTLD_DEFAULT`、`dlsym`、`dladdr` 和对应的 `dlerror`/`dlclose`；
+查找 TLS 符号返回当前线程的地址。非 NULL 路径的 `dlopen`、IFUNC、符号版本、
+RELR、`LD_PRELOAD` 和 `LD_LIBRARY_PATH` 尚未实现。不支持的 ELF 元数据会明确失败，
 不会假装已完成链接。用户态装载错误打印 `ld.so:` 诊断并退出 `127`；
 内核无法打开解释器或解析启动 ELF 时返回 `-1`。
 
 ## 构建与使用
 
-当前全部正式应用（69 个 i386、68 个 x86_64 产物，含回归用例）均为
+当前全部正式应用（具体清单由 `make -C apps ARCH=... list-apps` 生成）均为
 `ET_DYN` PIE，带 `/lib/ld.so` 的 `PT_INTERP`，通过 `DT_NEEDED` 使用
 `libp.so`。C++ 应用另导入 `libcpp.so`，C/C++ 都使用 `libp/entry.c` 的唯一
-`Main` 包装；C++ 支持代码位于 `libp/cxx.cpp`。`ld.so` 自身保持静态自举。
+`Main` 包装；C++ 支持来自原生 libc++/libc++abi，禁用异常和 RTTI，
+不再使用旧的手写 ABI 或 GNU C++ 头文件副本。`ld.so` 自身保持静态自举。
 
 ```sh
 make -C apps ARCH=i386 -j8
@@ -121,6 +125,27 @@ heap 自下向上增长，二者在修改页表前检查冲突。范围及请求
 匿名区域共享给其他进程后，创建者仍可解除自己的映射；物理页要等所有引用释放
 后才回收，共享期间不允许改变页面保护属性。
 
+## TLS、线程与运行库生命周期
+
+TLS 使用 x86 ELF variant II：模块存储位于 TCB 前方，TCB 包含自身指针、模块
+地址表和原生线程运行时。x86_64 经 FS base 访问，i386 使用每 CPU 的 GS 描述符。
+内核在线程切换和用户返回路径中保存、恢复线程指针；`__tls_get_addr` 从当前
+TCB 查找模块。所有依赖在进入 main 前装载，没有固定大小的动态 TLS 余量。
+
+`runtime_linker_t` 统一提供初始化/析构、TLS 分配、符号与地址查询，以及可执行
+文件的规范路径。每个 ELF 对象链接独立的 hidden `__dso_handle`。C++ 全局对象、
+局部静态对象和 thread_local 析构使用同一套原生运行库。
+
+线程创建、join/detach、栈和 TLS 映射的托管由原生 syscall `0x68` 完成；
+pthread mutex/condvar/rwlock/barrier/once 使用进程私有 futex `0x67`。
+errno、locale、TSS 与浮点环境按线程隔离。fork 协调分配器、环境、退出回调、
+TSS 和 stdio 锁，子进程更新自身线程身份。普通 `exit` 执行回调和析构，
+`_Exit`/`abort` 终止整个进程组；低层 `_exit` 保留线程退出入口的语义。
+
+`setenv`/`unsetenv` 管理进程内覆盖值，fork 复制覆盖值；普通 exec 当前从系统
+配置获取环境，不继承这些覆盖。线程及运行库回归使用 `--threads`，渲染依赖与
+具体支持边界见 [lavapipe](lavapipe.md)。
+
 ## 验证
 
 ```sh
@@ -128,6 +153,8 @@ python3 scripts/test-x86_64.py --dynamic
 python3 scripts/test-x86_64.py --arch i386 --dynamic --memory 512
 python3 scripts/test-x86_64.py --all-apps --firmware uefi
 python3 scripts/test-x86_64.py --arch i386 --all-apps --memory 512
+python3 scripts/test-x86_64.py --threads --memory 1024
+python3 scripts/test-x86_64.py --threads --arch i386 --memory 512
 ```
 
 默认完整回归也会运行 `dyntest.bin`。它覆盖跨库调用、两种哈希表、符号覆盖、

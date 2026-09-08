@@ -72,10 +72,21 @@ void arch_boot_verify(void) {
   for (size_t i = 0; i < count; i++) {
     struct limine_memmap_entry *entry = memory.response->entries[i];
     boot_memory_range_t *range = &boot_info.memory_ranges[i];
-    *range = (boot_memory_range_t){entry->base, entry->length,
-                                   entry->type == LIMINE_MEMMAP_USABLE
-                                       ? BOOT_MEMORY_USABLE
-                                       : BOOT_MEMORY_RESERVED};
+    if (entry->length > UINT64_MAX - entry->base)
+      boot_failure("memory range overflow");
+    boot_memory_type_t type = BOOT_MEMORY_RESERVED;
+    switch (entry->type) {
+    case LIMINE_MEMMAP_USABLE:
+      type = BOOT_MEMORY_USABLE;
+      break;
+    case LIMINE_MEMMAP_ACPI_RECLAIMABLE:
+    case LIMINE_MEMMAP_ACPI_NVS:
+    case LIMINE_MEMMAP_BOOTLOADER_RECLAIMABLE:
+    case LIMINE_MEMMAP_EXECUTABLE_AND_MODULES:
+      type = BOOT_MEMORY_RESERVED_RAM;
+      break;
+    }
+    *range = (boot_memory_range_t){entry->base, entry->length, type};
     if (i == storage_index) {
       range->base += map_bytes;
       range->length -= map_bytes;
@@ -119,7 +130,8 @@ uintptr_t arch_memory_detect(const boot_info_t *info) {
   uintptr_t end = 0;
   for (size_t i = 0; i < info->memory_range_count; i++) {
     const boot_memory_range_t *range = &info->memory_ranges[i];
-    if (range->type == BOOT_MEMORY_USABLE &&
+    if ((range->type == BOOT_MEMORY_USABLE ||
+         range->type == BOOT_MEMORY_RESERVED_RAM) &&
         range->base + range->length > end) {
       end = range->base + range->length;
     }

@@ -68,7 +68,7 @@ ASTATIC AWindow *aOpenWin(AInt16 x, AInt16 y, const char *t, AInt8 autoClose)
 	AWindow *w = aMalloc(aSizeof (AWindow));
 	aInitWin0(w, x, y, t, autoClose);
         w->win = SDL_CreateWindow(w->title, w->xsiz, w->ysiz, 0);
-        w->rndr = w->win ? SDL_CreateRenderer(w->win, "software") : NULL;
+        w->rndr = w->win ? SDL_CreateRenderer(w->win, NULL) : NULL;
         w->txtr = w->rndr ? SDL_CreateTexture(w->rndr, SDL_PIXELFORMAT_ARGB8888,
                                               SDL_TEXTUREACCESS_STREAMING,
                                               w->xsiz, w->ysiz)

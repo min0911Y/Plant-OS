@@ -1,0 +1,153 @@
+--- a/src/vulkan/wsi/wsi_common_headless.c
++++ b/src/vulkan/wsi/wsi_common_headless.c
+@@ -30,6 +30,8 @@
+ #include "vk_physical_device.h"
+ #include "wsi_common_entrypoints.h"
+ #include "wsi_common_private.h"
++#include "wsi_common_queue.h"
++#include <limits.h>
+ 
+ #include "drm-uapi/drm_fourcc.h"
+ 
+@@ -309,22 +311,11 @@
+ 
+ struct wsi_headless_image {
+    struct wsi_image base;
+-
+-   /* whether the host side ownership is taken by the app or the display */
+-   bool busy_on_host;
+-
+-   /* whether the image may still be worked on by the device
+-    *
+-    * The headless display does not involve a presentation queue to wait for
+-    * the gpu out-fence. To let the app acquire the most likely idle image, we
+-    * use a second boolean to steer the app to acquire all the swapchain images
+-    * in a loop.
+-    */
+-   bool busy_on_device;
+ };
+ 
+ struct wsi_headless_swapchain {
+    struct wsi_swapchain base;
++   struct wsi_queue available;
+    struct wsi_headless_image images[0];
+ };
+ VK_DEFINE_NONDISP_HANDLE_CASTS(wsi_headless_swapchain, base.base, VkSwapchainKHR,
+@@ -346,12 +337,8 @@
+    struct wsi_headless_swapchain *chain =
+       (struct wsi_headless_swapchain *)wsi_chain;
+ 
+-   for (uint32_t i = 0; i < count; i++) {
+-      uint32_t index = indices[i];
+-      assert(index < chain->base.image_count);
+-      chain->images[index].busy_on_device = false;
+-      chain->images[index].busy_on_host = false;
+-   }
++   for (uint32_t i = 0; i < count; i++)
++      wsi_queue_push(&chain->available, indices[i]);
+ 
+    return VK_SUCCESS;
+ }
+@@ -363,38 +350,8 @@
+ {
+    struct wsi_headless_swapchain *chain =
+       (struct wsi_headless_swapchain *)wsi_chain;
+-   struct timespec start_time, end_time;
+-   struct timespec rel_timeout;
+-
+-   timespec_from_nsec(&rel_timeout, info->timeout);
+-
+-   clock_gettime(CLOCK_MONOTONIC, &start_time);
+-   timespec_add(&end_time, &rel_timeout, &start_time);
+-
+-   while (1) {
+-      /* Try to find a free image. */
+-      for (uint32_t i = 0; i < chain->base.image_count; i++) {
+-         if (!chain->images[i].busy_on_host) {
+-            if (chain->images[i].busy_on_device) {
+-               /* simple trick to avoid the just presented image */
+-               chain->images[i].busy_on_device = false;
+-               continue;
+-            }
+-
+-            /* We found a non-busy image */
+-            *image_index = i;
+-            chain->images[i].busy_on_host = true;
+-            chain->images[i].busy_on_device = true;
+-            return VK_SUCCESS;
+-         }
+-      }
+-
+-      /* Check for timeout. */
+-      struct timespec current_time;
+-      clock_gettime(CLOCK_MONOTONIC, &current_time);
+-      if (timespec_after(&current_time, &end_time))
+-         return VK_NOT_READY;
+-   }
++   VkResult result = wsi_queue_pull(&chain->available, image_index, info->timeout);
++   return result == VK_TIMEOUT && info->timeout == 0 ? VK_NOT_READY : result;
+ }
+ 
+ static VkResult
+@@ -408,7 +365,7 @@
+ 
+    assert(image_index < chain->base.image_count);
+ 
+-   chain->images[image_index].busy_on_host = false;
++   wsi_queue_push(&chain->available, image_index);
+ 
+    return VK_SUCCESS;
+ }
+@@ -434,6 +391,7 @@
+          wsi_destroy_image(&chain->base, &chain->images[i].base);
+    }
+ 
++   wsi_queue_destroy(&chain->available);
+    wsi_swapchain_finish(&chain->base);
+ 
+    vk_free(pAllocator, chain);
+@@ -454,7 +412,11 @@
+ 
+    assert(pCreateInfo->sType == VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR);
+ 
+-   int num_images = pCreateInfo->minImageCount;
++   if (!pCreateInfo->minImageCount ||
++       pCreateInfo->minImageCount > INT_MAX / sizeof(uint32_t) ||
++       pCreateInfo->minImageCount > (SIZE_MAX - sizeof(*chain)) / sizeof(chain->images[0]))
++      return VK_ERROR_OUT_OF_HOST_MEMORY;
++   uint32_t num_images = pCreateInfo->minImageCount;
+ 
+    size_t size = sizeof(*chain) + num_images * sizeof(chain->images[0]);
+    chain = vk_zalloc(pAllocator, size, 8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+@@ -515,6 +477,13 @@
+    if (result != VK_SUCCESS)
+       goto fail_free_chain;
+ 
++   result = wsi_queue_init(&chain->available, num_images);
++   if (result != VK_SUCCESS) {
++      result = VK_ERROR_OUT_OF_HOST_MEMORY;
++      wsi_swapchain_finish(&chain->base);
++      goto fail_free_chain;
++   }
++
+    chain->base.destroy = wsi_headless_swapchain_destroy;
+    chain->base.get_wsi_image = wsi_headless_swapchain_get_wsi_image;
+    chain->base.acquire_next_image = wsi_headless_swapchain_acquire_next_image;
+@@ -531,8 +500,7 @@
+       if (result != VK_SUCCESS)
+          goto fail_destroy_images;
+ 
+-      chain->images[image].busy_on_host = false;
+-      chain->images[image].busy_on_device = false;
++      wsi_queue_push(&chain->available, image);
+    }
+ 
+    *swapchain_out = &chain->base;
+@@ -540,6 +508,7 @@
+    return VK_SUCCESS;
+ 
+ fail_destroy_images:
++   wsi_queue_destroy(&chain->available);
+    for (uint32_t i = 0; i < image; i++)
+       wsi_destroy_image(&chain->base, &chain->images[i].base);
+    wsi_swapchain_finish(&chain->base);

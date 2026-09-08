@@ -1,9 +1,112 @@
+#include "runtime_lifecycle.h"
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
+#include <pwd.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <syscall.h>
+#include <task.h>
+#include <unistd.h>
+#include <vm.h>
+
+extern const runtime_linker_t *runtime_linker;
+const char *getexecname(void) {
+  return runtime_linker ? runtime_linker->executable_path : NULL;
+}
+
+static struct passwd root_user = {"root",     "",  0,         0,
+                                  "Plant OS", "/", "/psh.bin"};
+struct passwd *getpwuid(uid_t uid) {
+  return uid == 0 ? &root_user : NULL;
+}
+struct passwd *getpwnam(const char *name) {
+  return name && !strcmp(name, root_user.pw_name) ? &root_user : NULL;
+}
+int getpwnam_r(const char *name, struct passwd *entry, char *buffer,
+               size_t size, struct passwd **result) {
+  *result = NULL;
+  struct passwd *user = getpwnam(name);
+  if (!user)
+    return 0;
+  const char *strings[] = {user->pw_name, user->pw_passwd, user->pw_gecos,
+                           user->pw_dir, user->pw_shell};
+  size_t required = 0;
+  for (unsigned i = 0; i < 5; i++)
+    required += strlen(strings[i]) + 1;
+  if (size < required)
+    return ERANGE;
+  *entry = *user;
+  char **fields[] = {&entry->pw_name, &entry->pw_passwd, &entry->pw_gecos,
+                     &entry->pw_dir, &entry->pw_shell};
+  for (unsigned i = 0; i < 5; i++) {
+    size_t length = strlen(strings[i]) + 1;
+    *fields[i] = buffer;
+    memcpy(buffer, strings[i], length);
+    buffer += length;
+  }
+  *result = entry;
+  return 0;
+}
+
+int getpwuid_r(uid_t uid, struct passwd *entry, char *buffer, size_t size,
+               struct passwd **result) {
+  if (uid) {
+    *result = NULL;
+    return 0;
+  }
+  return getpwnam_r("root", entry, buffer, size, result);
+}
+
+long sysconf(int name) {
+  switch (name) {
+  case _SC_PAGESIZE:
+    return VM_PAGE_SIZE;
+  case _SC_NPROCESSORS_ONLN:
+  case _SC_NPROCESSORS_CONF:
+    return cpu_count();
+  case _SC_PHYS_PAGES:
+    return mem_total() / VM_PAGE_SIZE;
+  case _SC_AVPHYS_PAGES:
+    return mem_total() / VM_PAGE_SIZE - mem_used();
+  case _SC_OPEN_MAX:
+    return __INT_MAX__;
+  case _SC_GETPW_R_SIZE_MAX:
+    return 1024;
+  default:
+    errno = EINVAL;
+    return -1;
+  }
+}
+int getpagesize(void) { return VM_PAGE_SIZE; }
+uid_t getuid(void) { return 0; }
+uid_t geteuid(void) { return 0; }
+gid_t getgid(void) { return 0; }
+gid_t getegid(void) { return 0; }
+int gethostname(char *buffer, size_t size) {
+  static const char name[] = "plant-os";
+  if (!buffer || size < sizeof(name)) {
+    errno = ENAMETOOLONG;
+    return -1;
+  }
+  memcpy(buffer, name, sizeof(name));
+  return 0;
+}
+int isatty(int descriptor) {
+  if (descriptor >= 0 && descriptor <= 2)
+    return 1;
+  struct stat status;
+  if (!fstat(descriptor, &status))
+    errno = ENOTTY;
+  return 0;
+}
+int usleep(useconds_t microseconds) {
+  struct timespec duration = {microseconds / 1000000,
+                              (microseconds % 1000000) * 1000};
+  return nanosleep(&duration, NULL);
+}
 
 static int vfs_result(int result) {
   if (result < 0) {
@@ -46,6 +149,8 @@ int open(const char *path, int flags, ...) {
   if ((flags & O_APPEND) != 0) {
     vfs_flags |= VFS_OPEN_APPEND;
   }
+  if (flags & O_DIRECTORY)
+    vfs_flags |= VFS_OPEN_DIRECTORY;
   vfs_syscall_request_t request = {0};
   request.arguments.open.path = (uintptr_t)path;
   request.arguments.open.flags = vfs_flags;
@@ -114,12 +219,34 @@ int fsync(int descriptor) {
   return vfs_result(vfs_invoke(VFS_SYSCALL_SYNC, &request));
 }
 
-static void stat_from_vfs(const vfs_file_stat_t *source,
-                          struct stat *destination) {
+int ftruncate(int descriptor, off_t length) {
+  if (length < 0 || (uint64_t)length > UINT32_MAX) {
+    errno = length < 0 ? EINVAL : EOVERFLOW;
+    return -1;
+  }
+  vfs_syscall_request_t request = {0};
+  request.arguments.truncate.descriptor = descriptor;
+  request.arguments.truncate.length = length;
+  return vfs_result(vfs_invoke(VFS_SYSCALL_TRUNCATE, &request));
+}
+
+static int stat_from_vfs(const vfs_file_stat_t *source,
+                         struct stat *destination) {
+  if (source->size > __LONG_MAX__) {
+    errno = EOVERFLOW;
+    return -1;
+  }
   memset(destination, 0, sizeof(*destination));
-  destination->st_mode = source->type == DIR ? S_IFDIR : S_IFREG;
+  destination->st_mode = (source->type == FILE_DIRECTORY ? S_IFDIR : S_IFREG) |
+                         (source->attributes == RDO ? 0555 : 0777);
+  destination->st_dev = source->device;
+  destination->st_ino = source->inode;
+  destination->st_nlink = 1;
   destination->st_size = source->size;
   destination->st_mtime = source->modified_time;
+  destination->st_blksize = VM_PAGE_SIZE;
+  destination->st_blocks = ((uint64_t)source->size + 511) / 512;
+  return 0;
 }
 
 int stat(const char *path, struct stat *status) {
@@ -133,7 +260,7 @@ int stat(const char *path, struct stat *status) {
   request.arguments.stat.status = (uintptr_t)&vfs_status;
   int result = vfs_result(vfs_invoke(VFS_SYSCALL_STAT, &request));
   if (result == 0) {
-    stat_from_vfs(&vfs_status, status);
+    return stat_from_vfs(&vfs_status, status);
   }
   return result;
 }
@@ -143,15 +270,69 @@ int fstat(int descriptor, struct stat *status) {
     errno = EINVAL;
     return -1;
   }
+  if (descriptor >= 0 && descriptor <= 2) {
+    memset(status, 0, sizeof(*status));
+    status->st_mode = S_IFCHR | 0666;
+    status->st_nlink = 1;
+    status->st_blksize = VM_PAGE_SIZE;
+    return 0;
+  }
   vfs_file_stat_t vfs_status;
   vfs_syscall_request_t request = {0};
   request.arguments.fstat.descriptor = descriptor;
   request.arguments.fstat.status = (uintptr_t)&vfs_status;
   int result = vfs_result(vfs_invoke(VFS_SYSCALL_FSTAT, &request));
   if (result == 0) {
-    stat_from_vfs(&vfs_status, status);
+    return stat_from_vfs(&vfs_status, status);
   }
   return result;
+}
+
+int lstat(const char *path, struct stat *status) { return stat(path, status); }
+int access(const char *path, int mode) {
+  if (mode & ~(R_OK | W_OK | X_OK)) {
+    errno = EINVAL;
+    return -1;
+  }
+  struct stat status;
+  if (stat(path, &status))
+    return -1;
+  if (((mode & R_OK) && !(status.st_mode & 0444)) ||
+      ((mode & W_OK) && !(status.st_mode & 0222)) ||
+      ((mode & X_OK) && !(status.st_mode & 0111))) {
+    errno = EACCES;
+    return -1;
+  }
+  return 0;
+}
+
+char *realpath(const char *path, char *resolved) {
+  if (!path) {
+    errno = EINVAL;
+    return NULL;
+  }
+  vfs_syscall_request_t request = {0};
+  request.arguments.canonical.path = (uintptr_t)path;
+  for (;;) {
+    int required = vfs_result(vfs_invoke(VFS_SYSCALL_REALPATH, &request));
+    if (required < 0)
+      return NULL;
+    size_t capacity = resolved ? PATH_MAX : (size_t)required + 1;
+    char *buffer = resolved ? resolved : malloc(capacity);
+    if (!buffer)
+      return NULL;
+    request.arguments.canonical.buffer = (uintptr_t)buffer;
+    request.arguments.canonical.capacity = capacity;
+    int status = vfs_result(vfs_invoke(VFS_SYSCALL_REALPATH, &request));
+    if (status >= 0)
+      return buffer;
+    if (!resolved)
+      free(buffer);
+    if (resolved || errno != EOVERFLOW)
+      return NULL;
+    request.arguments.canonical.buffer = 0;
+    request.arguments.canonical.capacity = 0;
+  }
 }
 
 int mkdir(const char *path, ...) {

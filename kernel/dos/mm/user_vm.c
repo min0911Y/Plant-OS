@@ -1,10 +1,34 @@
 #include <dos.h>
+#include <irq.h>
 #include <page_fault.h>
 #include <user_space.h>
 #include <user_vm.h>
 
 bool user_vm_range_free(uintptr_t address, size_t length) {
   return arch_user_find_free(address, address + length, length) == address;
+}
+
+bool user_vm_readable(uintptr_t address, size_t length) {
+  if (address < USER_SPACE_START || address >= USER_HEAP_END || !length ||
+      length > USER_HEAP_END - address)
+    return false;
+  uintptr_t last = (address + length - 1) & ~(uintptr_t)(VM_PAGE_SIZE - 1);
+  for (uintptr_t page = address & ~(uintptr_t)(VM_PAGE_SIZE - 1);;
+       page += VM_PAGE_SIZE) {
+    if (!(arch_user_page_flags(page) & VM_READ))
+      return false;
+    if (page == last)
+      return true;
+  }
+}
+
+bool user_vm_copy_from(void *destination, uintptr_t address, size_t length) {
+  irq_state_t state = irq_save();
+  bool readable = user_vm_readable(address, length);
+  if (readable)
+    memcpy(destination, (const void *)address, length);
+  irq_restore(state);
+  return readable;
 }
 
 bool user_vm_prepare_write(uintptr_t address, size_t length) {
@@ -20,6 +44,15 @@ bool user_vm_prepare_write(uintptr_t address, size_t length) {
     if (page == last)
       return true;
   }
+}
+
+bool user_vm_copy_to(uintptr_t address, const void *source, size_t length) {
+  irq_state_t state = irq_save();
+  bool writable = user_vm_prepare_write(address, length);
+  if (writable)
+    memcpy((void *)address, source, length);
+  irq_restore(state);
+  return writable;
 }
 
 intptr_t user_vm_operation(unsigned operation, const vm_request_t *request) {

@@ -349,9 +349,14 @@ object_t *object_load(int fd, const char *path, object_t *parent) {
   bool entry_valid = false;
   for (size_t i = 0; i < header.e_phnum; i++) {
     const Elf_Phdr *p = object->segments + i;
-    if ((p->p_type == PT_TLS && p->p_memsz) ||
-        (p->p_type == PT_GNU_STACK && (p->p_flags & PF_X)))
-      fail(path, "TLS and executable stacks are not supported");
+    if (p->p_type == PT_GNU_STACK && (p->p_flags & PF_X))
+      fail(path, "executable stacks are not supported");
+    if (p->p_type == PT_TLS) {
+      if (object->tls || p->p_filesz > p->p_memsz ||
+          (p->p_align && (p->p_align & (p->p_align - 1))))
+        fail(path, "invalid TLS segment");
+      object->tls = p;
+    }
     if (parent && p->p_type == PT_INTERP)
       fail(path, "a shared library cannot have an interpreter");
     if (p->p_type == PT_DYNAMIC) {

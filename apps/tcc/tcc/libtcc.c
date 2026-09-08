@@ -774,7 +774,7 @@ LIBTCCAPI TCCState *tcc_new(void)
     /* standard defines */
     tcc_define_symbol(s, "__STDC__", NULL);
     tcc_define_symbol(s, "__STDC_VERSION__", "199901L");
-    tcc_define_symbol(s, "__STDC_HOSTED__", NULL);
+    tcc_define_symbol(s, "__STDC_HOSTED__", "0");
 
     /* target defines */
 #if defined(TCC_TARGET_I386)
@@ -813,6 +813,9 @@ LIBTCCAPI TCCState *tcc_new(void)
 # ifdef TCC_TARGET_X86_64
     tcc_define_symbol(s, "_WIN64", NULL);
 # endif
+#elif defined(__plantos__)
+    tcc_define_symbol(s, "__plantos__", NULL);
+    tcc_define_symbol(s, "PLANT_ARCH_I386", NULL);
 #else
     tcc_define_symbol(s, "__unix__", NULL);
     tcc_define_symbol(s, "__unix", NULL);
@@ -870,6 +873,63 @@ LIBTCCAPI TCCState *tcc_new(void)
     };
     for (int i = 0; i < sizeof(integer_types) / sizeof(integer_types[0]); i++)
         tcc_define_symbol(s, integer_types[i].name, integer_types[i].type);
+    /* The SDK describes this native compiler's ABI, including x87 long double. */
+#define PLANT_STRINGIFY_INNER(value) #value
+#define PLANT_STRINGIFY(value) PLANT_STRINGIFY_INNER(value)
+#define PLANT_PREDEFINE(name) {#name, PLANT_STRINGIFY(name)}
+    static const struct { const char *name, *value; } native_constants[] = {
+        PLANT_PREDEFINE(__LONG_MAX__),
+        PLANT_PREDEFINE(__LONG_LONG_MAX__),
+        PLANT_PREDEFINE(__INT_MAX__),
+        PLANT_PREDEFINE(__FLT_RADIX__),
+        PLANT_PREDEFINE(__FLT_EVAL_METHOD__),
+        PLANT_PREDEFINE(__DECIMAL_DIG__),
+        PLANT_PREDEFINE(__FLT_MANT_DIG__),
+        PLANT_PREDEFINE(__FLT_DIG__),
+        PLANT_PREDEFINE(__FLT_DECIMAL_DIG__),
+        PLANT_PREDEFINE(__FLT_MIN_EXP__),
+        PLANT_PREDEFINE(__FLT_MAX_EXP__),
+        PLANT_PREDEFINE(__FLT_MIN_10_EXP__),
+        PLANT_PREDEFINE(__FLT_MAX_10_EXP__),
+        PLANT_PREDEFINE(__FLT_MIN__),
+        PLANT_PREDEFINE(__FLT_MAX__),
+        PLANT_PREDEFINE(__FLT_EPSILON__),
+        PLANT_PREDEFINE(__FLT_DENORM_MIN__),
+        PLANT_PREDEFINE(__FLT_HAS_DENORM__),
+        PLANT_PREDEFINE(__DBL_MANT_DIG__),
+        PLANT_PREDEFINE(__DBL_DIG__),
+        PLANT_PREDEFINE(__DBL_DECIMAL_DIG__),
+        PLANT_PREDEFINE(__DBL_MIN_EXP__),
+        PLANT_PREDEFINE(__DBL_MAX_EXP__),
+        PLANT_PREDEFINE(__DBL_MIN_10_EXP__),
+        PLANT_PREDEFINE(__DBL_MAX_10_EXP__),
+        PLANT_PREDEFINE(__DBL_MIN__),
+        PLANT_PREDEFINE(__DBL_MAX__),
+        PLANT_PREDEFINE(__DBL_EPSILON__),
+        PLANT_PREDEFINE(__DBL_DENORM_MIN__),
+        PLANT_PREDEFINE(__DBL_HAS_DENORM__),
+        PLANT_PREDEFINE(__LDBL_MANT_DIG__),
+        PLANT_PREDEFINE(__LDBL_DIG__),
+        PLANT_PREDEFINE(__LDBL_DECIMAL_DIG__),
+        PLANT_PREDEFINE(__LDBL_MIN_EXP__),
+        PLANT_PREDEFINE(__LDBL_MAX_EXP__),
+        PLANT_PREDEFINE(__LDBL_MIN_10_EXP__),
+        PLANT_PREDEFINE(__LDBL_MAX_10_EXP__),
+        PLANT_PREDEFINE(__LDBL_MIN__),
+        PLANT_PREDEFINE(__LDBL_MAX__),
+        PLANT_PREDEFINE(__LDBL_EPSILON__),
+        PLANT_PREDEFINE(__LDBL_DENORM_MIN__),
+        PLANT_PREDEFINE(__LDBL_HAS_DENORM__),
+    };
+#undef PLANT_PREDEFINE
+#undef PLANT_STRINGIFY
+#undef PLANT_STRINGIFY_INNER
+    for (unsigned i = 0; i < sizeof(native_constants) / sizeof(native_constants[0]); i++)
+        tcc_define_symbol(s, native_constants[i].name, native_constants[i].value);
+    tcc_define_symbol(s, "__builtin_offsetof(type,member)",
+        "((__SIZE_TYPE__)&((type *)0)->member)");
+    tcc_define_symbol(s, "_Alignof(type)", "__alignof__(type)");
+
     tcc_define_symbol(s, "_Static_assert(test,message)",
         "extern int __tcc_static_assert[(test) ? 1 : -1]");
 

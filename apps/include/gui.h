@@ -9,6 +9,11 @@ extern "C" {
 #endif
 
 typedef struct gui_window *window_t;
+typedef struct {
+  uint32_t *pixels;
+  size_t pitch;
+  uint32_t width, height;
+} window_buffer_t;
 
 window_t create_window(const char *title, int x, int y, int width, int height);
 int window_get_event(window_t window);
@@ -20,6 +25,8 @@ void window_refresh(window_t window, int first, int last);
 /* Publish complete pixels and wait until the compositor has copied them. */
 int window_present(window_t window, int first, int last);
 void *window_get_fb(window_t window);
+/* The window owns this ARGB8888 buffer until close_window(). */
+int window_get_buffer(window_t window, window_buffer_t *buffer);
 void window_start_recv_keyboard(window_t window);
 void window_stop_recv_keyboard(window_t window);
 /* Wake rpc_serve_once() when a window event or keyboard input is queued. */

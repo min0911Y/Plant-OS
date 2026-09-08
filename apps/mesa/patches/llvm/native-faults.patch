@@ -1,0 +1,36 @@
+--- a/llvm/include/llvm/Support/ExitCodes.h
++++ b/llvm/include/llvm/Support/ExitCodes.h
+@@ -20,7 +20,7 @@
+ 
+ #if HAVE_SYSEXITS_H
+ #include <sysexits.h>
+-#elif __MVS__ || defined(_WIN32)
++#elif __MVS__ || defined(_WIN32) || defined(__plantos__)
+ // <sysexits.h> does not exist on z/OS and Windows. The only value used in LLVM
+ // is EX_IOERR, which is used to signal a special error condition (broken pipe).
+ // Define the macro with its usual value from BSD systems, which is chosen to
+--- a/llvm/lib/Support/CrashRecoveryContext.cpp
++++ b/llvm/lib/Support/CrashRecoveryContext.cpp
+@@ -328,6 +328,13 @@
+     sCurrentExceptionHandle = NULL;
+   }
+ }
++
++#elif defined(__plantos__)
++
++static void installExceptionOrSignalHandlers() {
++  report_fatal_error("Plant OS does not support synchronous fault recovery");
++}
++static void uninstallExceptionOrSignalHandlers() {}
+ 
+ #else // !_WIN32
+ 
+@@ -469,6 +476,8 @@
+     return false;
+ #if defined(_WIN32)
+   ::RaiseException(RetCode, 0, 0, NULL);
++#elif defined(__plantos__)
++  std::_Exit(RetCode);
+ #else
+   llvm::sys::unregisterHandlers();
+   raise(RetCode - 128);

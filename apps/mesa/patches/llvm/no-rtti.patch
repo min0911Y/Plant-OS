@@ -1,0 +1,40 @@
+--- a/libcxxabi/CMakeLists.txt
++++ b/libcxxabi/CMakeLists.txt
+@@ -49,6 +49,10 @@
+ option(LIBCXXABI_ENABLE_EXCEPTIONS
+   "Provide support for exceptions in the runtime.
+   When disabled, libc++abi does not support stack unwinding and other exceptions-related features." ON)
++option(LIBCXXABI_ENABLE_RTTI "Provide runtime type information support." ON)
++if (LIBCXXABI_ENABLE_EXCEPTIONS AND NOT LIBCXXABI_ENABLE_RTTI)
++  message(FATAL_ERROR "Exception support requires RTTI support")
++endif()
+ option(LIBCXXABI_ENABLE_ASSERTIONS "Enable assertions independent of build mode." ON)
+ option(LIBCXXABI_ENABLE_PEDANTIC "Compile with pedantic enabled." OFF)
+ option(LIBCXXABI_ENABLE_WERROR "Fail and stop if a warning is triggered." OFF)
+@@ -325,6 +329,10 @@
+ # Get feature flags.
+ add_compile_flags_if_supported(-fstrict-aliasing)
+ 
++if (NOT LIBCXXABI_ENABLE_RTTI)
++  add_compile_flags_if_supported(-fno-rtti)
++endif()
++
+ # Exceptions
+ if (LIBCXXABI_ENABLE_EXCEPTIONS)
+   # Catches C++ exceptions only and tells the compiler to assume that extern C
+--- a/libcxxabi/src/CMakeLists.txt
++++ b/libcxxabi/src/CMakeLists.txt
+@@ -16,8 +16,11 @@
+   # Internal files
+   abort_message.cpp
+   fallback_malloc.cpp
+-  private_typeinfo.cpp
+-)
++)
++
++if (LIBCXXABI_ENABLE_RTTI)
++  list(APPEND LIBCXXABI_SOURCES private_typeinfo.cpp)
++endif()
+ 
+ if (LIBCXXABI_ENABLE_NEW_DELETE_DEFINITIONS)
+   list(APPEND LIBCXXABI_SOURCES

@@ -1,6 +1,7 @@
 #ifndef _FS_H
 #define _FS_H
 
+#include "../../apps/include/vfs_stat.h"
 #include <define.h>
 
 typedef struct FILE FILE;
@@ -34,14 +35,10 @@ enum vfs_open_flags {
   VFS_OPEN_EXCLUSIVE = 1u << 3,
   VFS_OPEN_TRUNCATE = 1u << 4,
   VFS_OPEN_APPEND = 1u << 5,
+  VFS_OPEN_DIRECTORY = 1u << 6,
 };
 
-typedef struct {
-  vfs_node_type_t type;
-  ftype attributes;
-  uint32_t size;
-  uint32_t modified_time;
-} vfs_stat_t;
+typedef vfs_file_stat_t vfs_stat_t;
 
 enum vfs_syscall_operation {
   VFS_SYSCALL_OPEN,
@@ -65,6 +62,8 @@ enum vfs_syscall_operation {
   VFS_SYSCALL_UNMOUNT,
   VFS_SYSCALL_CHANGE_DRIVE,
   VFS_SYSCALL_FORMAT,
+  VFS_SYSCALL_TRUNCATE,
+  VFS_SYSCALL_REALPATH,
   VFS_SYSCALL_COUNT,
 };
 
@@ -89,6 +88,10 @@ typedef struct {
       int32_t whence;
     } seek;
     struct {
+      int32_t descriptor;
+      uint32_t length;
+    } truncate;
+    struct {
       uintptr_t path;
       uintptr_t status;
     } stat;
@@ -101,6 +104,11 @@ typedef struct {
       uintptr_t entries;
       uint32_t capacity;
     } list;
+    struct {
+      uintptr_t path;
+      uintptr_t buffer;
+      uint32_t capacity;
+    } canonical;
     struct {
       uintptr_t path;
     } path;
@@ -182,6 +190,8 @@ int vfs_fd_seek(vfs_context_t *context, int descriptor, int32_t offset,
                 int whence);
 int vfs_fd_sync(vfs_context_t *context, int descriptor);
 int vfs_fd_stat(vfs_context_t *context, int descriptor, vfs_stat_t *status);
+int vfs_fd_truncate(vfs_context_t *context, int descriptor, uint32_t length);
+int vfs_realpath(vfs_context_t *context, const char *path, char **result);
 
 FILE *fopen(const char *path, const char *mode);
 int fputc(int c, FILE *stream);

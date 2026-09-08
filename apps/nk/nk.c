@@ -102,7 +102,7 @@ int main(int argc, char *argv[]) {
     exit(-1);
   }
 
-  renderer = SDL_CreateRenderer(win, "software");
+  renderer = SDL_CreateRenderer(win, NULL);
 
   if (renderer == NULL) {
     SDL_Log("Error SDL_CreateRenderer %s", SDL_GetError());

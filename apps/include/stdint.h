@@ -6,13 +6,15 @@ typedef __INTPTR_TYPE__ intptr_t;
 typedef long long _Int64;
 typedef _Int64 intmax_t;
 typedef uint64_t uintmax_t;
- # if __WORDSIZE == 64
+#ifndef __INT64_C
+#if __WORDSIZE == 64
 #  define __INT64_C(c)	c ## L
 #  define __UINT64_C(c)	c ## UL
 # else
 #  define __INT64_C(c)	c ## LL
 #  define __UINT64_C(c)	c ## ULL
 # endif
+#endif
 
 /* Limits of integral types.  */
 
@@ -113,7 +115,7 @@ typedef uint64_t uintmax_t;
 #  define PTRDIFF_MIN		(-9223372036854775807L-1)
 #  define PTRDIFF_MAX		(9223372036854775807L)
 # else
-#  if __WORDSIZE32_PTRDIFF_LONG
+#  if defined(__WORDSIZE32_PTRDIFF_LONG) && __WORDSIZE32_PTRDIFF_LONG
 #   define PTRDIFF_MIN		(-2147483647L-1)
 #   define PTRDIFF_MAX		(2147483647L)
 #  else
@@ -130,7 +132,7 @@ typedef uint64_t uintmax_t;
 # if __WORDSIZE == 64
 #  define SIZE_MAX		(18446744073709551615UL)
 # else
-#  if __WORDSIZE32_SIZE_ULONG
+#  if defined(__WORDSIZE32_SIZE_ULONG) && __WORDSIZE32_SIZE_ULONG
 #   define SIZE_MAX		(4294967295UL)
 #  else
 #   define SIZE_MAX		(4294967295U)

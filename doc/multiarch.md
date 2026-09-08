@@ -18,6 +18,10 @@ make -C kernel ARCH=x86_64 livecd
 
 x86_64 使用 GCC/G++、binutils、NASM、mtools、xorriso 和固定版本的 Limine 12.6.1。生成的 `kernel/plant-os-x86_64.iso` 同时包含 BIOS 和 UEFI 启动项。内核、应用和库分别位于 `kernel/obj/x86_64/`、`apps/out/x86_64/`、`apps/libs/x86_64/`；切换架构不会覆盖另一架构的对象。
 
+原生 C++ 运行库以及 x86_64 默认 lavapipe 构建还需要 Clang、CMake、Ninja、
+Meson、TableGen、glslangValidator 和 Python 生成器依赖，版本与配置见
+[lavapipe 构建](lavapipe.md#构建)。宿主工具与目标运行库严格分开。
+
 ```sh
 qemu-system-x86_64 -accel tcg -cpu max -smp 4 -m 1024 \
   -cdrom kernel/plant-os-x86_64.iso -boot d -serial stdio
@@ -37,6 +41,11 @@ xAPIC 模式下映射 LAPIC MMIO；不需要为此关闭 BIOS 中的 x2APIC。
 直接失败，不把静默降级后的测试算作 x2APIC 验证。
 
 ## 启动、地址空间与 ABI
+
+Limine 的可用 RAM 和被内核、模块、启动器或 ACPI 占用的 RAM 都纳入页元数据
+覆盖范围；后者标为 `BOOT_MEMORY_RESERVED_RAM`，不交给分配器。这样即使大的
+initramfs 位于最高可用内存之后，也能正确保留；MMIO 和普通保留地址不作为 RAM
+扩张分配器范围。只有 `BOOT_MEMORY_USABLE` 区间会成为空闲页。
 
 | 项目 | i386 | x86_64 |
 | --- | --- | --- |
@@ -70,7 +79,7 @@ PCID 要求 IA-32e 分页，i386 保留原来的 CR3 路径；`--arch i386 --dyn
 
 用户与内核都以 `-mno-red-zone -msse2 -mfpmath=sse -mlong-double-64` 构建。调度器在 CPU 支持时使用 XSAVEOPT64/XRSTOR64，否则使用 FXSAVE64/FXRSTOR64；BSP 选择后端，AP 验证能力。XSAVEOPT 后端启用 CR4.OSXSAVE，并在每个 CPU 设置 XCR0=3，只保存 x87 和 SSE；任务保存区为 64 字节对齐的 576-byte 标准 XSAVE 格式，任务注册表按页分配。保存区在恢复和下次保存之间保持完整，当前任务 reset 同时重置硬件状态跟踪。
 
-临时中断及 syscall 栈帧在执行 C 代码前仍保存完整 FXSAVE64 状态并装入内核 MXCSR，返回时恢复；清零或复用的临时栈不能依赖 XSAVEOPT 跳过未修改状态。调度、fork 和信号返回保留全部 XMM、x87 和 MXCSR。FSGSBASE 未启用，用户 GS 固定为零，AVX 不属于当前 ABI。信号返回使用编号 `0x65`，检查用户 frame 后经 `iretq` 恢复完整寄存器；信号 frame 保持完整的 FXSAVE 格式，不接受用户提供的 XSAVE header。
+临时中断及 syscall 栈帧在执行 C 代码前仍保存完整 FXSAVE64 状态并装入内核 MXCSR，返回时恢复；清零或复用的临时栈不能依赖 XSAVEOPT 跳过未修改状态。调度、fork 和信号返回保留全部 XMM、x87 和 MXCSR。FSGSBASE 未启用，用户 FS base 指向原生 TLS，用户 GS 固定为零，AVX 不属于当前 ABI。i386 使用 GS 描述符提供 TLS，并保持禁用 SSE。新线程继承创建者的浮点环境，`fenv.h` 在 x86_64 同步 x87/MXCSR，i386 只操作 x87。信号返回使用编号 `0x65`，检查用户 frame 后经 `iretq` 恢复完整寄存器；信号 frame 保持完整的 FXSAVE 格式，不接受用户提供的 XSAVE header。
 
 `simdtest.bin` 验证多核切换、fork、x87、16 个 XMM、MXCSR 和显式 reset。以下 CPU 配置分别覆盖 XSAVEOPT、只有 XSAVE、没有 XSAVE；串口 `simd: context=... xcr0=...` 显示实际选择，这些配置均运行完整回归：
 
@@ -106,11 +115,11 @@ flanterm 自己处理 ANSI/VT100，默认 TTY 不再经过内核旧解析器。G
 | `apps/SDL3_image` | [SDL_image 3.4.6](https://github.com/libsdl-org/SDL_image/releases/tag/release-3.4.6) | `d2e4637ae700f72e5196b8fbd749850ed2e5e1e09c5a5be8d06ff55aaccf3b01` |
 | `apps/SDL3_ttf` | [SDL_ttf 3.2.2](https://github.com/libsdl-org/SDL_ttf/releases/tag/release-3.2.2) | `63547d58d0185c833213885b635a2c0548201cc8f301e6587c0be1a67e1e045d` |
 
-仓库保留上游公共头文件、可移植源码、软件渲染器及选用后端，许可证位于各目录的 `LICENSE.txt`。SDL 源码清单维护在 `apps/sdl3/sources.mk`；Plant OS 配置位于 `config/SDL_build_config.h`，平台扩展位于 `src/{video,timer,time}/plos/`。平台识别屏蔽宿主的 Linux/Unix 宏，i386 禁用 SIMD，x86_64 使用 SSE2；内存、数学和标准文件接口使用 libp；配置中的 `HAVE_LIBC=1` 表示标准库符号由 libp 唯一提供。`SDL_iostream.c` 的描述符和同步调用接入项目 VFS 接口，不能使用宿主 `unistd.h` 或 POSIX `clock_gettime` ABI。
+仓库保留上游公共头文件、可移植源码、软件渲染器及选用后端，许可证位于各目录的 `LICENSE.txt`。SDL 源码清单维护在 `apps/sdl3/sources.mk`；Plant OS 配置位于 `config/SDL_build_config.h`，平台扩展位于 `src/{video,timer,time}/plos/`。平台识别屏蔽宿主的 Linux/Unix 宏，i386 禁用 SIMD，x86_64 使用 SSE2；内存、数学和标准文件接口使用 libp；配置中的 `HAVE_LIBC=1` 表示标准库符号由 libp 唯一提供。`SDL_iostream.c` 的描述符和同步调用接入项目 VFS 接口，通过项目 `unistd.h`、`time.h` 的原生包装访问服务，不能链接宿主运行库。
 
 在系统中先运行 `gui.bin`，再从 GUI 终端运行 `lite.bin` 或 `nk.bin`。Doom 与 WAD 位于 `/games`，可在该目录运行 `doom.bin`。SDL 软件 surface 直接写 GUI 提供的共享绘图缓冲，pitch 包含窗口边框；GUI 保留独立的已提交画面用于合成和遮挡恢复。Present 只按行复制 damage，并等刷新 RPC 应答后才复用共享绘图缓冲，避免 nk 清屏或绘制中的半成品帧被显示。SDL 不再额外持有第三份像素缓冲。普通 `window_refresh` 仍可合并异步更新；需要完整帧边界的程序使用 `window_present`。显示尺寸通过 `framebuffer_info()` 查询，SDL 不请求 BIOS 模式切换。每个窗口独立处理键盘前缀和鼠标状态，支持文字、方向键、滚轮、标题更新与关闭。
 
-当前支持软件渲染、字体、图片、键鼠、文件/内存 IOStream 及纳秒性能计时；窗口尺寸固定。OpenGL/Vulkan、音频设备、SDL 线程和 `SDL_AddTimer` 的异步回调尚未实现，相关创建或初始化返回失败。SDL3 不再使用 `SDL_INIT_TIMER`；`SDL_GetTicks` 返回 64 位毫秒，`SDL_GetTicksNS` 和性能计数器返回纳秒。延时调用转换为内核阻塞 sleep。
+当前支持软件渲染、字体、图片、键鼠、文件/内存 IOStream 及纳秒性能计时；窗口尺寸固定。x86_64 另提供原生 lavapipe Vulkan renderer 和 GUI swapchain，常规 renderer 应用选择 SDL 默认后端；窗口 surface 默认保留直接共享缓冲路径。Vulkan 的构建、单一 ICD 接口和像素验证见 [lavapipe](lavapipe.md)。OpenGL、音频设备、SDL 自身的线程后端和 `SDL_AddTimer` 异步回调尚未实现，Mesa 使用独立的原生 pthread 能力。SDL3 不再使用 `SDL_INIT_TIMER`；`SDL_GetTicks` 返回 64 位毫秒，`SDL_GetTicksNS` 和性能计数器返回纳秒。延时调用转换为内核阻塞 sleep。
 
 SDL3 操作普遍以 `true` 表示成功，窗口事件直接使用 `SDL_EVENT_WINDOW_*`，鼠标坐标为浮点数。文本输入按窗口显式开启，字体接口统一接收 UTF-8；i386 非 ASCII 字面量须显式保留 UTF-8 字节。SDL3 的文本/拖放事件字符串由 SDL 管理，不能保留到下一次事件泵或自行释放。nk 顶点颜色使用浮点 RGBA。初始窗口坐标通过 `SDL_CreateWindowWithProperties` 设置，不依赖创建后移动。
 
@@ -120,7 +129,7 @@ lite 的渲染器按 surface pitch 寻址，命令缓存按结构对齐；文件
 
 ## 日期与时间
 
-RTC 保存 UTC。读取完整、稳定的快照，解码 BCD/二进制与 12/24 小时格式，世纪寄存器直接参与年份计算。缺少世纪寄存器时使用 1970..2069 年窗口，不再额外偏移年份。`time()` 返回 Unix 秒；`gmtime` 使用 UTC，`localtime`/`mktime` 使用当前固定的 UTC+08:00。`tm_year` 从 1900 起算，`tm_yday` 从 0 起算。GUI 每秒更新一次；单调计时仍由 HPET/内核时钟提供。
+RTC 保存 UTC。读取完整、稳定的快照，解码 BCD/二进制与 12/24 小时格式，世纪寄存器直接参与年份计算。缺少世纪寄存器时使用 1970..2069 年窗口，不再额外偏移年份。`time_t` 在两种架构都是有符号 64 位秒；`gmtime` 使用 UTC，`localtime`/`mktime` 使用当前固定的 UTC+08:00。`clock()` 保留毫秒 ABI，标准 `clock_gettime(CLOCK_MONOTONIC/CLOCK_REALTIME, ...)`、`nanosleep` 和 `monotonic_ns` 使用原生时钟。`tm_year` 从 1900 起算，`tm_yday` 从 0 起算。GUI 每秒更新一次。
 
 ## 程序与验证
 

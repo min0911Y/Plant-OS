@@ -1,0 +1,21 @@
+--- a/include/c99_alloca.h
++++ b/include/c99_alloca.h
+@@ -35,7 +35,7 @@
+ 
+ #  define alloca _alloca
+ 
+-#elif defined(__sun) || defined(__CYGWIN__)
++#elif defined(__sun) || defined(__CYGWIN__) || defined(__plantos__)
+ 
+ #  include <alloca.h>
+ 
+--- a/src/util/log.c
++++ b/src/util/log.c
+@@ -30,6 +30,7 @@
+ #include "util/log.h"
+ #include "util/ralloc.h"
+ #include "util/u_debug.h"
++#include "util/u_process.h"
+ 
+ #if DETECT_OS_POSIX && !DETECT_OS_PLANTOS
+ #include <syslog.h>

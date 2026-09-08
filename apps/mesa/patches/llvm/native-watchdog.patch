@@ -1,0 +1,26 @@
+--- a/llvm/lib/Support/Watchdog.cpp
++++ b/llvm/lib/Support/Watchdog.cpp
+@@ -14,7 +14,9 @@
+ #include "llvm/Config/llvm-config.h"
+ 
+ // Include the platform-specific parts of this class.
+-#ifdef LLVM_ON_UNIX
++#if defined(__plantos__)
++#include "PlantOS/Watchdog.inc"
++#elif defined(LLVM_ON_UNIX)
+ #include "Unix/Watchdog.inc"
+ #endif
+ #ifdef _WIN32
+--- a/llvm/include/llvm/Support/Watchdog.h
++++ b/llvm/include/llvm/Support/Watchdog.h
+@@ -29,6 +29,10 @@
+       Watchdog(unsigned int seconds);
+       ~Watchdog();
+     private:
++#if defined(__plantos__)
++      struct State;
++      State *Timer;
++#endif
+       // Noncopyable.
+       Watchdog(const Watchdog &other) = delete;
+       Watchdog &operator=(const Watchdog &other) = delete;

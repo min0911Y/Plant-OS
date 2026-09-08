@@ -1,0 +1,14 @@
+{
+  "llvm": {
+    "version": "21.1.8",
+    "url": "https://github.com/llvm/llvm-project/releases/download/llvmorg-21.1.8/llvm-project-21.1.8.src.tar.xz",
+    "sha256": "4633a23617fa31a3ea51242586ea7fb1da7140e426bd62fc164261fe036aa142",
+    "directory": "llvm-project-21.1.8.src"
+  },
+  "mesa": {
+    "version": "26.2.2",
+    "url": "https://archive.mesa3d.org/mesa-26.2.2.tar.xz",
+    "sha256": "eeb29ca7e56cfaa8e8a79538dcf834e3b18e501c31bef5145e959ea437cc4216",
+    "directory": "mesa-26.2.2"
+  }
+}

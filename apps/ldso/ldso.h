@@ -28,6 +28,8 @@ struct object {
   size_t dependency_count;
   enum { OBJECT_NEW, OBJECT_VISITING, OBJECT_INITIALIZED } state;
   bool symbolic;
+  const Elf_Phdr *tls;
+  size_t tls_module, tls_offset;
 };
 
 typedef struct {
@@ -38,6 +40,7 @@ typedef struct {
   size_t available;
   const char *cwd;
   const char *library_path;
+  size_t tls_count, tls_size, tls_alignment;
 } linker_t;
 extern linker_t linker;
 

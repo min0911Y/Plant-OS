@@ -9,9 +9,10 @@ extern "C" {
 #include <ctypes.h>
 #include <input_event.h>
 #include <key_input.h>
+#include <vfs_stat.h>
 enum { SYSCALL_SIGNAL_RETURN = 0x65 };
 #define T_DrawBox(x, y, w, h, c) Text_Draw_Box((y), (x), (h) + y, (w) + x, (c))
-typedef enum { FLE, DIR, RDO, HID, SYS } ftype;
+typedef enum { FLE, FILE_DIRECTORY, RDO, HID, SYS } ftype;
 struct finfo_block {
   char name[255];
   ftype type;
@@ -19,12 +20,6 @@ struct finfo_block {
   unsigned short year, month, day;
   unsigned short hour, minute;
 };
-typedef struct {
-  uint32_t type;
-  uint32_t attributes;
-  uint32_t size;
-  uint32_t modified_time;
-} vfs_file_stat_t;
 
 enum vfs_open_flags {
   VFS_OPEN_READ = 1u << 0,
@@ -33,6 +28,7 @@ enum vfs_open_flags {
   VFS_OPEN_EXCLUSIVE = 1u << 3,
   VFS_OPEN_TRUNCATE = 1u << 4,
   VFS_OPEN_APPEND = 1u << 5,
+  VFS_OPEN_DIRECTORY = 1u << 6,
 };
 
 enum vfs_syscall_operation {
@@ -57,6 +53,8 @@ enum vfs_syscall_operation {
   VFS_SYSCALL_UNMOUNT,
   VFS_SYSCALL_CHANGE_DRIVE,
   VFS_SYSCALL_FORMAT,
+  VFS_SYSCALL_TRUNCATE,
+  VFS_SYSCALL_REALPATH,
   VFS_SYSCALL_COUNT,
 };
 
@@ -81,6 +79,10 @@ typedef struct {
       int32_t whence;
     } seek;
     struct {
+      int32_t descriptor;
+      uint32_t length;
+    } truncate;
+    struct {
       uintptr_t path;
       uintptr_t status;
     } stat;
@@ -93,6 +95,11 @@ typedef struct {
       uintptr_t entries;
       uint32_t capacity;
     } list;
+    struct {
+      uintptr_t path;
+      uintptr_t buffer;
+      uint32_t capacity;
+    } canonical;
     struct {
       uintptr_t path;
     } path;
@@ -163,14 +170,13 @@ void SendMessage(int to_tid, void *data, unsigned int size);
 void GetMessage(void *data, int from_tid);
 unsigned int MessageLength(int from_tid);
 int NowTaskID();
-void _exit(unsigned _status);
+void _exit(int status) __attribute__((noreturn));
 void timer_alloc();
 void timer_settime(unsigned int time);
 int timer_out();
 void timer_free();
 int haveMsg();
 void GetMessageAll(void *data);
-char *api_get_env(char *name, char *value);
 int format(unsigned drive, char *fs_name);
 void *malloc(size_t size);
 void free(void *p);
@@ -217,7 +223,7 @@ void tty_stop_cur_moving();
 int tty_get_xsize(void);
 int tty_get_ysize(void);
 int vfs_unmount_disk(uint8_t drive);
-void exit(unsigned status);
+void exit(int status) __attribute__((noreturn));
 void logk(char *s);
 int logkf(const char *format, ...);
 int fork();

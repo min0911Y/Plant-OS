@@ -1,7 +1,13 @@
 #ifndef __SIGNAL_H__
 #define __SIGNAL_H__
 typedef void (*sighandler_t)(int);
+#ifdef __cplusplus
+extern "C" {
+#endif
 sighandler_t signal(int sig, sighandler_t handler);
+#ifdef __cplusplus
+}
+#endif
 #define SIGINT 0
 #define SIGTERM 1
 #define SIGILL 2

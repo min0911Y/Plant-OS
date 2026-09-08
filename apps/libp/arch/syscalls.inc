@@ -35,13 +35,14 @@ CALL SendMessage, 0x22, 4, a0, a1, a2
 CALL GetMessage, 0x22, 5, a1, a0
 CALL MessageLength, 0x22, 6, a0
 CALL NowTaskID, 0x22, 7
+CALL getpid, 0x22, 0x0e
+CALL getppid, 0x22, 0x0f
 CALL haveMsg, 0x22, 8
 CALL GetMessageAll, 0x22, 9, 0, a0
-CALL AddThread, 0x22, 0x0a, a0, a1, a2, a3
 CALL TaskLock, 0x22, 0x0b
 CALL TaskUnlock, 0x22, 0x0c
 CALL SubThread, 0x22, 0x0d, a0
-CALL _exit, 0x1e, a0
+CALL api_exit, 0x1e, a0
 CALL timer_alloc, 0x24
 CALL timer_settime, 0x24, 1, a0
 CALL timer_out, 0x24, 2
@@ -71,7 +72,7 @@ CALL key_up_status, 0x32
 CALL get_key_press, 0x33
 CALL get_key_up, 0x34
 CALL sbrk, 0x35, a0
-CALL api_get_env, 0x36, a0, a1
+CALL environment_query, 0x36, a0, a1, a2, a3
 CALL exec, 0x39, a0, a1
 CALL clear, 0x3a
 CALL mem_total, 0x3e
@@ -82,7 +83,7 @@ CALL tty_get_xsize, 0x45
 CALL tty_get_ysize, 0x46
 CALL logk, 0x48, a0
 CALL signal, 0x49, a0, a1
-CALL fork, 0x4a
+CALL api_fork, 0x4a
 CALL waittid, 0x4b, a0
 CALL mouse_enable, 0x4d
 CALL mouse_dat_status, 0x4e
@@ -107,3 +108,7 @@ CALL cpu_current, 0x61, 0, 0, 0, 0, 0, 0, DATA_RESULT
 CALL tty_notify_input, 0x62, a0
 CALL perf_control, 0x63, a0
 CALL input_wait, 0x64, a0
+CALL futex_syscall, 0x67, a0, a1, a2
+CALL thread_syscall, 0x68, a0, a1, a2
+CALL native_thread_pointer, 0x68, 2
+CALL _Exit, 0x68, 7, a0

@@ -24,6 +24,10 @@
 #include "../SDL_sysvideo.h"
 #include <framebuffer.h>
 #include <gui.h>
+#ifdef SDL_VIDEO_VULKAN
+#include "../SDL_vulkan_internal.h"
+#include <plant_vulkan.h>
+#endif
 
 /* GUI window decorations surround the SDL client area. */
 enum { BORDER = 4, TITLE = 24 };
@@ -36,6 +40,9 @@ struct SDL_WindowData {
 };
 
 static bool PLOS_VideoInit(SDL_VideoDevice *_this) {
+  /* CPU window surfaces already have a direct GUI mapping. */
+  SDL_SetHintWithPriority(SDL_HINT_FRAMEBUFFER_ACCELERATION, "0",
+                          SDL_HINT_DEFAULT);
   framebuffer_info_t info;
   if (framebuffer_info(&info) < 0)
     return SDL_SetError("Plant OS display is unavailable");
@@ -63,9 +70,12 @@ static bool PLOS_SetDisplayMode(SDL_VideoDevice *_this,
 
 static bool PLOS_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window,
                               SDL_PropertiesID props) {
-  if (window->flags &
-      (SDL_WINDOW_OPENGL | SDL_WINDOW_VULKAN | SDL_WINDOW_METAL))
-    return SDL_SetError("Plant OS supports software rendering");
+  if (window->flags & (SDL_WINDOW_OPENGL | SDL_WINDOW_METAL))
+    return SDL_SetError("Plant OS has no OpenGL or Metal backend");
+#ifndef SDL_VIDEO_VULKAN
+  if (window->flags & SDL_WINDOW_VULKAN)
+    return SDL_SetError("Vulkan requires the x86_64 backend");
+#endif
   if (window->flags & SDL_WINDOW_RESIZABLE)
     return SDL_SetError("Plant OS windows have a fixed size");
   if (window->w > UINT16_MAX - 2 * BORDER ||
@@ -308,6 +318,82 @@ static void PLOS_VideoQuit(SDL_VideoDevice *_this) {}
 
 static void PLOS_DeleteDevice(SDL_VideoDevice *device) { SDL_free(device); }
 
+#ifdef SDL_VIDEO_VULKAN
+static bool PLOS_Vulkan_LoadLibrary(SDL_VideoDevice *device, const char *path) {
+  if (path && SDL_strcmp(path, "liblvp.so") &&
+      SDL_strcmp(path, "/lib/liblvp.so"))
+    return SDL_SetError("Plant OS Vulkan uses the linked lavapipe driver");
+  SDL_FunctionPointer enumerate =
+      (SDL_FunctionPointer)vk_icdGetInstanceProcAddr(
+          VK_NULL_HANDLE, "vkEnumerateInstanceExtensionProperties");
+  if (!enumerate)
+    return SDL_SetError("Lavapipe has no instance extension entry point");
+  device->vulkan_config.vkGetInstanceProcAddr =
+      (SDL_FunctionPointer)vk_icdGetInstanceProcAddr;
+  device->vulkan_config.vkEnumerateInstanceExtensionProperties = enumerate;
+  /* The ELF interpreter owns the linked ICD for the process lifetime. */
+  device->vulkan_config.loader_handle = (SDL_SharedObject *)device;
+  SDL_strlcpy(device->vulkan_config.loader_path, path ? path : "liblvp.so",
+              sizeof(device->vulkan_config.loader_path));
+  return true;
+}
+
+static void PLOS_Vulkan_UnloadLibrary(SDL_VideoDevice *device) {
+  device->vulkan_config.loader_handle = NULL;
+  device->vulkan_config.vkGetInstanceProcAddr = NULL;
+  device->vulkan_config.vkEnumerateInstanceExtensionProperties = NULL;
+}
+
+static const char *const *
+PLOS_Vulkan_GetInstanceExtensions(SDL_VideoDevice *device, Uint32 *count) {
+  static const char *const extensions[] = {VK_KHR_SURFACE_EXTENSION_NAME};
+  *count = SDL_arraysize(extensions);
+  return extensions;
+}
+
+static bool PLOS_Vulkan_CreateSurface(SDL_VideoDevice *device,
+                                      SDL_Window *window, VkInstance instance,
+                                      const VkAllocationCallbacks *allocator,
+                                      VkSurfaceKHR *surface) {
+  SDL_WindowData *data = window->internal;
+  VkRect2D client = {.offset = {BORDER, TITLE},
+                     .extent = {data->width, data->height}};
+  VkResult result = plant_vulkan_create_surface(instance, data->handle, &client,
+                                                allocator, surface);
+  return result == VK_SUCCESS ||
+         SDL_SetError("Cannot create the Vulkan window surface: %s",
+                      SDL_Vulkan_GetResultString(result));
+}
+
+static void PLOS_Vulkan_DestroySurface(SDL_VideoDevice *device,
+                                       VkInstance instance,
+                                       VkSurfaceKHR surface,
+                                       const VkAllocationCallbacks *allocator) {
+  SDL_Vulkan_DestroySurface_Internal(
+      device->vulkan_config.vkGetInstanceProcAddr, instance, surface,
+      allocator);
+}
+
+static bool PLOS_Vulkan_GetPresentationSupport(SDL_VideoDevice *device,
+                                               VkInstance instance,
+                                               VkPhysicalDevice physical,
+                                               Uint32 family) {
+  PFN_vkGetPhysicalDeviceProperties properties =
+      (PFN_vkGetPhysicalDeviceProperties)vk_icdGetInstanceProcAddr(
+          instance, "vkGetPhysicalDeviceProperties");
+  PFN_vkGetPhysicalDeviceQueueFamilyProperties queues =
+      (PFN_vkGetPhysicalDeviceQueueFamilyProperties)vk_icdGetInstanceProcAddr(
+          instance, "vkGetPhysicalDeviceQueueFamilyProperties");
+  if (!properties || !queues)
+    return false;
+  VkPhysicalDeviceProperties info;
+  uint32_t count = 0;
+  properties(physical, &info);
+  queues(physical, &count, NULL);
+  return info.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU && family < count;
+}
+#endif
+
 static SDL_VideoDevice *PLOS_CreateDevice(void) {
   SDL_VideoDevice *device = SDL_calloc(1, sizeof(*device));
   if (!device) {
@@ -324,6 +410,14 @@ static SDL_VideoDevice *PLOS_CreateDevice(void) {
   device->SetWindowTitle = PLOS_SetWindowTitle;
   device->DestroyWindow = PLOS_DestroyWindow;
   device->PumpEvents = PLOS_PumpEvents;
+#ifdef SDL_VIDEO_VULKAN
+  device->Vulkan_LoadLibrary = PLOS_Vulkan_LoadLibrary;
+  device->Vulkan_UnloadLibrary = PLOS_Vulkan_UnloadLibrary;
+  device->Vulkan_GetInstanceExtensions = PLOS_Vulkan_GetInstanceExtensions;
+  device->Vulkan_CreateSurface = PLOS_Vulkan_CreateSurface;
+  device->Vulkan_DestroySurface = PLOS_Vulkan_DestroySurface;
+  device->Vulkan_GetPresentationSupport = PLOS_Vulkan_GetPresentationSupport;
+#endif
   device->free = PLOS_DeleteDevice;
   return device;
 }
