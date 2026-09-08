@@ -37,6 +37,7 @@ typedef struct {
   mtask *next;
   mtask *runnable;
   uint64_t load;
+  uint32_t movable;
   uint64_t min_vruntime;
   uint32_t need_resched;
 } scheduler_cpu_t;
@@ -162,7 +163,9 @@ static void scheduler_remove(mtask *task) {
   *task->run_previous = task->run_next;
   if (task->run_next)
     task->run_next->run_previous = task->run_previous;
-  scheduler_cpus[task->cpu].load -= task->weight ? task->weight : 1;
+  scheduler_cpu_t *cpu = &scheduler_cpus[task->cpu];
+  cpu->load -= task->weight ? task->weight : 1;
+  cpu->movable -= !(task->sched_flags & TASK_SCHED_PINNED);
   task->run_previous = NULL;
   task->run_next = NULL;
 }
@@ -178,6 +181,7 @@ static void scheduler_insert(mtask *task) {
     task->run_next->run_previous = &task->run_next;
   cpu->runnable = task;
   cpu->load += task->weight ? task->weight : 1;
+  cpu->movable += !(task->sched_flags & TASK_SCHED_PINNED);
 }
 
 static void task_set_state(mtask *task, enum STATE state) {
@@ -260,9 +264,12 @@ static bool task_pin_address_space(arch_address_space_t address_space,
     if (!task_slot_in_use(task) || task->address_space != address_space) {
       continue;
     }
+    scheduler_remove(task);
     task->sched_flags |= TASK_SCHED_PINNED;
     if (task->cpu != cpu) {
       scheduler_place_task(task, cpu);
+    } else {
+      scheduler_insert(task);
     }
   }
   return true;
@@ -309,44 +316,50 @@ restart:
   return next != NULL ? next : cpu->idle;
 }
 
-static void scheduler_balance(void) {
-  uint32_t busiest = 0;
-  uint32_t least = 0;
-  uint64_t busiest_load = 0;
-  uint64_t least_load = UINT64_MAX;
-  for (uint32_t cpu = 0; cpu < scheduler_cpu_total; cpu++) {
-    if (!smp_cpu_online(cpu)) {
-      continue;
-    }
-    uint64_t load = scheduler_load(cpu, NULL);
-    if (load > busiest_load) {
-      busiest = cpu;
-      busiest_load = load;
-    }
-    if (load < least_load) {
-      least = cpu;
-      least_load = load;
-    }
-  }
-  if (busiest == least || busiest_load <= least_load + 1) {
-    return;
-  }
-
+/* Pull only a queued task, and only when moving its whole weight strictly
+ * reduces the load difference. This also prevents emptying a donor into an
+ * idle CPU and immediately stealing the same lone task back. */
+static bool scheduler_pull(uint32_t target) {
+  uint64_t target_load = scheduler_cpus[target].load;
+  uint64_t best_gain = 0;
   mtask *selected = NULL;
-  for (mtask *task = scheduler_cpus[busiest].runnable; task;
-       task = task->run_next) {
-    if (task->state != RUNNING || task->cpu != busiest || task->on_cpu ||
-        (task->sched_flags & (TASK_SCHED_IDLE | TASK_SCHED_PINNED))) {
+  for (uint32_t index = 0; index < scheduler_cpu_total; index++) {
+    scheduler_cpu_t *source = &scheduler_cpus[index];
+    if (index == target || source->load <= target_load || !source->movable)
       continue;
-    }
-    if (selected == NULL || task->vruntime < selected->vruntime ||
-        (task->vruntime == selected->vruntime && task->tid < selected->tid)) {
-      selected = task;
+    mtask *running = source->current;
+    if (source->movable == 1 && running && running->on_cpu &&
+        running->run_previous && !(running->sched_flags & TASK_SCHED_PINNED))
+      continue;
+    uint64_t difference = source->load - target_load;
+    for (mtask *task = source->runnable; task; task = task->run_next) {
+      if (task->on_cpu || task->terminate_pending ||
+          (task->sched_flags & TASK_SCHED_PINNED))
+        continue;
+      uint64_t weight = task->weight ? task->weight : 1;
+      if (weight >= difference)
+        continue;
+      uint64_t gain = weight < difference - weight ? weight : difference - weight;
+      if (gain > best_gain) {
+        selected = task;
+        best_gain = gain;
+      }
     }
   }
-  if (selected != NULL) {
-    scheduler_place_task(selected, least);
+  if (!selected)
+    return false;
+  scheduler_place_task(selected, target);
+  return true;
+}
+
+static void scheduler_balance(void) {
+  uint32_t least = 0;
+  for (uint32_t cpu = 1; cpu < scheduler_cpu_total; cpu++) {
+    if (smp_cpu_online(cpu) &&
+        scheduler_cpus[cpu].load < scheduler_cpus[least].load)
+      least = cpu;
   }
+  scheduler_pull(least);
 }
 
 void scheduler_tick(void) {
@@ -412,6 +425,8 @@ void task_next(void) {
     task_set_state(current, READY);
   }
   mtask *next = scheduler_pick_next(cpu, cpu_index);
+  if (next == cpu->idle && scheduler_pull(cpu_index))
+    next = scheduler_pick_next(cpu, cpu_index);
   if (next == NULL) {
     current->on_cpu = 1;
     return;

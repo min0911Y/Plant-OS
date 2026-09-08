@@ -1,27 +1,36 @@
 #!/usr/bin/env python3
-"""Compare matching schbench.bin runs produced by test-x86_64.py --sched-bench."""
+"""Compare matching schbench.bin runs produced by test-x86_64.py scheduler benchmarks."""
 import argparse
 import json
 from pathlib import Path
 import statistics
 
-METRICS = ("handoff_ns", "p50_ns", "p95_ns", "p99_ns", "yield_ns", "compute_ns")
+BENCHMARKS = {
+    "SCHEDBENCH": (("before", "parked", "after"),
+                   ("handoff_ns", "p50_ns", "p95_ns", "p99_ns", "yield_ns", "compute_ns"),
+                   ("sleepers", "cpus", "rounds", "work")),
+    "SCHEDBALANCE": (("balance",), ("elapsed_ns",),
+                     ("cpus", "jobs", "long_jobs", "short_work", "long_work")),
+}
 
 
 def read_run(directory):
     configuration = json.loads((directory / "configuration.json").read_text())
     serial = (directory / "serial.log").read_text(errors="replace")
-    if serial.count("SCHEDBENCH PASS") != 1 or "SCHEDBENCH FAIL" in serial:
+    suites = [name for name in BENCHMARKS if serial.count(name + " PASS") == 1]
+    if len(suites) != 1 or "SCHEDBENCH FAIL" in serial:
         raise ValueError(f"incomplete or failed benchmark: {directory}")
+    suite = suites[0]
+    phases, metrics, _ = BENCHMARKS[suite]
     records = {}
     for line in serial.splitlines():
-        if not line.startswith("SCHEDBENCH phase="):
+        if not line.startswith(suite + " ") or line == suite + " PASS":
             continue
         fields = dict(field.split("=", 1) for field in line.split()[1:])
-        phase = fields.pop("phase")
+        phase = fields.pop("phase", "balance")
         record = {key: int(value) for key, value in fields.items()}
-        if phase not in ("before", "parked", "after") or any(
-                record.get(metric, 0) <= 0 for metric in METRICS):
+        if phase not in phases or any(
+                record.get(metric, 0) <= 0 for metric in metrics):
             raise ValueError(f"invalid measurement: {line}")
         key = phase, record["repeat"]
         if key in records or record["cpus"] != configuration["cpus"]:
@@ -29,10 +38,10 @@ def read_run(directory):
         records[key] = record
     repeats = {repeat for phase, repeat in records}
     if (not repeats or repeats != set(range(1, max(repeats) + 1)) or
-            set(records) != {(phase, repeat) for phase in ("before", "parked", "after")
+            set(records) != {(phase, repeat) for phase in phases
                              for repeat in repeats}):
         raise ValueError(f"missing phases or repetitions: {directory}")
-    return configuration, records
+    return suite, configuration, records
 
 
 def main():
@@ -42,17 +51,19 @@ def main():
     parser.add_argument("--out", type=Path)
     args = parser.parse_args()
     try:
-        baseline_config, baseline = read_run(args.baseline)
-        candidate_config, candidate = read_run(args.candidate)
-        if baseline_config != candidate_config or baseline.keys() != candidate.keys():
+        suite, baseline_config, baseline = read_run(args.baseline)
+        candidate_suite, candidate_config, candidate = read_run(args.candidate)
+        if (suite != candidate_suite or baseline_config != candidate_config or
+                baseline.keys() != candidate.keys()):
             raise ValueError("configuration or repetition counts differ")
+        phases, metrics, workload = BENCHMARKS[suite]
         for key in baseline:
             if any(baseline[key][field] != candidate[key][field]
-                   for field in ("sleepers", "cpus", "rounds", "work")):
+                   for field in workload):
                 raise ValueError("workloads differ")
         rows = []
-        for phase in ("before", "parked", "after"):
-            for metric in METRICS:
+        for phase in phases:
+            for metric in metrics:
                 old = [record[metric] for key, record in baseline.items() if key[0] == phase]
                 new = [record[metric] for key, record in candidate.items() if key[0] == phase]
                 old_median, new_median = statistics.median(old), statistics.median(new)
@@ -65,7 +76,7 @@ def main():
                 print(f"{phase:7} {metric:12} {old_median:12.0f} -> {new_median:12.0f} ns"
                       f"  reduction={row['reduction_percent']:+.2f}%")
         if args.out:
-            args.out.write_text(json.dumps(dict(configuration=baseline_config, results=rows),
+            args.out.write_text(json.dumps(dict(benchmark=suite, configuration=baseline_config, results=rows),
                                            indent=2) + "\n")
     except (OSError, ValueError, KeyError) as error:
         parser.error(str(error))

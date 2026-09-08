@@ -2,9 +2,11 @@
 #include <futex.h>
 #include <limits.h>
 #include <pthread.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <syscall.h>
 #include <task.h>
 
@@ -13,7 +15,7 @@
 typedef struct {
   pthread_t thread;
   uint32_t tid, gate, done, release;
-  unsigned iterations, result;
+  unsigned iterations, result, first_cpu;
 } worker_t;
 
 static void require(int condition, const char *message) {
@@ -55,6 +57,19 @@ static void *compute(void *argument) {
   worker_t *worker = argument;
   __atomic_store_n(&worker->tid, NowTaskID(), __ATOMIC_RELEASE);
   await(&worker->gate, 1);
+  worker->result = calculate(worker->iterations);
+  publish(&worker->done, 1);
+  await(&worker->release, 1);
+  return NULL;
+}
+
+static uint32_t balance_gate;
+
+static void *balance_worker(void *argument) {
+  worker_t *worker = argument;
+  __atomic_store_n(&worker->tid, NowTaskID(), __ATOMIC_RELEASE);
+  await(&balance_gate, 1);
+  worker->first_cpu = cpu_current();
   worker->result = calculate(worker->iterations);
   publish(&worker->done, 1);
   await(&worker->release, 1);
@@ -177,10 +192,57 @@ static void measure(const char *phase, unsigned sleepers, unsigned repeats) {
   }
 }
 
+static void measure_balance(unsigned repeats) {
+  enum { SHORT_WORK = 1000000, LONG_WORK = 40000000, JOBS_PER_CPU = 4 };
+  unsigned cpus = cpu_count();
+  require(cpus && cpus <= UINT_MAX / JOBS_PER_CPU, "CPU count");
+  unsigned count = cpus * JOBS_PER_CPU;
+  unsigned short_result = calculate(SHORT_WORK);
+  unsigned long_result = calculate(LONG_WORK);
+  unsigned *long_cpus = calloc(cpus, sizeof(*long_cpus));
+  require(long_cpus != NULL, "CPU histogram");
+  for (unsigned repeat = 0; repeat <= repeats; repeat++) {
+    __atomic_store_n(&balance_gate, 0, __ATOMIC_RELEASE);
+    worker_t *workers = start(count, balance_worker, 0);
+    memset(long_cpus, 0, cpus * sizeof(*long_cpus));
+    for (unsigned i = 0; i < count; i++)
+      workers[i].iterations = i % JOBS_PER_CPU == 0 ? LONG_WORK : SHORT_WORK;
+    uint64_t begin = monotonic_ns();
+    publish(&balance_gate, 1);
+    for (unsigned i = 0; i < count; i++)
+      await(&workers[i].done, 1);
+    uint64_t elapsed = monotonic_ns() - begin;
+    for (unsigned i = 0; i < count; i++) {
+      require(workers[i].result == (i % JOBS_PER_CPU == 0 ? long_result : short_result),
+              "mixed-work checksum");
+      require(workers[i].first_cpu < cpus, "worker CPU");
+#if defined(__i386__)
+      require(workers[i].first_cpu == cpu_current(), "shared address space stayed pinned");
+#endif
+      if (i % JOBS_PER_CPU == 0)
+        long_cpus[workers[i].first_cpu]++;
+    }
+    unsigned used = 0, maximum = 0;
+    for (unsigned cpu = 0; cpu < cpus; cpu++) {
+      used += long_cpus[cpu] != 0;
+      if (long_cpus[cpu] > maximum)
+        maximum = long_cpus[cpu];
+    }
+    stop(workers, count);
+    if (repeat)
+      logkf("SCHEDBALANCE repeat=%u cpus=%u jobs=%u long_jobs=%u "
+            "short_work=%u long_work=%u elapsed_ns=%llu long_cpus=%u max_long=%u\n",
+            repeat, cpus, count, cpus, SHORT_WORK, LONG_WORK,
+            (unsigned long long)elapsed, used, maximum);
+  }
+  free(long_cpus);
+}
+
 int main(int argc, char **argv) {
   unsigned sleepers = 256, repeats = 7;
-  require(argc <= 3, "usage: schbench.bin [sleepers] [repeats]");
-  for (int i = 1; i < argc; i++) {
+  bool balance = argc > 1 && !strcmp(argv[1], "balance");
+  require(argc <= 3, "usage: schbench.bin [sleepers|balance] [repeats]");
+  for (int i = balance ? 2 : 1; i < argc; i++) {
     char *end;
     errno = 0;
     unsigned long value = strtoul(argv[i], &end, 10);
@@ -191,6 +253,11 @@ int main(int argc, char **argv) {
       sleepers = value;
     else
       repeats = value;
+  }
+  if (balance) {
+    measure_balance(repeats);
+    logk("SCHEDBALANCE PASS\n");
+    return 0;
   }
   measure("before", sleepers, repeats);
   worker_t *parked = start(sleepers, sleeper, 0);
