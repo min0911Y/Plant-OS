@@ -85,7 +85,8 @@ uint32_t smp_cpu_lapic_id(uint32_t cpu) {
   return cpu < cpu_count ? x64_cpus[cpu].lapic_id : 0;
 }
 int smp_cpu_online(uint32_t cpu) {
-  return cpu < cpu_count && x64_cpus[cpu].online;
+  return cpu < cpu_count &&
+         __atomic_load_n(&x64_cpus[cpu].online, __ATOMIC_ACQUIRE);
 }
 void smp_send_reschedule(uint32_t cpu) {
   if (cpu < cpu_count && cpu != smp_current_cpu() && x64_cpus[cpu].online) {
@@ -104,8 +105,10 @@ void kernel_lock_enter(void) {
     if (__atomic_compare_exchange_n(&kernel_owner, &expected, cpu + 1, false,
                                     __ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
       break;
-    while (__atomic_load_n(&kernel_owner, __ATOMIC_RELAXED))
+    while (__atomic_load_n(&kernel_owner, __ATOMIC_RELAXED)) {
+      x64_tlb_poll();
       arch_cpu_relax();
+    }
   }
   x64_cpus[cpu].lock_depth = 1;
 }

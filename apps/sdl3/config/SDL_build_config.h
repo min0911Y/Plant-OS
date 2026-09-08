@@ -100,6 +100,8 @@
 #if defined(PLANT_ARCH_X86_64)
 #define SDL_VIDEO_VULKAN 1
 #define SDL_VIDEO_RENDER_VULKAN 1
+#define SDL_VIDEO_OPENGL 1
+#define SDL_VIDEO_OPENGL_EGL 1
 #endif
 #define SDL_TIMER_PLOS 1
 #endif

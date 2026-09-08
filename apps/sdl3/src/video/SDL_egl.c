@@ -152,7 +152,7 @@ SDL_ELF_NOTE_DLOPEN(
 typedef void (APIENTRY* PFNGLGETINTEGERVPROC) (GLenum pname, GLint * params);
 #endif
 
-#if defined(SDL_VIDEO_STATIC_ANGLE) || defined(SDL_VIDEO_DRIVER_VITA)
+#if defined(SDL_VIDEO_STATIC_ANGLE) || defined(SDL_VIDEO_DRIVER_VITA) || defined(SDL_VIDEO_DRIVER_PLOS)
 #define LOAD_FUNC(TYPE, NAME) \
     _this->egl_data->NAME = NAME;
 #else
@@ -290,7 +290,7 @@ SDL_FunctionPointer SDL_EGL_GetProcAddressInternal(SDL_VideoDevice *_this, const
             result = _this->egl_data->eglGetProcAddress(proc);
         }
 
-#if !defined(SDL_VIDEO_DRIVER_VITA)
+#if !defined(SDL_VIDEO_DRIVER_VITA) && !defined(SDL_VIDEO_DRIVER_PLOS)
         // Try SDL_LoadFunction() first for EGL <= 1.4, or as a fallback for >= 1.5.
         if (!result) {
             result = SDL_LoadFunction(_this->egl_data->opengl_dll_handle, proc);
@@ -330,7 +330,7 @@ void SDL_EGL_UnloadLibrary(SDL_VideoDevice *_this)
 static bool SDL_EGL_LoadLibraryInternal(SDL_VideoDevice *_this, const char *egl_path)
 {
     SDL_SharedObject *egl_dll_handle = NULL;
-#if !defined(SDL_VIDEO_STATIC_ANGLE) && !defined(SDL_VIDEO_DRIVER_VITA)
+#if !defined(SDL_VIDEO_STATIC_ANGLE) && !defined(SDL_VIDEO_DRIVER_VITA) && !defined(SDL_VIDEO_DRIVER_PLOS)
     SDL_SharedObject *opengl_dll_handle = NULL;
 #endif
     const char *path = NULL;
@@ -372,7 +372,7 @@ static bool SDL_EGL_LoadLibraryInternal(SDL_VideoDevice *_this, const char *egl_
     }
 #endif
 
-#if !defined(SDL_VIDEO_STATIC_ANGLE) && !defined(SDL_VIDEO_DRIVER_VITA)
+#if !defined(SDL_VIDEO_STATIC_ANGLE) && !defined(SDL_VIDEO_DRIVER_VITA) && !defined(SDL_VIDEO_DRIVER_PLOS)
     /* A funny thing, loading EGL.so first does not work on the Raspberry, so we load libGL* first */
     path = SDL_GetHint(SDL_HINT_OPENGL_LIBRARY);
     if (path) {

@@ -19,7 +19,15 @@ enum {
 /* Direct-mapped hardware tags: collisions evict a slot, never limit the number
  * of address spaces. The kernel lock serializes this cache with page edits. */
 static arch_address_space_t (*pcid_roots)[PCID_COUNT];
-static bool kernel_pending[SMP_MAX_CPUS];
+static arch_address_space_t active_roots[SMP_MAX_CPUS];
+/* The kernel lock serializes senders. Receivers update only their hardware,
+ * tag and acknowledgement, without waiting for the sender's kernel lock. */
+static struct {
+  arch_address_space_t root;
+  uintptr_t address;
+  size_t size;
+  uint32_t pending;
+} shootdown;
 static bool use_pcid, use_invpcid;
 
 static void invpcid(unsigned type, unsigned pcid) {
@@ -88,10 +96,7 @@ arch_address_space_t arch_address_space_kernel(void) { return x64_kernel_cr3; }
 
 void arch_address_space_activate(arch_address_space_t root) {
   unsigned cpu = smp_current_cpu();
-  if (kernel_pending[cpu]) {
-    tlb_flush_all();
-    kernel_pending[cpu] = false;
-  }
+  active_roots[cpu] = root;
   uintptr_t current, value = root;
   __asm__ volatile("mov %%cr3, %0" : "=r"(current));
   if (pcid_roots) {
@@ -110,35 +115,16 @@ void arch_address_space_activate(arch_address_space_t root) {
   __asm__ volatile("mov %0, %%cr3" : : "r"(value) : "memory");
 }
 
-void x64_tlb_invalidate(arch_address_space_t root, uintptr_t address,
-                        size_t size) {
-  irq_state_t state = irq_save();
-  unsigned current_cpu = smp_current_cpu();
-  unsigned cpu_count = smp_cpu_count();
+static void tlb_invalidate_local(arch_address_space_t root, uintptr_t address,
+                                 size_t size) {
   if (address >= USER_SPACE_END) {
-    /* The upper-half tables are shared by every root. Preserve no stale
-     * inactive PCIDs when another CPU next enters an address space. */
-    for (unsigned cpu = 0; cpu < cpu_count; cpu++)
-      kernel_pending[cpu] = cpu != current_cpu;
     tlb_flush_all();
-    irq_restore(state);
     return;
   }
-  unsigned pcid = (root >> 12) & (PCID_COUNT - 1);
-  if (pcid_roots) {
-    for (unsigned cpu = 0; cpu < cpu_count; cpu++) {
-      if (pcid_roots[cpu][pcid] == root)
-        pcid_roots[cpu][pcid] = 0;
-    }
-  }
-  /* Other CPUs cannot run this user root during an edit. Their next load
-   * flushes the retired tag, including after migration or root-page reuse. */
   uintptr_t current;
   __asm__ volatile("mov %%cr3, %0" : "=r"(current));
-  if ((current & ~(uintptr_t)(PCID_COUNT - 1)) != root) {
-    irq_restore(state);
+  if ((current & ~(uintptr_t)(PCID_COUNT - 1)) != root)
     return;
-  }
   if (size && size <= TLB_PAGE_FLUSH_LIMIT * PAGE_BYTES) {
     for (size_t offset = 0; offset < size; offset += PAGE_BYTES)
       __asm__ volatile("invlpg (%0)" : : "r"(address + offset) : "memory");
@@ -147,7 +133,59 @@ void x64_tlb_invalidate(arch_address_space_t root, uintptr_t address,
   } else {
     __asm__ volatile("mov %0, %%cr3" : : "r"(current) : "memory");
   }
-  if (pcid_roots)
-    pcid_roots[current_cpu][current & (PCID_COUNT - 1)] = root;
+}
+
+void x64_tlb_poll(void) {
+  unsigned cpu = smp_current_cpu();
+  uint32_t bit = 1u << cpu;
+  if (!(__atomic_load_n(&shootdown.pending, __ATOMIC_ACQUIRE) & bit))
+    return;
+  /* Called with IRQs disabled, including from the kernel-lock wait loop. */
+  tlb_invalidate_local(shootdown.root, shootdown.address, shootdown.size);
+  if (pcid_roots && shootdown.address < USER_SPACE_END &&
+      arch_address_space_current() == shootdown.root)
+    pcid_roots[cpu][(shootdown.root >> 12) & (PCID_COUNT - 1)] = shootdown.root;
+  __atomic_fetch_and(&shootdown.pending, ~bit, __ATOMIC_RELEASE);
+}
+
+void x64_tlb_invalidate(arch_address_space_t root, uintptr_t address,
+                        size_t size) {
+  irq_state_t state = irq_save();
+  unsigned current_cpu = smp_current_cpu();
+  unsigned pcid = (root >> 12) & (PCID_COUNT - 1);
+  bool kernel = address >= USER_SPACE_END;
+  uint32_t targets = 0;
+  for (unsigned cpu = 0; cpu < smp_cpu_count(); cpu++) {
+    /* Retired inactive tags are flushed on their next activation. Active
+     * roots must acknowledge now, before an old page can be reclaimed. */
+    if (!kernel && pcid_roots && pcid_roots[cpu][pcid] == root)
+      pcid_roots[cpu][pcid] = 0;
+    if (cpu != current_cpu && smp_cpu_online(cpu) &&
+        (kernel || active_roots[cpu] == root))
+      targets |= 1u << cpu;
+  }
+  if (targets) {
+    shootdown.root = root;
+    shootdown.address = address;
+    shootdown.size = size;
+    __atomic_store_n(&shootdown.pending, targets, __ATOMIC_RELEASE);
+    for (unsigned cpu = 0; cpu < smp_cpu_count(); cpu++) {
+      if (targets & (1u << cpu))
+        apic_send_fixed_ipi(smp_cpu_lapic_id(cpu), X64_TLB_VECTOR);
+    }
+  }
+  tlb_invalidate_local(root, address, size);
+  if (!kernel && pcid_roots && active_roots[current_cpu] == root)
+    pcid_roots[current_cpu][pcid] = root;
+  if (targets) {
+    uint64_t deadline = monotonic_time_ns() + 1000000000ull;
+    while (__atomic_load_n(&shootdown.pending, __ATOMIC_ACQUIRE)) {
+      if (monotonic_time_ns() >= deadline) {
+        Panic_K("TLB shootdown acknowledgement timed out");
+        arch_halt();
+      }
+      arch_cpu_relax();
+    }
+  }
   irq_restore(state);
 }

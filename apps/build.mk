@@ -124,7 +124,7 @@ $(BUILD)/sdk-libraries.list: $(SDK_LIBRARIES) build.mk
 	printf '%s\n' $(notdir $(SDK_LIBRARIES)) > $@
 libtcc1: $(LIBS)/libtcc1.a
 default all: sdk
-UNSUPPORTED_PROGRAMS := archtest simdtest cpptest llvmtest lvptest lavapipe
+UNSUPPORTED_PROGRAMS := archtest simdtest cpptest llvmtest lvptest vkcube lavapipe llvmpipe glxgears
 else
 UNSUPPORTED_PROGRAMS := tcc tccinst setup1 fputest
 endif
@@ -137,7 +137,7 @@ default all: $(APP_TARGETS) $(BUILD)/applications.list
 
 # Packaging and verification consume the actual build graph, not stale .bin
 # files that happen to remain in an output directory.
-$(BUILD)/applications.list: $(APP_TARGETS) $(DYN_TARGETS) build.mk native-apps.mk dynamic.mk
+$(BUILD)/applications.list: $(APP_TARGETS) $(DYN_TARGETS) build.mk native-apps.mk dynamic.mk $(if $(filter x86_64,$(ARCH)),mesa/build.mk)
 	printf '%s\n' $(sort $(notdir $(APP_TARGETS) $(DYN_TARGETS))) > $@
 .PHONY: list-apps
 list-apps:

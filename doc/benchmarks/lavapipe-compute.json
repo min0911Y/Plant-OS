@@ -1,0 +1,387 @@
+{
+  "configuration": {
+    "arch": "x86_64",
+    "firmware": "bios",
+    "accel": "kvm",
+    "cpu": "host",
+    "cpus": 4,
+    "memory_mib": 3072,
+    "machine": "pc",
+    "qemu": "QEMU emulator version 10.2.1 (Debian 1:10.2.1+ds-1ubuntu3.2)"
+  },
+  "directories": [
+    "/tmp/plant-compute-large",
+    "/tmp/plant-compute-repeat"
+  ],
+  "workload": {
+    "workload": "tea32",
+    "blocks": 16777216,
+    "bytes": 134217728,
+    "local_size": 512,
+    "warmup": 3,
+    "rounds": 5,
+    "batches": 4,
+    "cpus": 4
+  },
+  "runs": [
+    {
+      "workers": 0,
+      "samples_ns": [
+        794789070,
+        795512510,
+        797352190,
+        795687580,
+        949569110
+      ],
+      "workload": "tea32",
+      "blocks": 16777216,
+      "bytes": 134217728,
+      "local_size": 512,
+      "warmup": 3,
+      "rounds": 5,
+      "batches": 4,
+      "cpus": 4
+    },
+    {
+      "workers": 1,
+      "samples_ns": [
+        809623320,
+        797545590,
+        804255500,
+        791840460,
+        801589020
+      ],
+      "workload": "tea32",
+      "blocks": 16777216,
+      "bytes": 134217728,
+      "local_size": 512,
+      "warmup": 3,
+      "rounds": 5,
+      "batches": 4,
+      "cpus": 4
+    },
+    {
+      "workers": 2,
+      "samples_ns": [
+        407092080,
+        403187430,
+        399709780,
+        402713250,
+        409045810
+      ],
+      "workload": "tea32",
+      "blocks": 16777216,
+      "bytes": 134217728,
+      "local_size": 512,
+      "warmup": 3,
+      "rounds": 5,
+      "batches": 4,
+      "cpus": 4
+    },
+    {
+      "workers": 4,
+      "samples_ns": [
+        299482340,
+        283535940,
+        272552120,
+        275050470,
+        269915460
+      ],
+      "workload": "tea32",
+      "blocks": 16777216,
+      "bytes": 134217728,
+      "local_size": 512,
+      "warmup": 3,
+      "rounds": 5,
+      "batches": 4,
+      "cpus": 4
+    },
+    {
+      "workers": 4,
+      "samples_ns": [
+        324855640,
+        279327120,
+        266064920,
+        272685330,
+        266224870
+      ],
+      "workload": "tea32",
+      "blocks": 16777216,
+      "bytes": 134217728,
+      "local_size": 512,
+      "warmup": 3,
+      "rounds": 5,
+      "batches": 4,
+      "cpus": 4
+    },
+    {
+      "workers": 2,
+      "samples_ns": [
+        402499230,
+        415554190,
+        404197450,
+        401684490,
+        406079570
+      ],
+      "workload": "tea32",
+      "blocks": 16777216,
+      "bytes": 134217728,
+      "local_size": 512,
+      "warmup": 3,
+      "rounds": 5,
+      "batches": 4,
+      "cpus": 4
+    },
+    {
+      "workers": 1,
+      "samples_ns": [
+        800950150,
+        800022450,
+        809948400,
+        810073940,
+        822230800
+      ],
+      "workload": "tea32",
+      "blocks": 16777216,
+      "bytes": 134217728,
+      "local_size": 512,
+      "warmup": 3,
+      "rounds": 5,
+      "batches": 4,
+      "cpus": 4
+    },
+    {
+      "workers": 0,
+      "samples_ns": [
+        817076680,
+        805044980,
+        801545100,
+        793277110,
+        814135000
+      ],
+      "workload": "tea32",
+      "blocks": 16777216,
+      "bytes": 134217728,
+      "local_size": 512,
+      "warmup": 3,
+      "rounds": 5,
+      "batches": 4,
+      "cpus": 4
+    },
+    {
+      "workers": 0,
+      "samples_ns": [
+        803614770,
+        804177860,
+        807426090,
+        809748830,
+        826827250
+      ],
+      "workload": "tea32",
+      "blocks": 16777216,
+      "bytes": 134217728,
+      "local_size": 512,
+      "warmup": 3,
+      "rounds": 5,
+      "batches": 4,
+      "cpus": 4
+    },
+    {
+      "workers": 1,
+      "samples_ns": [
+        817561980,
+        814880650,
+        815602460,
+        812980410,
+        812948150
+      ],
+      "workload": "tea32",
+      "blocks": 16777216,
+      "bytes": 134217728,
+      "local_size": 512,
+      "warmup": 3,
+      "rounds": 5,
+      "batches": 4,
+      "cpus": 4
+    },
+    {
+      "workers": 2,
+      "samples_ns": [
+        408232150,
+        409642530,
+        405264670,
+        410500080,
+        408553910
+      ],
+      "workload": "tea32",
+      "blocks": 16777216,
+      "bytes": 134217728,
+      "local_size": 512,
+      "warmup": 3,
+      "rounds": 5,
+      "batches": 4,
+      "cpus": 4
+    },
+    {
+      "workers": 4,
+      "samples_ns": [
+        351029040,
+        313347190,
+        305040890,
+        311522050,
+        305679640
+      ],
+      "workload": "tea32",
+      "blocks": 16777216,
+      "bytes": 134217728,
+      "local_size": 512,
+      "warmup": 3,
+      "rounds": 5,
+      "batches": 4,
+      "cpus": 4
+    },
+    {
+      "workers": 4,
+      "samples_ns": [
+        300720550,
+        331374470,
+        308892660,
+        310447510,
+        279521530
+      ],
+      "workload": "tea32",
+      "blocks": 16777216,
+      "bytes": 134217728,
+      "local_size": 512,
+      "warmup": 3,
+      "rounds": 5,
+      "batches": 4,
+      "cpus": 4
+    },
+    {
+      "workers": 2,
+      "samples_ns": [
+        408838850,
+        405136520,
+        405490050,
+        406195290,
+        406110230
+      ],
+      "workload": "tea32",
+      "blocks": 16777216,
+      "bytes": 134217728,
+      "local_size": 512,
+      "warmup": 3,
+      "rounds": 5,
+      "batches": 4,
+      "cpus": 4
+    },
+    {
+      "workers": 1,
+      "samples_ns": [
+        806114500,
+        803826760,
+        809666250,
+        823143110,
+        822384800
+      ],
+      "workload": "tea32",
+      "blocks": 16777216,
+      "bytes": 134217728,
+      "local_size": 512,
+      "warmup": 3,
+      "rounds": 5,
+      "batches": 4,
+      "cpus": 4
+    },
+    {
+      "workers": 0,
+      "samples_ns": [
+        806640970,
+        793070310,
+        803560780,
+        805717280,
+        805325820
+      ],
+      "workload": "tea32",
+      "blocks": 16777216,
+      "bytes": 134217728,
+      "local_size": 512,
+      "warmup": 3,
+      "rounds": 5,
+      "batches": 4,
+      "cpus": 4
+    }
+  ],
+  "summary": {
+    "0": {
+      "dispatches": 80,
+      "elapsed_ns": 16230099290,
+      "mean_ms": 202.876241125,
+      "median_ms": 201.152855,
+      "min_ms": 198.2675775,
+      "max_ms": 237.3922775,
+      "mib_per_second": 630.9265160385843,
+      "speedup_vs_synchronous": 1.0,
+      "speedup_vs_one_worker": 0.9973561104443495
+    },
+    "1": {
+      "dispatches": 80,
+      "elapsed_ns": 16187188700,
+      "mean_ms": 202.33985875,
+      "median_ms": 202.45183125,
+      "min_ms": 197.960115,
+      "max_ms": 205.7857775,
+      "mib_per_second": 632.5990380281413,
+      "speedup_vs_synchronous": 1.0026508982378146,
+      "speedup_vs_one_worker": 1.0
+    },
+    "2": {
+      "dispatches": 80,
+      "elapsed_ns": 8125727560,
+      "mean_ms": 101.5715945,
+      "median_ms": 101.523725,
+      "min_ms": 99.927445,
+      "max_ms": 103.8885475,
+      "mib_per_second": 1260.1948470937905,
+      "speedup_vs_synchronous": 1.997371825495956,
+      "speedup_vs_one_worker": 1.9920909949877768
+    },
+    "4": {
+      "dispatches": 80,
+      "elapsed_ns": 5927269740,
+      "mean_ms": 74.09087175,
+      "median_ms": 75.02536125,
+      "min_ms": 66.51623,
+      "max_ms": 87.75726,
+      "mib_per_second": 1727.6082326565418,
+      "speedup_vs_synchronous": 2.738208315452841,
+      "speedup_vs_one_worker": 2.73096879508642
+    }
+  },
+  "all_outputs_verified": true,
+  "min_speedup": 2.0,
+  "passed": true,
+  "provenance": {
+    "date": "2026-09-08",
+    "host_kernel": "6.18.33.2-microsoft-standard-WSL2",
+    "host_cpu": "Intel(R) Core(TM) Ultra 7 270K Plus",
+    "git_head": "69f3296dfe04f46d437e75406e39c327aef18cb6",
+    "working_tree": "Uncommitted multicore lavapipe implementation and compute benchmark",
+    "sha256": {
+      "kernel/obj/x86_64/kernel.bin": "cc2a9d3b7901972facb200231a9f48d9976f71f7c3b17f58344177c2d2d6accb",
+      "apps/out/x86_64/lvptest.bin": "8932dede10c5ce9d84faef53d94704750b7b71dac38cf0e0e56122e70ced0e76",
+      "apps/out/x86_64/lib/liblvp.so": "3a294fcbf323b0f5a779b3bca67f4b1c4973529f2f66b6b6343722b493e76f11",
+      "apps/out/x86_64/lib/libp.so": "b2229910281e8402846ed25b344bb4c4768b581bee27c3f578ad0fbf732af127",
+      "apps/out/x86_64/lib/libcpp.so": "8a24e2aea53a47946c03d05062353c58dd8dd81b8e0b96e5b4d1581e3fbab196"
+    }
+  },
+  "method": "Same kernel and shader for all modes; 0/1/2/4/4/2/1/0 workers per boot, two cold boots. Timed fence reset, queue submission and completion wait. JIT warmup, buffer clearing and full CPU-reference comparison excluded.",
+  "exploratory_run": {
+    "blocks": 4194304,
+    "bytes": 33554432,
+    "local_size": 128,
+    "approximate_speedup": 2,
+    "note": "Initial workload sizing only. CPU-count reporting used hardware_concurrency() and returned unknown (0); final runs use Plant OS cpu_count(). Not included in aggregate."
+  }
+}

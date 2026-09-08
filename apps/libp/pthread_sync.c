@@ -88,11 +88,6 @@ int pthread_mutex_unlock(pthread_mutex_t *mutex) {
   return 0;
 }
 
-typedef struct pthread_waiter {
-  struct pthread_waiter *previous, *next;
-  uint32_t notified;
-} pthread_waiter_t;
-
 int pthread_condattr_init(pthread_condattr_t *attributes) {
   attributes->clock = CLOCK_REALTIME;
   return 0;
@@ -119,60 +114,30 @@ int pthread_cond_init(pthread_cond_t *condition,
   return 0;
 }
 int pthread_cond_destroy(pthread_cond_t *condition) {
-  pthread_mutex_lock(&condition->lock);
-  int result = condition->first ? EBUSY : 0;
-  pthread_mutex_unlock(&condition->lock);
-  return result;
-}
-
-static void condition_remove(pthread_cond_t *condition,
-                             pthread_waiter_t *waiter) {
-  if (waiter->previous)
-    waiter->previous->next = waiter->next;
-  else
-    condition->first = waiter->next;
-  if (waiter->next)
-    waiter->next->previous = waiter->previous;
-  else
-    condition->last = waiter->previous;
+  return __atomic_load_n(&condition->waiters, __ATOMIC_ACQUIRE) ? EBUSY : 0;
 }
 
 static int condition_wait(pthread_cond_t *condition, pthread_mutex_t *mutex,
                           uint64_t deadline) {
-  pthread_waiter_t waiter = {0};
-  pthread_mutex_lock(&condition->lock);
-  waiter.previous = condition->last;
-  if (condition->last)
-    condition->last->next = &waiter;
-  else
-    condition->first = &waiter;
-  condition->last = &waiter;
+  uint32_t sequence = __atomic_load_n(&condition->sequence, __ATOMIC_ACQUIRE);
+  __atomic_fetch_add(&condition->waiters, 1, __ATOMIC_ACQ_REL);
   int error = pthread_mutex_unlock(mutex);
-  if (error)
-    condition_remove(condition, &waiter);
-  pthread_mutex_unlock(&condition->lock);
-  if (error)
-    return error;
-  while (!__atomic_load_n(&waiter.notified, __ATOMIC_ACQUIRE)) {
-    int result = os_futex_wait(&waiter.notified, 0, deadline);
-    if (result == FUTEX_TIMED_OUT) {
-      error = ETIMEDOUT;
-      break;
-    }
-    if (result != FUTEX_OK && result != FUTEX_CHANGED &&
-        result != FUTEX_INTERRUPTED) {
-      error = EINVAL;
-      break;
-    }
+  if (!error) {
+    /* Register before releasing the associated mutex. A notification between
+     * unlock and wait changes the futex predicate, so it cannot be lost.
+     * POSIX permits spurious wakeups; callers recheck their own predicate. */
+    int result = os_futex_wait(&condition->sequence, sequence, deadline);
+    error = result == FUTEX_TIMED_OUT ? ETIMEDOUT
+            : result == FUTEX_OK || result == FUTEX_CHANGED ||
+                    result == FUTEX_INTERRUPTED
+                ? 0
+                : EINVAL;
+    int locked = pthread_mutex_lock(mutex);
+    if (locked)
+      error = locked;
   }
-  pthread_mutex_lock(&condition->lock);
-  if (!waiter.notified)
-    condition_remove(condition, &waiter);
-  else
-    error = 0;
-  pthread_mutex_unlock(&condition->lock);
-  int locked = pthread_mutex_lock(mutex);
-  return locked ? locked : error;
+  __atomic_fetch_sub(&condition->waiters, 1, __ATOMIC_RELEASE);
+  return error;
 }
 int pthread_cond_wait(pthread_cond_t *condition, pthread_mutex_t *mutex) {
   return condition_wait(condition, mutex, UINT64_MAX);
@@ -184,16 +149,10 @@ int pthread_cond_timedwait(pthread_cond_t *condition, pthread_mutex_t *mutex,
   return error ? error : condition_wait(condition, mutex, deadline);
 }
 static int condition_signal(pthread_cond_t *condition, bool all) {
-  pthread_mutex_lock(&condition->lock);
-  while (condition->first) {
-    pthread_waiter_t *waiter = condition->first;
-    condition_remove(condition, waiter);
-    __atomic_store_n(&waiter->notified, 1, __ATOMIC_RELEASE);
-    os_futex_wake(&waiter->notified, 1);
-    if (!all)
-      break;
+  if (__atomic_load_n(&condition->waiters, __ATOMIC_ACQUIRE)) {
+    __atomic_fetch_add(&condition->sequence, 1, __ATOMIC_RELEASE);
+    os_futex_wake(&condition->sequence, all ? INT_MAX : 1);
   }
-  pthread_mutex_unlock(&condition->lock);
   return 0;
 }
 int pthread_cond_signal(pthread_cond_t *condition) {
@@ -287,21 +246,28 @@ int pthread_barrier_init(pthread_barrier_t *barrier,
   return 0;
 }
 int pthread_barrier_destroy(pthread_barrier_t *barrier) {
-  return barrier->arrived ? EBUSY : 0;
+  return __atomic_load_n(&barrier->users, __ATOMIC_ACQUIRE) ? EBUSY : 0;
 }
 int pthread_barrier_wait(pthread_barrier_t *barrier) {
+  __atomic_fetch_add(&barrier->users, 1, __ATOMIC_RELAXED);
   pthread_mutex_lock(&barrier->lock);
-  uint64_t generation = barrier->generation;
+  uint32_t generation = __atomic_load_n(&barrier->generation, __ATOMIC_RELAXED);
   int result = 0;
   if (++barrier->arrived == barrier->count) {
     barrier->arrived = 0;
-    barrier->generation++;
-    pthread_cond_broadcast(&barrier->changed);
+    __atomic_store_n(&barrier->generation, generation + 1, __ATOMIC_RELEASE);
     result = PTHREAD_BARRIER_SERIAL_THREAD;
-  } else {
-    while (generation == barrier->generation)
-      pthread_cond_wait(&barrier->changed, &barrier->lock);
   }
   pthread_mutex_unlock(&barrier->lock);
+  /* All participants wait on the same generation: one wake releases the
+   * round, without a condition-variable waiter and wake syscall per thread. */
+  if (result) {
+    os_futex_wake(&barrier->generation, INT_MAX);
+  } else {
+    while (__atomic_load_n(&barrier->generation, __ATOMIC_ACQUIRE) ==
+           generation)
+      os_futex_wait(&barrier->generation, generation, UINT64_MAX);
+  }
+  __atomic_fetch_sub(&barrier->users, 1, __ATOMIC_RELEASE);
   return result;
 }

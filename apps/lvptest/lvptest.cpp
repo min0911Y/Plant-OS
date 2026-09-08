@@ -1,12 +1,16 @@
 #define VK_NO_PROTOTYPES
-#include "compute_spv.h"
+#include "compute_comp_spv.h"
+#include "tea_comp_spv.h"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
+#include <climits>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <plant_vulkan.h>
 #include <rpc.h>
 #include <syscall.h>
+#include <task.h>
 #include <thread>
 #include <vector>
 
@@ -167,13 +171,14 @@ struct Compute {
   VkDescriptorPool descriptors = VK_NULL_HANDLE;
   VkCommandPool commands = VK_NULL_HANDLE;
   VkFence fence = VK_NULL_HANDLE;
+  VkCommandBuffer command = VK_NULL_HANDLE;
   void *mapped = nullptr;
 
-  bool run() {
-    constexpr uint32_t elements = 64;
+  bool initialize(const uint32_t *code, size_t code_size, VkDeviceSize bytes,
+                  uint32_t groups) {
     VkBufferCreateInfo buffer_info = {
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size = elements * sizeof(uint32_t),
+        .size = bytes,
         .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
     VK_CHECK(vk.CreateBuffer(vk.device, &buffer_info, nullptr, &buffer));
@@ -198,11 +203,11 @@ struct Compute {
     VK_CHECK(vk.AllocateMemory(vk.device, &allocate, nullptr, &memory));
     VK_CHECK(vk.BindBufferMemory(vk.device, buffer, memory, 0));
     VK_CHECK(vk.MapMemory(vk.device, memory, 0, requirements.size, 0, &mapped));
-    memset(mapped, 0, elements * sizeof(uint32_t));
+    memset(mapped, 0, bytes);
     VkShaderModuleCreateInfo shader_info = {
         .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-        .codeSize = sizeof(compute_spv),
-        .pCode = compute_spv};
+        .codeSize = code_size,
+        .pCode = code};
     VK_CHECK(vk.CreateShaderModule(vk.device, &shader_info, nullptr, &shader));
     VkDescriptorSetLayoutBinding binding = {
         .binding = 0,
@@ -263,7 +268,6 @@ struct Compute {
         .commandPool = commands,
         .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
         .commandBufferCount = 1};
-    VkCommandBuffer command;
     VK_CHECK(vk.AllocateCommandBuffers(vk.device, &command_allocate, &command));
     VkCommandBufferBeginInfo begin = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
@@ -271,7 +275,7 @@ struct Compute {
     vk.CmdBindPipeline(command, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
     vk.CmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_COMPUTE,
                              pipeline_layout, 0, 1, &set, 0, nullptr);
-    vk.CmdDispatch(command, elements / 4, 1, 1);
+    vk.CmdDispatch(command, groups, 1, 1);
     VkMemoryBarrier barrier = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
                                .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
                                .dstAccessMask = VK_ACCESS_HOST_READ_BIT};
@@ -282,11 +286,25 @@ struct Compute {
     VkFenceCreateInfo fence_info = {.sType =
                                         VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
     VK_CHECK(vk.CreateFence(vk.device, &fence_info, nullptr, &fence));
+    return true;
+  }
+
+  bool dispatch() {
+    VK_CHECK(vk.ResetFences(vk.device, 1, &fence));
     VkSubmitInfo submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
                            .commandBufferCount = 1,
                            .pCommandBuffers = &command};
     VK_CHECK(vk.QueueSubmit(vk.queue, 1, &submit, fence));
     VK_CHECK(vk.WaitForFences(vk.device, 1, &fence, true, UINT64_MAX));
+    return true;
+  }
+
+  bool run() {
+    constexpr uint32_t elements = 64;
+    if (!initialize(compute_comp_spv, sizeof(compute_comp_spv),
+                    elements * sizeof(uint32_t), elements / 4) ||
+        !dispatch())
+      return false;
     const uint32_t *values = static_cast<const uint32_t *>(mapped);
     for (uint32_t i = 0; i < elements; i++) {
       if (values[i] != i * 3 + 7) {
@@ -295,6 +313,57 @@ struct Compute {
       }
     }
     logkf("LVPCOMPUTE PASS elements=%u\n", elements);
+    return true;
+  }
+
+  bool benchmark() {
+    constexpr uint32_t blocks = 16 * 1024 * 1024;
+    constexpr unsigned warmup = 3, rounds = 5, batches = 4;
+    constexpr size_t bytes = size_t(blocks) * 2 * sizeof(uint32_t);
+    if (!initialize(tea_comp_spv, sizeof(tea_comp_spv), bytes, blocks / 512))
+      return false;
+    std::vector<uint32_t> reference(size_t(blocks) * 2);
+    for (uint32_t index = 0; index < blocks; index++) {
+      uint32_t left = index, right = 0, sum = 0;
+      for (unsigned round = 0; round < 32; round++) {
+        sum += 0x9e3779b9u;
+        left += (right << 4) ^ (right + sum) ^ (right >> 5);
+        right += (left << 4) ^ (left + sum) ^ (left >> 5);
+      }
+      reference[2 * index] = left;
+      reference[2 * index + 1] = right;
+    }
+    // Published TEA zero-key, zero-plaintext test vector anchors the reference.
+    if (reference[0] != 0x41ea3a0a || reference[1] != 0x94baa940)
+      return false;
+    const char *workers = getenv("LP_NUM_THREADS");
+    logkf("LVPSCALE CONFIG workload=tea32 blocks=%u bytes=%llu local_size=512 "
+          "warmup=%u rounds=%u batches=%u cpus=%u workers=%s\n",
+          blocks, (unsigned long long)bytes, warmup, rounds, batches,
+          cpu_count(), workers ? workers : "default");
+    for (unsigned i = 0; i < warmup; i++) {
+      if (!dispatch())
+        return false;
+    }
+    for (unsigned round = 0; round < rounds; round++) {
+      uint64_t elapsed = 0;
+      for (unsigned batch = 0; batch < batches; batch++) {
+        memset(mapped, 0, bytes);
+        uint64_t start = monotonic_ns();
+        if (!dispatch())
+          return false;
+        elapsed += monotonic_ns() - start;
+        if (memcmp(mapped, reference.data(), bytes)) {
+          logkf("LVPSCALE FAIL output round=%u batch=%u\n", round, batch);
+          return false;
+        }
+      }
+      logkf("LVPSCALE SAMPLE round=%u elapsed_ns=%llu\n", round,
+            (unsigned long long)elapsed);
+    }
+    logkf("LVPSCALE PASS workers=%s verified_blocks=%llu\n",
+          workers ? workers : "default",
+          (unsigned long long)blocks * rounds * batches);
     return true;
   }
 
@@ -476,6 +545,24 @@ static bool draw(SDL_Renderer *renderer, unsigned phase) {
 }
 
 int main(int argc, char **argv) {
+  if (argc >= 2 && !strcmp(argv[1], "--benchmark")) {
+    if (argc != 2) {
+      char *end;
+      const char *value = argc == 4 ? argv[3] : "";
+      unsigned long workers = strtoul(value, &end, 10);
+      if (argc != 4 || strcmp(argv[2], "--workers") || !*value || *end ||
+          workers > INT_MAX || setenv("LP_NUM_THREADS", value, 1)) {
+        printf("Usage: lvptest.bin --benchmark [--workers N]\n");
+        return 1;
+      }
+    }
+    Vulkan vk;
+    if (!vk.initialize() || !Compute{vk}.benchmark()) {
+      logkf("LVPSCALE FAIL initialization or execution\n");
+      return 1;
+    }
+    return 0;
+  }
   bool test = argc == 2 && !strcmp(argv[1], "--test");
   {
     Vulkan vk;

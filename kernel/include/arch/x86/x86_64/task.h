@@ -4,6 +4,7 @@
 #include <ctypes.h>
 
 typedef uintptr_t arch_address_space_t;
+enum { ARCH_SHARED_ADDRESS_SPACE_SMP = 1 };
 
 typedef struct {
   uint16_t control, status;

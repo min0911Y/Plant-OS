@@ -2,6 +2,7 @@
 """Boot Plant's x86 regressions through init.mst; exercise devices through QMP."""
 
 import argparse
+from collections import Counter
 import json
 from pathlib import Path
 import re
@@ -513,6 +514,10 @@ def main():
     gui_mode.add_argument("--threads", action="store_true", help="validate pthreads, ELF TLS, synchronization and thread resource release")
     gui_mode.add_argument("--llvm", action="store_true", help="validate native LLVM MCJIT, relocations, W^X and concurrent compilation")
     gui_mode.add_argument("--lavapipe", action="store_true", help="validate native Vulkan compute, SDL triangle pixels and window presentation")
+    gui_mode.add_argument("--opengl", action="store_true", help="validate llvmpipe EGL/GLSL/contexts and classic glxgears pixels and input")
+    gui_mode.add_argument("--cube", action="store_true", help="benchmark the Vulkan rotating cube and verify two frames")
+    gui_mode.add_argument("--compute-bench", action="store_true", help="benchmark verified Vulkan TEA compute with 0, 1, 2 and 4 workers in both orders")
+    parser.add_argument("--cube-workers", type=int, help="override cube LP_NUM_THREADS (0 runs without raster workers)")
     gui_mode.add_argument("--all-apps", action="store_true", help="validate and relocate every built application, then run dynamic regressions")
     gui_mode.add_argument("--usb", action="store_true", help="validate xHCI enumeration, USB speeds, hotplug and ring wrap")
     parser.add_argument("--out", type=Path, default=Path("/tmp/plant-x86_64-smoke"))
@@ -536,6 +541,8 @@ def main():
     output = args.out.resolve()
     output.mkdir(parents=True, exist_ok=True)
     native = args.arch == "x86_64"
+    if args.cube_workers is not None and (not args.cube or not 0 <= args.cube_workers <= 2147483647):
+        parser.error("--cube-workers requires --cube and a nonnegative signed 32-bit value")
     kernel_options = [f"USB_DEBUG={int(args.usb_debug)}"]
     commands = (["archtest.bin", "cpptest.bin", "simdtest.bin", "llvmtest.bin"] if native else ["fputest.bin"]) + [
         "timetest.bin", "thrdtest.bin", "libctest.bin", "cxxcheck.bin", "futest.bin", "exc_test.bin", "rpctest.bin", "dktest.bin", "dyntest.bin", "nettest.bin loopback",
@@ -595,6 +602,23 @@ def main():
             parser.error("--lavapipe requires x86_64")
         commands = ["llvmtest.bin", "lvptest.bin --test"]
         expected = ["LLVMTEST PASS", "LVPCOMPUTE PASS", "LVPHEADLESS PASS", "LVPTEST PASS"]
+    if args.opengl:
+        if not native:
+            parser.error("--opengl requires x86_64")
+        commands = ["libctest.bin", "glxgears.bin --test"]
+        expected = ["LIBCTEST PASS", "OPENGL TEST PASS", "GLXGEARS GL_RENDERER = llvmpipe", "GLXGEARS PASS"]
+    if args.cube:
+        if not native:
+            parser.error("--cube requires x86_64")
+        workers = "" if args.cube_workers is None else f" --workers {args.cube_workers}"
+        commands = ["vkcube.bin --benchmark" + workers]
+        expected = ["VKCUBE PASS"] + [f"VKCUBE BENCH round={i} " for i in range(3)]
+    if args.compute_bench:
+        if not native:
+            parser.error("--compute-bench requires x86_64")
+        commands = [f"lvptest.bin --benchmark --workers {workers}"
+                    for workers in (0, 1, 2, 4, 4, 2, 1, 0)]
+        expected = [f"LVPSCALE PASS workers={workers} " for workers in (0, 1, 2, 4)]
     if args.tools:
         # Commands and source files enter the guest through init.mst and Lua;
         # keyboard input is never used to execute commands.
@@ -697,6 +721,12 @@ def main():
         pcid, invpcid = {"pcid-invpcid": (1, 1), "pcid": (1, 0),
                         "invpcid": (0, 1), "cr3": (0, 0)}[args.tlb]
         cpu += f",pcid={'on' if pcid else 'off'},invpcid={'on' if invpcid else 'off'},enforce"
+    if args.cube or args.compute_bench:
+        configuration = {"arch": args.arch, "firmware": args.firmware,
+                         "accel": args.accel, "cpu": cpu, "cpus": args.cpus,
+                         "memory_mib": args.memory, "machine": args.machine,
+                         "qemu": subprocess.check_output(["qemu-system-x86_64", "--version"], text=True).splitlines()[0]}
+        (output / "configuration.json").write_text(json.dumps(configuration, indent=2) + "\n")
     command = ["qemu-system-x86_64", "-accel", args.accel, "-cpu", cpu, "-smp", str(args.cpus),
                "-machine", args.machine + (",i8042=off" if args.usb else ""),
                "-m", str(args.memory), "-rtc", "base=2026-09-05T04:05:06,clock=vm", "-cdrom", str(iso),
@@ -974,6 +1004,75 @@ def main():
                                 frames_checked.add(phase)
                             finally:
                                 qmp.close()
+                        for phase, left, top, client_width, client_height, checksum in re.findall(
+                                r"GLXGEARS FRAME phase=(\d+) x=(-?\d+) y=(-?\d+) width=(\d+) height=(\d+) hash=([0-9a-f]+)", text):
+                            if not args.opengl or phase in frames_checked:
+                                continue
+                            terminal = re.search(r"TERM ready x=(-?\d+) y=(-?\d+) width=(\d+) height=(\d+)", text)
+                            if phase == "0" and not terminal:
+                                continue
+                            qmp = QMP(qmp_path)
+                            try:
+                                width, height, pixels = qmp.screenshot(output / f"glxgears-{phase}.ppm")
+                                if phase == "0":
+                                    # The cold-start GUI opens a terminal asynchronously.
+                                    # Close that fixture window before checking the gears.
+                                    tx, ty, tw, _ = map(int, terminal.groups())
+                                    qmp.move(tx + tw - 13 - width // 2, ty + 15 - height // 2)
+                                    qmp.press("btn", button="left")
+                                    qmp.move(-width, -height)
+                                    width, height, pixels = qmp.screenshot(output / f"glxgears-{phase}.ppm")
+                                x, y = int(left) + 4, int(top) + 24
+                                w, h = int(client_width), int(client_height)
+                                if x < 0 or y < 0 or x + w > width or y + h > height:
+                                    raise RuntimeError("glxgears window is outside the framebuffer")
+                                client = b"".join(pixels[((y + row) * width + x) * 3:
+                                                        ((y + row) * width + x + w) * 3]
+                                                  for row in range(h))
+                                actual = 2166136261
+                                for byte in client:
+                                    actual = ((actual ^ byte) * 16777619) & 0xffffffff
+                                if actual != int(checksum, 16):
+                                    raise RuntimeError(f"glxgears presented pixels differ from GL readback: {actual:08x} != {checksum}")
+                                colors = Counter(client[i:i + 3] for i in range(0, len(client), 3))
+                                for channel in range(3):
+                                    count = sum(n for c, n in colors.items()
+                                                if c[channel] > 80 and all(c[channel] > 2 * c[i]
+                                                                         for i in range(3) if i != channel))
+                                    if count < w * h // 100:
+                                        raise RuntimeError(f"glxgears missing gear color {channel}: {count} pixels")
+                                if colors[bytes(3)] < w * h // 4:
+                                    raise RuntimeError("glxgears missing black background")
+                                (output / f"glxgears-{phase}.rgb").write_bytes(client)
+                                if phase == "1" and client == (output / "glxgears-0.rgb").read_bytes():
+                                    raise RuntimeError("glxgears did not rotate after keyboard input")
+                                qmp.press("key", key={"type": "qcode", "data": "right" if phase == "0" else "esc"})
+                                frames_checked.add(phase)
+                            finally:
+                                qmp.close()
+                        for phase, left, top in re.findall(r"VKCUBE FRAME phase=(\d+) x=(-?\d+) y=(-?\d+)", text):
+                            if not args.cube or phase in frames_checked:
+                                continue
+                            qmp = QMP(qmp_path)
+                            try:
+                                width, height, pixels = qmp.screenshot(output / f"cube-{phase}.ppm")
+                                x, y = int(left) + 4, int(top) + 24
+                                if x < 0 or y < 0 or x + 640 > width or y + 480 > height:
+                                    raise RuntimeError("cube window is outside the framebuffer")
+                                client = b"".join(pixels[((y + row) * width + x) * 3:
+                                                        ((y + row) * width + x + 640) * 3]
+                                                  for row in range(480))
+                                colors = Counter(client[i:i + 3] for i in range(0, len(client), 3))
+                                background = bytes((16, 24, 40))
+                                if colors[background] < 100000 or sum(n > 1000 for c, n in colors.items() if c != background) < 3:
+                                    raise RuntimeError(f"cube missing background or three visible faces: {colors.most_common(8)}")
+                                (output / f"cube-{phase}.rgb").write_bytes(client)
+                                if phase == "1" and client == (output / "cube-0.rgb").read_bytes():
+                                    raise RuntimeError("cube did not rotate")
+                                qmp.press("key", key={"type": "qcode", "data": "spc"})
+                                frames_checked.add(phase)
+                            finally:
+                                qmp.close()
                         mouse = re.search(r"GUIMOUSE READY origin=(\d+),(\d+) target=(\d+),(\d+)", text)
                         if (args.mouse or args.usb) and mouse and not mouse_sent:
                             origin = tuple(map(int, mouse.group(1, 2)))
@@ -992,6 +1091,9 @@ def main():
                             missing = [marker for marker in expected if marker not in text]
                             if missing:
                                 raise RuntimeError(f"missing {missing}; see {serial}")
+                            if args.compute_bench:
+                                subprocess.run(["python3", str(repo / "scripts/compare-compute.py"),
+                                                str(output), "--out", str(output / "results.json")], check=True)
                             if "dyntest.bin" in commands:
                                 markers = ["DYNAMIC PASS", "DYNAMIC ATEXIT", "DYNAMIC FINI main",
                                            "DYNAMIC FINI leaf", "DYNAMIC FINI base", "DYNTEST PASS"]

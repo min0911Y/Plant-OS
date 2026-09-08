@@ -200,6 +200,8 @@ static void test_thread_mappings(void) {
   }
 }
 
+int test_smp_vm(void);
+
 int main(void) {
   errno = 700;
   check(native_thread_pointer() != 0 && tls_library_zero(), "initial TLS");
@@ -207,6 +209,7 @@ int main(void) {
   test_synchronization();
   test_detach();
   test_thread_mappings();
+  check(test_smp_vm(), "cross-CPU translation and protection");
   int child = fork();
   if (!child) {
     if (local_value != 17 || *tls_library_value() != 41)

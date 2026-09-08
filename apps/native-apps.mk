@@ -1,7 +1,7 @@
 # Application sources and private library dependencies, shared by both architectures.
 SDL_ROOT := sdl3
 include sdl3/sources.mk
-SDL_RUNTIME := $(if $(filter x86_64,$(ARCH)),$(DYN_LIB)/liblvp.so)
+SDL_RUNTIME := $(if $(filter x86_64,$(ARCH)),$(addprefix $(DYN_LIB)/,liblvp.so libEGL.so))
 
 OS_TERMINAL_DIR ?= $(HOME)/os-terminal
 OS_TERMINAL_LIB := $(OS_TERMINAL_DIR)/libos_terminal_$(if $(filter i386,$(ARCH)),x86,x64).a

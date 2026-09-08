@@ -1,0 +1,15 @@
+#version 450
+layout(local_size_x = 512) in;
+layout(set = 0, binding = 0, std430) writeonly buffer Results { uvec2 values[]; };
+
+// TEA counter blocks with a zero key; unsigned arithmetic wraps modulo 2^32.
+void main() {
+  uint index = gl_GlobalInvocationID.x;
+  uint left = index, right = 0, sum = 0;
+  for (uint round = 0; round < 32; round++) {
+    sum += 0x9e3779b9u;
+    left += (right << 4) ^ (right + sum) ^ (right >> 5);
+    right += (left << 4) ^ (left + sum) ^ (left >> 5);
+  }
+  values[index] = uvec2(left, right);
+}

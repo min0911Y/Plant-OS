@@ -480,21 +480,23 @@ void *memmem(const void *h0, size_t k, const void *n0, size_t l) {
   return twoway_memmem(h, h + k, n, l);
 }
 
-char *strtok(char *restrict s, const char *restrict sep) {
-  static char *p;
-  if (!s && !(s = p))
+char *strtok_r(char *restrict s, const char *restrict sep,
+               char **restrict state) {
+  if (!s && !(s = *state))
     return NULL;
   s += strspn(s, sep);
   if (!*s)
-    return p = 0;
-  p = s + strcspn(s, sep);
-  if (*p)
-    *p++ = 0;
-  else
-    p = 0;
+    return *state = NULL;
+  char *end = s + strcspn(s, sep);
+  *state = *end ? end + 1 : NULL;
+  *end = 0;
   return s;
 }
 
+char *strtok(char *restrict s, const char *restrict sep) {
+  static char *state;
+  return strtok_r(s, sep, &state);
+}
 
 int sscanf(const char *s, const char *fmt, ...) {
   int ret;

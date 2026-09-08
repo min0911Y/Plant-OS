@@ -109,6 +109,11 @@ void x64_interrupt_dispatch(x64_interrupt_frame_t *frame) {
     apic_send_eoi();
     return;
   }
+  if (vector == X64_TLB_VECTOR) {
+    x64_tlb_poll();
+    apic_send_eoi();
+    return;
+  }
   kernel_lock_enter();
   if (vector < 32) {
     uintptr_t address = 0;
@@ -145,6 +150,8 @@ void x64_interrupt_dispatch(x64_interrupt_frame_t *frame) {
 
 void x64_syscall_dispatch(x64_interrupt_frame_t *frame) {
   kernel_lock_enter();
+  if (current_task()->terminate_pending)
+    task_exit(current_task()->terminate_status);
   if (frame->rax == SYSCALL_ARCH_SIGNAL_RETURN) {
     if (!x64_user_access(frame->rdi, sizeof(*frame), false))
       task_exit(141);

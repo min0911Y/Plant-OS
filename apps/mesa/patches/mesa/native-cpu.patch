@@ -1,16 +1,34 @@
 --- a/src/util/u_cpu_detect.c
 +++ b/src/util/u_cpu_detect.c
-@@ -766,7 +766,13 @@
+@@ -46,1 +46,5 @@
+ #include <inttypes.h>
++
++#if DETECT_OS_PLANTOS
++#include <task.h>
++#endif
+@@ -766,7 +770,11 @@
  void
  _util_cpu_detect_once(void)
  {
 +#if DETECT_OS_PLANTOS
-+   /* An address space is pinned to one CPU until synchronous TLB shootdown
-+    * supports scheduling its threads on multiple CPUs. */
-+   int available_cpus = 1;
++   int available_cpus = cpu_count();
 +#else
     int available_cpus = 0;
 +#endif
     int total_cpus = 0;
     bool zen = false;
  
+--- a/src/gallium/drivers/llvmpipe/lp_screen.c
++++ b/src/gallium/drivers/llvmpipe/lp_screen.c
+@@ -989 +989,4 @@
+-   screen->cs_tpool = lp_cs_tpool_create(screen->num_threads);
++   unsigned compute_threads = util_get_cpu_caps()->nr_cpus;
++   compute_threads = debug_get_num_option("LP_NUM_THREADS",
++                                          compute_threads > 1 ? compute_threads : 0);
++   screen->cs_tpool = lp_cs_tpool_create(MIN2(compute_threads, LP_MAX_THREADS));
+@@ -1069,0 +1073,5 @@
++#if DETECT_OS_PLANTOS
++   /* Cross-CPU wakeups outweigh the work in small raster jobs. Keep compute
++    * parallel by default; LP_NUM_THREADS explicitly enables raster workers. */
++   screen->num_threads = 0;
++#endif

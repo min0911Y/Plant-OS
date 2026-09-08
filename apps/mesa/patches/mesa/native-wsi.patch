@@ -82,4 +82,4 @@
    description : 'Build panfrost Rust components.'
  )
 +
-+option('plantos-port', type : 'string', value : '', description : 'Plant OS native WSI source directory')
++option('plantos-port', type : 'string', value : '', description : 'Plant OS native platform source directory')

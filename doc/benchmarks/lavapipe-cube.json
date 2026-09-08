@@ -1,0 +1,90 @@
+{
+  "before": {
+    "device": "llvmpipe (LLVM 21.1.8, 128 bits)",
+    "cpus": 4,
+    "workers": "auto",
+    "size": "640x480",
+    "frames": 10800,
+    "fps": 799.7700708440105,
+    "render_ms": 0.5739883074074075,
+    "round_fps": [
+      812.874,
+      798.081,
+      788.724
+    ],
+    "raster_workers": 0,
+    "compute_workers": 0
+  },
+  "after": {
+    "device": "llvmpipe (LLVM 21.1.8, 128 bits)",
+    "cpus": 4,
+    "workers": "auto",
+    "size": "640x480",
+    "frames": 10800,
+    "fps": 820.5129682519076,
+    "render_ms": 0.5943859907407408,
+    "round_fps": [
+      817.746,
+      827.879,
+      816.014
+    ],
+    "raster_workers": 0,
+    "compute_workers": 4
+  },
+  "fps_change": 0.02593607608497628,
+  "pixels_identical": true,
+  "max_regression": 0.05,
+  "passed": true,
+  "environment": {
+    "arch": "x86_64",
+    "firmware": "bios",
+    "accel": "kvm",
+    "cpu": "host",
+    "cpus": 4,
+    "memory_mib": 3072,
+    "machine": "pc",
+    "qemu": "QEMU emulator version 10.2.1 (Debian 1:10.2.1+ds-1ubuntu3.2)"
+  },
+  "host_cpu": "Intel Core Ultra 7 270K Plus",
+  "host_kernel": "6.18.33.2-microsoft-standard-WSL2",
+  "default_repeat": {
+    "device": "llvmpipe (LLVM 21.1.8, 128 bits)",
+    "cpus": 4,
+    "workers": "auto",
+    "size": "640x480",
+    "frames": 10800,
+    "fps": 827.015419232318,
+    "render_ms": 0.5871086777777778,
+    "round_fps": [
+      824.065,
+      826.064,
+      830.948
+    ],
+    "raster_workers": 0,
+    "compute_workers": 4,
+    "fps_change": 0.03406647658064399,
+    "passed": true
+  },
+  "explicit_four": {
+    "device": "llvmpipe (LLVM 21.1.8, 128 bits)",
+    "cpus": 4,
+    "workers": "4",
+    "size": "640x480",
+    "frames": 10800,
+    "fps": 670.7721462201669,
+    "render_ms": 0.8618739685185185,
+    "round_fps": [
+      669.832,
+      667.92,
+      674.6
+    ],
+    "raster_workers": 4,
+    "compute_workers": 4,
+    "fps_change": -0.16129376345342616,
+    "passed": false
+  },
+  "pixel_sha256": {
+    "0": "b32fc77b480da645a4c1447d79f172495e9799647cea1eb20b5a038278fe5a77",
+    "1": "a536895caf3f3bd8c7ca6c0f0b30c6f00a3e299b1c77245ebfae05d35b47b6b0"
+  }
+}

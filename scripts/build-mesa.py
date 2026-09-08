@@ -171,7 +171,7 @@ def build_libcxx(arch, output, jobs):
 
 def build_llvm(arch, output, jobs):
     if arch != "x86_64":
-        raise RuntimeError("the LLVM/lavapipe backend currently targets x86_64")
+        raise RuntimeError("the native LLVM/Mesa backend currently targets x86_64")
     for name in ("libp.so", "libcpp.so"):
         if not (output / "lib" / name).exists():
             raise RuntimeError(f"build the native runtime before LLVM: missing {name}")
@@ -244,7 +244,7 @@ def build_llvm(arch, output, jobs):
 
 def configure_mesa(arch, output):
     if arch != "x86_64":
-        raise RuntimeError("lavapipe currently requires x86_64")
+        raise RuntimeError("native Mesa currently requires x86_64")
     mesa = source("mesa")
     build = output / "mesa/driver"
     sysroot = output / "mesa/sysroot"
@@ -292,10 +292,10 @@ def configure_mesa(arch, output):
         for section, values in cross.items()) + "\n")
     options = [
         "--buildtype=release", "--wrap-mode=nofallback", "--auto-features=disabled",
-        "-Dplatforms=[]", "-Dgallium-drivers=[]", "-Dvulkan-drivers=swrast",
+        "-Dplatforms=[]", "-Dgallium-drivers=llvmpipe", "-Dvulkan-drivers=swrast",
         "-Dllvm=enabled", "-Dshared-llvm=disabled", "-Ddraw-use-llvm=true", "-Dllvm-orcjit=false",
-        "-Dcpp_rtti=false", "-Dopengl=false", "-Dgles1=disabled", "-Dgles2=disabled",
-        "-Dglx=disabled", "-Degl=disabled", "-Dgbm=disabled", "-Dshader-cache=disabled",
+        "-Dcpp_rtti=false", "-Dopengl=true", "-Dgles1=disabled", "-Dgles2=disabled",
+        "-Dglx=disabled", "-Degl=enabled", "-Dgbm=disabled", "-Dshader-cache=disabled",
         "-Dxmlconfig=disabled", "-Dzlib=disabled", "-Dvideo-codecs=[]", "-Dbuild-tests=false",
         "-Dtools=[]", "-Dplantos-port=" + str(PORT / "mesa"),
     ]
@@ -303,6 +303,12 @@ def configure_mesa(arch, output):
     environment["PYTHONPATH"] = str(APPS / "out/host/python")
     environment["PATH"] = str(Path(host_tool("ninja")).parent) + os.pathsep + environment["PATH"]
     environment["PATH"] = str(Path(host_tool("glslangValidator")).parent) + os.pathsep + environment["PATH"]
+    for generator in ("bison", "flex", "m4"):
+        environment["PATH"] = str(Path(host_tool(generator)).parent) + os.pathsep + environment["PATH"]
+    environment["M4"] = host_tool("m4")
+    bison_data = Path(host_tool("bison")).parent.parent / "share/bison"
+    if bison_data.is_dir():
+        environment["BISON_PKGDATADIR"] = str(bison_data)
     symbols = subprocess.check_output(["nm", "-D", "--defined-only", "--format=posix",
                                        output / "lib/libp.so"], text=True)
     fingerprint = json.dumps({"cross": cross, "options": options,
@@ -328,34 +334,52 @@ def configure_mesa(arch, output):
 
 def build_mesa(arch, output, jobs):
     if not (output / "mesa/llvm/lib/libLLVMPlant.a").exists():
-        raise RuntimeError("build the native LLVM component before lavapipe")
+        raise RuntimeError("build the native LLVM component before Mesa")
     build, environment = configure_mesa(arch, output)
-    subprocess.run([host_tool("ninja"), "-C", str(build), "src/gallium/targets/lavapipe/liblvp.so",
-                    "-j", str(jobs)], env=environment, check=True)
-    driver = build / "src/gallium/targets/lavapipe/liblvp.so"
-    symbols = subprocess.check_output(["nm", "-D", "--defined-only", driver], text=True)
-    for symbol in ("vk_icdGetInstanceProcAddr", "plant_vulkan_create_surface"):
-        if not re.search(r"\b" + symbol + r"$", symbols, re.MULTILINE):
-            raise RuntimeError(f"native Vulkan driver does not export {symbol}")
-    destination = output / "lib/liblvp.so"
-    temporary = destination.with_suffix(".tmp")
-    shutil.copyfile(driver, temporary)
-    temporary.replace(destination)
-    publish(output / "mesa/lavapipe.stamp", digest(destination) + "\n")
+    libraries = {
+        "src/gallium/targets/lavapipe/liblvp.so": ("vk_icdGetInstanceProcAddr", "plant_vulkan_create_surface"),
+        "src/egl/libEGL.so": ("eglCreateContext", "eglGetProcAddress"),
+        "src/egl/libGL.so": ("glBegin", "glCreateShader"),
+    }
+    subprocess.run([host_tool("ninja"), "-C", str(build), *libraries, "-j", str(jobs)],
+                   env=environment, check=True)
+    for target, required in libraries.items():
+        library = build / target
+        symbols = subprocess.check_output(["nm", "-D", "--defined-only", library], text=True)
+        for symbol in required:
+            if not re.search(r"\b" + symbol + r"$", symbols, re.MULTILINE):
+                raise RuntimeError(f"{library.name} does not export {symbol}")
+    for target in libraries:
+        destination = output / "lib" / Path(target).name
+        if destination.exists() and digest(destination) == digest(build / target):
+            continue
+        temporary = destination.with_suffix(".tmp")
+        shutil.copyfile(build / target, temporary)
+        temporary.replace(destination)
+    mesa = source("mesa")
+    header_state = {}
+    for headers in ("EGL", "GL", "KHR"):
+        for header in sorted((mesa / "include" / headers).glob("*.h")):
+            destination = output / "mesa/include" / headers / header.name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            publish(destination, header.read_text())
+            header_state[f"{headers}/{header.name}"] = digest(header)
+    publish(output / "mesa/headers.stamp", json.dumps(header_state, sort_keys=True) + "\n")
 
 
-def build_shaders(arch, output, jobs):
+def build_shaders(arch, output, source):
     if arch != "x86_64":
         raise RuntimeError("the Vulkan regression requires x86_64")
-    directory = output / "lvptest"
+    directory = output / source.parent.name
     directory.mkdir(parents=True, exist_ok=True)
-    binary = directory / "compute.spv"
-    run([host_tool("glslangValidator"), "-V", APPS / "lvptest/compute.comp", "-o", binary])
+    name = source.name.replace(".", "_")
+    binary = directory / (name + ".spv")
+    run([host_tool("glslangValidator"), "-V", source, "-o", binary])
     data = binary.read_bytes()
     if len(data) % 4 or data[:4] != b"\x03\x02\x23\x07":
         raise RuntimeError("shader compiler did not produce SPIR-V")
     words = struct.unpack("<" + "I" * (len(data) // 4), data)
-    publish(directory / "compute_spv.h", "#include <stdint.h>\nstatic const uint32_t compute_spv[] = {\n" +
+    publish(directory / (name + "_spv.h"), "#include <stdint.h>\nstatic const uint32_t " + name + "_spv[] = {\n" +
             "\n".join("  " + ", ".join(f"0x{word:08x}" for word in words[index:index + 8]) + ","
                       for index in range(0, len(words), 8)) + "\n};\n")
 
@@ -363,16 +387,19 @@ def build_shaders(arch, output, jobs):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--arch", choices=("i386", "x86_64"), required=True)
-    builders = {"libcxx": build_libcxx, "llvm": build_llvm, "lavapipe": build_mesa, "shaders": build_shaders}
+    builders = {"libcxx": build_libcxx, "llvm": build_llvm, "mesa": build_mesa, "shaders": build_shaders}
     parser.add_argument("--component", choices=builders, required=True)
     parser.add_argument("--jobs", type=int, default=2)
+    parser.add_argument("--shader", type=Path, help="GLSL source relative to apps/ (shaders component)")
     arguments = parser.parse_args()
     if arguments.jobs < 1:
         parser.error("--jobs must be positive")
     output = APPS / "out" / ("x86_64" if arguments.arch == "x86_64" else "")
     (output / "mesa").mkdir(parents=True, exist_ok=True)
     if arguments.component == "shaders":
-        build_shaders(arguments.arch, output, arguments.jobs)
+        if arguments.shader is None:
+            parser.error("--component shaders requires --shader")
+        build_shaders(arguments.arch, output, APPS / arguments.shader)
         return
     with (output / "mesa/.build-lock").open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)

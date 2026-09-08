@@ -1,0 +1,7 @@
+{
+  global:
+    egl*;
+    _mesa_glapi_tls_Dispatch;
+  local:
+    *;
+};

@@ -8,6 +8,9 @@ SPIR-V compute、光栅化、GUI swapchain 和 SDL3 Vulkan renderer。
 窗口像素和键盘事件。它使用 CPU，不依赖宿主 Linux 库或 GPU 驱动。
 i386 共用线程、TLS、C/C++ 运行库，图形仍使用 SDL 软件后端。
 
+x86_64 的 OpenGL/EGL 接入复用 llvmpipe、Gallivm 和 LLVM，窗口接口及
+经典 glxgears 回归见 [OpenGL](opengl.md)。
+
 正常 SDL renderer 应用通过 `SDL_CreateRenderer(window, NULL)` 选择后端，
 x86_64 优先使用 `vulkan`；显式指定 `"vulkan"` 可以禁止回退。
 `SDL_GetWindowSurface` 默认继续使用 GUI 的直接共享缓冲，避免把 CPU surface
@@ -20,7 +23,7 @@ x86_64 优先使用 `vulkan`；显式指定 `"vulkan"` 可以禁止回退。
 | 显示 | 原生 GUI surface、BGRA8 UNORM、FIFO 提交，固定窗口尺寸；独立支持 headless surface |
 | 着色器 | Mesa NIR、llvmpipe、LLVM 21 MCJIT；生成代码使用受支持的 SIMD、无 red zone 和 W^X |
 | 动态链接 | SDL 应用经 `DT_NEEDED` 引入 ICD，解释器负责完整装载；ICD 依赖 `libp.so` 和 `libcpp.so` |
-| 并发 | 原生 pthread/futex/TLS；当前地址空间固定在一个 CPU，默认不另建 llvmpipe 光栅工作线程 |
+| 并发 | 原生 pthread/futex/TLS；x86_64 线程可跨 CPU，compute 默认按在线 CPU 数并行，光栅默认串行；`LP_NUM_THREADS` 显式配置两者 |
 | 范围外 | i386 Vulkan、硬件加速、通用 Khronos Vulkan Loader、运行时装载其他 ICD、磁盘 shader cache、Unix fd 导入导出 |
 
 未执行完整 Vulkan CTS；这里的验证覆盖下述实际运行路径，不代表一致性认证。
@@ -28,7 +31,8 @@ x86_64 优先使用 `vulkan`；显式指定 `"vulkan"` 可以禁止回退。
 ## 构建
 
 除仓库的 GCC/G++、binutils、NASM、mtools、QEMU、ISO 工具和 os-terminal
-依赖外，还需要宿主 Clang、CMake、Ninja、Meson、`patch`、`glslangValidator`，
+依赖外，还需要宿主 Clang、CMake、Ninja、Meson、`patch`、`glslangValidator`、
+`bison`、`flex`、`m4`，
 以及 Python `mako`、`yaml`、`packaging` 模块。LLVM TableGen 必须来自与固定
 源码匹配的 LLVM 21.1.8。宿主工具运行在构建机，生成的库全部使用 Plant OS ABI。
 
@@ -50,7 +54,7 @@ make -C apps/lvptest ARCH=x86_64
 
 x86_64 默认构建包含渲染器。首次构建下载并编译 LLVM，后续复用缓存；
 `scripts/build-mesa.py` 默认给 LLVM/Mesa 使用两个编译任务。
-可通过 `MESA_JOBS=N` 调整依赖构建并行度。
+可通过 `MESA_JOBS=N` 调整依赖构建并行度。运行时工作线程数由 `LP_NUM_THREADS` 控制，两者无关。
 所有归档、生成头文件、交叉配置和日志留在 `apps/out/`。
 应用和 `lib/` 经统一构建图打包，不能复制宿主 `.so` 或另建应用清单。
 大 initramfs 占用的 RAM 也进入页元数据覆盖范围，仍保持保留状态。
@@ -168,6 +172,114 @@ python3 scripts/test-x86_64.py --sdl --memory 1536
 
 在 GUI 终端运行 `lvptest.bin` 可查看三角形；Space 切换背景，Escape 或窗口
 关闭按钮退出。无需先启动 GUI 时，该演示会启动单例 GUI 服务。
+
+## 旋转立方体与性能回归
+
+`vkcube.bin` 直接使用 Vulkan 图形管线、SPIR-V 顶点/片元着色器、深度测试和
+原生 swapchain 绘制旋转立方体，窗口标题显示 FPS，Escape 退出。
+`--workers N` 在初始化 ICD 前设置 `LP_NUM_THREADS`，`0` 在提交线程内完成光栅化。
+计算线程池默认按在线 CPU 数创建，光栅默认在提交线程内执行；单 CPU 不另建计算工作线程。
+
+```sh
+make -C apps/vkcube ARCH=x86_64
+python3 scripts/test-x86_64.py --cube --accel kvm --cpu host --cpus 4 \
+  --memory 3072 --timeout 600 --out /tmp/cube-before
+# 完成待比较的修改后，使用相同配置再次运行，输出到 /tmp/cube-after。
+python3 scripts/test-x86_64.py --cube --accel kvm --cpu host --cpus 4 \
+  --memory 3072 --timeout 600 --out /tmp/cube-after
+python3 scripts/compare-cube.py /tmp/cube-before /tmp/cube-after
+```
+
+基准固定为 640×480，预热 60 帧，三轮各 3600 帧使用同一旋转序列。
+计时包含图像获取、命令记录、提交、等待渲染完成和同步窗口呈现，另外记录命令
+记录至渲染完成的耗时。初始化、JIT 预热、事件检查、日志和截图握手不纳入采样。
+报告每轮实际帧数、总纳秒数、FPS、帧时间中位数与 P95；跨轮总 FPS 按总帧数除以
+总时间计算。测试前后还各渲染一个固定角度，经 QMP 检查背景、三个可见面和键盘事件。
+
+输出目录保留 `serial.log`、`configuration.json`、两张 PPM 截图及去掉窗口边框的
+RGB 像素。比较工具要求 QEMU 配置、图像大小和采样帧数相同，像素逐字节相同，
+且总 FPS 不下降超过 5%（可用 `--max-regression` 设置）；失败返回非零状态。
+运行对照时使用同一宿主且避免其他 CPU 密集任务。TCG 可以验证功能，其帧率不能
+与 KVM 或原生硬件混比。`--cube-workers 0` 可单独测量优化后内核上的串行对照。
+原始帧率记录见 [CSV](benchmarks/lavapipe-cube.csv)。
+
+2026-09-08 的对照使用上述命令：WSL2/KVM、Intel Core Ultra 7 270K Plus、
+4 vCPU、3072 MiB、BIOS、QEMU 10.2.1。基线内核及运行库为 `69f3296`，加入同一
+立方体基准后先完成测量，再修改线程和 TLB 实现。结果与配置另见
+[JSON](benchmarks/lavapipe-cube.json)。
+
+| 配置 | 光栅 / compute 工作线程 | 总 FPS | 相对基线 | 渲染阶段 ms/帧 |
+| --- | --- | ---: | ---: | ---: |
+| 修改前默认 | 0 / 0 | 799.770 | — | 0.574 |
+| 修改后默认 | 0 / 4 | 820.513 | +2.59% | 0.594 |
+| 修改后显式 `--workers 4` | 4 / 4 | 670.772 | −16.13% | 0.862 |
+
+默认配置另一次冷启动测得 827.015 FPS（+3.41%），各次固定角度画面均与基线逐字节
+一致。总 FPS 的小幅改善不能说明多核光栅更快：本例渲染阶段没有加速，强制四个光栅
+工作线程仍有负收益，因此默认策略保留串行光栅，同时开放真正的跨核计算与显式光栅
+并行。其他场景需要独立测量，不能用这组帧率外推复杂着色器或真机的加速比。
+
+图块领取使用原子索引，场景同步后各线程独立处理图块；fence 仅在全部图块工作完成
+时唤醒等待者。原生 pthread 条件变量和 barrier 使用共享 futex 序号，一次广播释放
+等待者，空闲时仍阻塞。默认保留串行光栅，是因为该立方体在当前 KVM 环境中
+不足以抵消跨核唤醒成本；多核光栅须显式启用并针对应用测量。
+
+本次回归覆盖 x86_64 BIOS/UEFI 的 `--lavapipe`、两架构的 `--threads` 与基础回归，
+以及 x86_64 四种 PCID/INVPCID 组合配合跨核 VM 探针。跨核探针覆盖单页与 64 页同址
+重映射、远端写保护、并发 VM 操作中的进程退出；运行库回归覆盖条件变量、barrier、
+TLS、C/C++ 和浮点环境。未执行完整 Vulkan CTS 或真机性能测试。
+
+## 多核 compute 吞吐基准
+
+`lvptest.bin --benchmark [--workers N]` 使用 Vulkan compute 生成 TEA 计数器数据块：
+16,777,216 个独立的 64-bit 块，每块执行标准 TEA 的 32 轮无符号整数运算，
+固定零密钥、输入为 `(块索引, 0)`，每次 dispatch 输出 128 MiB。工作组大小为 512，
+共 32,768 组，计算量均匀且各组之间无需通信。这是计算吞吐场景，单位为 ms/dispatch
+和输出 MiB/s，不包含窗口显示。
+
+基准与已有小型 compute 测试共用 Vulkan 资源及提交代码。每个进程预热三次，
+随后采样五轮、每轮四次 dispatch；计时包含 fence 重置、队列提交及等待完成，
+排除初始化、JIT 预热、缓冲区清零、日志及结果校验。每次计时后将全部输出与
+CPU 参考实现逐字节比较，参考实现还检查零密钥/零输入的已知结果
+`41ea3a0a 94baa940`。每次采样前清零输出，避免遗漏执行时误用上次结果。
+
+```sh
+python3 scripts/test-x86_64.py --compute-bench --accel kvm --cpu host --cpus 4 \
+  --memory 3072 --timeout 600 --out /tmp/compute-a
+python3 scripts/test-x86_64.py --compute-bench --accel kvm --cpu host --cpus 4 \
+  --memory 3072 --timeout 600 --out /tmp/compute-b
+python3 scripts/compare-compute.py /tmp/compute-a /tmp/compute-b \
+  --min-speedup 2 --out /tmp/compute-results.json
+```
+
+每次启动依次运行 `0, 1, 2, 4, 4, 2, 1, 0` 个 worker，各模式使用同一个内核、
+ICD、着色器和四 vCPU 配置；`0` 在提交线程中同步计算，`1` 使用一个计算 worker。
+正反顺序均保留，避免只选最快结果。测试自动保存配置、串口日志和 `results.json`，
+比较工具拒绝缺失采样、校验不完整及配置/工作量不同的结果。
+`--min-speedup 2` 要求四 worker 相对两种串行模式都达到两倍吞吐，否则返回非零。
+性能测试须串行运行，避免宿主同时执行编译或其他 CPU 密集任务。
+
+2026-09-08 实测使用 Intel Core Ultra 7 270K Plus、WSL2/KVM、QEMU 10.2.1、
+BIOS、4 vCPU、3072 MiB。两次冷启动合计每种模式 80 次计时 dispatch，按总工作量
+除以总耗时汇总；全部 320 次输出通过完整校验。
+
+| 计算 worker | 平均 ms/dispatch | 输出 MiB/s | 相对同步模式 | 相对单 worker |
+| ---: | ---: | ---: | ---: | ---: |
+| 0（同步） | 202.876 | 630.93 | 1.000× | 0.997× |
+| 1 | 202.340 | 632.60 | 1.003× | 1.000× |
+| 2 | 101.572 | 1260.19 | 1.997× | 1.992× |
+| 4 | 74.091 | 1727.61 | **2.738×** | **2.731×** |
+
+四 worker 的耗时降低 63.48%，两次冷启动单独统计分别为 2.906× 和 2.587×。
+原始采样见 [CSV](benchmarks/lavapipe-compute.csv)，完整配置、二进制 SHA-256、
+所有样本与汇总见 [JSON](benchmarks/lavapipe-compute.json)。构造场景时曾以
+32 MiB、128 大小工作组试跑，四 worker 约两倍；最终采用上述更大任务，所有对照
+模式统一使用同一工作量。四 worker 仍未达到理想四倍，具体调度和宿主开销需要
+进一步采样才能归因。这组计算吞吐结果不能用于推断小立方体或窗口呈现的 FPS。
+
+新增基准完成两次 BIOS 冷启动对照，并运行原有 `--lavapipe` 回归验证小型 compute、
+headless swapchain、SDL 三角形像素与实际键盘事件。正式吞吐数据来自当前版本中
+并行关闭/开启的比较，不是重跑旧版本内核；历史立方体修改前后的结果保留在上一节。
 
 ## 调查与上游
 

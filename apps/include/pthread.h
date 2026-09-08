@@ -15,10 +15,8 @@ typedef struct {
 typedef struct {
   int type;
 } pthread_mutexattr_t;
-struct pthread_waiter;
 typedef struct {
-  pthread_mutex_t lock;
-  struct pthread_waiter *first, *last;
+  uint32_t sequence, waiters;
   clockid_t clock;
 } pthread_cond_t;
 typedef struct {
@@ -40,9 +38,8 @@ typedef struct {
 } pthread_rwlockattr_t;
 typedef struct {
   pthread_mutex_t lock;
-  pthread_cond_t changed;
   unsigned count, arrived;
-  uint64_t generation;
+  uint32_t generation, users;
 } pthread_barrier_t;
 typedef struct {
   int unused;

@@ -24,6 +24,10 @@
 #include "../SDL_sysvideo.h"
 #include <framebuffer.h>
 #include <gui.h>
+#ifdef SDL_VIDEO_OPENGL_EGL
+#include "../SDL_egl_c.h"
+#include <plant_egl.h>
+#endif
 #ifdef SDL_VIDEO_VULKAN
 #include "../SDL_vulkan_internal.h"
 #include <plant_vulkan.h>
@@ -37,6 +41,10 @@ struct SDL_WindowData {
   int width, height;
   Uint8 prefix[2];
   Uint8 button;
+#ifdef SDL_VIDEO_OPENGL_EGL
+  struct plant_egl_window egl_window;
+  EGLSurface egl_surface;
+#endif
 };
 
 static bool PLOS_VideoInit(SDL_VideoDevice *_this) {
@@ -70,8 +78,12 @@ static bool PLOS_SetDisplayMode(SDL_VideoDevice *_this,
 
 static bool PLOS_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window,
                               SDL_PropertiesID props) {
-  if (window->flags & (SDL_WINDOW_OPENGL | SDL_WINDOW_METAL))
-    return SDL_SetError("Plant OS has no OpenGL or Metal backend");
+  if (window->flags & SDL_WINDOW_METAL)
+    return SDL_SetError("Plant OS has no Metal backend");
+#ifndef SDL_VIDEO_OPENGL_EGL
+  if (window->flags & SDL_WINDOW_OPENGL)
+    return SDL_SetError("OpenGL requires the x86_64 backend");
+#endif
 #ifndef SDL_VIDEO_VULKAN
   if (window->flags & SDL_WINDOW_VULKAN)
     return SDL_SetError("Vulkan requires the x86_64 backend");
@@ -93,6 +105,23 @@ static bool PLOS_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window,
     SDL_free(data);
     return SDL_SetError("Cannot create a GUI window; start gui.bin first");
   }
+#ifdef SDL_VIDEO_OPENGL_EGL
+  if (window->flags & SDL_WINDOW_OPENGL) {
+    data->egl_window = (struct plant_egl_window){
+        .window = data->handle,
+        .x = BORDER,
+        .y = TITLE,
+        .width = window->w,
+        .height = window->h,
+    };
+    data->egl_surface = SDL_EGL_CreateSurface(_this, window, &data->egl_window);
+    if (data->egl_surface == EGL_NO_SURFACE) {
+      close_window(data->handle);
+      SDL_free(data);
+      return false;
+    }
+  }
+#endif
   window->internal = data;
   window_start_recv_keyboard(data->handle);
   SDL_SetMouseFocus(window);
@@ -145,6 +174,10 @@ static void PLOS_DestroyWindow(SDL_VideoDevice *_this, SDL_Window *window) {
   SDL_WindowData *data = window->internal;
   if (!data)
     return;
+#ifdef SDL_VIDEO_OPENGL_EGL
+  if (data->egl_surface != EGL_NO_SURFACE)
+    SDL_EGL_DestroySurface(_this, data->egl_surface);
+#endif
   window_stop_recv_keyboard(data->handle);
   close_window(data->handle);
   SDL_free(data);
@@ -394,7 +427,30 @@ static bool PLOS_Vulkan_GetPresentationSupport(SDL_VideoDevice *device,
 }
 #endif
 
-static SDL_VideoDevice *PLOS_CreateDevice(void) {
+#ifdef SDL_VIDEO_OPENGL_EGL
+static bool PLOS_GL_LoadLibrary(SDL_VideoDevice *device, const char *path) {
+  if (path && SDL_strcmp(path, "libGL.so") && SDL_strcmp(path, "/lib/libGL.so"))
+    return SDL_SetError("Plant OS provides the native Mesa OpenGL library");
+  if (device->gl_config.profile_mask == SDL_GL_CONTEXT_PROFILE_ES)
+    return SDL_SetError("OpenGL ES is not enabled");
+  if (!SDL_EGL_LoadLibrary(device, NULL, EGL_DEFAULT_DISPLAY, 0))
+    return false;
+  SDL_strlcpy(device->gl_config.driver_path, path ? path : "libGL.so",
+              sizeof(device->gl_config.driver_path));
+  return true;
+}
+
+static bool PLOS_GL_SetSwapInterval(SDL_VideoDevice *device, int interval) {
+  if (interval != 0)
+    return SDL_SetError("Plant OS OpenGL supports swap interval 0");
+  return SDL_EGL_SetSwapInterval(device, interval);
+}
+
+SDL_EGL_CreateContext_impl(PLOS) SDL_EGL_MakeCurrent_impl(PLOS)
+    SDL_EGL_SwapWindow_impl(PLOS)
+#endif
+
+        static SDL_VideoDevice *PLOS_CreateDevice(void) {
   SDL_VideoDevice *device = SDL_calloc(1, sizeof(*device));
   if (!device) {
     SDL_OutOfMemory();
@@ -410,6 +466,17 @@ static SDL_VideoDevice *PLOS_CreateDevice(void) {
   device->SetWindowTitle = PLOS_SetWindowTitle;
   device->DestroyWindow = PLOS_DestroyWindow;
   device->PumpEvents = PLOS_PumpEvents;
+#ifdef SDL_VIDEO_OPENGL_EGL
+  device->GL_LoadLibrary = PLOS_GL_LoadLibrary;
+  device->GL_UnloadLibrary = SDL_EGL_UnloadLibrary;
+  device->GL_GetProcAddress = SDL_EGL_GetProcAddressInternal;
+  device->GL_CreateContext = PLOS_GLES_CreateContext;
+  device->GL_MakeCurrent = PLOS_GLES_MakeCurrent;
+  device->GL_SetSwapInterval = PLOS_GL_SetSwapInterval;
+  device->GL_GetSwapInterval = SDL_EGL_GetSwapInterval;
+  device->GL_SwapWindow = PLOS_GLES_SwapWindow;
+  device->GL_DestroyContext = SDL_EGL_DestroyContext;
+#endif
 #ifdef SDL_VIDEO_VULKAN
   device->Vulkan_LoadLibrary = PLOS_Vulkan_LoadLibrary;
   device->Vulkan_UnloadLibrary = PLOS_Vulkan_UnloadLibrary;

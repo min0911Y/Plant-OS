@@ -27,7 +27,7 @@
 ## 构建与打包
 
 需要 GNU make、GCC/G++、binutils、NASM、mtools 和 QEMU；i386 工具链须支持 `-m32`/`elf_i386`。LiveCD 另需 `curl`、`tar` 和 `xorriso` 或 `genisoimage`。
-原生 C++ 运行库还需 Clang、CMake 和 Ninja；x86_64 默认包含 lavapipe，另需 Meson、匹配 LLVM 源码的宿主 TableGen、glslangValidator 和 Python 生成器模块。版本、缓存与构建说明见 [lavapipe](doc/lavapipe.md)。
+原生 C++ 运行库还需 Clang、CMake 和 Ninja；x86_64 默认包含 Mesa lavapipe/llvmpipe，另需 Meson、匹配 LLVM 源码的宿主 TableGen、glslangValidator、bison、flex、m4 和 Python 生成器模块。版本、缓存与构建说明见 [lavapipe](doc/lavapipe.md)。
 
 ```sh
 # i386：按顺序构建应用、DOSLDR、内核与磁盘镜像
@@ -71,7 +71,7 @@ make -C kernel ARCH=x86_64 livecd
 - IRQ、异常和 syscall 入口按现有约定进入/离开 kernel lock；可能调度后重新读取当前 CPU。IRQ 回调不分配、不阻塞、不自行 EOI 或切换任务，由统一分派器完成 EOI 和调度；ISA 使用独占注册，PCI INTx 使用共享注册。
 - 任务资源全部构造完成后调用 `task_publish`，失败用 `task_abort_creation`；启动参数及输入队列归新任务所有；任务退出取消 waiter/timer 并释放所属资源，内核栈只在切离后随任务槽回收。任务注册表通过迭代器访问，TID/页引用不得收窄为 8 位，异步引用用 TID/generation 识别。
 - 保持每 CPU 的 current、idle 和运行队列，只有 BSP 推进全局时钟及 timeout。调度器不可自切换；BSP 在资源就绪且释放最外层 kernel lock 后唤醒 AP，AP 等待 release 时休眠。
-- 实现同步跨 CPU TLB shootdown 前，同一地址空间的整个任务组固定在同一 CPU；跨进程共享映射只修改未在 CPU 上运行的目标。x86_64 页表修改统一经 TLB 失效接口处理当前和缓存的 PCID，不能依赖地址空间切换刷新；共享内核映射须覆盖所有 PCID。i386 BIOS/VBE 仅在 BSP 执行。
+- x86_64 同一地址空间的线程可跨 CPU 调度；页表修改统一经同步 TLB shootdown 处理活动 CPU 和缓存的 PCID，确认完成后才能回收旧页，共享内核映射须覆盖所有 CPU/PCID。TLB IPI 不获取 kernel lock，等待该锁的 CPU 也须处理失效请求；进程回收须等远端线程退出。i386 尚无同步 shootdown，同一地址空间仍固定到一个 CPU，BIOS/VBE 仅在 BSP 执行；跨进程共享映射仍只修改未在 CPU 上运行的目标。
 - DMA 使用正式 page/DMA/MMIO API 和驱动持有的缓冲，不指向等待调用者的栈或用户地址。硬件等待使用单调 deadline；失败不自动重放写入。停止设备并确认不再 DMA 后才释放资源，无法确认时禁用 bus master 并隔离相关页。
 
 ## 子系统边界
@@ -87,6 +87,7 @@ make -C kernel ARCH=x86_64 livecd
 - SDL 唯一实现为 `apps/sdl3`，应用直接使用 SDL3、SDL3_image 与 SDL3_ttf API，不引入 SDL2 兼容层。GUI 合成读取已提交画面，`window_present` 应答后客户端才复用绘图缓冲，`window_refresh` 保留异步 damage 合并。显示布局以 `framebuffer_info()` 的实际尺寸、pitch 和颜色位序为准；framebuffer 别名保持相同缓存属性。详情见 [显示与 SDL](doc/multiarch.md)。
 - JIT 编译器及其目标库运行在原生用户态；生成代码也必须遵循当前架构的调用约定、SIMD、无 red zone 和 W^X 约束，不能仅依赖构建编译器本体的选项。Mesa/lavapipe 的依赖、移植阶段和实际支持状态见 [lavapipe 移植](doc/lavapipe.md)。
 - x86_64 SDL renderer 可选择原生 lavapipe；普通应用使用 SDL 的后端选择，回归显式固定软件后端并断言默认选择为 Vulkan。SDL window surface 默认使用直接共享缓冲。Vulkan WSI 使用 `window_get_buffer` 的实际布局，在渲染完成且同步 present 应答后才复用图像；平台代码、上游补丁与宿主生成器统一维护在 `apps/mesa/` 和 `scripts/build-mesa.py`，不引入宿主驱动或装载器。
+- x86_64 OpenGL 使用同一 Mesa 构建中的 llvmpipe 和原生 EGL，SDL 复用上游 EGL 上下文接口。GL dispatch/TLS 保持单一实现，当前 EGL 对象须保留至解绑；窗口呈现遵循 GUI owner 与同步提交规则。经典 glxgears 仅替换窗口层，不引入 X11/GLX 兼容层；接口与验证见 [OpenGL](doc/opengl.md)。
 
 ### 文件系统与设备
 
@@ -127,7 +128,8 @@ python3 scripts/test-x86_64.py --arch i386 --dynamic --memory 512
 | IPC/RPC、磁盘、网络 | `rpctest.bin`、`dktest.bin`、`nettest.bin` |
 | 任务、异常、浮点 | `guitest.bin stress`/`capacity`、`--memory-pressure`、`exc_test.bin`、i386 `fputest.bin`、x86_64 `simdtest.bin` |
 | 用户态线程、TLS、运行库 | `--threads`、`--futex`，覆盖同步、分配、C/C++、stdio、浮点环境和动态链接/VM |
-| LLVM、Vulkan 与 WSI | x86_64 `--llvm`、`--lavapipe --memory 3072 --timeout 600`，同时验证着色器结果、窗口像素与输入 |
+| LLVM、Vulkan 与 WSI | x86_64 `--llvm`、`--lavapipe --memory 3072 --timeout 600` 验证着色器、窗口像素与输入；`--compute-bench` 比较多个 worker 数并逐块核验结果，性能数据须固定宿主与 QEMU 配置 |
+| OpenGL、EGL 与 llvmpipe | x86_64 `--opengl --memory 3072 --timeout 600`，覆盖离屏、GLSL、上下文共享及 glxgears 两帧像素和键盘事件 |
 | GUI、输入、SDL、工具 | `--mouse`、`--console`、`--editor`、`--sdl`、`--terminal-load COUNT`、`--desktop-app`（`lite` 或 `nk`）、`--tools` |
 | 动态链接与全部应用装载 | `--dynamic`、`--all-apps`，见 [动态链接验证](doc/dynamic-linking.md#验证) |
 | USB、PCI、AHCI | `--usb`、`--usb-hubs`、`--usb-irq`、`--usb-root-bus`、`--ahci --machine q35`；故障与模式组合见对应专题文档 |

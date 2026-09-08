@@ -4,6 +4,7 @@
 #include <ctypes.h>
 
 typedef uintptr_t arch_address_space_t;
+enum { ARCH_SHARED_ADDRESS_SPACE_SMP = 0 };
 
 typedef struct {
   uint32_t eax;

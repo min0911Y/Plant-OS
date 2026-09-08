@@ -1,0 +1,89 @@
+--- a/src/gallium/drivers/llvmpipe/lp_fence.c
++++ b/src/gallium/drivers/llvmpipe/lp_fence.c
+@@ -156 +156 @@
+-      fence->count++;
++      __atomic_store_n(&fence->count, fence->count + 1, __ATOMIC_RELEASE);
+@@ -163,3 +163,3 @@
+-      /* Wakeup all threads waiting on the mutex:
+-      */
+-      cnd_broadcast(&fence->signalled);
++      /* Only the completed fence can satisfy a waiter. */
++      if (fence->count == fence->rank)
++         cnd_broadcast(&fence->signalled);
+@@ -180 +180 @@
+-      return f->count == f->rank;
++      return __atomic_load_n(&f->count, __ATOMIC_ACQUIRE) == f->rank;
+--- a/src/gallium/drivers/llvmpipe/lp_scene.c
++++ b/src/gallium/drivers/llvmpipe/lp_scene.c
+@@ -538,17 +537,0 @@
+-/** advance curr_x,y to the next bin */
+-static bool
+-next_bin(struct lp_scene *scene)
+-{
+-   scene->curr_x++;
+-   if (scene->curr_x >= scene->tiles_x) {
+-      scene->curr_x = 0;
+-      scene->curr_y++;
+-   }
+-   if (scene->curr_y >= scene->tiles_y) {
+-      /* no more bins */
+-      return false;
+-   }
+-   return true;
+-}
+-
+-
+@@ -558,10 +541,6 @@
+-   scene->curr_x = scene->curr_y = -1;
+-}
+-
+-
+-/**
+- * Return pointer to next bin to be rendered.
+- * The lp_scene::curr_x and ::curr_y fields will be advanced.
+- * Multiple rendering threads will call this function to get a chunk
+- * of work (a bin) to work on.
+- */
++   scene->next_bin = 0;
++}
++
++
++/* Scene metadata is published before workers start. Only the work index is
++ * shared during rasterization; claiming a tile needs no blocking mutex. */
+@@ -569,23 +548,8 @@
+-lp_scene_bin_iter_next(struct lp_scene *scene , int *x, int *y)
+-{
+-   struct cmd_bin *bin = NULL;
+-
+-   mtx_lock(&scene->mutex);
+-
+-   if (scene->curr_x < 0) {
+-      /* first bin */
+-      scene->curr_x = 0;
+-      scene->curr_y = 0;
+-   } else if (!next_bin(scene)) {
+-      /* no more bins left */
+-      goto end;
+-   }
+-
+-   bin = lp_scene_get_bin(scene, scene->curr_x, scene->curr_y);
+-   *x = scene->curr_x;
+-   *y = scene->curr_y;
+-
+-end:
+-   /*printf("return bin %p at %d, %d\n", (void *) bin, *bin_x, *bin_y);*/
+-   mtx_unlock(&scene->mutex);
+-   return bin;
++lp_scene_bin_iter_next(struct lp_scene *scene, int *x, int *y)
++{
++   unsigned index = __atomic_fetch_add(&scene->next_bin, 1, __ATOMIC_RELAXED);
++   if (index >= (unsigned)scene->tiles_x * scene->tiles_y)
++      return NULL;
++   *x = index % scene->tiles_x;
++   *y = index / scene->tiles_x;
++   return lp_scene_get_bin(scene, *x, *y);
+--- a/src/gallium/drivers/llvmpipe/lp_scene.h
++++ b/src/gallium/drivers/llvmpipe/lp_scene.h
+@@ -200 +200 @@
+-   int curr_x, curr_y;  /**< for iterating over bins */
++   unsigned next_bin;  /**< atomic work index during rasterization */

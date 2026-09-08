@@ -3,8 +3,7 @@
 #define _STDINT_H   1
 #include <ctypes.h>
 typedef __INTPTR_TYPE__ intptr_t;
-typedef long long _Int64;
-typedef _Int64 intmax_t;
+typedef int64_t intmax_t;
 typedef uint64_t uintmax_t;
 #ifndef __INT64_C
 #if __WORDSIZE == 64

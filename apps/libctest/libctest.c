@@ -3,6 +3,8 @@
 #include <errno.h>
 #include <fenv.h>
 #include <float.h>
+#include <inttypes.h>
+#include <limits.h>
 #include <locale.h>
 #include <math.h>
 #include <pthread.h>
@@ -69,6 +71,15 @@ static void allocations(void) {
 }
 
 static void numbers(void) {
+  char formatted[64];
+  intmax_t signed_value = 0;
+  uintmax_t unsigned_value = 0;
+  snprintf(formatted, sizeof(formatted), "%" PRIdMAX " %" PRIuMAX, INTMAX_MIN,
+           UINTMAX_MAX);
+  check(sscanf(formatted, "%" SCNdMAX " %" SCNuMAX, &signed_value,
+               &unsigned_value) == 2 &&
+            signed_value == INTMAX_MIN && unsigned_value == UINTMAX_MAX,
+        "intmax formatting and scanning");
   char *end;
   check(strtod("  -0x1.8p+1tail", &end) == -3.0 && !strcmp(end, "tail"),
         "hexadecimal floating-point syntax");
@@ -95,6 +106,29 @@ static void numbers(void) {
   long double large = strtold("1e4000", &end);
   check(large > 0 && !__builtin_isinf(large) && !*end, "x87 exponent range");
 #endif
+}
+
+static void tokenization(void) {
+  char first[] = ",alpha,,beta;gamma", second[] = "/one/two/";
+  char *a = NULL, *b = NULL;
+  char *token = strtok_r(first, ",", &a);
+  check(token && !strcmp(token, "alpha"), "strtok_r leading delimiters");
+  token = strtok_r(second, "/", &b);
+  check(token && !strcmp(token, "one"), "strtok_r independent state");
+  token = strtok_r(NULL, ",;", &a);
+  check(token && !strcmp(token, "beta"), "strtok_r changed delimiters");
+  token = strtok_r(NULL, "", &a);
+  check(token && !strcmp(token, "gamma") && !strtok_r(NULL, "", &a),
+        "strtok_r empty delimiter set and end");
+  token = strtok_r(NULL, "/", &b);
+  check(token && !strcmp(token, "two") && !strtok_r(NULL, "/", &b),
+        "strtok_r trailing delimiters");
+  char legacy[] = "a:b";
+  token = strtok(legacy, ":");
+  check(token && !strcmp(token, "a"), "strtok first token");
+  token = strtok(NULL, ":");
+  check(token && !strcmp(token, "b") && !strtok(NULL, ":"),
+        "strtok continuation");
 }
 
 static void times_and_locale(void) {
@@ -347,6 +381,22 @@ static void math_environment(void) {
   fenv_t original, held;
   check(fegetenv(&original) == 0 && fesetround(FE_TONEAREST) == 0,
         "floating-point environment snapshot");
+  check(
+      fesetround(FE_DOWNWARD) == 0 && feclearexcept(FE_ALL_EXCEPT) == 0 &&
+          lround(2.5) == 3 && lround(-2.5) == -3 && lroundf(0.49999997f) == 0 &&
+          llround(0x1.fffffffffffffp62) == 9223372036854774784ll &&
+          llround(-0x1p63) == LLONG_MIN && llroundf(-0.5f) == -1 &&
+          lround((double)LONG_MIN) == LONG_MIN && !fetestexcept(FE_ALL_EXCEPT),
+      "integer rounding ties, range and FP mode independence");
+  check(lround(-(double)LONG_MIN) == LONG_MIN && fetestexcept(FE_INVALID) &&
+            !fetestexcept(FE_INEXACT),
+        "integer rounding overflow");
+  feclearexcept(FE_ALL_EXCEPT);
+  check(llround(NAN) == LLONG_MIN && fetestexcept(FE_INVALID) &&
+            !fetestexcept(FE_INEXACT),
+        "integer rounding NaN");
+  check(feclearexcept(FE_ALL_EXCEPT) == 0 && fesetround(FE_TONEAREST) == 0,
+        "restore integer rounding environment");
   check(fma(0x1.0000000000001p0, 0x1.ffffffffffffep-1, -1.0) == -0x1p-104 &&
             fmaf(0x1.000002p0f, 0x1.fffffcp-1f, -1.0f) == -0x1p-46f,
         "fused multiply-add single rounding");
@@ -379,6 +429,7 @@ static void math_environment(void) {
 int main(void) {
   allocations();
   numbers();
+  tokenization();
   times_and_locale();
   file_io();
   shared_stream();

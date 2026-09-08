@@ -1,0 +1,128 @@
+--- a/src/gallium/winsys/sw/null/null_sw_winsys.c
++++ b/src/gallium/winsys/sw/null/null_sw_winsys.c
+@@ -146,7 +146,7 @@
+ struct sw_winsys *
+ null_sw_create(void)
+ {
+-   static struct sw_winsys *winsys;
++   struct sw_winsys *winsys;
+ 
+    winsys = CALLOC_STRUCT(sw_winsys);
+    if (!winsys)
+--- a/meson.build
++++ b/meson.build
+@@ -484,6 +484,7 @@
+ with_platform_android = _platforms.contains('android')
+ with_platform_x11 = _platforms.contains('x11')
+ with_platform_wayland = _platforms.contains('wayland')
++with_platform_plantos = host_machine.system() == 'plantos'
+ with_platform_haiku = _platforms.contains('haiku')
+ with_platform_windows = _platforms.contains('windows')
+ with_platform_macos = _platforms.contains('macos')
+@@ -559,7 +560,7 @@
+   .allowed()
+ 
+ with_egl = get_option('egl') \
+-  .require(with_platform_windows or with_platform_haiku or with_dri or with_platform_android, error_message : 'EGL requires DRI, Haiku, Windows or Android') \
++  .require(with_platform_plantos or with_platform_windows or with_platform_haiku or with_dri or with_platform_android, error_message : 'EGL requires DRI, Haiku, Windows or Android') \
+   .require(with_glx != 'xlib', error_message :'EGL requires DRI, but GLX is being built with xlib support') \
+   .disable_auto_if(with_platform_haiku) \
+   .allowed()
+--- a/src/egl/main/egldisplay.h
++++ b/src/egl/main/egldisplay.h
+@@ -55,6 +55,7 @@
+    _EGL_PLATFORM_SURFACELESS,
+    _EGL_PLATFORM_DEVICE,
+    _EGL_PLATFORM_WINDOWS,
++   _EGL_PLATFORM_PLANTOS,
+ 
+    _EGL_NUM_PLATFORMS,
+    _EGL_INVALID_PLATFORM = -1
+--- a/src/egl/main/egldisplay.c
++++ b/src/egl/main/egldisplay.c
+@@ -84,6 +84,7 @@
+    {_EGL_PLATFORM_SURFACELESS, "surfaceless"},
+    {_EGL_PLATFORM_DEVICE, "device"},
+    {_EGL_PLATFORM_WINDOWS, "windows"},
++   {_EGL_PLATFORM_PLANTOS, "plantos"},
+ };
+ 
+ /**
+--- a/include/EGL/eglplatform.h
++++ b/include/EGL/eglplatform.h
+@@ -48,7 +48,13 @@
+  * implementations.
+  */
+ 
+-#if defined(EGL_NO_PLATFORM_SPECIFIC_TYPES)
++#if defined(__plantos__)
++
++typedef void *EGLNativeDisplayType;
++typedef void *EGLNativePixmapType;
++typedef struct plant_egl_window *EGLNativeWindowType;
++
++#elif defined(EGL_NO_PLATFORM_SPECIFIC_TYPES)
+ 
+ typedef void *EGLNativeDisplayType;
+ typedef void *EGLNativePixmapType;
+--- a/src/egl/meson.build
++++ b/src/egl/meson.build
+@@ -137,6 +137,11 @@
+     deps_for_egl += [dep_android, idep_u_gralloc]
+     files_egl += files('drivers/dri2/platform_android.c')
+   endif
++elif with_platform_plantos
++  files_egl += files(get_option('plantos-port') / 'egl_plantos.c')
++  incs_for_egl += [inc_mesa, inc_gallium, inc_gallium_aux, inc_gallium_drivers, inc_gallium_winsys]
++  link_for_egl += [libmesa, libgallium, libglapi, libws_null]
++  deps_for_egl += driver_llvmpipe
+ elif with_platform_haiku
+   c_args_for_egl += [
+     '-D_EGL_BUILT_IN_DRIVER_HAIKU',
+@@ -187,9 +192,9 @@
+     link_deps_for_egl += files('egl-glvnd.sym')
+   else
+     link_args_for_egl += [
+-      '-Wl,--version-script', join_paths(meson.current_source_dir(), 'egl.sym')
++      '-Wl,--version-script', (with_platform_plantos ? get_option('plantos-port') / 'egl_plantos.sym' : meson.current_source_dir() / 'egl.sym')
+     ]
+-    link_deps_for_egl += files('egl.sym')
++    link_deps_for_egl += files(with_platform_plantos ? get_option('plantos-port') / 'egl_plantos.sym' : 'egl.sym')
+   endif
+ endif
+ 
+@@ -199,6 +204,10 @@
+   output : 'egl.def',
+   command : gen_vs_module_defs_normal_command,
+ )
++
++if with_platform_plantos
++  egl_native_platform = 'plantos'
++endif
+ 
+ if egl_native_platform != ''
+   c_args_for_egl += '-D_EGL_NATIVE_PLATFORM=_EGL_PLATFORM_@0@'.format(egl_native_platform.to_upper())
+@@ -218,11 +227,21 @@
+   link_depends : [link_deps_for_egl],
+   dependencies : [deps_for_egl, dep_dl, dep_libdrm, dep_clock, dep_thread, idep_mesautil],
+   install : true,
+-  version : egl_lib_version,
+-  soversion : egl_lib_soversion,
++  kwargs : with_platform_plantos ? {} : {'version': egl_lib_version, 'soversion': egl_lib_soversion},
+   name_prefix : host_machine.system() == 'windows' ? 'lib' : [],  # always use lib, but avoid warnings on !windows
+   vs_module_defs : egl_def
+ )
++
++if with_platform_plantos
++  libgl = shared_library(
++    'GL',
++    link_whole : libglapi_bridge,
++    link_with : libegl,
++    link_args : [ld_args_bsymbolic, ld_args_gc_sections],
++    dependencies : idep_mesautil,
++    install : true,
++  )
++endif
+ 
+ if with_glvnd
+   configure_file(

@@ -149,11 +149,11 @@ static bool init_task(void) {
   return task_registry_grow();
 }
 
-static uint32_t scheduler_load(uint32_t cpu) {
+static uint32_t scheduler_load(uint32_t cpu, const mtask *exclude) {
   uint32_t load = 0;
   for (uint32_t i = 0; i < task_registry.slot_count; i++) {
     mtask *task = task_slot_at(i);
-    if (task->state == RUNNING && task->cpu == cpu &&
+    if (task != exclude && task->state == RUNNING && task->cpu == cpu &&
         !(task->sched_flags & TASK_SCHED_IDLE)) {
       load += task->weight ? task->weight : 1;
     }
@@ -161,20 +161,28 @@ static uint32_t scheduler_load(uint32_t cpu) {
   return load;
 }
 
-static uint32_t scheduler_least_loaded_cpu(void) {
-  uint32_t selected = 0;
-  uint32_t selected_load = UINT_MAX;
+static uint32_t scheduler_least_loaded_cpu(const mtask *task) {
+  /* Keep a waking task's cache affinity when runnable loads are equal. */
+  uint32_t selected = task->cpu;
+  uint32_t selected_load = scheduler_load(selected, task);
   for (uint32_t cpu = 0; cpu < scheduler_cpu_total; cpu++) {
     if (!smp_cpu_online(cpu)) {
       continue;
     }
-    uint32_t load = scheduler_load(cpu);
+    uint32_t load = scheduler_load(cpu, task);
     if (load < selected_load) {
       selected = cpu;
       selected_load = load;
     }
   }
   return selected;
+}
+
+static void scheduler_request(uint32_t cpu) {
+  if (!scheduler_cpus[cpu].need_resched) {
+    scheduler_cpus[cpu].need_resched = 1;
+    smp_send_reschedule(cpu);
+  }
 }
 
 static void scheduler_place_task(mtask *task, uint32_t cpu) {
@@ -186,8 +194,7 @@ static void scheduler_place_task(mtask *task, uint32_t cpu) {
   task->cpu = cpu;
   task->vruntime =
       (target->min_vruntime > 1 ? target->min_vruntime - 1 : 0) + lag;
-  target->need_resched = 1;
-  smp_send_reschedule(cpu);
+  scheduler_request(cpu);
 }
 
 static bool task_pin_address_space(arch_address_space_t address_space,
@@ -221,7 +228,7 @@ static bool task_pin_address_space(arch_address_space_t address_space,
 static int scheduler_task_eligible(const mtask *task, uint32_t cpu,
                                    const mtask *current) {
   return task != NULL && task->state == RUNNING && task->cpu == cpu &&
-         !(task->sched_flags & TASK_SCHED_IDLE) &&
+         !task->terminate_pending && !(task->sched_flags & TASK_SCHED_IDLE) &&
          (!task->on_cpu || task == current);
 }
 
@@ -235,6 +242,13 @@ static mtask *scheduler_pick_next(scheduler_cpu_t *cpu, uint32_t cpu_index) {
 
   for (uint32_t i = 0; i < task_registry.slot_count; i++) {
     mtask *candidate = task_slot_at(i);
+    if (candidate->state == RUNNING && candidate->terminate_pending &&
+        !candidate->on_cpu && candidate != current) {
+      task_finish_pending(candidate);
+      /* Closing an owning service can also retire an earlier candidate. */
+      if (!scheduler_task_eligible(next, cpu_index, current))
+        next = NULL;
+    }
     if (candidate->state == READY && !candidate->on_cpu &&
         candidate != current) {
       task_slot_release(candidate);
@@ -261,7 +275,7 @@ static void scheduler_balance(void) {
     if (!smp_cpu_online(cpu)) {
       continue;
     }
-    uint32_t load = scheduler_load(cpu);
+    uint32_t load = scheduler_load(cpu, NULL);
     if (load > busiest_load) {
       busiest = cpu;
       busiest_load = load;
@@ -374,7 +388,7 @@ void task_next(void) {
 
 static mtask *create_task_impl(uintptr_t entry, unsigned weight,
                                bool share_pde) {
-  if (share_pde && scheduler_active) {
+  if (share_pde && scheduler_active && !ARCH_SHARED_ADDRESS_SPACE_SMP) {
     irq_state_t state = irq_save();
     bool pinned =
         task_pin_address_space(current_task()->address_space, smp_current_cpu());
@@ -393,7 +407,7 @@ static mtask *create_task_impl(uintptr_t entry, unsigned weight,
                                           : (uint32_t)tid;
   t->ptid = share_pde && scheduler_active ? current_task()->ptid
                                           : TASK_ID_NONE;
-  if (share_pde && scheduler_active) {
+  if (share_pde && scheduler_active && !ARCH_SHARED_ADDRESS_SPACE_SMP) {
     t->cpu = smp_current_cpu();
     t->sched_flags = TASK_SCHED_PINNED;
   }
@@ -459,7 +473,7 @@ bool task_publish(mtask *task) {
   if (published) {
     uint32_t cpu = task->sched_flags & TASK_SCHED_PINNED
                        ? task->cpu
-                       : scheduler_least_loaded_cpu();
+                       : scheduler_least_loaded_cpu(task);
     scheduler_place_task(task, cpu);
     task->state = RUNNING;
   }
@@ -679,17 +693,13 @@ static void finish_task(mtask *task, unsigned status, bool waitable) {
 }
 
 static void request_task_termination(mtask *task, unsigned status) {
+  task->terminate_status = status;
+  task->terminate_pending = 1;
   if (task->on_cpu && task != current_task()) {
-    task->terminate_status = status;
-    task->terminate_pending = 1;
-    scheduler_cpus[task->cpu].need_resched = 1;
-    smp_send_reschedule(task->cpu);
+    scheduler_request(task->cpu);
     return;
   }
-  finish_task(task, status,
-              task->joinable ||
-                  (task->kind == TASK_PROCESS && task->ptid != TASK_ID_NONE &&
-                   task->ptid != REAPER_TID));
+  task_finish_pending(task);
 }
 
 static void terminate_thread_group(uint32_t tgid, mtask *except) {
@@ -707,11 +717,32 @@ static void terminate_thread_group(uint32_t tgid, mtask *except) {
   }
 }
 
+static bool task_group_has_threads(const mtask *self) {
+  task_iterator_t iterator = {0};
+  mtask *thread;
+  while ((thread = task_iter_next(&iterator)) != NULL) {
+    if (thread != self && thread->kind == TASK_THREAD &&
+        thread->tgid == self->tgid && thread->address_space)
+      return true;
+  }
+  return false;
+}
+
 static void task_finish_pending(mtask *task) {
   unsigned status = task->terminate_status;
   task->terminate_pending = 0;
   if (task->kind == TASK_PROCESS) {
     terminate_thread_group(task->tgid, task);
+    /* Remote threads still hold group resources, including alloc_size and
+     * the leader's identity. Their exit wakes this deferred finalization. */
+    if (task_group_has_threads(task)) {
+      task->terminate_pending = 1;
+      task->state = WAITING;
+      task->wait_reason = WAIT_REASON_CHILD;
+      task->waittid = TASK_ID_NONE;
+      task->wait_generation = 0;
+      return;
+    }
     reparent_children(task->tgid, REAPER_TID);
   }
   bool waitable = task->joinable ||
@@ -727,22 +758,7 @@ void task_kill(unsigned tid) {
   }
   irq_state_t interrupt_state = irq_save();
   bool is_current = task == current_task();
-  if (task->on_cpu && !is_current) {
-    task->terminate_status = TASK_KILLED_STATUS;
-    task->terminate_pending = 1;
-    scheduler_cpus[task->cpu].need_resched = 1;
-    smp_send_reschedule(task->cpu);
-    irq_restore(interrupt_state);
-    return;
-  }
-  if (task->kind == TASK_PROCESS) {
-    terminate_thread_group(task->tgid, task);
-    reparent_children(task->tgid, REAPER_TID);
-  }
-  bool waitable = task->joinable ||
-                  (task->kind == TASK_PROCESS && task->ptid != TASK_ID_NONE &&
-                   task->ptid != REAPER_TID);
-  finish_task(task, TASK_KILLED_STATUS, waitable);
+  request_task_termination(task, TASK_KILLED_STATUS);
   if (is_current) {
     task_next();
     arch_halt();
@@ -862,8 +878,7 @@ bool task_pin_current(uint32_t cpu) {
     return false;
   }
   if (cpu != smp_current_cpu()) {
-    scheduler_cpus[cpu].need_resched = 1;
-    smp_send_reschedule(cpu);
+    scheduler_request(cpu);
     task_next();
   }
   bool on_target = smp_current_cpu() == cpu;
@@ -1002,15 +1017,13 @@ void task_run(mtask *task) {
     task->wait_reason = WAIT_REASON_NONE;
     task->ready = 0;
     if (!(task->sched_flags & TASK_SCHED_PINNED) && !task->on_cpu) {
-      scheduler_place_task(task, scheduler_least_loaded_cpu());
+      scheduler_place_task(task, scheduler_least_loaded_cpu(task));
     } else {
-      scheduler_cpus[task->cpu].need_resched = 1;
-      smp_send_reschedule(task->cpu);
+      scheduler_request(task->cpu);
     }
   } else {
     task->ready = 1;
-    scheduler_cpus[task->cpu].need_resched = 1;
-    smp_send_reschedule(task->cpu);
+    scheduler_request(task->cpu);
   }
   task->fifosleep = 0;
 }
@@ -1178,20 +1191,7 @@ int task_terminate_thread(uint32_t tid, uint32_t generation) {
 
 void task_wait_threads(void) {
   mtask *self = current_task();
-  for (;;) {
-    bool running = false;
-    task_iterator_t iterator = {0};
-    mtask *thread;
-    while ((thread = task_iter_next(&iterator)) != NULL) {
-      if (thread != self && thread->kind == TASK_THREAD &&
-          thread->tgid == self->tgid && thread->state != DIED &&
-          thread->state != WILL_EMPTY && thread->state != READY) {
-        running = true;
-        break;
-      }
-    }
-    if (!running)
-      return;
+  while (task_group_has_threads(self)) {
     self->waittid = TASK_ID_NONE;
     self->wait_generation = 0;
     task_fall_blocked_reason(WAITING, WAIT_REASON_CHILD);
@@ -1202,8 +1202,7 @@ void mtask_run_now(mtask *obj) {
     return;
   }
   scheduler_cpus[obj->cpu].next = obj;
-  scheduler_cpus[obj->cpu].need_resched = 1;
-  smp_send_reschedule(obj->cpu);
+  scheduler_request(obj->cpu);
 }
 static void release_task_fifos(mtask *task) {
   if (task->Pkeyfifo) {

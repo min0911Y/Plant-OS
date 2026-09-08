@@ -10,6 +10,7 @@ extern "C" {
 char *strerror(int error_number);
 int strerror_r(int error_number, char *buffer, size_t size);
 char *strtok(char *text, const char *separators);
+char *strtok_r(char *text, const char *separators, char **state);
 int strcmp(const char* s1, const char* s2);
 int strcasecmp(const char *s1, const char *s2);
 int strncasecmp(const char *s1, const char *s2, size_t length);

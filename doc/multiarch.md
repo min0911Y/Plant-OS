@@ -19,7 +19,7 @@ make -C kernel ARCH=x86_64 livecd
 x86_64 使用 GCC/G++、binutils、NASM、mtools、xorriso 和固定版本的 Limine 12.6.1。生成的 `kernel/plant-os-x86_64.iso` 同时包含 BIOS 和 UEFI 启动项。内核、应用和库分别位于 `kernel/obj/x86_64/`、`apps/out/x86_64/`、`apps/libs/x86_64/`；切换架构不会覆盖另一架构的对象。
 
 原生 C++ 运行库以及 x86_64 默认 lavapipe 构建还需要 Clang、CMake、Ninja、
-Meson、TableGen、glslangValidator 和 Python 生成器依赖，版本与配置见
+Meson、TableGen、glslangValidator、bison、flex、m4 和 Python 生成器依赖，版本与配置见
 [lavapipe 构建](lavapipe.md#构建)。宿主工具与目标运行库严格分开。
 
 ```sh
@@ -62,7 +62,9 @@ x86_64 使用四级页表和 Limine HHDM，不探测写物理内存。物理页�
 
 x86_64 的 TLB 后端分别检测 PCID（CPUID.1:ECX[17]）和 INVPCID（CPUID.7.0:EBX[10]）；BSP 选择，AP 验证能力。每个 CPU 启用 CR4.PCIDE 前先清零 CR3 的低 12 位，并在初始化时清理引导器遗留翻译。任务切换、首次调度和临时地址空间调用统一使用 `arch_address_space_activate`：PCID 命中时以 CR3[63] 保留翻译，同根且记录有效时跳过 CR3 写入。每 CPU 的 4096 项目录记录完整页表根，只在支持 PCID 时按实际 CPU 数于 BSP 启动阶段分配，每 CPU 32 KiB；页框号映射到 12 位 PCID，冲突时刷新该标签再替换，不限制进程数量，也不向通用地址空间句柄混入 PCID 位。
 
-页表修改经 `x64_tlb_invalidate` 批量失效：短用户范围使用 INVLPG，超过 32 页或整个地址空间使用 INVPCID single-context，无 INVPCID 时重载当前 CR3。其他 CPU 中匹配的 PCID 记录作废，在下次激活时刷新，因此迁移、fork/COW、共享映射、exec 和页表根物理页复用都不能继承旧翻译。共享的内核高半区使用 INVPCID all-context（包括 global），无该指令时切换 CR4.PGE；其他 CPU 在下次激活时处理挂起的全量失效。失效接口在 kernel lock 内使用并保留调用者 IRQ 状态；这不替代同步跨 CPU shootdown，现有任务组固定 CPU、只修改非运行目标和模块使用新虚拟地址的约束仍适用。
+页表修改经 `x64_tlb_invalidate` 批量失效：短用户范围使用 INVLPG，超过 32 页或整个地址空间使用 INVPCID single-context，无 INVPCID 时重载当前 CR3。正在运行该地址空间的远端 CPU 经 TLB IPI 同步刷新；其他 CPU 中匹配的非活动 PCID 记录作废，在下次激活时刷新。共享的内核高半区在所有在线 CPU 使用 INVPCID all-context（包括 global），无该指令时切换 CR4.PGE。失效接口在 kernel lock 内使用并保留调用者 IRQ 状态；接收端不获取该锁，等待 kernel lock 的 CPU 也处理请求，避免发送者与接收者互等。发送者在收到全部确认后才允许释放旧物理页或页表；确认超时停机，不能继续回收。
+
+x86_64 线程不再按地址空间绑定到单个 CPU，唤醒时在相同负载下优先保留原 CPU，并合并尚未处理的重调度中断。并发 COW 缺页在取得 kernel lock 后重新检查页表，允许重试其他 CPU 已恢复为可写的映射。进程退出先终止线程，等待远端线程释放资源后再回收主线程及其身份；待终止任务不能重新进入用户态。i386 后端仍将共享地址空间的线程固定到同一 CPU。`thrdtest.bin` 的 SMP 检查覆盖运行中远端 CPU 的单页/64 页同址重映射、写权限撤销，以及并发 VM 操作时退出整个进程。
 
 `dyntest.bin` 的 `DYNTEST TLB PASS` 覆盖预热页的父进程 COW、两个进程的同址隔离、连续切换、64 页批量权限修改和同址反复解除/重建映射。基础回归另覆盖共享 GUI 缓冲和模块反复装卸。`--tlb` 强制 QEMU 特性并核对串口 `tlb: pcid=... invpcid=...`，避免静默降级；PCID 可用性取决于加速器，支持这些指令的 KVM 宿主可运行：
 
@@ -119,7 +121,7 @@ flanterm 自己处理 ANSI/VT100，默认 TTY 不再经过内核旧解析器。G
 
 在系统中先运行 `gui.bin`，再从 GUI 终端运行 `lite.bin` 或 `nk.bin`。Doom 与 WAD 位于 `/games`，可在该目录运行 `doom.bin`。SDL 软件 surface 直接写 GUI 提供的共享绘图缓冲，pitch 包含窗口边框；GUI 保留独立的已提交画面用于合成和遮挡恢复。Present 只按行复制 damage，并等刷新 RPC 应答后才复用共享绘图缓冲，避免 nk 清屏或绘制中的半成品帧被显示。SDL 不再额外持有第三份像素缓冲。普通 `window_refresh` 仍可合并异步更新；需要完整帧边界的程序使用 `window_present`。显示尺寸通过 `framebuffer_info()` 查询，SDL 不请求 BIOS 模式切换。每个窗口独立处理键盘前缀和鼠标状态，支持文字、方向键、滚轮、标题更新与关闭。
 
-当前支持软件渲染、字体、图片、键鼠、文件/内存 IOStream 及纳秒性能计时；窗口尺寸固定。x86_64 另提供原生 lavapipe Vulkan renderer 和 GUI swapchain，常规 renderer 应用选择 SDL 默认后端；窗口 surface 默认保留直接共享缓冲路径。Vulkan 的构建、单一 ICD 接口和像素验证见 [lavapipe](lavapipe.md)。OpenGL、音频设备、SDL 自身的线程后端和 `SDL_AddTimer` 异步回调尚未实现，Mesa 使用独立的原生 pthread 能力。SDL3 不再使用 `SDL_INIT_TIMER`；`SDL_GetTicks` 返回 64 位毫秒，`SDL_GetTicksNS` 和性能计数器返回纳秒。延时调用转换为内核阻塞 sleep。
+当前支持软件渲染、字体、图片、键鼠、文件/内存 IOStream 及纳秒性能计时；窗口尺寸固定。x86_64 另提供原生 lavapipe Vulkan renderer 和 GUI swapchain，常规 renderer 应用选择 SDL 默认后端；窗口 surface 默认保留直接共享缓冲路径。Vulkan 的构建、单一 ICD 接口和像素验证见 [lavapipe](lavapipe.md)。x86_64 OpenGL 使用原生 EGL 和 llvmpipe，经典 glxgears 与上下文验证见 [OpenGL](opengl.md)。音频设备、SDL 自身的线程后端和 `SDL_AddTimer` 异步回调尚未实现，Mesa 使用独立的原生 pthread 能力。SDL3 不再使用 `SDL_INIT_TIMER`；`SDL_GetTicks` 返回 64 位毫秒，`SDL_GetTicksNS` 和性能计数器返回纳秒。延时调用转换为内核阻塞 sleep。
 
 SDL3 操作普遍以 `true` 表示成功，窗口事件直接使用 `SDL_EVENT_WINDOW_*`，鼠标坐标为浮点数。文本输入按窗口显式开启，字体接口统一接收 UTF-8；i386 非 ASCII 字面量须显式保留 UTF-8 字节。SDL3 的文本/拖放事件字符串由 SDL 管理，不能保留到下一次事件泵或自行释放。nk 顶点颜色使用浮点 RGBA。初始窗口坐标通过 `SDL_CreateWindowWithProperties` 设置，不依赖创建后移动。
 

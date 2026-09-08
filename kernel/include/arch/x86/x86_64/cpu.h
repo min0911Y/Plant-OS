@@ -46,8 +46,12 @@ void x64_cpu_initialize(x64_cpu_t *cpu);
 void x64_tlb_initialize(void);
 /* Allocate the tag directory on the BSP before APs or tasks can use it. */
 bool x64_tlb_prepare(void);
-/* Under the kernel lock: size=0 flushes a user root;
- * upper-half addresses invalidate the shared kernel mappings in all PCIDs. */
+enum { X64_TLB_VECTOR = 0xf2 };
+/* Lock-free acknowledgement, also serviced while waiting for kernel lock. */
+void x64_tlb_poll(void);
+/* Under the kernel lock: size=0 flushes a user root; upper-half addresses
+ * invalidate shared kernel mappings in all PCIDs. Waits for remote completion
+ * before the caller may reclaim retired pages or page tables. */
 void x64_tlb_invalidate(arch_address_space_t root, uintptr_t address,
                         size_t size);
 uint64_t x64_virtual_physical(const void *pointer);
