@@ -1,3 +1,4 @@
+#include <scheduler.h>
 #include <cmd.h>
 #include <dos.h>
 #include <executable.h>
@@ -1562,10 +1563,10 @@ static void syscall_task_level(syscall_context_t *frame) {
       return;
     }
     task->urgent = 1;
-    task->weight = 5;
+    task_set_weight(task, 5);
   } else {
     task->urgent = 0;
-    task->weight = 1;
+    task_set_weight(task, 1);
   }
   irq_restore(state);
 }

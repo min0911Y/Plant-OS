@@ -195,7 +195,7 @@ Mimg : make_dir $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $
 		mcopy -s -i ./disk.img $(APPSOUTPATH)lib ::/
 		mcopy -i ./disk.img $(APPSOUTPATH)guitest.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)timetest.bin ::
-		mcopy -i ./disk.img $(APPSOUTPATH)futest.bin ::
+		mcopy -i ./disk.img $(APPSOUTPATH)futest.bin $(APPSOUTPATH)schbench.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)thrdtest.bin $(APPSOUTPATH)libctest.bin $(APPSOUTPATH)cxxcheck.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)sdltest.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)exc_test.bin ::
@@ -255,7 +255,7 @@ Mimg : make_dir $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $
 		mcopy -s -i boot.img $(APPSOUTPATH)lib ::/
 		mcopy -i boot.img $(APPSOUTPATH)guitest.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)timetest.bin ::
-		mcopy -i boot.img $(APPSOUTPATH)futest.bin ::
+		mcopy -i boot.img $(APPSOUTPATH)futest.bin $(APPSOUTPATH)schbench.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)thrdtest.bin $(APPSOUTPATH)libctest.bin $(APPSOUTPATH)cxxcheck.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)sdltest.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)exc_test.bin ::

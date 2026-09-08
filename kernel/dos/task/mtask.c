@@ -6,7 +6,9 @@
 #include <irq.h>
 #include <limits.h>
 #include <platform.h>
+#include <scheduler.h>
 #include <smp.h>
+#include <stdint.h>
 #include <tty_rpc.h>
 #include <usb.h>
 #define STACK_SIZE TASK_KERNEL_STACK_SIZE
@@ -33,6 +35,8 @@ typedef struct {
   mtask *current;
   mtask *idle;
   mtask *next;
+  mtask *runnable;
+  uint64_t load;
   uint64_t min_vruntime;
   uint32_t need_resched;
 } scheduler_cpu_t;
@@ -42,6 +46,7 @@ static scheduler_cpu_t scheduler_cpus[SMP_MAX_CPUS];
 static uint32_t scheduler_cpu_total = 1;
 static uint32_t scheduler_active;
 static uint64_t scheduler_ticks;
+static mtask *retired_tasks;
 
 static bool task_slot_in_use(const mtask *task) {
   return task != NULL && task->state != EMPTY && task->state != WILL_EMPTY &&
@@ -149,27 +154,65 @@ static bool init_task(void) {
   return task_registry_grow();
 }
 
-static uint32_t scheduler_load(uint32_t cpu, const mtask *exclude) {
-  uint32_t load = 0;
-  for (uint32_t i = 0; i < task_registry.slot_count; i++) {
-    mtask *task = task_slot_at(i);
-    if (task != exclude && task->state == RUNNING && task->cpu == cpu &&
-        !(task->sched_flags & TASK_SCHED_IDLE)) {
-      load += task->weight ? task->weight : 1;
-    }
+/* Runnable membership includes the current task, but excludes idle tasks.
+ * All queue/state/load changes are serialized by the existing kernel lock. */
+static void scheduler_remove(mtask *task) {
+  if (!task->run_previous)
+    return;
+  *task->run_previous = task->run_next;
+  if (task->run_next)
+    task->run_next->run_previous = task->run_previous;
+  scheduler_cpus[task->cpu].load -= task->weight ? task->weight : 1;
+  task->run_previous = NULL;
+  task->run_next = NULL;
+}
+
+static void scheduler_insert(mtask *task) {
+  if (task->state != RUNNING || (task->sched_flags & TASK_SCHED_IDLE) ||
+      task->run_previous)
+    return;
+  scheduler_cpu_t *cpu = &scheduler_cpus[task->cpu];
+  task->run_next = cpu->runnable;
+  task->run_previous = &cpu->runnable;
+  if (task->run_next)
+    task->run_next->run_previous = &task->run_next;
+  cpu->runnable = task;
+  cpu->load += task->weight ? task->weight : 1;
+}
+
+static void task_set_state(mtask *task, enum STATE state) {
+  scheduler_remove(task);
+  task->state = state;
+  scheduler_insert(task);
+}
+
+void task_set_weight(mtask *task, unsigned weight) {
+  irq_state_t state = irq_save();
+  if (task->run_previous) {
+    scheduler_cpu_t *cpu = &scheduler_cpus[task->cpu];
+    cpu->load -= task->weight ? task->weight : 1;
+    cpu->load += weight ? weight : 1;
   }
+  task->weight = weight;
+  irq_restore(state);
+}
+
+static uint64_t scheduler_load(uint32_t cpu, const mtask *exclude) {
+  uint64_t load = scheduler_cpus[cpu].load;
+  if (exclude && exclude->cpu == cpu && exclude->run_previous)
+    load -= exclude->weight ? exclude->weight : 1;
   return load;
 }
 
 static uint32_t scheduler_least_loaded_cpu(const mtask *task) {
   /* Keep a waking task's cache affinity when runnable loads are equal. */
   uint32_t selected = task->cpu;
-  uint32_t selected_load = scheduler_load(selected, task);
+  uint64_t selected_load = scheduler_load(selected, task);
   for (uint32_t cpu = 0; cpu < scheduler_cpu_total; cpu++) {
     if (!smp_cpu_online(cpu)) {
       continue;
     }
-    uint32_t load = scheduler_load(cpu, task);
+    uint64_t load = scheduler_load(cpu, task);
     if (load < selected_load) {
       selected = cpu;
       selected_load = load;
@@ -191,7 +234,9 @@ static void scheduler_place_task(mtask *task, uint32_t cpu) {
   uint64_t lag = task->vruntime > source->min_vruntime
                      ? task->vruntime - source->min_vruntime
                      : 0;
+  scheduler_remove(task);
   task->cpu = cpu;
+  scheduler_insert(task);
   task->vruntime =
       (target->min_vruntime > 1 ? target->min_vruntime - 1 : 0) + lag;
   scheduler_request(cpu);
@@ -216,9 +261,7 @@ static bool task_pin_address_space(arch_address_space_t address_space,
       continue;
     }
     task->sched_flags |= TASK_SCHED_PINNED;
-    if (task->on_cpu) {
-      task->cpu = cpu;
-    } else if (task->cpu != cpu) {
+    if (task->cpu != cpu) {
       scheduler_place_task(task, cpu);
     }
   }
@@ -234,32 +277,32 @@ static int scheduler_task_eligible(const mtask *task, uint32_t cpu,
 
 static mtask *scheduler_pick_next(scheduler_cpu_t *cpu, uint32_t cpu_index) {
   mtask *current = cpu->current;
-  mtask *next = cpu->next;
+  mtask *hint = cpu->next;
+  mtask *next;
   cpu->next = NULL;
+restart:
+  next = hint;
   if (!scheduler_task_eligible(next, cpu_index, current)) {
     next = NULL;
   }
 
-  for (uint32_t i = 0; i < task_registry.slot_count; i++) {
-    mtask *candidate = task_slot_at(i);
-    if (candidate->state == RUNNING && candidate->terminate_pending &&
-        !candidate->on_cpu && candidate != current) {
-      task_finish_pending(candidate);
-      /* Closing an owning service can also retire an earlier candidate. */
-      if (!scheduler_task_eligible(next, cpu_index, current))
-        next = NULL;
-    }
-    if (candidate->state == READY && !candidate->on_cpu &&
+  for (mtask *candidate = cpu->runnable; candidate;
+       candidate = candidate->run_next) {
+    if (candidate->terminate_pending && !candidate->on_cpu &&
         candidate != current) {
-      task_slot_release(candidate);
-      continue;
+      task_finish_pending(candidate);
+      /* Cleanup may retire other members too. Restart only after teardown,
+       * never walk links belonging to a released or reused task slot. */
+      goto restart;
     }
     if (!scheduler_task_eligible(candidate, cpu_index, current)) {
       continue;
     }
     if (next == NULL || candidate->urgent > next->urgent ||
         (candidate->urgent == next->urgent &&
-         candidate->vruntime < next->vruntime)) {
+         (candidate->vruntime < next->vruntime ||
+          (candidate->vruntime == next->vruntime && next != hint &&
+           candidate->tid < next->tid)))) {
       next = candidate;
     }
   }
@@ -269,13 +312,13 @@ static mtask *scheduler_pick_next(scheduler_cpu_t *cpu, uint32_t cpu_index) {
 static void scheduler_balance(void) {
   uint32_t busiest = 0;
   uint32_t least = 0;
-  uint32_t busiest_load = 0;
-  uint32_t least_load = UINT_MAX;
+  uint64_t busiest_load = 0;
+  uint64_t least_load = UINT64_MAX;
   for (uint32_t cpu = 0; cpu < scheduler_cpu_total; cpu++) {
     if (!smp_cpu_online(cpu)) {
       continue;
     }
-    uint32_t load = scheduler_load(cpu, NULL);
+    uint64_t load = scheduler_load(cpu, NULL);
     if (load > busiest_load) {
       busiest = cpu;
       busiest_load = load;
@@ -290,13 +333,14 @@ static void scheduler_balance(void) {
   }
 
   mtask *selected = NULL;
-  for (uint32_t i = 0; i < task_registry.slot_count; i++) {
-    mtask *task = task_slot_at(i);
+  for (mtask *task = scheduler_cpus[busiest].runnable; task;
+       task = task->run_next) {
     if (task->state != RUNNING || task->cpu != busiest || task->on_cpu ||
         (task->sched_flags & (TASK_SCHED_IDLE | TASK_SCHED_PINNED))) {
       continue;
     }
-    if (selected == NULL || task->vruntime < selected->vruntime) {
+    if (selected == NULL || task->vruntime < selected->vruntime ||
+        (task->vruntime == selected->vruntime && task->tid < selected->tid)) {
       selected = task;
     }
   }
@@ -353,12 +397,19 @@ void task_next(void) {
   if (current == NULL) {
     return;
   }
+  /* These stacks were retired by earlier switches, never by this invocation. */
+  while (retired_tasks) {
+    mtask *task = retired_tasks;
+    retired_tasks = task->run_next;
+    task->run_next = NULL;
+    task_slot_release(task);
+  }
   current->on_cpu = 0;
   if (current->terminate_pending) {
     task_finish_pending(current);
   }
   if (current->state == WILL_EMPTY) {
-    current->state = READY;
+    task_set_state(current, READY);
   }
   mtask *next = scheduler_pick_next(cpu, cpu_index);
   if (next == NULL) {
@@ -382,6 +433,10 @@ void task_next(void) {
   arch_fpu_flush_cpu();
 
   arch_thread_pointer_set(next->thread_pointer);
+  if (current->state == READY) {
+    current->run_next = retired_tasks;
+    retired_tasks = current;
+  }
   arch_task_switch(&current->context, next->context, next->address_space, &cpu->current,
                    next);
 }
@@ -475,7 +530,7 @@ bool task_publish(mtask *task) {
                        ? task->cpu
                        : scheduler_least_loaded_cpu(task);
     scheduler_place_task(task, cpu);
-    task->state = RUNNING;
+    task_set_state(task, RUNNING);
   }
   irq_restore(state);
   return published;
@@ -680,6 +735,7 @@ static void reparent_children(uint32_t old_parent, uint32_t new_parent) {
 
 static void finish_task(mtask *task, unsigned status, bool waitable) {
   bool is_current = task == current_task();
+  scheduler_remove(task);
   task_release_resources(task);
   task->status = status;
   wake_child_waiter(task);
@@ -737,7 +793,7 @@ static void task_finish_pending(mtask *task) {
      * the leader's identity. Their exit wakes this deferred finalization. */
     if (task_group_has_threads(task)) {
       task->terminate_pending = 1;
-      task->state = WAITING;
+      task_set_state(task, WAITING);
       task->wait_reason = WAIT_REASON_CHILD;
       task->waittid = TASK_ID_NONE;
       task->wait_generation = 0;
@@ -999,7 +1055,7 @@ void task_set_fifo(mtask *task, struct FIFO8 *kfifo, struct FIFO8 *mfifo) {
 }
 struct FIFO8 *task_get_key_fifo(mtask *task) { return task->keyfifo; }
 void task_sleep(mtask *task) {
-  task->state = SLEEPING;
+  task_set_state(task, SLEEPING);
   task->wait_reason = WAIT_REASON_GENERIC;
   task->fifosleep = 1;
 }
@@ -1013,7 +1069,7 @@ void task_run(mtask *task) {
   }
   task->urgent = 1;
   if (task->state == WAITING || task->state == SLEEPING) {
-    task->state = RUNNING;
+    task_set_state(task, RUNNING);
     task->wait_reason = WAIT_REASON_NONE;
     task->ready = 0;
     if (!(task->sched_flags & TASK_SCHED_PINNED) && !task->on_cpu) {
@@ -1046,7 +1102,7 @@ void task_lock() {
       irq_restore(interrupt_state);
       return;
     }
-    self->state = WAITING;
+    task_set_state(self, WAITING);
     self->wait_reason = WAIT_REASON_TASK_GROUP_LOCK;
     self->ready = 0;
     task_next();
@@ -1094,7 +1150,7 @@ void task_fall_blocked_reason(enum STATE state, enum WAIT_REASON reason) {
     irq_restore(interrupt_state);
     return;
   }
-  current_task()->state = state;
+  task_set_state(current_task(), state);
   current_task()->wait_reason = reason;
   current_task()->ready = 0;
   task_next();
@@ -1156,7 +1212,7 @@ static int task_wait(uint32_t tid, uint32_t generation, bool thread) {
     self->waittid = tid;
     self->wait_generation = generation;
     self->wait_reason = WAIT_REASON_CHILD;
-    self->state = WAITING;
+    task_set_state(self, WAITING);
     self->ready = 0;
     task_next();
     irq_restore(interrupt_state);
@@ -1275,6 +1331,7 @@ static void task_slot_reset(mtask *task, uint32_t tid) {
 static void task_slot_release(mtask *task) {
   irq_state_t state = irq_save();
   uint32_t tid = task->tid;
+  scheduler_remove(task);
   // The scheduler or a waiter retires the slot after leaving its kernel stack.
   if (task->top)
     page_free((void *)(task->top - STACK_SIZE), STACK_SIZE);
@@ -1310,6 +1367,8 @@ int task_fork() {
   child->ptid = parent->tgid;
   child->state = ALLOCATING;
   child->on_cpu = 0;
+  child->run_next = NULL;
+  child->run_previous = NULL;
   child->sched_flags = 0;
   child->runtime_ticks = 0;
   child->terminate_pending = 0;

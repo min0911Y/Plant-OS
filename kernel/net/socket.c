@@ -191,10 +191,7 @@ static int net_socket_wait(net_socket_waiter_t *waiter, uint32_t deadline,
   waiter->tid = self->tid;
   waiter->generation = self->generation;
   waiter->deadline = deadline;
-  self->state = WAITING;
-  self->wait_reason = WAIT_REASON_SOCKET;
-  self->ready = 0;
-  task_next();
+  task_fall_blocked_reason(WAITING, WAIT_REASON_SOCKET);
 
   if (net_socket_waiter_matches(waiter, self)) {
     net_socket_waiter_init(waiter);

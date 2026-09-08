@@ -510,6 +510,7 @@ def main():
     gui_mode.add_argument("--desktop-app", choices=("lite", "nk"), help="capture and close an SDL desktop application")
     gui_mode.add_argument("--tools", action="store_true", help="run C4 pointer/VM, NASM object and JavaScript regressions")
     gui_mode.add_argument("--dynamic", action="store_true", help="run user ELF interpreter, shared libraries and page protection regressions")
+    gui_mode.add_argument("--sched-bench", type=int, metavar="SLEEPERS", help="measure scheduler handoff, yield and compute before/during/after parked threads")
     gui_mode.add_argument("--futex", action="store_true", help="validate native futex wait/wake, cancellation and concurrent allocation")
     gui_mode.add_argument("--threads", action="store_true", help="validate pthreads, ELF TLS, synchronization and thread resource release")
     gui_mode.add_argument("--llvm", action="store_true", help="validate native LLVM MCJIT, relocations, W^X and concurrent compilation")
@@ -586,6 +587,13 @@ def main():
                  f"ARCH={args.arch}", "list-apps"], text=True).splitlines()
             commands = ["dyntest.bin --all"]
             expected.append(f"DYNAPPS PASS count={len(programs)}")
+    if args.sched_bench is not None:
+        if args.sched_bench < 1:
+            parser.error("--sched-bench requires a positive sleeper count")
+        commands = [f"schbench.bin {args.sched_bench}"]
+        expected = ["SCHEDBENCH PASS"] + [
+            f"SCHEDBENCH phase={phase} sleepers={args.sched_bench} repeat=7 "
+            for phase in ("before", "parked", "after")]
     if args.futex:
         commands = ["futest.bin", "dyntest.bin"]
         expected = ["FUTEXTEST PASS", "DYNTEST PASS", "DYNTEST TLB PASS"]
@@ -721,7 +729,7 @@ def main():
         pcid, invpcid = {"pcid-invpcid": (1, 1), "pcid": (1, 0),
                         "invpcid": (0, 1), "cr3": (0, 0)}[args.tlb]
         cpu += f",pcid={'on' if pcid else 'off'},invpcid={'on' if invpcid else 'off'},enforce"
-    if args.cube or args.compute_bench:
+    if args.cube or args.compute_bench or args.sched_bench is not None:
         configuration = {"arch": args.arch, "firmware": args.firmware,
                          "accel": args.accel, "cpu": cpu, "cpus": args.cpus,
                          "memory_mib": args.memory, "machine": args.machine,

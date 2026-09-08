@@ -1,3 +1,4 @@
+#include <scheduler.h>
 #include <dos.h>
 #include <input_device.h>
 #include <irq.h>
@@ -68,7 +69,7 @@ static bool keyboard_wake_task(mtask *task) {
   if (task == NULL) {
     return false;
   }
-  task->weight = 5;
+  task_set_weight(task, 5);
   task_run(task);
   if (task == current_task()) {
     return false;
@@ -297,7 +298,7 @@ bool input_mouse_event(input_pointer_t *source, const mouse_event_t *event) {
   for (unsigned i = 0; i < sizeof(*event); i++) {
     fifo8_put(task->mousefifo, bytes[i]);
   }
-  task->weight = 5;
+  task_set_weight(task, 5);
   task_run(task);
   if (task != current_task()) {
     mtask_run_now(task);

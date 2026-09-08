@@ -164,6 +164,8 @@ typedef struct mtask {
   unsigned weight;
   enum STATE state; // 此项为1（RUNNING） 即正常调度，为 2（WAITING） 3
                     // （SLEEPING）的时候不执行 ，0 EMPTY 空闲格子
+  /* Intrusive runnable links; only run_next is reused after retirement. */
+  struct mtask *run_next, **run_previous;
   uint64_t vruntime;
   uint64_t runtime_ticks;
   uint16_t cpu;

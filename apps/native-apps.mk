@@ -93,6 +93,7 @@ default all: $(BUILD)/nasm.bin $(BUILD)/ndisasm.bin
 
 $(eval $(call application,timetest,,timetest/timetest.c))
 $(eval $(call application,futest))
+$(eval $(call application,schbench,,schedbench/schedbench.c))
 $(eval $(call application,thrdtest,$(DYN_LIB)/libtls.so))
 $(eval $(call application,libctest))
 $(eval $(call application,cxxcheck,,cxxcheck/cxxcheck.cpp))

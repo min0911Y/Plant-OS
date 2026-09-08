@@ -203,9 +203,7 @@ static void ipc_wait(mtask *self, uint32_t peer_tid, uint32_t deadline,
   self->ipc_wait_peer = peer_tid;
   self->ipc_deadline = deadline;
   self->ipc_deadline_set = use_deadline ? 1 : 0;
-  self->state = WAITING;
-  self->wait_reason = WAIT_REASON_IPC;
-  task_next();
+  task_fall_blocked_reason(WAITING, WAIT_REASON_IPC);
   self->ipc_wait_peer = TASK_ID_NONE;
   self->ipc_deadline_set = 0;
   if (self->wait_reason == WAIT_REASON_IPC) {
