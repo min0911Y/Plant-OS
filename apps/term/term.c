@@ -43,7 +43,10 @@ static struct {
   bool dirty, shell_finished;
   char *program, *command;
   int shell_status;
-} term;
+  gui_event_queue_t input;
+  int key;
+  bool extended[2];
+} term = {.key = -1};
 
 static void *terminal_allocate(size_t size) {
   void *memory = malloc(size);
@@ -61,7 +64,18 @@ static void *terminal_allocate(size_t size) {
   return NULL;
 }
 
-static void cursor_report(const uint8_t *data, size_t length) {
+static void terminal_reply(const uint8_t *data, size_t length) {
+  if (term.key >= 0) {
+    // Keyboard output means this key belongs to the application. Preserve
+    // the native getch ABI instead of forwarding the library's ANSI bytes.
+    if (length) {
+      if (term.key > 255)
+        gui_event_queue_push2(&term.input, 0xe0, term.key & 255);
+      else
+        gui_event_queue_push(&term.input, term.key);
+    }
+    return;
+  }
   char report[32];
   if (length >= sizeof(report))
     return;
@@ -75,6 +89,29 @@ static void cursor_report(const uint8_t *data, size_t length) {
     term.state.x = column - 1;
     term.state.y = row - 1;
   }
+}
+
+static void terminal_keyboard(int scan, bool released) {
+  if (scan == 0xe0) {
+    term.extended[released] = true;
+    return;
+  }
+  // Assemble extended keys before calling the library: GUI press/release
+  // queues can deliver a prefix separately from the rest of its event.
+  term.key = scan;
+  if (term.extended[released]) {
+    term.extended[released] = false;
+    term.key |= 0xe000;
+    terminal_handle_keyboard(term.emulator, 0xe0);
+    // The supplied C library scrolls Up/PageUp toward newer history. Reverse
+    // its navigation direction; application input retains the original key.
+    unsigned code = scan & 0x7f;
+    if (code == 0x48 || code == 0x50 || code == 0x49 || code == 0x51)
+      scan ^= 0x18;
+  }
+  terminal_handle_keyboard(term.emulator, scan);
+  term.key = -1;
+  term.dirty = true;
 }
 
 static void terminal_write(const void *data, size_t length) {
@@ -191,10 +228,10 @@ static int terminal_dispatch(rpc_call_t *call) {
     terminal_write("\0338", 2);
     break;
   case TTY_RPC_INPUT_STATUS:
-    reply.value = window_get_key_press_status(term.window);
+    reply.value = gui_event_queue_count(&term.input);
     break;
   case TTY_RPC_INPUT_GET:
-    reply.value = window_get_key_press_data(term.window);
+    reply.value = gui_event_queue_pop(&term.input);
     break;
   default:
     return RPC_ERR_BAD_OPCODE;
@@ -230,9 +267,12 @@ static int terminal_run(void) {
         term.dirty = true;
       }
     }
-    while (window_get_key_up_data(term.window) >= 0) {
-    }
-    if (window_get_key_press_status(term.window) > 0)
+    int scan;
+    while ((scan = window_get_key_press_data(term.window)) >= 0)
+      terminal_keyboard(scan, false);
+    while ((scan = window_get_key_up_data(term.window)) >= 0)
+      terminal_keyboard(scan, true);
+    if (gui_event_queue_count(&term.input))
       tty_notify_input(term.tty);
     unsigned now = (unsigned)clock();
     if (term.dirty && now - last_frame >= FRAME_MS) {
@@ -296,7 +336,7 @@ int main(int argc, char **argv) {
     goto done;
   terminal_set_auto_flush(term.emulator, false);
   terminal_set_crnl_mapping(term.emulator, true);
-  terminal_set_pty_writer(term.emulator, cursor_report);
+  terminal_set_pty_writer(term.emulator, terminal_reply);
   size_t columns = terminal_columns(term.emulator);
   size_t rows = terminal_rows(term.emulator);
   if (columns == 0 || rows == 0 || columns > surface.width ||

@@ -221,6 +221,18 @@ def exercise_console(qmp_path, output, origin=None):
         qmp.press("key", key={"type": "qcode", "data": "backspace"})
         if cell_rows("backspace", 1, 12) != before:
             raise RuntimeError("GUI console backspace did not restore the prompt")
+        qmp.chord("ctrl", "shift", "f2")
+        if cell_rows("theme-2", 1, 12) == before:
+            raise RuntimeError("term theme shortcut did not change its pixels")
+        qmp.chord("ctrl", "shift", "f1")
+        if cell_rows("theme-1", 1, 12) != before:
+            raise RuntimeError("term theme shortcut did not restore its palette")
+        qmp.press("key", key={"type": "qcode", "data": "a"})
+        if cell_rows("shortcut-release-echo", 1, 12) == before:
+            raise RuntimeError("term retained shortcut modifiers after release")
+        qmp.press("key", key={"type": "qcode", "data": "backspace"})
+        if cell_rows("shortcut-release-backspace", 1, 12) != before:
+            raise RuntimeError("term shortcut leaked into application input")
         # Submit only empty lines: guest commands are always selected by init.mst.
         for _ in range(30):
             qmp.press("key", key={"type": "qcode", "data": "ret"})
@@ -236,6 +248,20 @@ def exercise_console(qmp_path, output, origin=None):
             qmp.press("btn", button="wheel-down")
         if cell_rows("history-bottom", 0, 7) != prompt:
             raise RuntimeError("term did not return from scrollback")
+        qmp.chord("ctrl", "shift", "pgup")
+        if cell_rows("keyboard-history", 0, 13) != banner:
+            raise RuntimeError("term PageUp shortcut did not reveal history")
+        qmp.chord("ctrl", "shift", "pgdn")
+        if cell_rows("keyboard-history-bottom", 0, 7) != prompt:
+            raise RuntimeError("term PageDown shortcut did not return from history")
+        for _ in range(8):
+            qmp.chord("ctrl_r", "shift_r", "up")
+        if cell_rows("keyboard-history-lines", 0, 13) != banner:
+            raise RuntimeError("term ArrowUp shortcut did not reveal history")
+        for _ in range(8):
+            qmp.chord("ctrl_r", "shift_r", "down")
+        if cell_rows("keyboard-history-lines-bottom", 0, 7) != prompt:
+            raise RuntimeError("term ArrowDown shortcut did not return from history")
         # Closing term must retire its blocked shell; the toolbox launches a
         # new process, window and independently owned TTY each time.
         mouse_x, mouse_y = 700, 500

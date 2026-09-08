@@ -31,7 +31,11 @@ fartty 设置 `native_ansi`，`print` 的批量输出和 `putch` 的单字节输
 
 `window_set_event_notifications()` 可让窗口事件通过 `GUI_RPC_EVENT_READY` 通知唤醒 `rpc_serve_once()`。term 订阅此通知；空闲时阻塞，有待提交画面时才使用 16 ms 帧间隔。shell 工作线程退出也通知主循环。
 
-键盘沿用 Plant OS 的逻辑键码和 `getch` ABI。GUI 将按键写入窗口共享队列，term 用该队列回答 fartty 输入读取，并调用 `tty_notify_input` 唤醒等待者；不把 os-terminal 的 ANSI 键盘输出当成 PS/2 字节。滚轮交给 os-terminal 的历史滚动接口。
+GUI 窗口队列中的键盘输入保留 Set 1 编码。term 将按下和松开事件交给 `terminal_handle_keyboard()`，分别收集两条队列中的扩展键前缀，避免前缀与另一条队列的事件拼接。库消费终端快捷键；产生 PTY 键盘输出时，term 将对应的原始按键放入应用输入队列，保留 Plant OS 的 `getch` ABI，不把 ANSI 字节作为扫描码传给 fartty。输入队列用于回答 fartty 读取并通过 `tty_notify_input` 唤醒等待者。键盘处理后标记重绘，仍由主循环同步提交窗口。滚轮交给 os-terminal 的历史滚动接口。
+
+当前预编译库支持 `Ctrl+Shift+F1–F8` 切换内置主题，以及 `Ctrl+Shift+↑/↓`、`Ctrl+Shift+PageUp/PageDown` 按行或按页回看历史。左右 Ctrl/Shift 均可使用，快捷键不进入 shell 输入。现有 C 库的键盘历史滚动方向与滚轮相反；term 在交给库时对调上下导航键，应用队列保留原键码。更换外部静态库时须重新验证此行为。
+
+上游 Rust 文档中的快捷键不等于当前 C 库的全部能力：现有 `terminal_handle_keyboard()` 返回 `void`，字号快捷键没有改变字体或行列数，C 接口也没有字号 setter；复制快捷键没有调用已注册的剪贴板写回调。粘贴路径需要剪贴板读回调和文本输入通道，term 当前没有提供剪贴板，因此字号与复制粘贴仍不可用。这里直接使用预编译库的公开函数，不修改库源码、不访问其内部布局，也不通过重建终端丢弃历史来模拟缩放。
 
 关闭窗口时释放 TTY，终止其 shell 会话和工作线程，再释放线程栈、终端对象和窗口。shell 自然退出也走同一回收路径，GUI 按启动线程的 TID/generation 确認其退出后再释放用户栈，不会误杀复用同一编号的新线程。
 
@@ -56,7 +60,7 @@ python3 scripts/test-x86_64.py --memory-pressure --memory 512
 python3 scripts/test-x86_64.py --arch i386 --memory-pressure --memory 512
 ```
 
-`guitest.bin terminal` 在外部 term 中运行 TTY 测试，覆盖逐字节 ANSI、控制字符串、备用屏幕、光标位置、清屏、区域填色、自动换行和滚屏。宿主的 `--console` 继续通过真实键鼠事件和连续像素比较验证默认 psh 的提示符、回显、退格、滚屏、滚轮历史回看以及多次关闭和重启；测试命令只由临时 `init.mst` 选择。
+`guitest.bin terminal` 在外部 term 中运行 TTY 测试，覆盖逐字节 ANSI、控制字符串、备用屏幕、光标位置、清屏、区域填色、自动换行和滚屏。宿主的 `--console` 通过真实键鼠事件和连续像素比较验证默认 psh 的提示符、回显、退格、滚屏、滚轮历史回看、主题切换、快捷键按行/页回看历史、左右修饰键及释放后的普通输入，以及多次关闭和重启；测试命令只由临时 `init.mst` 选择。
 
 `rpctest.bin` 的 `tty_rpc` 项另外验证原始 ANSI 字节没有被内核截获，且输入通知竞态、RPC 超时、迟到应答和会话回收仍然成立。
 
