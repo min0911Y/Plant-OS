@@ -1,5 +1,6 @@
 #include <arch/x86/io.h>
 #include <dos.h>
+#include <platform.h>
 #include <platform/pc.h>
 
 typedef struct {
@@ -461,7 +462,7 @@ int acpi_shutdown(void) {
 
 bool hpet_available(void) { return hpetInfo != NULL; }
 
-uint64_t monotonic_time_ns(void) {
+uint64_t platform_monotonic_time_ns(void) {
   if (!hpetInfo) {
     return (uint64_t)timerctl.count * 10000000ull;
   }

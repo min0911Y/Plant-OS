@@ -23,7 +23,7 @@ x86_64 优先使用 `vulkan`；显式指定 `"vulkan"` 可以禁止回退。
 | 显示 | 原生 GUI surface、BGRA8 UNORM、FIFO 提交，固定窗口尺寸；独立支持 headless surface |
 | 着色器 | Mesa NIR、llvmpipe、LLVM 21 MCJIT；生成代码使用受支持的 SIMD、无 red zone 和 W^X |
 | 动态链接 | SDL 应用经 `DT_NEEDED` 引入 ICD，解释器负责完整装载；ICD 依赖 `libp.so` 和 `libcpp.so` |
-| 并发 | 原生 pthread/futex/TLS；x86_64 线程可跨 CPU，compute 默认按在线 CPU 数并行，光栅默认串行；`LP_NUM_THREADS` 显式配置两者 |
+| 并发 | 原生 pthread/futex/TLS；x86_64 线程可跨 CPU，光栅与 compute 默认按在线 CPU 数并行；`LP_NUM_THREADS` 共用同一配置 |
 | 范围外 | i386 Vulkan、硬件加速、通用 Khronos Vulkan Loader、运行时装载其他 ICD、磁盘 shader cache、Unix fd 导入导出 |
 
 未执行完整 Vulkan CTS；这里的验证覆盖下述实际运行路径，不代表一致性认证。
@@ -127,6 +127,8 @@ SDL 的 Vulkan loader 钩子返回已由 ELF 解释器链接的 ICD，不调用�
 - futex syscall `0x67` 以进程组和对齐的 32-bit 地址为键，使用绝对单调 deadline；
   `UINT64_MAX` 表示无限等待。谓词检查与等待发布原子进行，退出摘除 waiter。
   wake 不修改用户谓词，调用者需要 acquire/release 原子操作和重试循环。
+  唤醒仅在遇到匹配的有限 deadline 时读取一次时钟；无限等待和空队列不访问 HPET，
+  到期等待者仍以超时返回，且不占用成功唤醒的数量。
 - 原生线程 syscall `0x68` 管创建、TLS 指针、join/detach、退出与组退出。
   托管的栈和 TLS 映射由内核在线程退出时释放。`_Exit`/`abort` 终止进程组；
   普通用户异常仍由内核处理，不仿造 POSIX 同步异常恢复。
@@ -178,7 +180,8 @@ python3 scripts/test-x86_64.py --sdl --memory 1536
 `vkcube.bin` 直接使用 Vulkan 图形管线、SPIR-V 顶点/片元着色器、深度测试和
 原生 swapchain 绘制旋转立方体，窗口标题显示 FPS，Escape 退出。
 `--workers N` 在初始化 ICD 前设置 `LP_NUM_THREADS`，`0` 在提交线程内完成光栅化。
-计算线程池默认按在线 CPU 数创建，光栅默认在提交线程内执行；单 CPU 不另建计算工作线程。
+光栅与计算线程池默认按在线 CPU 数创建，单 CPU 默认在提交线程内执行；
+`--workers 0` 显式选择串行，构建并行度不影响运行时线程数量。
 
 ```sh
 make -C apps/vkcube ARCH=x86_64
@@ -216,18 +219,45 @@ RGB 像素。比较工具要求 QEMU 配置、图像大小和采样帧数相同�
 
 默认配置另一次冷启动测得 827.015 FPS（+3.41%），各次固定角度画面均与基线逐字节
 一致。总 FPS 的小幅改善不能说明多核光栅更快：本例渲染阶段没有加速，强制四个光栅
-工作线程仍有负收益，因此默认策略保留串行光栅，同时开放真正的跨核计算与显式光栅
+工作线程仍有负收益，因此当时的默认策略保留串行光栅，同时开放真正的跨核计算与显式光栅
 并行。其他场景需要独立测量，不能用这组帧率外推复杂着色器或真机的加速比。
-
-图块领取使用原子索引，场景同步后各线程独立处理图块；fence 仅在全部图块工作完成
-时唤醒等待者。原生 pthread 条件变量和 barrier 使用共享 futex 序号，一次广播释放
-等待者，空闲时仍阻塞。默认保留串行光栅，是因为该立方体在当前 KVM 环境中
-不足以抵消跨核唤醒成本；多核光栅须显式启用并针对应用测量。
 
 本次回归覆盖 x86_64 BIOS/UEFI 的 `--lavapipe`、两架构的 `--threads` 与基础回归，
 以及 x86_64 四种 PCID/INVPCID 组合配合跨核 VM 探针。跨核探针覆盖单页与 64 页同址
 重映射、远端写保护、并发 VM 操作中的进程退出；运行库回归覆盖条件变量、barrier、
 TLS、C/C++ 和浮点环境。未执行完整 Vulkan CTS 或真机性能测试。
+
+### 光栅 worker 的场景同步
+
+当前实现在 `apps/mesa/patches/mesa/native-raster-workers.patch`：场景准备完成后
+发布共享代际号，一次 futex 广播唤醒 worker。每个 worker 每代只消费一次场景，
+通过原子索引领取图块，空闲时阻塞。完成计数的最后一个到达者汇集所有 worker 的
+写入，推进场景队列后只发布一次 fence；不再逐线程发送开始/完成信号，也不再使用
+两轮全员 barrier。setup 不保存第二份线程数量，scene fence 的完成不依赖 worker 数。
+
+队列发布与退出共用 rasterizer mutex，但可能等待队列空间的 enqueue 必须在该锁
+外执行，让最后一个 worker 可以取走下一场景。销毁等待场景排空，发布退出代际，
+join 全部 worker 后才释放缓存和同步对象；线程池构造失败同样完整唤醒、join 和回滚。
+共享代际在上一场景所有参与者完成后才推进，不用自旋、轮询 sleep 或固定图块阈值
+掩盖唤醒成本。全局时钟改用可校验的 KVM pvclock 后，小窗口的并行收益也得到确认，
+已删除强制串行和独立 compute 配置补丁，恢复上游按在线 CPU 数设置两种线程池的策略。
+`LP_NUM_THREADS=0` 仍可用于显式串行对照。
+
+OpenGL 的 `--test` 额外使用四个独立上下文并发提交分条画面，连续 flush 场景，
+每轮读回并验证全部像素，最后带未等待的提交退出。可通过下列命令选择光栅 worker，
+并用单 vCPU 检查多个 worker 都能通过阻塞等待完成工作：
+
+```sh
+python3 scripts/test-x86_64.py --opengl --gears-workers 4 --accel kvm \
+  --cpu host --cpus 1 --memory 3072
+python3 scripts/test-x86_64.py --gears-bench --gears-workers 4 --accel kvm \
+  --cpu host --cpus 4 --memory 3072
+```
+
+本轮 KVM 累计对照中，四 worker 立方体从 676.417 FPS 提高到 954.169 FPS；
+再消除公共读钟的虚拟 HPET 开销后为 1434.712 FPS。最终默认 glxgears 两次冷启动
+为 2927.115 FPS，各轮均超过 1500 FPS。完整分阶段数据和验证范围见
+[OpenGL 性能对照](opengl.md#场景同步与全局时钟对照)。
 
 ## 多核 compute 吞吐基准
 

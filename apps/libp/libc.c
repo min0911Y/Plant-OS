@@ -165,16 +165,33 @@ int memcmp(const void *vl, const void *vr, size_t n) {
 void *memcpy(void *destination, const void *source, size_t size) {
   unsigned char *output = destination;
   const unsigned char *input = source;
-  while (size != 0 &&
-         (((uintptr_t)output | (uintptr_t)input) & 3u) != 0) {
-    *output++ = *input++;
-    size--;
+#if defined(PLANT_ARCH_X86_64)
+  /* SSE2 is part of the native ABI. Unaligned aliasing types keep arbitrary
+   * byte buffers valid; only full blocks are accessed, including at page ends. */
+  typedef unsigned char vector_t
+      __attribute__((vector_size(16), aligned(1), may_alias));
+  while (size >= 64) {
+    *(vector_t *)(output + 0) = *(const vector_t *)(input + 0);
+    *(vector_t *)(output + 16) = *(const vector_t *)(input + 16);
+    *(vector_t *)(output + 32) = *(const vector_t *)(input + 32);
+    *(vector_t *)(output + 48) = *(const vector_t *)(input + 48);
+    output += 64;
+    input += 64;
+    size -= 64;
   }
-  while (size >= sizeof(uint32_t)) {
-    *(uint32_t *)output = *(const uint32_t *)input;
-    output += sizeof(uint32_t);
-    input += sizeof(uint32_t);
-    size -= sizeof(uint32_t);
+  while (size >= sizeof(vector_t)) {
+    *(vector_t *)output = *(const vector_t *)input;
+    output += sizeof(vector_t);
+    input += sizeof(vector_t);
+    size -= sizeof(vector_t);
+  }
+#endif
+  typedef uintptr_t word_t __attribute__((aligned(1), may_alias));
+  while (size >= sizeof(word_t)) {
+    *(word_t *)output = *(const word_t *)input;
+    output += sizeof(word_t);
+    input += sizeof(word_t);
+    size -= sizeof(word_t);
   }
   while (size-- != 0) {
     *output++ = *input++;

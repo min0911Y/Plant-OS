@@ -15,6 +15,7 @@ typedef struct {
 } platform_video_info_t;
 
 bool platform_rtc_timestamp(uint32_t *timestamp);
+uint64_t platform_monotonic_time_ns(void);
 void platform_early_initialize(void);
 void *platform_text_vram(void);
 bool platform_is_text_vram(const void *vram);

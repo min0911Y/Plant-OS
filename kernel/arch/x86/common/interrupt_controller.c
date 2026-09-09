@@ -1,4 +1,5 @@
 #include <arch/x86/cpuid.h>
+#include <arch/x86/clock.h>
 #include <arch/x86/interrupt_controller.h>
 #include <arch/x86/io.h>
 #include <dos.h>
@@ -65,19 +66,12 @@ static uint8_t irq_trigger[MAX_IRQS];
 static uint8_t irq_polarity[MAX_IRQS];
 static uint8_t irq_masked[MAX_IRQS];
 static uint32_t bsp_lapic_id;
-static uint64_t tsc_khz;
 static uint64_t apic_timer_deadline_interval_tsc;
 static uint64_t apic_timer_next_deadline_tsc[SMP_MAX_CPUS];
 
 static inline uint64_t rdmsr64(uint32_t msr) {
   uint32_t lo, hi;
   asm volatile("rdmsr" : "=a"(lo), "=d"(hi) : "c"(msr));
-  return ((uint64_t)hi << 32) | lo;
-}
-
-static inline uint64_t rdtsc64(void) {
-  uint32_t lo, hi;
-  asm volatile("rdtsc" : "=a"(lo), "=d"(hi));
   return ((uint64_t)hi << 32) | lo;
 }
 
@@ -312,51 +306,6 @@ static int cpu_has_tsc_deadline(void) {
   return (x86_cpuid(1, 0).ecx & (1u << 24)) != 0;
 }
 
-static uint64_t cpu_tsc_khz_from_cpuid(void) {
-  x86_cpuid_t maximum = x86_cpuid(0, 0);
-  if (maximum.eax >= 0x15u) {
-    x86_cpuid_t frequency = x86_cpuid(0x15u, 0);
-    if (frequency.eax && frequency.ebx && frequency.ecx) {
-      uint64_t hz = ((uint64_t)frequency.ecx * frequency.ebx) / frequency.eax;
-      if (hz) {
-        return hz / 1000ull;
-      }
-    }
-  }
-  if (maximum.eax >= 0x16u) {
-    x86_cpuid_t frequency = x86_cpuid(0x16u, 0);
-    if (frequency.eax) {
-      return (uint64_t)frequency.eax * 1000ull;
-    }
-  }
-  return 0;
-}
-
-static uint64_t cpu_tsc_khz_from_hpet(void) {
-  if (!hpet_available()) {
-    return 0;
-  }
-
-  uint64_t start_tsc = rdtsc64();
-  uint64_t start_ns = monotonic_time_ns();
-  uint64_t target_ns = start_ns + 1000000ull;
-  while (monotonic_time_ns() < target_ns) {
-  }
-  uint64_t delta_tsc = rdtsc64() - start_tsc;
-  if (!delta_tsc) {
-    return 0;
-  }
-  return delta_tsc;
-}
-
-static uint64_t cpu_detect_tsc_khz(void) {
-  uint64_t khz = cpu_tsc_khz_from_cpuid();
-  if (khz) {
-    return khz;
-  }
-  return cpu_tsc_khz_from_hpet();
-}
-
 static void apic_timer_arm_next_deadline(void) {
   uint32_t cpu = smp_current_cpu();
   if (!apic_tsc_deadline_enabled[cpu] ||
@@ -364,7 +313,7 @@ static void apic_timer_arm_next_deadline(void) {
     return;
   }
 
-  uint64_t now = rdtsc64();
+  uint64_t now = x86_tsc_read();
   uint64_t next = apic_timer_next_deadline_tsc[cpu];
   if (!next || next <= now) {
     next = now + apic_timer_deadline_interval_tsc;
@@ -399,9 +348,7 @@ static void apic_timer_init_tsc_deadline(void) {
     return;
   }
 
-  if (!tsc_khz) {
-    tsc_khz = cpu_detect_tsc_khz();
-  }
+  uint64_t tsc_khz = x86_tsc_frequency_khz();
   if (!tsc_khz) {
     logk("apic: TSC frequency unavailable, keep PIT timer\n");
     return;
@@ -433,7 +380,6 @@ void apic_init(void) {
   x2apic_enabled = 0;
   apic_tsc_deadline_supported = 0;
   memset(apic_tsc_deadline_enabled, 0, sizeof(apic_tsc_deadline_enabled));
-  tsc_khz = 0;
   apic_timer_deadline_interval_tsc = 0;
   memset(apic_timer_next_deadline_tsc, 0,
          sizeof(apic_timer_next_deadline_tsc));
@@ -641,13 +587,14 @@ void apic_send_fixed_ipi(uint32_t apic_id, uint8_t vector) {
 }
 
 static void apic_timer_init_periodic(void) {
+  uint64_t tsc_khz = x86_tsc_frequency_khz();
   lapic_write(LAPIC_REG_TIMER_DIVIDE, 0x3);
   lapic_write(LAPIC_REG_LVT_TIMER, APIC_TIMER_VECTOR | APIC_LVT_MASKED);
   lapic_write(LAPIC_REG_TIMER_INITIAL, UINT_MAX);
 
   if (tsc_khz) {
-    uint64_t start = rdtsc64();
-    while (rdtsc64() - start < tsc_khz) {
+    uint64_t start = x86_tsc_read();
+    while (x86_tsc_read() - start < tsc_khz) {
       asm volatile("pause");
     }
   } else if (hpet_available()) {

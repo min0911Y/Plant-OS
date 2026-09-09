@@ -6,7 +6,7 @@ obj_arch := $(out_path_src)boot.o \
 	$(out_path_src)executable.o $(out_path_src)module.o \
 	$(out_path_src)cpu.o $(out_path_src)fpu.o $(out_path_src)irq.o \
 	$(out_path_src)x86_irq_dispatch.o \
-	$(out_path_src)interrupt_controller.o $(out_path_src)memory.o \
+	$(out_path_src)interrupt_controller.o $(out_path_src)x86_clock.o $(out_path_src)memory.o \
 	$(out_path_src)page.o $(out_path_src)smp.o \
 	$(out_path_src)syscall_adapter.o \
 	$(out_path_src)task_context.o \
@@ -32,6 +32,10 @@ $(out_path_src)syscall_adapter.o: syscall.c Makefile
 $(out_path_src)x86_irq_dispatch.o: interrupt.c Makefile
 	gcc $(KERNEL_COMMON_CFLAGS) -O3 -Wall -Wextra -Werror \
 		$(KERNEL_PACKED_BITFIELD_FLAGS) -c interrupt.c -o $@
+
+$(out_path_src)x86_clock.o: ../common/clock.c Makefile
+	gcc $(KERNEL_COMMON_CFLAGS) -O3 -Wall $(KERNEL_PACKED_BITFIELD_FLAGS) \
+		-c $< -o $@
 
 $(out_path_src)interrupt_controller.o: ../common/interrupt_controller.c Makefile
 	gcc $(KERNEL_COMMON_CFLAGS) -O3 -Wall $(KERNEL_PACKED_BITFIELD_FLAGS) \

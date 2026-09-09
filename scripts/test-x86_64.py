@@ -504,6 +504,8 @@ def main():
     parser.add_argument("--cpus", type=int, default=4)
     parser.add_argument("--cpu", default="max", help="QEMU CPU model and feature overrides")
     parser.add_argument("--accel", choices=("tcg", "kvm"), default="tcg")
+    parser.add_argument("--clock-source", choices=("kvm-pvclock", "invariant-tsc", "platform"),
+                        help="require this monotonic clock source throughout the run")
     parser.add_argument("--apic", choices=("xapic", "x2apic"),
                         help="require a QEMU APIC mode and verify the boot handoff")
     parser.add_argument("--tlb", choices=("pcid-invpcid", "pcid", "invpcid", "cr3"),
@@ -543,9 +545,11 @@ def main():
     gui_mode.add_argument("--llvm", action="store_true", help="validate native LLVM MCJIT, relocations, W^X and concurrent compilation")
     gui_mode.add_argument("--lavapipe", action="store_true", help="validate native Vulkan compute, SDL triangle pixels and window presentation")
     gui_mode.add_argument("--opengl", action="store_true", help="validate llvmpipe EGL/GLSL/contexts and classic glxgears pixels and input")
+    gui_mode.add_argument("--gears-bench", action="store_true", help="benchmark fixed glxgears frames with separate render and present timing")
     gui_mode.add_argument("--cube", action="store_true", help="benchmark the Vulkan rotating cube and verify two frames")
     gui_mode.add_argument("--compute-bench", action="store_true", help="benchmark verified Vulkan TEA compute with 0, 1, 2 and 4 workers in both orders")
     parser.add_argument("--cube-workers", type=int, help="override cube LP_NUM_THREADS (0 runs without raster workers)")
+    parser.add_argument("--gears-workers", type=int, help="override glxgears LP_NUM_THREADS for --opengl or --gears-bench")
     gui_mode.add_argument("--all-apps", action="store_true", help="validate and relocate every built application, then run dynamic regressions")
     gui_mode.add_argument("--usb", action="store_true", help="validate xHCI enumeration, USB speeds, hotplug and ring wrap")
     parser.add_argument("--out", type=Path, default=Path("/tmp/plant-x86_64-smoke"))
@@ -643,7 +647,8 @@ def main():
     if args.opengl:
         if not native:
             parser.error("--opengl requires x86_64")
-        commands = ["libctest.bin", "glxgears.bin --test"]
+        workers = "" if args.gears_workers is None else f" --workers {args.gears_workers}"
+        commands = ["libctest.bin", "glxgears.bin --test" + workers]
         expected = ["LIBCTEST PASS", "OPENGL TEST PASS", "GLXGEARS GL_RENDERER = llvmpipe", "GLXGEARS PASS"]
     if args.cube:
         if not native:
@@ -651,6 +656,12 @@ def main():
         workers = "" if args.cube_workers is None else f" --workers {args.cube_workers}"
         commands = ["vkcube.bin --benchmark" + workers]
         expected = ["VKCUBE PASS"] + [f"VKCUBE BENCH round={i} " for i in range(3)]
+    if args.gears_bench:
+        if not native:
+            parser.error("--gears-bench requires x86_64")
+        workers = "" if args.gears_workers is None else f" --workers {args.gears_workers}"
+        commands = ["glxgears.bin --benchmark" + workers]
+        expected = ["GLXGEARS PASS"] + [f"GLXGEARS BENCH round={i} " for i in range(3)]
     if args.compute_bench:
         if not native:
             parser.error("--compute-bench requires x86_64")
@@ -710,6 +721,8 @@ def main():
             commands = []
             expected = ["ahci: port=0 command=ec completion=0", "command timeout or error",
                         "ahci: controllers=2 disks=0 initialization complete"]
+    if args.clock_source:
+        expected.append(f"clock: monotonic={args.clock_source} platform epoch retained")
     iso = repo / "kernel" / ("plant-os-x86_64.iso" if native else "plant-os-livecd.iso")
     init = repo / "kernel/res/init.mst"
     original = init.read_bytes()
@@ -759,7 +772,7 @@ def main():
         pcid, invpcid = {"pcid-invpcid": (1, 1), "pcid": (1, 0),
                         "invpcid": (0, 1), "cr3": (0, 0)}[args.tlb]
         cpu += f",pcid={'on' if pcid else 'off'},invpcid={'on' if invpcid else 'off'},enforce"
-    if args.cube or args.compute_bench or args.sched_bench is not None or args.sched_balance:
+    if args.cube or args.gears_bench or args.compute_bench or args.sched_bench is not None or args.sched_balance:
         configuration = {"arch": args.arch, "firmware": args.firmware,
                          "accel": args.accel, "cpu": cpu, "cpus": args.cpus,
                          "memory_mib": args.memory, "machine": args.machine,
@@ -1127,6 +1140,8 @@ def main():
                                     qmp.close()
                                 raise RuntimeError(f"command regression; see {serial}")
                             missing = [marker for marker in expected if marker not in text]
+                            if args.clock_source and "clock: monotonic fallback=" in text:
+                                raise RuntimeError(f"unexpected monotonic clock fallback; see {serial}")
                             if missing:
                                 raise RuntimeError(f"missing {missing}; see {serial}")
                             if args.compute_bench:

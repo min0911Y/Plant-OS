@@ -70,6 +70,12 @@ void arch_fpu_flush_cpu(void);
 void arch_fpu_reset(struct mtask *task);
 void arch_fpu_handle_device_not_available(struct mtask *task);
 
+/* CPU-local scheduler clock. Initialize before starting each CPU's first task;
+ * timestamps must never be compared across CPUs. cpu must be the calling CPU;
+ * callers pass their known index to avoid an extra APIC lookup on i386. */
+void arch_task_clock_init(uint32_t cpu);
+uint64_t arch_task_clock_ns(uint32_t cpu);
+
 void arch_cpu_idle(void);
 void arch_cpu_relax(void);
 bool arch_dma_map(const void *address, size_t size, uint64_t *dma_address);

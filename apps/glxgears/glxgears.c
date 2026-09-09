@@ -26,6 +26,7 @@
 #include <GL/gl.h>
 #include <SDL3/SDL.h>
 #include <gui.h>
+#include <limits.h>
 #include <math.h>
 #include <rpc.h>
 #include <stdio.h>
@@ -261,23 +262,34 @@ static bool frame_checksum(int width, int height, uint32_t *hash) {
 }
 
 int main(int argc, char **argv) {
-  bool test = false, info = false;
+  bool test = false, info = false, benchmark = false;
   for (int i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "--test"))
       test = true;
     else if (!strcmp(argv[i], "-info"))
       info = true;
-    else {
-      puts("Usage: glxgears.bin [-info] [--test]\nArrow keys rotate, space "
-           "pauses, Escape exits.");
+    else if (!strcmp(argv[i], "--benchmark"))
+      benchmark = true;
+    else if (!strcmp(argv[i], "--workers") && i + 1 < argc) {
+      char *end;
+      const char *value = argv[++i];
+      unsigned long workers = strtoul(value, &end, 10);
+      if (!*value || *end || workers > INT_MAX ||
+          setenv("LP_NUM_THREADS", value, 1))
+        return 1;
+    } else {
+      puts("Usage: glxgears.bin [-info] [--test | --benchmark] [--workers N]\n"
+           "Arrow keys rotate, space pauses, Escape exits.");
       return 1;
     }
   }
+  if (test && benchmark)
+    return 1;
   if (test && !opengl_test())
     return 1;
   rpc_endpoint_t gui;
   if (rpc_connect(GUI_SERVICE_NAME, &gui, 0) != RPC_OK) {
-    if (!test) {
+    if (!test && !benchmark) {
       fputs("Start gui.bin, then run glxgears.bin from its terminal.\n",
             stderr);
       return 1;
@@ -327,22 +339,55 @@ int main(int argc, char **argv) {
   int width, height;
   if (!SDL_GetWindowSizeInPixels(window, &width, &height))
     goto done;
+  const char *workers = getenv("LP_NUM_THREADS");
+  logkf("GLXGEARS CONFIG cpus=%u workers=%s size=%dx%d\n", cpu_count(),
+        workers ? workers : "auto", width, height);
   init();
   reshape(width, height);
   bool running = true, animate = true;
   unsigned frames = 0, phase = 0;
   uint64_t last = monotonic_ns(), rate_start = last;
+  uint64_t render_ns = 0, present_ns = 0;
+  unsigned benchmark_frame = 0;
   while (running) {
     uint64_t now = monotonic_ns();
-    if (!test && animate)
+    if (benchmark)
+      angle = (benchmark_frame % 3600) * 0.1f;
+    else if (!test && animate)
       angle = fmodf(angle + 70.0f * ((now - last) / 1000000000.0), 3600.0f);
     last = now;
     draw();
     uint32_t hash = 0;
     if (test && !frame_checksum(width, height, &hash))
       goto done;
+    if (benchmark)
+      glFinish();
+    uint64_t rendered = benchmark ? monotonic_ns() : 0;
     if (glGetError() != GL_NO_ERROR || !SDL_GL_SwapWindow(window))
       goto done;
+    if (benchmark) {
+      uint64_t presented = monotonic_ns();
+      if (benchmark_frame >= 180) {
+        render_ns += rendered - now;
+        present_ns += presented - rendered;
+      }
+      benchmark_frame++;
+      if (benchmark_frame == 180) {
+        rate_start = presented;
+      } else if (benchmark_frame > 180 &&
+                 (benchmark_frame - 180) % 3600 == 0) {
+        uint64_t elapsed = presented - rate_start;
+        logkf("GLXGEARS BENCH round=%u frames=3600 elapsed_ns=%llu "
+              "render_ns=%llu present_ns=%llu fps=%.3f\n",
+              (benchmark_frame - 180) / 3600 - 1,
+              (unsigned long long)elapsed, (unsigned long long)render_ns,
+              (unsigned long long)present_ns, 3600e9 / elapsed);
+        rate_start = presented;
+        render_ns = present_ns = 0;
+        if (benchmark_frame == 180 + 3 * 3600)
+          running = false;
+      }
+    }
     if (test) {
       int x, y;
       SDL_GetWindowPosition(window, &x, &y);
@@ -351,7 +396,7 @@ int main(int argc, char **argv) {
     }
     frames++;
     now = monotonic_ns();
-    if (now - rate_start >= 5000000000ull) {
+    if (!benchmark && now - rate_start >= 5000000000ull) {
       double seconds = (now - rate_start) / 1000000000.0;
       printf("%u frames in %.1f seconds = %.3f FPS\n", frames, seconds,
              frames / seconds);
@@ -407,6 +452,8 @@ int main(int argc, char **argv) {
   }
   if (test && phase != 1)
     goto done;
+  if (benchmark && benchmark_frame != 180 + 3 * 3600)
+    goto done;
   glDeleteLists(gear1, 1);
   glDeleteLists(gear2, 1);
   glDeleteLists(gear3, 1);
@@ -418,7 +465,7 @@ done:
     SDL_GL_DestroyContext(context);
   SDL_DestroyWindow(window);
   SDL_Quit();
-  if (!status && test)
+  if (!status && (test || benchmark))
     logkf("GLXGEARS PASS\n");
   return status;
 }

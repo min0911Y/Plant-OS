@@ -19,7 +19,7 @@ CFLAGS := $(KERNEL_COMMON_CFLAGS) -O2 -Wall -Wextra \
 	-I$(ARCH_DIR)/third_party/limine -I$(FLANTERM) \
 	-Inet/lwip_port/include -I$(LWIP)/include
 
-SOURCES := $(wildcard $(ARCH_DIR)/*.c) arch/x86/common/interrupt_controller.c \
+SOURCES := $(wildcard $(ARCH_DIR)/*.c) arch/x86/common/interrupt_controller.c arch/x86/common/clock.c \
 	dos/init/main.c dos/init/init.c dos/init/kernelc.c dos/mm/heap.c \
 	$(wildcard dos/task/*.c dos/hal/*.c dos/tools/*.c) dos/syscall/syscall.c \
 	dos/perf/perf.c dos/mm/kasan.c dos/mm/user_vm.c \

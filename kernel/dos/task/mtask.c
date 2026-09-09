@@ -899,6 +899,7 @@ int into_mtask() {
   }
 
   (void)irq_save();
+  arch_task_clock_init(0);
   scheduler_active = 1;
   init_task->on_cpu = 1;
   arch_task_start(init_task->context, init_task->address_space,
@@ -910,6 +911,7 @@ __attribute__((noreturn)) void scheduler_start_secondary(uint32_t cpu) {
   if (!scheduler_active || idle == NULL) {
     arch_halt();
   }
+  arch_task_clock_init(cpu);
   idle->on_cpu = 1;
   arch_task_start(idle->context, idle->address_space, &scheduler_cpus[cpu].current,
                   idle);

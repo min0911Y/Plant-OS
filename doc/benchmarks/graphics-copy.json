@@ -1,0 +1,402 @@
+{
+  "host": "Intel Core Ultra 7 270K Plus, WSL2/KVM",
+  "date": "2026-09-09",
+  "configuration": {
+    "arch": "x86_64",
+    "firmware": "bios",
+    "accel": "kvm",
+    "cpu": "host",
+    "cpus": 4,
+    "memory_mib": 3072,
+    "machine": "pc",
+    "qemu": "QEMU emulator version 10.2.1 (Debian 1:10.2.1+ds-1ubuntu3.2)"
+  },
+  "comparison": "Same working-tree kernel, including pre-existing scheduler changes; baseline and optimized runtime differ only in memcpy. Both use the same benchmark instrumentation.",
+  "benchmarks": {
+    "glxgears": {
+      "before": {
+        "runs": [
+          {
+            "directory": "/tmp/plos-gears-before",
+            "samples": [
+              {
+                "round": 0,
+                "frames": 3600,
+                "elapsed_ns": 3013461160,
+                "render_ns": 1963139580,
+                "present_ns": 632778570,
+                "fps": 1194.64
+              },
+              {
+                "round": 1,
+                "frames": 3600,
+                "elapsed_ns": 2998575560,
+                "render_ns": 1951166330,
+                "present_ns": 628044520,
+                "fps": 1200.57
+              },
+              {
+                "round": 2,
+                "frames": 3600,
+                "elapsed_ns": 3246686930,
+                "render_ns": 2163900310,
+                "present_ns": 659790840,
+                "fps": 1108.823
+              }
+            ]
+          },
+          {
+            "directory": "/tmp/plos-gears-before-repeat",
+            "samples": [
+              {
+                "round": 0,
+                "frames": 3600,
+                "elapsed_ns": 2925583590,
+                "render_ns": 1903094290,
+                "present_ns": 612052110,
+                "fps": 1230.524
+              },
+              {
+                "round": 1,
+                "frames": 3600,
+                "elapsed_ns": 2911383080,
+                "render_ns": 1889862380,
+                "present_ns": 608988700,
+                "fps": 1236.526
+              },
+              {
+                "round": 2,
+                "frames": 3600,
+                "elapsed_ns": 2907124090,
+                "render_ns": 1891957750,
+                "present_ns": 603904610,
+                "fps": 1238.337
+              }
+            ]
+          }
+        ],
+        "summary": {
+          "frames": 21600,
+          "elapsed_ns": 18002814410,
+          "fps": 1199.8124019987606,
+          "render_us_per_frame": 544.5889185185185,
+          "present_us_per_frame": 173.40552546296294
+        }
+      },
+      "after": {
+        "runs": [
+          {
+            "directory": "/tmp/plos-gears-after",
+            "samples": [
+              {
+                "round": 0,
+                "frames": 3600,
+                "elapsed_ns": 2839078540,
+                "render_ns": 1883427610,
+                "present_ns": 547920500,
+                "fps": 1268.017
+              },
+              {
+                "round": 1,
+                "frames": 3600,
+                "elapsed_ns": 2977746080,
+                "render_ns": 1987895350,
+                "present_ns": 575657750,
+                "fps": 1208.968
+              },
+              {
+                "round": 2,
+                "frames": 3600,
+                "elapsed_ns": 2824257220,
+                "render_ns": 1868212900,
+                "present_ns": 546340240,
+                "fps": 1274.671
+              }
+            ]
+          },
+          {
+            "directory": "/tmp/plos-gears-after-repeat",
+            "samples": [
+              {
+                "round": 0,
+                "frames": 3600,
+                "elapsed_ns": 2828209570,
+                "render_ns": 1865592430,
+                "present_ns": 556815600,
+                "fps": 1272.89
+              },
+              {
+                "round": 1,
+                "frames": 3600,
+                "elapsed_ns": 2828115150,
+                "render_ns": 1864184750,
+                "present_ns": 554934530,
+                "fps": 1272.933
+              },
+              {
+                "round": 2,
+                "frames": 3600,
+                "elapsed_ns": 2893311160,
+                "render_ns": 1921246820,
+                "present_ns": 560202100,
+                "fps": 1244.249
+              }
+            ]
+          }
+        ],
+        "summary": {
+          "frames": 21600,
+          "elapsed_ns": 17190717720,
+          "fps": 1256.492041334037,
+          "render_us_per_frame": 527.3407342592593,
+          "present_us_per_frame": 154.71623703703705
+        }
+      },
+      "fps_change": 0.04724041795271838
+    },
+    "vkcube_workers_0": {
+      "before": {
+        "runs": [
+          {
+            "directory": "/tmp/plos-graphics-before-0",
+            "samples": [
+              {
+                "round": 0,
+                "frames": 3600,
+                "elapsed_ns": 4726735090,
+                "render_ns": 2195260770,
+                "fps": 761.625,
+                "median_ms": 1.283,
+                "p95_ms": 1.621
+              },
+              {
+                "round": 1,
+                "frames": 3600,
+                "elapsed_ns": 5502070100,
+                "render_ns": 2621766970,
+                "fps": 654.299,
+                "median_ms": 1.319,
+                "p95_ms": 1.669
+              },
+              {
+                "round": 2,
+                "frames": 3600,
+                "elapsed_ns": 4952374710,
+                "render_ns": 2225140390,
+                "fps": 726.924,
+                "median_ms": 1.347,
+                "p95_ms": 1.718
+              }
+            ]
+          },
+          {
+            "directory": "/tmp/plos-graphics-before-repeat-0",
+            "samples": [
+              {
+                "round": 0,
+                "frames": 3600,
+                "elapsed_ns": 4857907600,
+                "render_ns": 2221232760,
+                "fps": 741.06,
+                "median_ms": 1.33,
+                "p95_ms": 1.662
+              },
+              {
+                "round": 1,
+                "frames": 3600,
+                "elapsed_ns": 4878225900,
+                "render_ns": 2231816990,
+                "fps": 737.973,
+                "median_ms": 1.332,
+                "p95_ms": 1.669
+              },
+              {
+                "round": 2,
+                "frames": 3600,
+                "elapsed_ns": 5074377950,
+                "render_ns": 2273114920,
+                "fps": 709.447,
+                "median_ms": 1.386,
+                "p95_ms": 1.738
+              }
+            ]
+          }
+        ],
+        "summary": {
+          "frames": 21600,
+          "elapsed_ns": 29991691350,
+          "fps": 720.1994628422315,
+          "render_us_per_frame": 637.4228148148148,
+          "non_render_us_per_frame": 751.0814143518518
+        }
+      },
+      "after": {
+        "runs": [
+          {
+            "directory": "/tmp/plos-graphics-after-0",
+            "samples": [
+              {
+                "round": 0,
+                "frames": 3600,
+                "elapsed_ns": 4758844170,
+                "render_ns": 2265539480,
+                "fps": 756.486,
+                "median_ms": 1.293,
+                "p95_ms": 1.658
+              },
+              {
+                "round": 1,
+                "frames": 3600,
+                "elapsed_ns": 4845711210,
+                "render_ns": 2297633410,
+                "fps": 742.925,
+                "median_ms": 1.301,
+                "p95_ms": 1.693
+              },
+              {
+                "round": 2,
+                "frames": 3600,
+                "elapsed_ns": 4771886810,
+                "render_ns": 2248895130,
+                "fps": 754.419,
+                "median_ms": 1.298,
+                "p95_ms": 1.655
+              }
+            ]
+          },
+          {
+            "directory": "/tmp/plos-graphics-after-repeat-0",
+            "samples": [
+              {
+                "round": 0,
+                "frames": 3600,
+                "elapsed_ns": 4429333650,
+                "render_ns": 2214189300,
+                "fps": 812.763,
+                "median_ms": 1.196,
+                "p95_ms": 1.544
+              },
+              {
+                "round": 1,
+                "frames": 3600,
+                "elapsed_ns": 4710520710,
+                "render_ns": 2356871640,
+                "fps": 764.247,
+                "median_ms": 1.205,
+                "p95_ms": 1.554
+              },
+              {
+                "round": 2,
+                "frames": 3600,
+                "elapsed_ns": 4463008390,
+                "render_ns": 2210768840,
+                "fps": 806.631,
+                "median_ms": 1.215,
+                "p95_ms": 1.534
+              }
+            ]
+          }
+        ],
+        "summary": {
+          "frames": 21600,
+          "elapsed_ns": 27979304940,
+          "fps": 771.9991631786404,
+          "render_us_per_frame": 629.3471203703704,
+          "non_render_us_per_frame": 665.9910712962964
+        }
+      },
+      "fps_change": 0.07192410298666974,
+      "checkpoint_pixels_identical": true
+    },
+    "vkcube_workers_4": {
+      "before": {
+        "runs": [
+          {
+            "directory": "/tmp/plos-graphics-before-4",
+            "samples": [
+              {
+                "round": 0,
+                "frames": 3600,
+                "elapsed_ns": 5878293000,
+                "render_ns": 3100177820,
+                "fps": 612.423,
+                "median_ms": 1.574,
+                "p95_ms": 2.104
+              },
+              {
+                "round": 1,
+                "frames": 3600,
+                "elapsed_ns": 5576879000,
+                "render_ns": 3023376650,
+                "fps": 645.522,
+                "median_ms": 1.508,
+                "p95_ms": 1.897
+              },
+              {
+                "round": 2,
+                "frames": 3600,
+                "elapsed_ns": 5651811120,
+                "render_ns": 3036986540,
+                "fps": 636.964,
+                "median_ms": 1.52,
+                "p95_ms": 1.963
+              }
+            ]
+          }
+        ],
+        "summary": {
+          "frames": 10800,
+          "elapsed_ns": 17106983120,
+          "fps": 631.3211350149505,
+          "render_us_per_frame": 848.1982416666667,
+          "non_render_us_per_frame": 735.7816768518519
+        }
+      },
+      "after": {
+        "runs": [
+          {
+            "directory": "/tmp/plos-graphics-after-4",
+            "samples": [
+              {
+                "round": 0,
+                "frames": 3600,
+                "elapsed_ns": 5700954140,
+                "render_ns": 3166958490,
+                "fps": 631.473,
+                "median_ms": 1.527,
+                "p95_ms": 2.048
+              },
+              {
+                "round": 1,
+                "frames": 3600,
+                "elapsed_ns": 5431881230,
+                "render_ns": 3080550970,
+                "fps": 662.754,
+                "median_ms": 1.471,
+                "p95_ms": 1.851
+              },
+              {
+                "round": 2,
+                "frames": 3600,
+                "elapsed_ns": 5677837160,
+                "render_ns": 3237395500,
+                "fps": 634.044,
+                "median_ms": 1.46,
+                "p95_ms": 1.867
+              }
+            ]
+          }
+        ],
+        "summary": {
+          "frames": 10800,
+          "elapsed_ns": 16810672530,
+          "fps": 642.4490145011467,
+          "render_us_per_frame": 878.2319407407407,
+          "non_render_us_per_frame": 678.311812037037
+        }
+      },
+      "fps_change": 0.01762633764182886,
+      "checkpoint_pixels_identical": true
+    }
+  }
+}

@@ -4,9 +4,12 @@
 #include <EGL/eglext.h>
 #include <GL/gl.h>
 #include <GL/glext.h>
+#include <futex.h>
+#include <limits.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <syscall.h>
 
@@ -66,6 +69,90 @@ done:
   return NULL;
 }
 
+struct raster_test {
+  EGLDisplay display;
+  EGLContext context;
+  EGLSurface surface;
+  uint32_t *start;
+  unsigned seed;
+  bool passed;
+};
+
+static void *raster_worker(void *argument) {
+  struct raster_test *test = argument;
+  unsigned char *pixels = malloc(128 * 128 * 4);
+  CHECK(pixels);
+  CHECK(eglMakeCurrent(test->display, test->surface, test->surface,
+                       test->context));
+  while (!__atomic_load_n(test->start, __ATOMIC_ACQUIRE))
+    os_futex_wait(test->start, 0, UINT64_MAX);
+  glEnable(GL_SCISSOR_TEST);
+  for (unsigned round = 0; round < 4; round++) {
+    /* Flush independent strips without waiting between scenes. Four contexts
+     * share the raster pool; readback checks ordering and scene reuse. */
+    for (unsigned row = 0; row < 128; row++) {
+      glScissor(0, row, 128, 1);
+      glClearColor(((row + round * 17) & 255) / 255.0f,
+                    test->seed / 255.0f, (255 - row) / 255.0f, 1);
+      glClear(GL_COLOR_BUFFER_BIT);
+      glFlush();
+    }
+    glReadPixels(0, 0, 128, 128, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    for (unsigned row = 0; row < 128; row++) {
+      for (unsigned x = 0; x < 128; x++) {
+        const unsigned char *pixel = pixels + (row * 128 + x) * 4;
+        CHECK(pixel[0] == ((row + round * 17) & 255) &&
+              pixel[1] == test->seed && pixel[2] == 255 - row &&
+              pixel[3] == 255);
+      }
+    }
+    CHECK(glGetError() == GL_NO_ERROR);
+  }
+  glClear(GL_COLOR_BUFFER_BIT);
+  glFlush();
+  test->passed = true;
+done:
+  eglReleaseThread();
+  free(pixels);
+  return NULL;
+}
+
+static bool queued_scenes(EGLDisplay display, EGLConfig config) {
+  struct raster_test tests[4] = {0};
+  pthread_t threads[4];
+  uint32_t start = 0;
+  unsigned created = 0;
+  const EGLint dimensions[] = {EGL_WIDTH, 128, EGL_HEIGHT, 128, EGL_NONE};
+  for (unsigned i = 0; i < 4; i++) {
+    tests[i] = (struct raster_test){
+        .display = display,
+        .context = eglCreateContext(display, config, EGL_NO_CONTEXT, NULL),
+        .surface = eglCreatePbufferSurface(display, config, dimensions),
+        .start = &start,
+        .seed = 37 * (i + 1),
+    };
+    if (tests[i].context == EGL_NO_CONTEXT ||
+        tests[i].surface == EGL_NO_SURFACE ||
+        pthread_create(&threads[i], NULL, raster_worker, &tests[i]))
+      break;
+    created++;
+  }
+  __atomic_store_n(&start, 1, __ATOMIC_RELEASE);
+  os_futex_wake(&start, INT_MAX);
+  bool passed = created == 4;
+  for (unsigned i = 0; i < created; i++) {
+    passed &= pthread_join(threads[i], NULL) == 0;
+    passed &= tests[i].passed;
+  }
+  for (unsigned i = 0; i < 4; i++) {
+    if (tests[i].context != EGL_NO_CONTEXT)
+      passed &= eglDestroyContext(display, tests[i].context);
+    if (tests[i].surface != EGL_NO_SURFACE)
+      passed &= eglDestroySurface(display, tests[i].surface);
+  }
+  return passed;
+}
+
 bool opengl_test(void) {
   EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
   EGLContext context = EGL_NO_CONTEXT, shared = EGL_NO_CONTEXT,
@@ -102,6 +189,7 @@ bool opengl_test(void) {
   glClearColor(1, 0, 0, 1);
   glClear(GL_COLOR_BUFFER_BIT);
   CHECK(eglWaitClient() && pixel(255, 0, 0));
+  CHECK(queued_scenes(display, config));
 
   const char *vertex_source =
       "#version 120\nvoid main() { gl_Position = gl_Vertex; }";

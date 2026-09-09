@@ -1,8 +1,14 @@
 #include <errno.h>
+#include <futex.h>
+#include <limits.h>
+#include <pthread.h>
+#include <sched.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <syscall.h>
+#include <task.h>
 #include <time.h>
 
 int64_t __divmoddi4(int64_t numerator, int64_t denominator, int64_t *remainder);
@@ -15,7 +21,70 @@ int64_t __divmoddi4(int64_t numerator, int64_t denominator, int64_t *remainder);
     }                                                                          \
   } while (0)
 
+struct clock_test {
+  pthread_mutex_t lock;
+  uint64_t last;
+  uint32_t start;
+  unsigned cpus;
+  bool *seen;
+};
+
+static void *clock_reader(void *argument) {
+  struct clock_test *test = argument;
+  while (!__atomic_load_n(&test->start, __ATOMIC_ACQUIRE))
+    os_futex_wait(&test->start, 0, UINT64_MAX);
+  bool valid = true;
+  for (unsigned i = 0; i < 4096; i++) {
+    pthread_mutex_lock(&test->lock);
+    uint64_t now = monotonic_ns();
+    valid &= now >= test->last;
+    test->last = now;
+    if (!(i % 64)) {
+      unsigned cpu = cpu_current();
+      if (cpu < test->cpus)
+        test->seen[cpu] = true;
+      else
+        valid = false;
+    }
+    pthread_mutex_unlock(&test->lock);
+    if (!(i % 64))
+      sched_yield();
+  }
+  return (void *)(uintptr_t)valid;
+}
+
+static int monotonic_clock_test(void) {
+  struct clock_test test = {.lock = PTHREAD_MUTEX_INITIALIZER,
+                            .cpus = cpu_count()};
+  test.seen = calloc(test.cpus, sizeof(*test.seen));
+  CHECK(test.seen);
+  pthread_t readers[4];
+  unsigned created = 0;
+  while (created < 4 &&
+         pthread_create(&readers[created], NULL, clock_reader, &test) == 0)
+    created++;
+  __atomic_store_n(&test.start, 1, __ATOMIC_RELEASE);
+  os_futex_wake(&test.start, INT_MAX);
+  bool valid = created == 4;
+  for (unsigned i = 0; i < created; i++) {
+    void *result = NULL;
+    valid &= pthread_join(readers[i], &result) == 0 && result == (void *)1;
+  }
+  unsigned observed = 0;
+  for (unsigned cpu = 0; cpu < test.cpus; cpu++)
+    observed += test.seen[cpu];
+  free(test.seen);
+  CHECK(pthread_mutex_destroy(&test.lock) == 0 && valid && observed);
+  uint64_t start = monotonic_ns();
+  for (unsigned i = 0; i < 10000; i++)
+    monotonic_ns();
+  logkf("TIMETEST monotonic cpus=%u read_ns=%llu\n", observed,
+        (unsigned long long)((monotonic_ns() - start) / 10000));
+  return 0;
+}
+
 int main(void) {
+  CHECK(monotonic_clock_test() == 0);
   static const struct {
     int64_t num, den, quotient, remainder;
   } divisions[] = {{0, 86400, 0, 0},
@@ -74,7 +143,16 @@ int main(void) {
   gmtime_r(&first, &calendar);
   CHECK(calendar.tm_year + 1900 == get_year());
   CHECK(calendar.tm_year >= 125 && calendar.tm_year < 200);
+  uint64_t started_ns = monotonic_ns();
+  clock_t started_ms = clock();
   sleep(1100);
+  uint64_t elapsed_ns = monotonic_ns() - started_ns;
+  uint64_t elapsed_ms = (clock_t)(clock() - started_ms);
+  /* The interrupt-driven millisecond clock is independent of pvclock's
+   * conversion. Check the rate as well as monotonicity across threads. */
+  CHECK(elapsed_ms >= 100 &&
+        elapsed_ns >= (elapsed_ms - 100) * 1000000ull &&
+        elapsed_ns <= (elapsed_ms + 100) * 1000000ull);
   time_t last = time(NULL);
   CHECK(last > first && last - first < 10);
   char output[64];

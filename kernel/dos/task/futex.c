@@ -54,12 +54,17 @@ int futex_operation(unsigned operation, const futex_request_t *request) {
   futex_waiter_t **bucket = &buckets[hash % FUTEX_BUCKET_COUNT];
   if (operation == FUTEX_WAKE) {
     unsigned woken = 0;
-    uint64_t now = monotonic_time_ns();
+    uint64_t now = 0;
+    bool have_time = false;
     futex_waiter_t *waiter = *bucket;
     while (waiter && woken < request->value) {
       futex_waiter_t *next = waiter->next;
       if (waiter->task->tgid == self->tgid && waiter->address == address) {
         futex_remove(waiter);
+        if (waiter->deadline_ns != UINT64_MAX && !have_time) {
+          now = monotonic_time_ns();
+          have_time = true;
+        }
         bool expired =
             waiter->deadline_ns != UINT64_MAX && now >= waiter->deadline_ns;
         waiter->result = expired ? FUTEX_TIMED_OUT : FUTEX_OK;

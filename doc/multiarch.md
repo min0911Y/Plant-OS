@@ -93,6 +93,46 @@ python3 scripts/test-x86_64.py --cpu max,xsave=off,xsaveopt=off,xsavec=off,xsave
 python3 scripts/test-x86_64.py --accel kvm --cpu host,enforce
 ```
 
+全局单调时钟由 `kernel/arch/x86/common/clock.c` 统一选择，启动与运行中回退共用
+**pvclock → invariant TSC → 平台时钟（HPET/PIT）** 的优先级：
+
+- pvclock 须同时具备 KVM CPUID 0x40000001 bit 24 与版本一致的 flags bit 0，
+  才能用于全局时间。没有跨 CPU 保证的记录仍可用于 CPU 局部调度记账。
+- TSC 须具备 invariant、RDTSCP 和有效频率。每 CPU 启动时独立校准到共同平台
+  原点，以前后参考读数包围 TSC 采样，并验证其经过时间落在参考区间内。
+  invariant 只保证频率，不能假设各 CPU 原始计数的偏移相同；全局读取使用校准后的
+  纳秒值。当前校准需要 HPET 参考，运行中的 TSC 读钟不访问 HPET。
+- 能力或校验不满足时才使用平台读钟。pvclock 启用时仍保留已校准的 TSC 后备能力，
+  失去稳定保证或转换异常时依次尝试后备源，不直接跳到 HPET。
+
+PC 后端的 `platform_monotonic_time_ns()` 只提供启动参考和最终回退。全局最后值
+由短 IRQ 临界区保护；尚未完成初始化的 AP 使用平台参考，后备源接管时将新原点
+对齐到最后发布的时间，保持单调前进。切换时输出一次 `clock: monotonic fallback=...`，
+便于区分启动选择与运行中降级。参考 [KVM MSR 规范](https://docs.kernel.org/virt/kvm/x86/msr.html)。
+
+`timetest.bin` 校验多线程有序读取不倒退，并用独立的中断毫秒时钟检查纳秒速率。
+运行库测试仍覆盖绝对 deadline、超时、取消、sleep 和实时钟转换。
+下列组合均可加 `--arch i386 --memory 512` 覆盖 i386；`--clock-source` 验证选择，
+并拒绝测试过程中意外降级，不修改 CPU 能力：
+
+```sh
+python3 scripts/test-x86_64.py --threads --accel kvm --cpu host,+invtsc \
+  --clock-source kvm-pvclock
+python3 scripts/test-x86_64.py --threads --accel kvm --cpu host,kvmclock=off,+invtsc \
+  --clock-source invariant-tsc
+python3 scripts/test-x86_64.py --threads --accel kvm --cpu host,kvmclock=off,-invtsc \
+  --clock-source platform
+```
+
+上述三种时钟选择均已通过 i386、x86_64 的 4 vCPU KVM 线程与运行库回归。
+x86_64 另验证了关闭 pvclock stable bit 后选择 TSC，以及临时故障注入下
+pvclock → TSC → 平台时钟的连续回退；注入代码不保留在正常构建中。
+同一宿主、3072 MiB 内存下，`timetest` 测得 pvclock、TSC、HPET 路径的平均
+单次读钟耗时分别为 109 ns、121 ns、27652 ns。TSC 路径通过 UEFI OpenGL
+像素与输入回归；BIOS 下默认 worker、300×300 glxgears 单次冷启动的三轮
+基准为 2900.701、2892.207、2848.866 FPS。这些数值反映该宿主与虚拟机配置，
+不代表其他硬件上的固定开销。
+
 ## 显示与终端
 
 Limine 请求 `1024x768x32`，以固件实际提供的尺寸、pitch 和颜色布局为准。x86_64 的 `set_mode(w, h)` 返回 `intptr_t`：取得当前显示、清屏并映射 framebuffer，硬件模式保持不变。程序通过 `framebuffer_info()` 取得真实布局。GUI 的目标 stride 独立于窗口的逻辑宽度，并支持 RGB 位序转换。

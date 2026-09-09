@@ -1,4 +1,5 @@
 #include <arch.h>
+#include <arch/x86/cpuid.h>
 #include <arch/x86/i386/control.h>
 #include <arch/x86/i386/interrupt.h>
 #include <arch/x86/i386/memory.h>
@@ -12,6 +13,7 @@
 typedef struct {
   uint32_t lapic_id;
   volatile uint32_t online;
+  bool tsc_aux_initialized;
 } smp_cpu_t;
 
 typedef enum {
@@ -24,6 +26,7 @@ static smp_cpu_t smp_cpus[SMP_MAX_CPUS];
 static uint8_t smp_boot_stacks[SMP_MAX_CPUS][SMP_BOOT_STACK_SIZE]
     __attribute__((aligned(16)));
 static uint32_t smp_cpu_total = 1;
+static bool use_tsc_aux;
 static volatile uint32_t smp_online_total = 1;
 static volatile smp_secondary_state_t smp_secondary_state;
 static volatile uint32_t kernel_lock_owner;
@@ -43,7 +46,20 @@ static void smp_trampoline_write(uint8_t *symbol, uint32_t value) {
   *(uint32_t *)(uintptr_t)(SMP_TRAMPOLINE_PHYS + offset) = value;
 }
 
+static void smp_cpu_identity_init(uint32_t cpu) {
+  if (x86_cpuid(0x80000000u, 0).eax < 0x80000001u ||
+      !(x86_cpuid(0x80000001u, 0).edx & (1u << 27)))
+    return;
+  asm volatile("wrmsr" : : "c"(0xc0000103u), "a"(cpu), "d"(0) : "memory");
+  __atomic_store_n(&smp_cpus[cpu].tsc_aux_initialized, true, __ATOMIC_RELEASE);
+}
+
 uint32_t smp_current_cpu(void) {
+  if (__atomic_load_n(&use_tsc_aux, __ATOMIC_ACQUIRE)) {
+    uint32_t low, high, cpu;
+    asm volatile("rdtscp" : "=a"(low), "=d"(high), "=c"(cpu));
+    return cpu;
+  }
   if (!apic_ready()) {
     return 0;
   }
@@ -62,6 +78,7 @@ void smp_topology_init(void) {
   smp_cpus[0].online = 1;
   smp_cpu_total = 1;
   smp_online_total = 1;
+  smp_cpu_identity_init(0);
 
   if (!apic_ready()) {
     return;
@@ -130,6 +147,7 @@ static __attribute__((noreturn)) void x86_smp_secondary_entry(uint32_t cpu) {
       asm volatile("cli; hlt");
     }
   }
+  smp_cpu_identity_init(cpu);
   arch_interrupt_init_secondary();
   apic_init_secondary();
   arch_task_state_init();
@@ -147,6 +165,15 @@ static __attribute__((noreturn)) void x86_smp_secondary_entry(uint32_t cpu) {
 }
 
 void smp_request_secondary_release(void) {
+  /* Include CPUs whose startup is delayed: no AP may observe the fast path
+   * before its own MSR is initialized. Older CPUs retain the APIC lookup. */
+  bool ready = true;
+  for (uint32_t cpu = 0; cpu < smp_cpu_total; cpu++) {
+    if (!__atomic_load_n(&smp_cpus[cpu].tsc_aux_initialized, __ATOMIC_ACQUIRE))
+      ready = false;
+  }
+  __atomic_store_n(&use_tsc_aux, ready, __ATOMIC_RELEASE);
+  logk("smp: cpu lookup=%s\n", ready ? "tsc-aux" : "apic");
   if (smp_cpu_total <= 1 ||
       smp_secondary_state != SMP_SECONDARIES_PARKED) {
     return;

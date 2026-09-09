@@ -26,6 +26,52 @@ static void check(int valid, const char *name) {
     logkf("LIBCTEST FAIL: %s\n", name);
   }
 }
+static void memory_copy(void) {
+  unsigned char source[192], destination[192];
+  for (size_t i = 0; i < sizeof(source); i++)
+    source[i] = (unsigned char)(i * 37);
+  for (unsigned from = 0; from < 16; from++) {
+    for (unsigned to = 0; to < 16; to++) {
+      for (size_t size = 0; size <= 160; size++) {
+        memset(destination, 0xa5, sizeof(destination));
+        bool valid = memcpy(destination + to, source + from, size) ==
+                     destination + to;
+        for (size_t i = 0; i < sizeof(destination); i++)
+          valid &= destination[i] ==
+                   (i >= to && i - to < size ? source[from + i - to] : 0xa5);
+        if (!valid) {
+          check(false, "memcpy alignment, tails and destination bounds");
+          return;
+        }
+      }
+    }
+  }
+  size_t page = (size_t)sysconf(_SC_PAGESIZE);
+  unsigned char *mapping = mmap(NULL, 4 * page, PROT_READ | PROT_WRITE,
+                                MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  check(mapping != MAP_FAILED, "memcpy guard mapping");
+  if (mapping == MAP_FAILED)
+    return;
+  /* Native VM has no PROT_NONE; leave unmapped pages after both buffers. */
+  bool guards[2] = {munmap(mapping + page, page) == 0,
+                    munmap(mapping + 3 * page, page) == 0};
+  if (guards[0] && guards[1]) {
+    for (size_t i = 0; i < page; i++)
+      mapping[i] = (unsigned char)(i * 37);
+    for (size_t size = 0; size <= page; size++) {
+      unsigned char *input = mapping + page - size;
+      unsigned char *output = mapping + 3 * page - size;
+      check(memcpy(output, input, size) == output &&
+                memcmp(output, input, size) == 0,
+            "memcpy does not cross a guard page");
+    }
+  } else {
+    check(false, "memcpy guard protection");
+  }
+  for (unsigned i = 0; i < 4; i++)
+    if (!(i & 1) || !guards[i / 2])
+      check(munmap(mapping + i * page, page) == 0, "memcpy guard release");
+}
 static void allocations(void) {
   void *blocks[17] = {0};
   for (unsigned i = 0; i < 17; i++) {
@@ -427,6 +473,7 @@ static void math_environment(void) {
 }
 
 int main(void) {
+  memory_copy();
   allocations();
   numbers();
   tokenization();
