@@ -4,49 +4,20 @@ import render;
 import post;
 
 namespace {
-bool vertex_sky_visibility(Terrain& terrain, const int x, const int y, const int z,
-                                   const int face, const int corner, float* out_visibility)
-{
-    if (!out_visibility)
-    {
-        return false;
-    }
-    if (terrain.blocks.empty())
-    {
-        terrain.generate();
-    }
-    if (face < 0 || face >= 6 || corner < 0 || corner >= 4)
-    {
-        return false;
-    }
-    const int chunk_size = terrain.topology.chunk_size;
-    if (x < 0 || z < 0 || x >= chunk_size || z >= chunk_size)
-    {
-        return false;
-    }
-    const size_t height_index = terrain.topology.index(x, z);
-    if (height_index >= terrain.topology.heights.size())
-    {
-        return false;
-    }
-    const int height = terrain.topology.heights[height_index];
-    if (y < 0 || y >= height)
-    {
-        return false;
-    }
-    const size_t slot = terrain.topology.block_slot(x, y, z);
-    if (slot >= terrain.topology.block_index.size())
-    {
-        return false;
-    }
-    const int block_index = terrain.topology.block_index[slot];
-    if (block_index < 0 || static_cast<size_t>(block_index) >= terrain.blocks.size())
-    {
-        return false;
-    }
-    const VoxelBlock& block = terrain.blocks[static_cast<size_t>(block_index)];
-    *out_visibility = block.sky_visibility[static_cast<size_t>(face)][static_cast<size_t>(corner)];
-    return true;
+bool vertex_sky_visibility(Terrain &terrain, const int x, const int y, const int z,
+                           const int face, const int corner, float *out_visibility) {
+  if (!out_visibility || face < 0 || face >= 6 || corner < 0 || corner >= 4) {
+    return false;
+  }
+  if (terrain.blocks.empty()) {
+    terrain.generate();
+  }
+  const VoxelBlock *block = terrain.topology.block_at(terrain.blocks, x, y, z);
+  if (!block) {
+    return false;
+  }
+  *out_visibility = block->sky_visibility[static_cast<size_t>(face)][static_cast<size_t>(corner)];
+  return true;
 }
 
 Vec3 tonemap_vec3(const Vec3 color, const double exposure_value)

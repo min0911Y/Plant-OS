@@ -5,7 +5,6 @@ module;
 export module terrain;
 
 import math;
-import noise;
 
 export struct Material
 {
@@ -59,32 +58,33 @@ export struct BlockGeometry
     }
 };
 
-export struct TerrainConfig
-{
-    int chunk_size = 16;
-    double block_size = 2.0;
-    double start_z = 4.0;
-    double base_y = 2.0;
-    int base_height = 4;
-    int dirt_thickness = 2;
-    int height_variation = 6;
-    double height_freq = 0.12;
-    double surface_freq = 0.4;
+export struct TerrainConfig {
+  // One palette index per voxel, shared by all room furnishings.
+  enum Surface : uint8_t {
+    Plaster, Limestone, Grout, Coral, Teal, Oak, Gold, Indigo,
+    Rose, Leaf, Mint, Porcelain, Soil
+  };
 
-    std::vector<Material> palette{
-        {.color = 0xFF7A7A7A, .ambient = 0.22, .diffuse = 0.90,
-         .specular = 0.06, .shininess = 32.0},  // stone
-        {.color = 0xFF7D4714, .ambient = 0.24, .diffuse = 0.95,
-         .specular = 0.02, .shininess = 8.0},   // dirt
-        {.color = 0xFF3B8A38, .ambient = 0.28, .diffuse = 1.00,
-         .specular = 0.025, .shininess = 12.0}, // grass
-        {.color = 0xFF2B5FA8, .ambient = 0.18, .diffuse = 0.70,
-         .specular = 0.08, .shininess = 96.0},  // water
-    };
-    uint8_t stone = 0;
-    uint8_t dirt = 1;
-    uint8_t grass = 2;
-    uint8_t water = 3;
+  int chunk_size = 32;
+  double block_size = 1.0;
+  double start_z = 4.0;
+  double base_y = 2.0;
+
+  std::vector<Material> palette{
+      {.color = 0xFFF0E9D8}, // warm plaster
+      {.color = 0xFFD6CDB8}, // limestone
+      {.color = 0xFF797C80}, // tile joints
+      {.color = 0xFFE65343}, // coral upholstery / west wall
+      {.color = 0xFF25B8AE}, // teal upholstery / east wall
+      {.color = 0xFFAE7547}, // oak
+      {.color = 0xFFF2BE42}, // ochre ceramic
+      {.color = 0xFF535AB8}, // indigo
+      {.color = 0xFFDC76AA}, // rose
+      {.color = 0xFF43854B}, // foliage
+      {.color = 0xFF91C966}, // new leaves
+      {.color = 0xFFFAF5E9, .specular = 0.3, .shininess = 64.0},
+      {.color = 0xFF514237}, // potting soil
+  };
 };
 
 export struct VoxelBlock
@@ -122,14 +122,7 @@ export struct BlockTopology
 {
     int chunk_size = 0;
     int max_height = 0;
-    std::vector<int> heights;
     std::vector<int> block_index;
-
-    [[nodiscard]]
-    constexpr auto index(const int gx, const int gz) const -> size_t
-    {
-        return static_cast<size_t>(gz * chunk_size + gx);
-    }
 
     [[nodiscard]]
     constexpr auto block_slot(const int gx, const int gy, const int gz) const -> size_t
@@ -140,16 +133,15 @@ export struct BlockTopology
                + static_cast<size_t>(gx);
     }
 
-    [[nodiscard]]
-    auto has_block(const int gx, const int gy, const int gz) const -> bool
-    {
-        if (gx < 0 || gx >= chunk_size || gz < 0 || gz >= chunk_size || gy < 0)
-        {
-            return false;
-        }
-        const size_t idx = index(gx, gz);
-        return idx < heights.size() && gy < heights[idx];
+  [[nodiscard]]
+  auto has_block(const int gx, const int gy, const int gz) const -> bool {
+    if (gx < 0 || gx >= chunk_size || gz < 0 || gz >= chunk_size ||
+        gy < 0 || gy >= max_height) {
+      return false;
     }
+    const size_t slot = block_slot(gx, gy, gz);
+    return slot < block_index.size() && block_index[slot] >= 0;
+  }
 
     [[nodiscard]]
     auto block_at(std::span<const VoxelBlock> blocks,
@@ -380,53 +372,134 @@ export struct Terrain
     }
 
 private:
-    auto build_chunk() -> void
-    {
-        const int chunk_size = config.chunk_size;
-        topology.chunk_size = chunk_size;
+  auto build_chunk() -> void {
+    using enum TerrainConfig::Surface;
+    // Design coordinates describe a 32 x 16 x 32 voxel room. Scaling the
+    // horizontal grid preserves the layout when chunk_size changes.
+    constexpr int design_size = 32;
+    constexpr int room_height = 16;
+    const int size = std::max(config.chunk_size, 1);
+    topology.chunk_size = size;
+    topology.max_height = room_height;
+    const size_t slots = static_cast<size_t>(size) * size * room_height;
+    topology.block_index.assign(slots, -1);
+    blocks.clear();
+    const Vec3 base = grid_origin();
 
-        const size_t grid_cells = static_cast<size_t>(chunk_size) * chunk_size;
-        topology.heights.assign(grid_cells, 0);
-        std::vector<uint8_t> surface(grid_cells, config.grass);
-        blocks.clear();
-        blocks.reserve(grid_cells * static_cast<size_t>(config.base_height
-                                                        + config.height_variation + 3));
-
-        topology.max_height = 0;
-        for (int z = 0; z < chunk_size; ++z)
-        {
-            for (int x = 0; x < chunk_size; ++x)
-            {
-                const size_t idx = topology.index(x, z);
-                topology.heights[idx] = height_at(x, z);
-                surface[idx] = surface_material_at(x, z);
-                topology.max_height = std::max(topology.max_height, topology.heights[idx]);
+    // Half-open boxes overwrite materials without duplicating occupied cells.
+    const auto box = [&](int x0, int y0, int z0, int x1, int y1, int z1,
+                         TerrainConfig::Surface material) {
+      x0 = static_cast<int>(static_cast<int64_t>(x0) * size / design_size);
+      x1 = static_cast<int>(static_cast<int64_t>(x1) * size / design_size);
+      z0 = static_cast<int>(static_cast<int64_t>(z0) * size / design_size);
+      z1 = static_cast<int>(static_cast<int64_t>(z1) * size / design_size);
+      for (int z = z0; z < z1; ++z) {
+        for (int y = y0; y < y1; ++y) {
+          for (int x = x0; x < x1; ++x) {
+            int &index = topology.block_index[topology.block_slot(x, y, z)];
+            if (index >= 0) {
+              blocks[static_cast<size_t>(index)].material = material;
+              continue;
             }
+            index = static_cast<int>(blocks.size());
+            blocks.push_back({base + Vec3{0.5 + x, 0.5 + y, 0.5 + z} *
+                                        config.block_size,
+                              static_cast<uint8_t>(material), {}});
+          }
         }
+      }
+    };
 
-        const size_t slots = grid_cells * static_cast<size_t>(std::max(topology.max_height, 1));
-        topology.block_index.assign(slots, -1);
-
-        const Vec3 base = grid_origin();
-        for (size_t i = 0; i < grid_cells; ++i)
-        {
-            const int height = topology.heights[i];
-            const int z = static_cast<int>(i) / chunk_size;
-            const int x = static_cast<int>(i) % chunk_size;
-
-            for (int y = 0; y < height; ++y)
-            {
-                const Vec3 center{0.5 + x, 0.5 + y, 0.5 + z};
-                blocks.push_back({
-                    base + center * config.block_size,
-                    material_at(y, height, surface[i]),
-                    face_sky(x, y, z)
-                });
-                topology.block_index[topology.block_slot(x, y, z)] =
-                    static_cast<int>(blocks.size() - 1);
-            }
-        }
+    // Pale surfaces receive colored bounce light; the +/-Z ends stay open.
+    box(0, 0, 0, 32, 1, 32, Grout);
+    for (int z = 0; z < 32; z += 4) {
+      for (int x = 0; x < 32; x += 4) {
+        box(x, 0, z, x + 3, 1, z + 3, Limestone);
+      }
     }
+    box(0, 1, 0, 1, 16, 32, Plaster);
+    box(31, 1, 0, 32, 16, 32, Plaster);
+    box(1, 2, 3, 2, 10, 29, Coral);
+    box(30, 2, 3, 31, 10, 29, Teal);
+    for (int z = 2; z < 32; z += 9) {
+      box(1, 1, z, 2, 15, z + 1, Plaster);
+      box(30, 1, z, 31, 15, z + 1, Plaster);
+    }
+    // A broad front skylight and a covered rear gallery give both sunlit
+    // patches and deep shade without changing the existing sky or lights.
+    box(0, 15, 0, 5, 16, 32, Plaster);
+    box(28, 15, 0, 32, 16, 32, Plaster);
+    box(5, 15, 22, 28, 16, 32, Plaster);
+    box(5, 15, 0, 28, 16, 1, Oak);
+    box(5, 15, 13, 28, 16, 14, Oak);
+
+    // West lounge: indigo rug, coral sofa, contrasting loose cushions.
+    box(3, 1, 5, 13, 2, 16, Indigo);
+    box(4, 1, 6, 8, 3, 15, Oak);
+    box(4, 3, 6, 8, 4, 15, Coral);
+    box(3, 2, 6, 5, 7, 15, Coral);
+    box(4, 3, 5, 8, 5, 6, Coral);
+    box(4, 3, 15, 8, 5, 16, Coral);
+    box(5, 4, 7, 7, 6, 9, Gold);
+    box(5, 4, 11, 7, 6, 13, Rose);
+    box(9, 4, 8, 13, 5, 13, Porcelain);
+    for (int z : {8, 12}) {
+      box(9, 2, z, 10, 4, z + 1, Oak);
+      box(12, 2, z, 13, 4, z + 1, Oak);
+    }
+    box(10, 5, 9, 12, 6, 11, Teal);
+    box(10, 6, 9, 11, 7, 10, Gold);
+
+    // East table: open space under the top, stools and colored ceramics.
+    box(21, 5, 9, 28, 6, 16, Oak);
+    for (int x : {21, 27}) {
+      for (int z : {9, 15}) box(x, 1, z, x + 1, 5, z + 1, Oak);
+    }
+    for (int z : {7, 17}) {
+      box(22, 1, z, 23, 3, z + 2, Oak);
+      box(25, 1, z, 26, 3, z + 2, Oak);
+      box(21, 3, z, 27, 4, z + 2, Teal);
+    }
+    box(22, 6, 11, 24, 8, 13, Gold);
+    box(22, 8, 11, 23, 9, 12, Gold);
+    box(25, 6, 13, 27, 7, 15, Rose);
+    box(25, 7, 13, 26, 8, 14, Porcelain);
+
+    // Rear display shelving: real gaps between shelves and colored books.
+    box(27, 1, 23, 30, 11, 24, Oak);
+    box(27, 1, 29, 30, 11, 30, Oak);
+    for (int y : {1, 5, 9}) {
+      box(27, y, 23, 30, y + 1, 30, Oak);
+      for (int z = 24; z < 29; ++z) {
+        const auto color = static_cast<TerrainConfig::Surface>(Coral + (z + y) % 6);
+        box(28, y + 1, z, 30, y + 2 + (z % 2), z + 1, color);
+      }
+    }
+    // Stepped sculpture on a white plinth, offset from the central aisle.
+    box(7, 1, 23, 12, 3, 28, Plaster);
+    box(8, 3, 24, 11, 6, 27, Indigo);
+    box(9, 6, 24, 12, 8, 27, Rose);
+    box(8, 8, 25, 10, 10, 27, Gold);
+
+    // Two block-built planters with irregular, layered foliage.
+    for (const auto &corner : std::array<std::array<int, 2>, 2>{{{4, 19}, {25, 3}}}) {
+      const int x = corner[0], z = corner[1];
+      box(x, 1, z, x + 3, 3, z + 3, Gold);
+      box(x + 1, 3, z + 1, x + 2, 4, z + 2, Soil);
+      box(x + 1, 4, z + 1, x + 2, 8, z + 2, Oak);
+      box(x - 1, 6, z, x + 3, 8, z + 3, Leaf);
+      box(x, 8, z + 1, x + 4, 10, z + 4, Mint);
+      box(x + 1, 10, z + 1, x + 3, 11, z + 3, Leaf);
+    }
+
+    // Occlusion must see the complete room, including overhangs and cavities.
+    for (VoxelBlock &block : blocks) {
+      const Vec3 grid = (block.position - base) * (1.0 / config.block_size);
+      block.sky_visibility = face_sky(static_cast<int>(std::floor(grid.x)),
+                                      static_cast<int>(std::floor(grid.y)),
+                                      static_cast<int>(std::floor(grid.z)));
+    }
+  }
 
     auto build_mesh() -> void
     {
@@ -462,44 +535,6 @@ private:
                 visible_faces++;
             }
         }
-    }
-
-    [[nodiscard]]
-    auto height_at(const int x, const int z) const -> int
-    {
-        const double h = SimplexNoise::sample(x * config.height_freq, z * config.height_freq);
-        const double scaled = (h + 1.0) * 0.5 * static_cast<double>(config.height_variation);
-        return std::max(config.base_height + static_cast<int>(scaled + 0.5), 3);
-    }
-
-    [[nodiscard]]
-    auto surface_material_at(const int x, const int z) const -> uint8_t
-    {
-        const double surface = SimplexNoise::sample(x * config.surface_freq + 100.0,
-                                                    z * config.surface_freq - 100.0);
-        if (surface > 0.55)
-        {
-            return config.water;
-        }
-        if (surface < -0.35)
-        {
-            return config.dirt;
-        }
-        return config.grass;
-    }
-
-    [[nodiscard]]
-    auto material_at(const int y, const int height, const uint8_t surface) const -> uint8_t
-    {
-        if (y >= height - 1)
-        {
-            return surface;
-        }
-        if (y >= height - 1 - config.dirt_thickness)
-        {
-            return config.dirt;
-        }
-        return config.stone;
     }
 
     [[nodiscard]]
