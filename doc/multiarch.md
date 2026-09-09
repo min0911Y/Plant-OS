@@ -147,7 +147,7 @@ pvclock → TSC → 平台时钟的连续回退；注入代码不保留在正常
 
 ## 显示与终端
 
-Limine 请求 `1024x768x32`，以固件实际提供的尺寸、pitch 和颜色布局为准。x86_64 的 `set_mode(w, h)` 返回 `intptr_t`：取得当前显示、清屏并映射 framebuffer，硬件模式保持不变。程序通过 `framebuffer_info()` 取得真实布局。GUI 的目标 stride 独立于窗口的逻辑宽度，并支持 RGB 位序转换。
+Limine 请求 `1024x768x32`，以固件实际提供的尺寸、pitch 和颜色布局为准。x86_64 的 `set_mode(w, h)` 返回 `intptr_t`：取得当前显示、清屏并映射 framebuffer，硬件模式保持不变。程序通过 `framebuffer_info()` 取得真实布局。GUI 的目标 stride 独立于窗口的逻辑宽度，并支持 RGB 位序转换。窗口拖动、合成损伤区域与性能验证见 [GUI 性能](gui-performance.md)。
 
 flanterm 自己处理 ANSI/VT100，默认 TTY 不再经过内核旧解析器。GUI 启动独立的 `term.bin`，由 os-terminal 处理终端输出；fartty 同样绕过内核旧解析器。旧解析器仅用于 i386 的传统显示后端，`VT100=0` 可以在构建时将它移除。i386 的 TextMode、HighTextMode、VGA 与 BIOS/VBE 操作继续由原后端提供，x86_64 对旧模式请求返回负状态。显示所有者退出后恢复 flanterm。
 

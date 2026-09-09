@@ -75,23 +75,10 @@ void puts_window(window_t *window, char *s, int x, int y, color_t color) {
 }
 extern void (*drop)();
 window_t *backup_w;
-gmouse_t *backup_gmouse;
 void w_drop() {
-  if (Collision(backup_w->x + 3, backup_w->y + 3, backup_w->xsize - 37, 20,
-                backup_gmouse->x, backup_gmouse->y)) {
-    // 移动
-    int oldx;
-    oldx = backup_w->x;
-    backup_w->x += mouse_event.x;
-    backup_w->y += mouse_event.y;
-    backup_w->x = (backup_w->x + 2) & ~3;
-    sheet_slide(backup_w->sht, backup_w->x, backup_w->y);
-    int x = (backup_w->x + 2) & ~3;
-    x -= oldx;
-    mouse_event.x = x;
-  } else {
-    drop = NULL;
-  }
+  backup_w->x += mouse_event.x;
+  backup_w->y += mouse_event.y;
+  sheet_slide(backup_w->sht, backup_w->x, backup_w->y);
 }
 void handle_left_window(window_t *window, gmouse_t *gmouse) {
   if (!window->using1)
@@ -100,11 +87,9 @@ void handle_left_window(window_t *window, gmouse_t *gmouse) {
   if (Collision(window->x + 3, window->y + 3, window->xsize - 37, 20, gmouse->x,
                 gmouse->y)) {
     // 移动
-    window->x += mouse_event.x;
-    window->y += mouse_event.y;
     backup_w = window;
-    backup_gmouse = gmouse;
     drop = w_drop;
+    w_drop();
     return;
   } else if (Collision(window->x + window->xsize - 21, window->y + 5, 16, 19,
                        gmouse->x, gmouse->y)) {
@@ -293,7 +278,6 @@ void destroy_window(window_t *window) {
   if (backup_w == window) {
     drop = NULL;
     backup_w = NULL;
-    backup_gmouse = NULL;
   }
   for (List *entry = window->desktop->window_list->next; entry != NULL;
        entry = entry->next) {

@@ -175,7 +175,35 @@ def exercise_mouse(qmp_path, origin, target, output):
     qmp = QMP(qmp_path)
     try:
         qmp.execute("screendump", filename=str(output / "mouse-before.ppm"))
-        qmp.move(target[0] - origin[0], target[1] - origin[1])
+        # Drag the test window in one-pixel reports. Quantizing each X report
+        # used to discard these moves; compare the actual window border pixels.
+        qmp.move(target[0] - origin[0], 74 - origin[1])
+        qmp.execute("input-send-event", events=[
+            {"type": "btn", "data": {"button": "left", "down": True}}])
+        time.sleep(0.2)
+
+        def border(label, dx, dy):
+            width, _, pixels = qmp.screenshot(output / f"mouse-drag-{label}.ppm")
+            return b"".join(pixels[(y * width + 64 + dx) * 3:
+                                   (y * width + 80 + dx) * 3]
+                            for y in range(90 + dy, 154 + dy))
+
+        reference = border("start", 0, 0)
+        if len(set(reference)) < 2:
+            raise RuntimeError("mouse drag fixture has no visible border")
+        dx = dy = 0
+        for axis, step in (("x", 1), ("x", -1), ("y", 1), ("y", -1)):
+            for _ in range(8):
+                qmp.move(step if axis == "x" else 0, step if axis == "y" else 0)
+            dx += 8 * step if axis == "x" else 0
+            dy += 8 * step if axis == "y" else 0
+            if border(f"{axis}{step}", dx, dy) != reference:
+                raise RuntimeError(f"one-pixel {axis} drag lost motion: expected {dx},{dy}")
+        qmp.execute("input-send-event", events=[
+            {"type": "btn", "data": {"button": "left", "down": False}}])
+        time.sleep(0.15)
+        print("GUI drag PASS: +/-1 pixel reports on both axes, window border verified", flush=True)
+        qmp.move(0, target[1] - 74)
         for button in ("left", "right", "wheel-up"):
             qmp.press("btn", button=button)
         qmp.execute("screendump", filename=str(output / "mouse-after.ppm"))

@@ -1,6 +1,6 @@
 /* Window composition. Pixel ownership uses stable sheet pointers; the visible
  * order grows independently, without a fixed window count or narrow IDs. */
-#include "gui.h"
+#include "sheet.h"
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
@@ -193,13 +193,29 @@ void sheet_refresh(struct SHEET *sheet, int x0, int y0, int x1, int y1) {
 
 void sheet_slide(struct SHEET *sheet, int x, int y) {
   int old_x = sheet->vx0, old_y = sheet->vy0;
+  if (old_x == x && old_y == y)
+    return;
   sheet->vx0 = x;
   sheet->vy0 = y;
-  if (sheet->height >= 0) {
-    sheet_recompose(sheet->ctl, old_x, old_y, old_x + sheet->bxsize,
-                    old_y + sheet->bysize);
-    sheet_recompose(sheet->ctl, x, y, x + sheet->bxsize, y + sheet->bysize);
+  if (sheet->height < 0)
+    return;
+  int old_right = old_x + sheet->bxsize, old_bottom = old_y + sheet->bysize;
+  int right = x + sheet->bxsize, bottom = y + sheet->bysize;
+  int left = old_x > x ? old_x : x;
+  int top = old_y > y ? old_y : y;
+  int overlap_right = old_right < right ? old_right : right;
+  int overlap_bottom = old_bottom < bottom ? old_bottom : bottom;
+  if (left >= overlap_right || top >= overlap_bottom) {
+    sheet_recompose(sheet->ctl, old_x, old_y, old_right, old_bottom);
+  } else {
+    /* Only the exposed part of the old rectangle needs a separate pass.
+     * The new rectangle includes the overlap, including transparent pixels. */
+    sheet_recompose(sheet->ctl, old_x, old_y, old_right, top);
+    sheet_recompose(sheet->ctl, old_x, overlap_bottom, old_right, old_bottom);
+    sheet_recompose(sheet->ctl, old_x, top, left, overlap_bottom);
+    sheet_recompose(sheet->ctl, overlap_right, top, old_right, overlap_bottom);
   }
+  sheet_recompose(sheet->ctl, x, y, right, bottom);
 }
 
 void sheet_free(struct SHEET *sheet) {
