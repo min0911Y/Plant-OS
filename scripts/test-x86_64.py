@@ -494,6 +494,51 @@ def exercise_usb(qmp_path, serial, guest, deadline, keyboard_bus, keyboard_port,
         qmp.close()
 
 
+def exercise_rendertm(qmp_path, serial, output):
+    qmp = QMP(qmp_path)
+    try:
+        def wait_marker(marker):
+            deadline = time.monotonic() + 45
+            while marker not in serial.read_text(errors="replace"):
+                if time.monotonic() >= deadline:
+                    raise RuntimeError(f"RenderTM missing {marker}")
+                time.sleep(0.1)
+
+        text = serial.read_text(errors="replace")
+        terminals = re.findall(r"TERM ready x=(-?\d+) y=(-?\d+) width=(\d+) height=(\d+)", text)
+        left, top, w, h = map(int, terminals[-1])
+        width, height, _ = qmp.screenshot(output / "rendertm-desktop.ppm")
+        qmp.move(-width, -height)
+        qmp.move(left + w // 2, top + h // 2)
+        qmp.press("btn", button="left")
+
+        def capture(phase):
+            time.sleep(1)
+            width, height, pixels = qmp.screenshot(output / f"rendertm-{phase}.ppm")
+            x, y = left + 4, top + 24
+            client = b"".join(pixels[((y + row) * width + x) * 3:
+                                    ((y + row) * width + x + w - 8) * 3]
+                              for row in range(h - 28))
+            colors = Counter(client[i:i + 3] for i in range(0, len(client), 3))
+            if len(colors) < 100:
+                raise RuntimeError("RenderTM terminal contains no detailed rendered terrain")
+            return client
+
+        initial = capture("initial")
+        for key, marker in (("w", "move=1"), ("p", "paused=1"),
+                            ("o", "ao=0"), ("g", "gi=1")):
+            qmp.press("key", key={"type": "qcode", "data": key})
+            wait_marker(marker)
+        qmp.move(w // 4, -h // 4)
+        wait_marker("look=1")
+        if initial == capture("moved"):
+            raise RuntimeError("RenderTM terminal pixels did not change after input")
+        qmp.press("key", key={"type": "qcode", "data": "q"})
+        wait_marker("RENDERTM EXIT status=0")
+    finally:
+        qmp.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--arch", choices=("x86_64", "i386"), default="x86_64")
@@ -535,9 +580,12 @@ def main():
                           help="exhaust free pages, verify failed thread creation rolls back and programs recover")
     gui_mode.add_argument("--editor", action="store_true", help="edit and save files with pl_editor inside term using real keyboard events")
     gui_mode.add_argument("--sdl", action="store_true", help="validate SDL3 surfaces, renderer, image IO, fonts and input")
+    gui_mode.add_argument("--rendertm", action="store_true", help="validate RenderTM inside the native terminal")
+    gui_mode.add_argument("--renderhd", action="store_true", help="validate the native-resolution SDL3 RenderTM and parallel renderer")
     gui_mode.add_argument("--desktop-app", choices=("lite", "nk"), help="capture and close an SDL desktop application")
     gui_mode.add_argument("--tools", action="store_true", help="run C4 pointer/VM, NASM object and JavaScript regressions")
     gui_mode.add_argument("--dynamic", action="store_true", help="run user ELF interpreter, shared libraries and page protection regressions")
+    gui_mode.add_argument("--sched-fair", action="store_true", help="measure yielding worker fairness (use --cpus 1)")
     gui_mode.add_argument("--sched-balance", action="store_true", help="benchmark long/short runnable jobs and idle load balancing")
     gui_mode.add_argument("--sched-bench", type=int, metavar="SLEEPERS", help="measure scheduler handoff, yield and compute before/during/after parked threads")
     gui_mode.add_argument("--futex", action="store_true", help="validate native futex wait/wake, cancellation and concurrent allocation")
@@ -603,6 +651,12 @@ def main():
     if args.sdl:
         commands = ["timetest.bin", "sdltest.bin"]
         expected = ["TIMETEST PASS", "SDLTEST PASS", "SDLFRAME PASS"]
+    if args.rendertm:
+        commands = ["rpctest.bin", "guitest.bin rendertm"]
+        expected = ["RPCTEST done checks=23 fails=0", "RENDERTM EXIT status=0"]
+    if args.renderhd:
+        commands = ["guitest.bin renderhd"]
+        expected = ["RENDERHD VERIFY frame=2", "RENDERHD PASS pixels keyboard mouse AO GI pause"]
     if args.desktop_app:
         commands = ["timetest.bin", f"sdltest.bin {args.desktop_app}.bin"]
         expected = ["TIMETEST PASS", f"SDLAPP EXIT {args.desktop_app}.bin status=0"]
@@ -618,6 +672,9 @@ def main():
                  f"ARCH={args.arch}", "list-apps"], text=True).splitlines()
             commands = ["dyntest.bin --all"]
             expected.append(f"DYNAPPS PASS count={len(programs)}")
+    if args.sched_fair:
+        commands = ["schbench.bin fair"]
+        expected = ["SCHEDFAIR PASS", "SCHEDFAIR repeat=7 "]
     if args.sched_balance:
         commands = ["schbench.bin balance"]
         expected = ["SCHEDBALANCE PASS", "SCHEDBALANCE repeat=7 "]
@@ -772,7 +829,7 @@ def main():
         pcid, invpcid = {"pcid-invpcid": (1, 1), "pcid": (1, 0),
                         "invpcid": (0, 1), "cr3": (0, 0)}[args.tlb]
         cpu += f",pcid={'on' if pcid else 'off'},invpcid={'on' if invpcid else 'off'},enforce"
-    if args.cube or args.gears_bench or args.compute_bench or args.sched_bench is not None or args.sched_balance:
+    if args.cube or args.gears_bench or args.compute_bench or args.sched_bench is not None or args.sched_balance or args.sched_fair:
         configuration = {"arch": args.arch, "firmware": args.firmware,
                          "accel": args.accel, "cpu": cpu, "cpus": args.cpus,
                          "memory_mib": args.memory, "machine": args.machine,
@@ -1055,6 +1112,52 @@ def main():
                                 frames_checked.add(phase)
                             finally:
                                 qmp.close()
+                        for phase, left, top, client_width, client_height, checksum, paused, ao, gi in re.findall(
+                                r"RENDERHD FRAME phase=(\d+) x=(-?\d+) y=(-?\d+) width=(\d+) height=(\d+) hash=([0-9a-f]+) paused=(\d) ao=(\d) gi=(\d)", text):
+                            if not args.renderhd or phase in frames_checked:
+                                continue
+                            qmp = QMP(qmp_path)
+                            try:
+                                width, height, pixels = qmp.screenshot(output / f"renderhd-{phase}.ppm")
+                                # GUI startup finishes before guitest launches this window;
+                                # the renderer is the topmost window. Keep the cursor outside it.
+                                if phase == "0":
+                                    qmp.move(-width, -height)
+                                    width, height, pixels = qmp.screenshot(output / f"renderhd-{phase}.ppm")
+                                x, y = int(left) + 4, int(top) + 24
+                                w, h = int(client_width), int(client_height)
+                                if (w, h) != (480, 300):
+                                    raise RuntimeError("RenderHD did not render at the requested native resolution")
+                                if x < 0 or y < 0 or x + w > width or y + h > height:
+                                    raise RuntimeError("RenderHD window is outside the display")
+                                client = b"".join(pixels[((y + row) * width + x) * 3:
+                                                        ((y + row) * width + x + w) * 3]
+                                                  for row in range(h))
+                                actual = 2166136261
+                                for byte in client:
+                                    actual = ((actual ^ byte) * 16777619) & 0xffffffff
+                                if actual != int(checksum, 16):
+                                    raise RuntimeError(f"RenderHD presented pixels differ: {actual:08x} != {checksum}")
+                                if (int(paused), int(ao), int(gi)) != (int(phase != "5"), int(int(phase) < 3), int(int(phase) >= 4)):
+                                    raise RuntimeError("RenderHD controls did not update renderer settings")
+                                colors = Counter(client[i:i + 3] for i in range(0, len(client), 3))
+                                if len(colors) < 1000:
+                                    raise RuntimeError("RenderHD frame lacks high-resolution terrain detail")
+                                if phase != "0" and client == (output / f"renderhd-{int(phase) - 1}.rgb").read_bytes():
+                                    raise RuntimeError(f"RenderHD frame {phase} did not change")
+                                (output / f"renderhd-{phase}.rgb").write_bytes(client)
+                                if phase == "1":
+                                    qmp.move(x + w * 3 // 4, y + h // 2)
+                                    qmp.move(-width, -height)
+                                else:
+                                    key = {"0": "w", "2": "o", "3": "g", "4": "p", "5": "q"}[phase]
+                                    qmp.press("key", key={"type": "qcode", "data": key})
+                                frames_checked.add(phase)
+                            finally:
+                                qmp.close()
+                        if args.rendertm and "RENDERTM OUTPUT" in text and "rendertm" not in frames_checked:
+                            exercise_rendertm(qmp_path, serial, output)
+                            frames_checked.add("rendertm")
                         for phase, left, top, client_width, client_height, checksum in re.findall(
                                 r"GLXGEARS FRAME phase=(\d+) x=(-?\d+) y=(-?\d+) width=(\d+) height=(\d+) hash=([0-9a-f]+)", text):
                             if not args.opengl or phase in frames_checked:

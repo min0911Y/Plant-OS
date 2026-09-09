@@ -45,6 +45,8 @@ static struct {
   int shell_status;
   gui_event_queue_t input;
   int key;
+  tty_pointer_t pointer;
+  bool pointer_valid;
   bool extended[2];
 } term = {.key = -1};
 
@@ -233,6 +235,10 @@ static int terminal_dispatch(rpc_call_t *call) {
   case TTY_RPC_INPUT_GET:
     reply.value = gui_event_queue_pop(&term.input);
     break;
+  case TTY_RPC_POINTER:
+    reply.value = term.pointer_valid ? 0 : -1;
+    reply.pointer = term.pointer;
+    break;
   default:
     return RPC_ERR_BAD_OPCODE;
   }
@@ -260,7 +266,16 @@ static int terminal_run(void) {
     while ((event = window_get_event(term.window)) >= 0) {
       if (event == GUI_EVENT_CLOSE_WINDOW)
         return 0;
-      window_get_event(term.window); // Mouse coordinates.
+      uint32_t coordinates = window_get_event(term.window);
+      int x = (int16_t)(coordinates >> 16) - BORDER;
+      int y = (int16_t)coordinates - TITLE_HEIGHT;
+      int width = term.width - 2 * BORDER;
+      int height = term.height - TITLE_HEIGHT - BORDER;
+      if (x >= 0 && y >= 0 && x < width && y < height) {
+        term.pointer.column = (int64_t)x * term.columns / width + 1;
+        term.pointer.row = (int64_t)y * term.rows / height + 1;
+        term.pointer_valid = true;
+      }
       if (event == GUI_EVENT_MOUSE_WHEEL) {
         int direction = window_get_event(term.window);
         terminal_handle_mouse_scroll(term.emulator, direction == 1 ? 1 : -1);

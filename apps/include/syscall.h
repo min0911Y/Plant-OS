@@ -146,7 +146,7 @@ void Draw_Str(int x, int y, char *str, int color);
 void sleep(int time);
 void PrintChineseChar(int x, int y, int color, unsigned short cChar);
 void PrintChineseStr(int x, int y, int color, unsigned char *cStr);
-void print(char *str);
+void print(const char *str);
 void scan(char *str, int length);
 int system(char *command);
 void bmpview(char *filename);

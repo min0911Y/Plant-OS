@@ -23,7 +23,7 @@ static void fartty_wake(struct tty *tty) {
 }
 
 static int fartty_call(struct tty *tty, tty_rpc_request_t *request,
-                       unsigned size) {
+                       unsigned size, tty_rpc_reply_t *out_reply) {
   mtask *self = current_task();
   if (self->tid == tty->remote.server.tid)
     return -1;
@@ -60,7 +60,22 @@ static int fartty_call(struct tty *tty, tty_rpc_request_t *request,
   tty->remote.busy = (rpc_endpoint_t){0};
   fartty_wake(tty);
   irq_restore(state);
+  if (valid && out_reply != NULL)
+    *out_reply = reply;
   return valid ? reply.value : -1;
+}
+
+int fartty_get_pointer(struct tty *tty, tty_pointer_t *pointer) {
+  if (tty == NULL || !tty->using1 || tty->remote.handle == 0)
+    return -1;
+  tty_rpc_request_t request = {.operation = TTY_RPC_POINTER};
+  tty_rpc_reply_t reply;
+  if (fartty_call(tty, &request, sizeof(request), &reply) != 0 ||
+      reply.pointer.column <= 0 || reply.pointer.column > tty->xsize ||
+      reply.pointer.row <= 0 || reply.pointer.row > tty->ysize)
+    return -1;
+  *pointer = reply.pointer;
+  return 0;
 }
 
 static void fartty_putchar(struct tty *tty, int c) {
@@ -68,7 +83,7 @@ static void fartty_putchar(struct tty *tty, int c) {
     tty_rpc_request_t request;
     char text;
   } message = {.request.operation = TTY_RPC_WRITE, .text = (char)c};
-  fartty_call(tty, &message.request, sizeof(message.request) + 1);
+  fartty_call(tty, &message.request, sizeof(message.request) + 1, NULL);
 }
 
 static void fartty_print(struct tty *tty, const char *text) {
@@ -84,7 +99,7 @@ static void fartty_print(struct tty *tty, const char *text) {
       message.text[length] = text[length];
       length++;
     }
-    fartty_call(tty, &message.request, sizeof(message.request) + length);
+    fartty_call(tty, &message.request, sizeof(message.request) + length, NULL);
     text += length;
   }
 }
@@ -94,17 +109,17 @@ static void fartty_move(struct tty *tty, int x, int y) {
     return;
   tty_rpc_request_t request = {.operation = TTY_RPC_MOVE,
                                .args.cursor = {x, y}};
-  fartty_call(tty, &request, sizeof(request));
+  fartty_call(tty, &request, sizeof(request), NULL);
 }
 
 static void fartty_clear(struct tty *tty) {
   tty_rpc_request_t request = {.operation = TTY_RPC_CLEAR};
-  fartty_call(tty, &request, sizeof(request));
+  fartty_call(tty, &request, sizeof(request), NULL);
 }
 
 static void fartty_scroll(struct tty *tty) {
   tty_rpc_request_t request = {.operation = TTY_RPC_SCROLL};
-  fartty_call(tty, &request, sizeof(request));
+  fartty_call(tty, &request, sizeof(request), NULL);
 }
 
 static void fartty_draw_box(struct tty *tty, int x, int y, int x1, int y1,
@@ -114,18 +129,18 @@ static void fartty_draw_box(struct tty *tty, int x, int y, int x1, int y1,
     return;
   tty_rpc_request_t request = {.operation = TTY_RPC_DRAW_BOX,
                                .args.box = {x, y, x1, y1, color}};
-  fartty_call(tty, &request, sizeof(request));
+  fartty_call(tty, &request, sizeof(request), NULL);
 }
 
 static int fartty_fifo_status(struct tty *tty) {
   tty_rpc_request_t request = {.operation = TTY_RPC_INPUT_STATUS};
-  int count = fartty_call(tty, &request, sizeof(request));
+  int count = fartty_call(tty, &request, sizeof(request), NULL);
   return count > 0 ? count : 0;
 }
 
 static int fartty_fifo_get(struct tty *tty) {
   tty_rpc_request_t request = {.operation = TTY_RPC_INPUT_GET};
-  int key = fartty_call(tty, &request, sizeof(request));
+  int key = fartty_call(tty, &request, sizeof(request), NULL);
   return key >= 0 && key <= 255 ? key : -1;
 }
 

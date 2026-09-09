@@ -174,6 +174,8 @@ Mimg : make_dir $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $
 		mcopy -i ./disk.img $(RESPATH)g.nes ::
 		mcopy -i ./disk.img $(APPSOUTPATH)gui.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)term.bin ::
+		mcopy -i ./disk.img $(APPSOUTPATH)rendertm.bin ::
+		mcopy -i ./disk.img $(APPSOUTPATH)renderhd.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)editor.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)psh.bin ::
 		mcopy -i ./disk.img $(APPSOUTPATH)nasm.bin ::
@@ -272,6 +274,8 @@ Mimg : make_dir $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $
 		mcopy -i boot.img $(RESPATH)g.nes ::
 		mcopy -i boot.img $(APPSOUTPATH)gui.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)term.bin ::
+		mcopy -i boot.img $(APPSOUTPATH)rendertm.bin ::
+		mcopy -i boot.img $(APPSOUTPATH)renderhd.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)editor.bin ::
 
 

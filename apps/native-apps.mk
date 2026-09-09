@@ -27,6 +27,7 @@ endef
 
 $(eval $(call library,sdl3,$(SDL_SOURCES)))
 SDL_CFLAGS := -Isdl3/include -ISDL3_image/include -ISDL3_ttf/include
+include rendertm/build.mk
 $(BUILD)/sdl3/%.o: CFLAGS += $(SDL_CFLAGS) -Isdl3/config -Isdl3/src \
   -Isdl3/src/video/khronos -Imesa/include
 $(call objects,$(SDL_SOURCES)): sdl3/sources.mk

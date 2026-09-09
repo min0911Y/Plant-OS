@@ -39,6 +39,8 @@ typedef struct {
   uint64_t load;
   uint32_t movable;
   uint64_t min_vruntime;
+  uint64_t accounted_at;
+  uint32_t accounted_weight;
   uint32_t need_resched;
 } scheduler_cpu_t;
 
@@ -48,6 +50,20 @@ static uint32_t scheduler_cpu_total = 1;
 static uint32_t scheduler_active;
 static uint64_t scheduler_ticks;
 static mtask *retired_tasks;
+
+static void scheduler_account(uint32_t index) {
+  scheduler_cpu_t *cpu = &scheduler_cpus[index];
+  uint64_t now = arch_task_clock_ns(index);
+  uint64_t elapsed = now - cpu->accounted_at;
+  cpu->accounted_at = now;
+  mtask *task = cpu->current;
+  if (!task)
+    return;
+  task->runtime_ns += elapsed;
+  if (!(task->sched_flags & TASK_SCHED_IDLE))
+    task->vruntime += elapsed / cpu->accounted_weight;
+  cpu->accounted_weight = task->weight ? task->weight : 1;
+}
 
 static bool task_slot_in_use(const mtask *task) {
   return task != NULL && task->state != EMPTY && task->state != WILL_EMPTY &&
@@ -192,12 +208,25 @@ static void task_set_state(mtask *task, enum STATE state) {
 
 void task_set_weight(mtask *task, unsigned weight) {
   irq_state_t state = irq_save();
+  if (task->weight == weight) {
+    irq_restore(state);
+    return;
+  }
+  bool local = scheduler_active && task == current_task();
+  if (local)
+    scheduler_account(smp_current_cpu());
   if (task->run_previous) {
     scheduler_cpu_t *cpu = &scheduler_cpus[task->cpu];
     cpu->load -= task->weight ? task->weight : 1;
     cpu->load += weight ? weight : 1;
   }
   task->weight = weight;
+  if (local)
+    scheduler_cpus[smp_current_cpu()].accounted_weight = weight ? weight : 1;
+  /* A remote running task retains its interval's old weight until its next
+   * accounting boundary; do not apply the new weight retroactively. */
+  if (task->on_cpu && !local)
+    smp_send_reschedule(task->cpu);
   irq_restore(state);
 }
 
@@ -241,8 +270,7 @@ static void scheduler_place_task(mtask *task, uint32_t cpu) {
   scheduler_remove(task);
   task->cpu = cpu;
   scheduler_insert(task);
-  task->vruntime =
-      (target->min_vruntime > 1 ? target->min_vruntime - 1 : 0) + lag;
+  task->vruntime = target->min_vruntime + lag;
   scheduler_request(cpu);
 }
 
@@ -286,8 +314,10 @@ static mtask *scheduler_pick_next(scheduler_cpu_t *cpu, uint32_t cpu_index) {
   mtask *current = cpu->current;
   mtask *hint = cpu->next;
   mtask *next;
+  uint64_t minimum;
   cpu->next = NULL;
 restart:
+  minimum = UINT64_MAX;
   next = hint;
   if (!scheduler_task_eligible(next, cpu_index, current)) {
     next = NULL;
@@ -305,6 +335,8 @@ restart:
     if (!scheduler_task_eligible(candidate, cpu_index, current)) {
       continue;
     }
+    if (candidate->vruntime < minimum)
+      minimum = candidate->vruntime;
     if (next == NULL || candidate->urgent > next->urgent ||
         (candidate->urgent == next->urgent &&
          (candidate->vruntime < next->vruntime ||
@@ -313,6 +345,11 @@ restart:
       next = candidate;
     }
   }
+  if (minimum == UINT64_MAX && current->cpu == cpu_index &&
+      !(current->sched_flags & TASK_SCHED_IDLE))
+    minimum = current->vruntime;
+  if (minimum != UINT64_MAX && minimum > cpu->min_vruntime)
+    cpu->min_vruntime = minimum;
   return next != NULL ? next : cpu->idle;
 }
 
@@ -368,14 +405,6 @@ void scheduler_tick(void) {
   }
   uint32_t cpu_index = smp_current_cpu();
   scheduler_cpu_t *cpu = &scheduler_cpus[cpu_index];
-  mtask *current = cpu->current;
-  if (current != NULL) {
-    current->runtime_ticks++;
-    if (!(current->sched_flags & TASK_SCHED_IDLE)) {
-      uint32_t weight = current->weight ? current->weight : 1;
-      current->vruntime += 1024u / weight;
-    }
-  }
   cpu->need_resched = 1;
   if (cpu_index == 0 && ++scheduler_ticks % 10 == 0) {
     scheduler_balance();
@@ -410,6 +439,7 @@ void task_next(void) {
   if (current == NULL) {
     return;
   }
+  scheduler_account(cpu_index);
   /* These stacks were retired by earlier switches, never by this invocation. */
   while (retired_tasks) {
     mtask *task = retired_tasks;
@@ -435,9 +465,7 @@ void task_next(void) {
   next->urgent = 0;
   next->ready = 0;
   cpu->need_resched = 0;
-  if (next->vruntime > cpu->min_vruntime) {
-    cpu->min_vruntime = next->vruntime;
-  }
+  cpu->accounted_weight = next->weight ? next->weight : 1;
   if (next == current) {
     return;
   }
@@ -900,6 +928,8 @@ int into_mtask() {
 
   (void)irq_save();
   arch_task_clock_init(0);
+  scheduler_cpus[0].accounted_at = arch_task_clock_ns(0);
+  scheduler_cpus[0].accounted_weight = init_task->weight;
   scheduler_active = 1;
   init_task->on_cpu = 1;
   arch_task_start(init_task->context, init_task->address_space,
@@ -912,6 +942,8 @@ __attribute__((noreturn)) void scheduler_start_secondary(uint32_t cpu) {
     arch_halt();
   }
   arch_task_clock_init(cpu);
+  scheduler_cpus[cpu].accounted_at = arch_task_clock_ns(cpu);
+  scheduler_cpus[cpu].accounted_weight = idle->weight;
   idle->on_cpu = 1;
   arch_task_start(idle->context, idle->address_space, &scheduler_cpus[cpu].current,
                   idle);
@@ -1015,6 +1047,7 @@ void task_close_tty(struct tty *tty, struct tty *fallback) {
 }
 
 int task_snapshot(task_info_t *entries, uint32_t capacity, uint32_t *count) {
+  scheduler_account(smp_current_cpu());
   uint32_t required = 0;
   for (uint32_t i = 0; i < task_registry.slot_count; i++) {
     enum STATE state = task_slot_at(i)->state;
@@ -1046,7 +1079,7 @@ int task_snapshot(task_info_t *entries, uint32_t capacity, uint32_t *count) {
     info->cpu = task->cpu;
     info->kind = task->kind;
     info->flags = task->on_cpu ? TASK_INFO_FLAG_ON_CPU : 0;
-    info->runtime_ms = task->runtime_ticks * 10ull;
+    info->runtime_ms = task->runtime_ns / 1000000ull;
     switch (task->state) {
     case RUNNING:
       info->state = TASK_INFO_RUNNING;
@@ -1387,7 +1420,7 @@ int task_fork() {
   child->run_next = NULL;
   child->run_previous = NULL;
   child->sched_flags = 0;
-  child->runtime_ticks = 0;
+  child->runtime_ns = 0;
   child->terminate_pending = 0;
   child->terminate_status = 0;
   child->top = 0;

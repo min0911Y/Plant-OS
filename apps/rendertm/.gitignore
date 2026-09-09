@@ -1,0 +1,10 @@
+# Build cache
+/build
+
+# Other files
+AGENTS.md
+/.idea
+
+# Perf related files
+perf.*
+report.txt

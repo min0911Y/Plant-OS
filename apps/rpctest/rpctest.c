@@ -496,6 +496,9 @@ static int tty_test_dispatch(rpc_call_t *call) {
   case TTY_RPC_INPUT_STATUS:
     reply.value = 1;
     break;
+  case TTY_RPC_POINTER:
+    reply.pointer = (tty_pointer_t){23, 12};
+    break;
   case TTY_RPC_INPUT_GET:
     tty_test.reads++;
     reply.value = tty_test.reads == 1 ? -1 : 42;
@@ -542,6 +545,10 @@ static int tty_test_writer(rpc_endpoint_t server) {
     failed |= ipc_recv_any(NULL, 0, &got, 500) < 0 || got.type != RAW_TYPE;
   }
   failed |= tty_get_xsize() != 80 || tty_get_ysize() != 25;
+  tty_pointer_t pointer;
+  failed |= tty_get_pointer(NULL) != -1;
+  failed |= tty_get_pointer(&pointer) != 0 || pointer.column != 23 ||
+            pointer.row != 12;
   goto_xy(7, 3);
   failed |= get_xy() != (7 << 16 | 3);
   tty_stop_cur_moving();

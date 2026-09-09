@@ -6,4 +6,5 @@
 struct tty *fartty_alloc(mtask *server, unsigned opcode, int xsize, int ysize);
 struct tty *fartty_lookup(uintptr_t handle);
 void fartty_task_cleanup(mtask *task);
+int fartty_get_pointer(struct tty *tty, tty_pointer_t *pointer);
 #endif

@@ -33,9 +33,22 @@ CPU 全部绑核或仅有正在运行的任务而中止，会继续检查其他�
 将某个 CPU 唯一的 runnable 任务在空闲 CPU 间来回搬移。迁移排除 on_cpu、
 PINNED 和 terminate_pending，保留既有 vruntime 归一化与 reschedule 通知。
 
-tick 记账、urgent 优待和全局内核锁仍保留。这里的负载是调度权重，并非
-实际 CPU 利用率；未来的精确时间记账、缓存迁移代价和拆锁仍须单独测量。
-当前也没有 tickless idle 或硬实时唤醒保证。
+运行时间在实际调度边界结算：每 CPU 保存上次时间戳及该区间的权重，按
+`elapsed / weight` 累计 vruntime，同时累计任务的纳秒运行时间。阻塞、yield、
+抢占都进入同一结算路径；当前任务改权重前先按旧权重结算，远端运行任务通过
+重调度通知在下次边界切换记账权重，不能把新权重追溯用于整个旧区间。
+`min_vruntime` 来自真实 runnable 最小值，不能因选中 urgent 任务就跳过其他
+任务的进度。迁移只归一化 vruntime，CPU 时钟原始时间戳始终留在所属 CPU。
+
+公开 `task_info_t` 的大小和 `runtime_ms` 单位不变，后者为已结算纳秒数向下
+取整到毫秒；查询同时结算调用 CPU 的当前区间，其他 CPU 显示其最近边界的
+累计值。fork 的运行时间从零开始，阻塞期间不计入运行时间。这里测量的是
+被调度期间经过的时间，包含内核执行及虚拟机暂停/steal；尚未扣除 KVM steal
+时间，不能当成硬件实际执行周期或精确的用户态 CPU 时间。
+
+urgent 优待和全局内核锁仍保留。负载仍是调度权重，并非实际 CPU 利用率；
+缓存迁移代价、唤醒优待的饥饿边界和拆锁仍须单独评估。当前没有 tickless idle
+或硬实时唤醒保证。
 
 ## 原生基准
 
@@ -194,3 +207,70 @@ compute 批次由约 5.2–5.3 ms 降至约 2.9–3.1 ms，包含更及时调度
 `--sched-balance` 和 DOSLDR 磁盘基准。比较器同时验证旧基准与均衡基准，
 拒绝混合测试类型或不同 CPU 配置。未添加用户绑核 ABI，未改全局内核锁或
 时间记账，也未将此结果外推到裸机。
+
+## 调度时钟与公平性（2026-09-09）
+
+架构后端在启动每个 CPU 的第一个任务前选定时钟，不在运行中切换时间基准。
+
+- KVM 的 `CLOCKSOURCE2` 可用且 CPU 支持 RDTSCP 时，注册该 CPU 的 pvclock
+  记录，按相同偶数版本读取参考 TSC、系统时间、倍率和移位。记录使用常驻
+  内核内存，经正式物理地址映射 API 交付，绝不引用用户地址或临时栈。
+  64×32 位缩放拆为两个乘积，不依赖 i386 的 128 位整数 ABI；移位和溢出
+  输入须验证。只比较同 CPU 的时间戳，不假设 KVM 跨 CPU stable 标志存在。
+- 裸机或未提供 KVM 时钟的环境，只有 invariant TSC、RDTSCP 和有效频率都
+  满足时才使用 TSC。绝对计数转换拆分商和余数，避免直接乘一百万溢出。
+- 其余环境使用现有平台时钟。HPET 读取可能较贵；没有 HPET 时平台回退
+  tick 的分辨率，无法保证亚 tick 记账。三条路径均有启动回归，但不保证
+  缺少快时钟的配置具有相同性能。
+
+协议依据为 [KVM 时钟 MSR 规范](https://docs.kernel.org/virt/kvm/x86/msr.html)。
+没有引入 Linux 运行时、宿主 libc 或公共时钟 ABI。i386 使用 RDTSCP 和整数
+内存屏障，不引入 SSE fence；CPU 查询复用启动时验证的 TSC_AUX 编号，避免
+在每次 syscall/切换中反复读 APIC 和扫描 CPU 表。公共调度逻辑不含这些硬件
+细节，也不增加每任务时钟状态；计时锚点及区间权重归每 CPU 所有。
+
+```sh
+schbench.bin fair 7
+python3 scripts/test-x86_64.py --sched-fair --cpus 1 --accel kvm --cpu host \
+  --memory 2048 --timeout 600 --out /tmp/fair-new
+python3 scripts/compare-scheduler.py /tmp/fair-base /tmp/fair-new \
+  --out /tmp/fair-comparison.json
+```
+
+两个 worker 各执行 2000 轮，每轮完成 4096 次有数据依赖的 xorshift 后调用
+`api_yield()`。原子进度计数记录任意时刻领先对方的最大轮数 `max_lead`；
+只在整体开始/结束读取时间，不在每轮引入计时 syscall。所有结果对照完整
+计算校验值。`first_ms`、`second_ms` 为 worker 完成后、退出前的任务统计。
+该公平性指标用于单个 CPU 上的竞争；x86_64 使用 `--cpus 1`，i386 即使
+配置多个 CPU，同地址空间的两个 worker 仍竞争一个 CPU。
+
+基线为 `35d7a8d`，两侧使用相同的新基准。宿主和 KVM/QEMU 配置与前述实验
+一致，x86_64 使用 1 vCPU、2048 MiB，i386 使用 4 vCPU、512 MiB。
+各预热 1 轮、测量 7 轮，以下为相邻基线/改进版复测的中位数：
+
+| 架构 | 最大进度差：基线 → 改进 | 进度差减少 | 整批时间：基线 → 改进 |
+| --- | --- | --- | --- |
+| x86_64 | 1999 → 31 轮 | 98.45% | 19.427 → 19.896 ms（增加 2.42%） |
+| i386 | 299 → 21 轮 | 92.98% | 136.212 → 21.476 ms（减少 84.23%） |
+
+x86_64 的主要收益是公平性及记账粒度，不能称作吞吐加速；i386 同时获益于
+移除 CPU 身份查询的 APIC 访问。x86_64 基线会将执行过约半数计算的 worker
+记为 0 ms，改进版各 worker 通常显示 9–10 ms。按经过时间公平不等于严格
+逐轮轮转，因此不要求最大进度差恒为 1。
+
+无竞争的 x86_64 1000 次 yield 批次从约 119 µs 增至约 135 µs，这是新增
+记账的实际成本；四核混合任务仍约 52 ms。futex 分位数继续保留原始记录，
+不从单次前后对照推断稳定收益。不同架构结果不横向比较，未进行裸机或 KVM
+在线迁移/steal 校正验证。
+
+最终复测记录为 `/tmp/sched-account-base-confirm`、`/tmp/sched-account-final`、
+`/tmp/sched-account-base-i386`、`/tmp/sched-account-identity-fair`；比较结果为
+`/tmp/sched-account-final.json`、`/tmp/sched-account-identity.json`。
+比较脚本输出显式 `unit`，时间为 ns、进度差为 rounds，避免将轮数误标为时间。
+
+验证覆盖 KVM pvclock、禁用 kvmclock 后的 invariant TSC、禁用两种快时钟后的
+平台回退，以及 TCG；i386 另验证禁用 RDTSCP 时保持 APIC 查询。两种架构均
+完成完整构建和 BIOS 集成回归，x86_64 完成 UEFI 线程回归，覆盖 IPC/RPC、
+文件系统、动态链接/VM、浮点、线程退出与 GUI 实际输入。DOSLDR 磁盘启动也
+运行公平性基准并通过；反汇编确认 i386 时钟和 CPU 查询对象未引入 SSE。
+测试结束恢复普通启动脚本及镜像。

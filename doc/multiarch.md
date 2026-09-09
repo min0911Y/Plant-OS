@@ -93,7 +93,19 @@ python3 scripts/test-x86_64.py --cpu max,xsave=off,xsaveopt=off,xsavec=off,xsave
 python3 scripts/test-x86_64.py --accel kvm --cpu host,enforce
 ```
 
-全局单调时钟由 `kernel/arch/x86/common/clock.c` 统一选择，启动与运行中回退共用
+调度专用时钟集中在 `kernel/arch/x86/common/clock.c`，通过 `arch.h` 提供
+CPU 本地纳秒读数。KVM 下使用版本化 pvclock；其他环境在支持 invariant TSC、
+RDTSCP 且频率可用时使用 TSC，否则回退平台时钟。公共 `monotonic_ns()` 的 ABI 不变。
+APIC 与调度时钟共享频率探测：使用 CPUID 0x15 的晶振比例或 HPET 实际经过
+时间校准，不将 CPUID 0x16 的核心标称 MHz 当成 TSC 频率。
+
+i386 在每个 CPU 支持 RDTSCP 时将逻辑 CPU 编号写入 IA32_TSC_AUX；BSP 仅在
+所有发现的 CPU 都完成初始化后发布快速查询路径，包含尚未完成启动的 AP。
+不满足条件时继续读取 APIC 并查询拓扑，不执行不受支持的指令。TSC_AUX 是
+CPU 身份而非线程 TLS，任务切换不会改写它；该路径不需要 SSE 或新 syscall。
+时钟协议、测量限制和基准见 [调度器](scheduler.md)。
+
+全局单调时钟也由该架构后端统一选择，启动与运行中回退共用
 **pvclock → invariant TSC → 平台时钟（HPET/PIT）** 的优先级：
 
 - pvclock 须同时具备 KVM CPUID 0x40000001 bit 24 与版本一致的 flags bit 0，

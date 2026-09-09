@@ -167,7 +167,7 @@ typedef struct mtask {
   /* Intrusive runnable links; only run_next is reused after retirement. */
   struct mtask *run_next, **run_previous;
   uint64_t vruntime;
-  uint64_t runtime_ticks;
+  uint64_t runtime_ns;
   uint16_t cpu;
   uint8_t on_cpu;
   uint8_t sched_flags;

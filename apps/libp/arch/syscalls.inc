@@ -112,3 +112,4 @@ CALL futex_syscall, 0x67, a0, a1, a2
 CALL thread_syscall, 0x68, a0, a1, a2
 CALL native_thread_pointer, 0x68, 2
 CALL _Exit, 0x68, 7, a0
+CALL tty_get_pointer, 0x69, a0

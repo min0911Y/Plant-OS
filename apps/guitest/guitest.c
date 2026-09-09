@@ -736,6 +736,15 @@ int main(int argc, char **argv) {
     return gui_test_editor_client();
   if (argc == 2 && strcmp(argv[1], "terminal-client") == 0)
     return gui_test_terminal_client();
+  if (argc == 2 && strcmp(argv[1], "rendertm-client") == 0) {
+    print("RenderTM return test\n");
+    int saved_cursor = get_xy();
+    int status = exec("rendertm.bin", "rendertm.bin --test");
+    if (get_xy() != saved_cursor)
+      status = 1;
+    logkf("RENDERTM EXIT status=%d\n", status);
+    return status;
+  }
   if (argc == 4 && strcmp(argv[1], "worker") == 0) {
     int parent_tid = atoi(argv[2]);
     int index = atoi(argv[3]);
@@ -781,6 +790,15 @@ int main(int argc, char **argv) {
     result = exec("term.bin", "term.bin guitest.bin terminal-client");
     logkf("GUITERM %s\n", result == 0 ? "PASS" : "FAIL");
     return result;
+  }
+  if (argc == 2 && strcmp(argv[1], "rendertm") == 0)
+    return exec("term.bin", "term.bin guitest.bin rendertm-client");
+  if (argc == 2 && strcmp(argv[1], "renderhd") == 0) {
+#ifdef PLANT_ARCH_X86_64
+    return exec("renderhd.bin", "renderhd.bin --test");
+#else
+    return exec("renderhd.bin", "renderhd.bin --test --workers 2");
+#endif
   }
   if (argc == 2 && strcmp(argv[1], "editor") == 0) {
     result = exec("term.bin", "term.bin guitest.bin editor-client");

@@ -1,0 +1,32 @@
+#pragma once
+
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <cctype>
+#include <cerrno>
+#include <charconv>
+#include <chrono>
+#include <signal.h>
+#include <cmath>
+#include <condition_variable>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <cstdio>
+#include <iterator>
+#include <limits>
+#include <mutex>
+#include <numbers>
+#include <numeric>
+#include <optional>
+#include <random>
+#include <span>
+#include <stop_token>
+#include <string>
+#include <string_view>
+#include <thread>
+#include <utility>
+#include <vector>
+
+#include "platform.hpp"

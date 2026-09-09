@@ -9,6 +9,8 @@ BENCHMARKS = {
     "SCHEDBENCH": (("before", "parked", "after"),
                    ("handoff_ns", "p50_ns", "p95_ns", "p99_ns", "yield_ns", "compute_ns"),
                    ("sleepers", "cpus", "rounds", "work")),
+    "SCHEDFAIR": (("fair",), ("elapsed_ns", "max_lead"),
+                  ("cpus", "rounds", "work")),
     "SCHEDBALANCE": (("balance",), ("elapsed_ns",),
                      ("cpus", "jobs", "long_jobs", "short_work", "long_work")),
 }
@@ -27,10 +29,11 @@ def read_run(directory):
         if not line.startswith(suite + " ") or line == suite + " PASS":
             continue
         fields = dict(field.split("=", 1) for field in line.split()[1:])
-        phase = fields.pop("phase", "balance")
+        phase = fields.pop("phase", phases[0])
         record = {key: int(value) for key, value in fields.items()}
         if phase not in phases or any(
-                record.get(metric, 0) <= 0 for metric in metrics):
+                record.get(metric, -1) < 0 or
+                (metric.endswith("_ns") and record[metric] == 0) for metric in metrics):
             raise ValueError(f"invalid measurement: {line}")
         key = phase, record["repeat"]
         if key in records or record["cpus"] != configuration["cpus"]:
@@ -67,14 +70,18 @@ def main():
                 old = [record[metric] for key, record in baseline.items() if key[0] == phase]
                 new = [record[metric] for key, record in candidate.items() if key[0] == phase]
                 old_median, new_median = statistics.median(old), statistics.median(new)
-                row = dict(phase=phase, metric=metric, samples=len(old),
-                           baseline_median_ns=old_median, candidate_median_ns=new_median,
-                           baseline_range_ns=[min(old), max(old)],
-                           candidate_range_ns=[min(new), max(new)],
-                           reduction_percent=100 * (1 - new_median / old_median))
+                unit = "ns" if metric.endswith("_ns") else "rounds"
+                reduction = (100 * (1 - new_median / old_median) if old_median else
+                             0.0 if not new_median else None)
+                row = dict(phase=phase, metric=metric, unit=unit, samples=len(old),
+                           baseline_median=old_median, candidate_median=new_median,
+                           baseline_range=[min(old), max(old)],
+                           candidate_range=[min(new), max(new)],
+                           reduction_percent=reduction)
                 rows.append(row)
-                print(f"{phase:7} {metric:12} {old_median:12.0f} -> {new_median:12.0f} ns"
-                      f"  reduction={row['reduction_percent']:+.2f}%")
+                change = f"{reduction:+.2f}%" if reduction is not None else "n/a (zero baseline)"
+                print(f"{phase:7} {metric:12} {old_median:12.0f} -> {new_median:12.0f} {unit}"
+                      f"  reduction={change}")
         if args.out:
             args.out.write_text(json.dumps(dict(benchmark=suite, configuration=baseline_config, results=rows),
                                            indent=2) + "\n")

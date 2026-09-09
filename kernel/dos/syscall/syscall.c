@@ -290,6 +290,7 @@ enum syscall_id {
   SYSCALL_VIRTUAL_MEMORY = SYSCALL_VM,
   SYSCALL_USER_FUTEX = SYSCALL_FUTEX,
   SYSCALL_NATIVE_THREAD = SYSCALL_THREAD,
+  SYSCALL_TTY_POINTER = 0x69,
   SYSCALL_COUNT,
 };
 
@@ -1438,6 +1439,18 @@ static void syscall_return_to_app(syscall_context_t *frame) {
   current_task()->ret_to_app = frame->argument0;
 }
 
+static void syscall_tty_pointer(syscall_context_t *frame) {
+  tty_pointer_t pointer;
+  frame->value = -1;
+  if (!user_range_ok(frame->argument0, sizeof(pointer)))
+    return;
+  if (fartty_get_pointer(current_task()->TTY, &pointer) == 0 &&
+      user_vm_prepare_write(frame->argument0, sizeof(pointer))) {
+    memcpy((void *)frame->argument0, &pointer, sizeof(pointer));
+    frame->value = 0;
+  }
+}
+
 static void syscall_use_keyboard(syscall_context_t *frame) {
 
   if (keyboard_use_task != NULL && keyboard_use_task != current_task()) {
@@ -1980,6 +1993,7 @@ static const syscall_handler_t syscall_handlers[SYSCALL_COUNT] = {
     [SYSCALL_TTY_ALLOC] = syscall_tty_object,
     [SYSCALL_TTY_SET] = syscall_tty_object,
     [SYSCALL_TTY_FREE] = syscall_tty_object,
+    [SYSCALL_TTY_POINTER] = syscall_tty_pointer,
     [SYSCALL_RETURN_TO_APP] = syscall_return_to_app,
     [SYSCALL_USE_KEYBOARD] = syscall_use_keyboard,
     [SYSCALL_SHARED_MEMORY] = syscall_shared_memory,

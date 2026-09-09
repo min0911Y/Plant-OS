@@ -12,6 +12,7 @@ typedef enum {
   TTY_RPC_DRAW_BOX,
   TTY_RPC_INPUT_STATUS,
   TTY_RPC_INPUT_GET,
+  TTY_RPC_POINTER,
   TTY_RPC_COUNT
 } tty_rpc_operation_t;
 
@@ -36,15 +37,28 @@ typedef struct {
 } tty_rpc_request_t;
 
 typedef struct {
+  int32_t column, row;
+} tty_pointer_t;
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+int tty_get_pointer(tty_pointer_t *pointer);
+#ifdef __cplusplus
+}
+#endif
+
+typedef struct {
   tty_rpc_state_t state;
   int32_t value;
+  tty_pointer_t pointer;
 } tty_rpc_reply_t;
 
 #if defined(__cplusplus)
 static_assert(sizeof(tty_rpc_request_t) == 44, "TTY request ABI");
-static_assert(sizeof(tty_rpc_reply_t) == 20, "TTY reply ABI");
+static_assert(sizeof(tty_rpc_reply_t) == 28, "TTY reply ABI");
 #else
 _Static_assert(sizeof(tty_rpc_request_t) == 44, "TTY request ABI");
-_Static_assert(sizeof(tty_rpc_reply_t) == 20, "TTY reply ABI");
+_Static_assert(sizeof(tty_rpc_reply_t) == 28, "TTY reply ABI");
 #endif
 #endif

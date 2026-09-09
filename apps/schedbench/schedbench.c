@@ -15,7 +15,7 @@
 typedef struct {
   pthread_t thread;
   uint32_t tid, gate, done, release;
-  unsigned iterations, result, first_cpu;
+  unsigned iterations, result, first_cpu, index, max_lead;
 } worker_t;
 
 static void require(int condition, const char *message) {
@@ -43,8 +43,7 @@ static void publish(uint32_t *word, uint32_t value) {
   require(os_futex_wake(word, INT_MAX) >= 0, "wake");
 }
 
-static unsigned calculate(unsigned rounds) {
-  unsigned value = 1;
+static unsigned calculate(unsigned value, unsigned rounds) {
   for (unsigned i = 0; i < rounds; i++) {
     value ^= value << 13;
     value ^= value >> 17;
@@ -57,7 +56,7 @@ static void *compute(void *argument) {
   worker_t *worker = argument;
   __atomic_store_n(&worker->tid, NowTaskID(), __ATOMIC_RELEASE);
   await(&worker->gate, 1);
-  worker->result = calculate(worker->iterations);
+  worker->result = calculate(1, worker->iterations);
   publish(&worker->done, 1);
   await(&worker->release, 1);
   return NULL;
@@ -70,7 +69,29 @@ static void *balance_worker(void *argument) {
   __atomic_store_n(&worker->tid, NowTaskID(), __ATOMIC_RELEASE);
   await(&balance_gate, 1);
   worker->first_cpu = cpu_current();
-  worker->result = calculate(worker->iterations);
+  worker->result = calculate(1, worker->iterations);
+  publish(&worker->done, 1);
+  await(&worker->release, 1);
+  return NULL;
+}
+
+enum { FAIR_ROUNDS = 2000, FAIR_WORK = 4096 };
+static uint32_t fair_progress[2];
+
+static void *fair_worker(void *argument) {
+  worker_t *worker = argument;
+  __atomic_store_n(&worker->tid, NowTaskID(), __ATOMIC_RELEASE);
+  await(&balance_gate, 1);
+  unsigned value = 1;
+  for (unsigned round = 1; round <= FAIR_ROUNDS; round++) {
+    value = calculate(value, FAIR_WORK);
+    __atomic_store_n(&fair_progress[worker->index], round, __ATOMIC_RELEASE);
+    unsigned peer = __atomic_load_n(&fair_progress[worker->index ^ 1], __ATOMIC_ACQUIRE);
+    if (round > peer && round - peer > worker->max_lead)
+      worker->max_lead = round - peer;
+    api_yield();
+  }
+  worker->result = value;
   publish(&worker->done, 1);
   await(&worker->release, 1);
   return NULL;
@@ -108,6 +129,7 @@ static worker_t *start(unsigned count, void *(*entry)(void *), unsigned rounds) 
               !pthread_attr_setstacksize(&attr, 64 * 1024), "stack attributes");
   for (unsigned i = 0; i < count; i++) {
     workers[i].iterations = rounds;
+    workers[i].index = i;
     require(!pthread_create(&workers[i].thread, &attr, entry, &workers[i]),
             "thread creation");
   }
@@ -150,7 +172,7 @@ static void measure(const char *phase, unsigned sleepers, unsigned repeats) {
   enum { ROUNDS = 1000, COMPUTE_ROUNDS = 2000000 };
   uint64_t samples[ROUNDS];
   unsigned cpus = cpu_count();
-  unsigned expected = calculate(COMPUTE_ROUNDS);
+  unsigned expected = calculate(1, COMPUTE_ROUNDS);
   for (unsigned repeat = 0; repeat <= repeats; repeat++) {
     worker_t *peer = start(1, exchange, ROUNDS);
     uint64_t begin = monotonic_ns();
@@ -197,8 +219,8 @@ static void measure_balance(unsigned repeats) {
   unsigned cpus = cpu_count();
   require(cpus && cpus <= UINT_MAX / JOBS_PER_CPU, "CPU count");
   unsigned count = cpus * JOBS_PER_CPU;
-  unsigned short_result = calculate(SHORT_WORK);
-  unsigned long_result = calculate(LONG_WORK);
+  unsigned short_result = calculate(1, SHORT_WORK);
+  unsigned long_result = calculate(1, LONG_WORK);
   unsigned *long_cpus = calloc(cpus, sizeof(*long_cpus));
   require(long_cpus != NULL, "CPU histogram");
   for (unsigned repeat = 0; repeat <= repeats; repeat++) {
@@ -238,11 +260,48 @@ static void measure_balance(unsigned repeats) {
   free(long_cpus);
 }
 
+static void measure_fair(unsigned repeats) {
+  unsigned expected = calculate(1, FAIR_ROUNDS * FAIR_WORK);
+  for (unsigned repeat = 0; repeat <= repeats; repeat++) {
+    __atomic_store_n(&balance_gate, 0, __ATOMIC_RELEASE);
+    memset(fair_progress, 0, sizeof(fair_progress));
+    worker_t *workers = start(2, fair_worker, FAIR_ROUNDS);
+    uint64_t begin = monotonic_ns();
+    publish(&balance_gate, 1);
+    for (unsigned i = 0; i < 2; i++)
+      await(&workers[i].done, 1);
+    uint64_t elapsed = monotonic_ns() - begin;
+    unsigned max_lead = 0;
+    for (unsigned i = 0; i < 2; i++) {
+      require(workers[i].result == expected && fair_progress[i] == FAIR_ROUNDS,
+              "yielding worker checksum and progress");
+      if (workers[i].max_lead > max_lead)
+        max_lead = workers[i].max_lead;
+    }
+    task_info_t *tasks = NULL;
+    size_t task_count = 0;
+    require(!task_list(&tasks, &task_count), "accounting snapshot");
+    const task_info_t *first = task_snapshot_find(tasks, task_count, workers[0].tid);
+    const task_info_t *second = task_snapshot_find(tasks, task_count, workers[1].tid);
+    require(first && second, "accounting identities");
+    uint64_t first_ms = first->runtime_ms, second_ms = second->runtime_ms;
+    free(tasks);
+    stop(workers, 2);
+    if (repeat)
+      logkf("SCHEDFAIR repeat=%u cpus=%u rounds=%u work=%u elapsed_ns=%llu "
+            "max_lead=%u first_ms=%llu second_ms=%llu\n",
+            repeat, cpu_count(), FAIR_ROUNDS, FAIR_WORK,
+            (unsigned long long)elapsed, max_lead,
+            (unsigned long long)first_ms, (unsigned long long)second_ms);
+  }
+}
+
 int main(int argc, char **argv) {
   unsigned sleepers = 256, repeats = 7;
   bool balance = argc > 1 && !strcmp(argv[1], "balance");
-  require(argc <= 3, "usage: schbench.bin [sleepers|balance] [repeats]");
-  for (int i = balance ? 2 : 1; i < argc; i++) {
+  bool fair = argc > 1 && !strcmp(argv[1], "fair");
+  require(argc <= 3, "usage: schbench.bin [sleepers|balance|fair] [repeats]");
+  for (int i = balance || fair ? 2 : 1; i < argc; i++) {
     char *end;
     errno = 0;
     unsigned long value = strtoul(argv[i], &end, 10);
@@ -253,6 +312,11 @@ int main(int argc, char **argv) {
       sleepers = value;
     else
       repeats = value;
+  }
+  if (fair) {
+    measure_fair(repeats);
+    logk("SCHEDFAIR PASS\n");
+    return 0;
   }
   if (balance) {
     measure_balance(repeats);
