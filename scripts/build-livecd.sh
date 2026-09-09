@@ -26,7 +26,7 @@ esac
 work_dir=$object_dir/livecd
 iso_root=$work_dir/root
 payload_dir=$work_dir/payload
-initramfs=$iso_root/boot/initramfs.img
+initramfs=$work_dir/initramfs.img
 limine_dir=${LIMINE_DIR:-$kernel_dir/obj/limine-$limine_version}
 output=${1:-$kernel_dir/plant-os-livecd.iso}
 
@@ -59,7 +59,7 @@ fat_short_path() {
   printf '%s\n' "$short"
 }
 
-for command in awk curl du find make mcopy mformat mshortname sha256sum sort \
+for command in awk curl du find gzip make mcopy mformat mshortname sha256sum sort \
                tar tr truncate; do
   if ! command -v "$command" >/dev/null 2>&1; then
     echo "build-livecd: missing required command: $command" >&2
@@ -202,6 +202,8 @@ loader_source=$(fat_short_path "$initramfs" DOSLDR.bin)
 mcopy -i "$initramfs" "$setup_manifest" ::/setup.mst
 
 fi
+
+gzip -n -6 -c "$initramfs" > "$iso_root/boot/initramfs.img.gz"
 
 cp "$object_dir/kernel.bin" "$iso_root/boot/kernel.bin"
 if [ "$architecture" = x86_64 ]; then

@@ -1,7 +1,9 @@
 # Plant OS LiveCD
 
-LiveCD 使用 Limine 直接按 Multiboot2 加载 32 位 `kernel.bin`，并把一个可写的 FAT
-镜像作为 initramfs module 交给内核。内核在分页与堆初始化前保留该物理内存，随后把它
+LiveCD 使用 Limine 加载 `kernel.bin`：i386 使用 Multiboot2，x86_64 使用 Limine native
+协议。两种架构均把 FAT 镜像压缩为 `/boot/initramfs.img.gz`，配置通过
+`module_path: $boot():/boot/initramfs.img.gz` 让 Limine 透明解压，再作为 initramfs
+module 交给内核。内核在分页与堆初始化前保留该物理内存，随后把它
 注册为 `R:` 启动盘；运行期间的写入只保存在内存中，重启后丢失。
 
 先按仓库标准顺序完成构建，再生成 ISO：
@@ -12,7 +14,7 @@ make -C loader
 make -C kernel livecd
 ```
 
-首次执行会下载并校验固定版本的 Limine 12.6.1。LiveCD 额外依赖 `curl`、`tar`、
+首次执行会下载并校验固定版本的 Limine 12.6.1。LiveCD 额外依赖 `curl`、`tar`、`gzip`、
 `xorriso`（也可使用 `genisoimage`）和现有的 mtools，产物为
 `kernel/plant-os-livecd.iso`。
 
@@ -42,5 +44,11 @@ PFS 目标原名和 FAT 目标 8.3 名。`setup1.bin` 不再假定安装源是 A
 复制到 C:；用户仍可选择 FAT 或 PFS。选择 FAT 时，超过 8.3 的名称使用 mtools 为
 LiveCD 生成的无冲突短别名，选择 PFS 时保留原始名称。
 
-当前内核仍依赖 BIOS 实模式服务，因此 LiveCD 只生成 legacy BIOS 启动入口，不宣称
-支持 UEFI 启动。
+i386 LiveCD 使用 legacy BIOS；x86_64 LiveCD 同时支持 BIOS 与 UEFI，构建命令为
+`make -C kernel ARCH=x86_64 livecd`，产物为 `kernel/plant-os-x86_64.iso`。
+
+FAT 内容与安装清单全部写入后，打包脚本使用 `gzip -n -6` 压缩，省略 gzip 中的
+原文件名和时间戳。未压缩镜像保留在对应对象目录的 `livecd/initramfs.img`，只将
+压缩版本放入 ISO。压缩减少 ISO 大小与引导读取量，不减少解压后的 RAM 盘占用。
+验证时可用 `gzip -dc` 与未压缩镜像逐字节比较，并分别冷启动 i386 BIOS、
+x86_64 BIOS 与 UEFI，检查 `R:` 挂载及用户程序运行。
