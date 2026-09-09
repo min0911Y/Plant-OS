@@ -50,9 +50,15 @@ ELF 解释器经 `DT_NEEDED` 装载。没有第二套运行时库加载器。
 ```text
 OpenGL / GLSL
   → Mesa OpenGL state tracker → llvmpipe → LLVM JIT → CPU 图像
-  → 等待绘制完成 → 按 window_get_buffer 的实际 pitch 复制客户区
-  → window_present 同步应答 → 交换 front/back 缓冲
+  → 等待绘制完成 → 按 window_get_buffer 的实际 pitch 复制到当前绘图平面
+  → window_present_frame 同步交接 GUI 平面 → 交换 Mesa front/back 缓冲
 ```
+
+EGL 每帧重新取得当前 GUI 绘图平面。`window_present_frame` 直接将该平面作为
+已提交画面，只保留客户区外的窗口装饰，不再复制完整客户区到第二份 GUI 图像。
+应答交还上一块已提交平面，旧绘图指针立即失效；EGL 下一帧完整覆盖客户区。
+GUI 和 Mesa 各自的 front/back 是两个独立生命周期，不交换 Mesa 资源的所有权。
+缓冲协议、基准及逐像素验证见 [GUI 性能](gui-performance.md#整帧提交与所有权)。
 
 颜色为 BGRA8 UNORM，配置可选无深度或 D24S8；窗口尺寸固定。
 上下文、绘图缓冲与 display 分别保留引用。销毁当前对象或终止 display
@@ -122,6 +128,12 @@ glxgears 的同步呈现从 173.406 降至 154.716 µs/帧（−10.78%）；两�
 光栅同步优化及其新对照见 [场景同步](lavapipe.md#光栅-worker-的场景同步)。
 `glxgears.bin --workers N` 在 EGL 初始化前设置 `LP_NUM_THREADS`，同时适用于普通、
 测试和基准模式；宿主入口用 `--gears-workers N`，可搭配 `--opengl` 或 `--gears-bench`。
+
+后续 GUI 平面交换消除了 GUI 内部完整客户区的复制：同一宿主上，两次冷启动
+汇总的 glxgears 从 2941.706 到 3113.520 FPS（+5.84%），呈现从 96.056 到
+82.778 µs/帧（−13.82%）。该组基线已经包含下节的场景同步和快时钟优化；它是
+独立采样，不能与上表直接拼接计算收益。接口与完整数据见
+[整帧提交与所有权](gui-performance.md#整帧提交与所有权)。
 
 ### 场景同步与全局时钟对照
 

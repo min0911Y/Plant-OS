@@ -8,6 +8,7 @@
 struct gui_window {
   struct gui_window *next;
   uint32_t id;
+  uint32_t buffer;
   uintptr_t mapping;
   uint32_t mapping_size;
   uint32_t width;
@@ -114,6 +115,7 @@ window_t create_window(const char *title, int x, int y, int width, int height) {
   uintptr_t mapping = gui_mapping_find(mapping_size);
   if (mapping != 0) {
     window->id = 0;
+    window->buffer = 0;
     window->mapping = mapping;
     window->mapping_size = mapping_size;
     window->width = (unsigned)width;
@@ -198,17 +200,20 @@ int window_set_event_notifications(window_t window, bool enabled) {
 }
 
 void draw_px(window_t window, int x, int y, int color) {
-  if (window == NULL || (unsigned)x >= window->width ||
+  if (window == NULL || window->buffer > 1 || (unsigned)x >= window->width ||
       (unsigned)y >= window->height) {
     return;
   }
-  uint32_t *framebuffer =
-      (uint32_t *)((unsigned char *)window->shared + sizeof(*window->shared));
+  uint32_t *framebuffer = gui_window_pixels(window->shared, window->width,
+                                            window->height, window->buffer);
   framebuffer[(unsigned)y * window->width + (unsigned)x] = (uint32_t)color;
 }
 
-static int gui_window_update(window_t window, int first, int last, bool wait) {
-  if (window == NULL)
+enum gui_update { GUI_UPDATE_ASYNC, GUI_UPDATE_COPY, GUI_UPDATE_FRAME };
+
+static int gui_window_update(window_t window, int first, int last,
+                              enum gui_update mode) {
+  if (window == NULL || window->buffer > 1)
     return RPC_ERR_INVAL;
   int result = gui_connect();
   if (result != RPC_OK)
@@ -232,16 +237,31 @@ static int gui_window_update(window_t window, int first, int last, bool wait) {
     rect.y1 = window->height;
   }
   if (rect.x0 >= rect.x1 || rect.y0 >= rect.y1)
-    return RPC_OK;
+    return mode == GUI_UPDATE_FRAME ? RPC_ERR_INVAL : RPC_OK;
   bool signal = gui_damage_add(&window->shared->damage, &rect);
-  if (!wait && !signal)
+  if (mode == GUI_UPDATE_ASYNC && !signal)
     return RPC_OK;
 
-  gui_rpc_window_request_t request = {.window_id = window->id};
-  result = wait ? rpc_call(&gui_endpoint, GUI_RPC_REFRESH_WINDOW, &request,
-                            sizeof(request), NULL, 0, NULL, 0)
-                : rpc_notify(&gui_endpoint, GUI_RPC_REFRESH_WINDOW, &request,
-                              sizeof(request));
+  if (mode == GUI_UPDATE_FRAME) {
+    gui_rpc_frame_request_t request = {window->id, window->buffer};
+    gui_rpc_frame_reply_t reply;
+    unsigned length = 0;
+    result = rpc_call(&gui_endpoint, GUI_RPC_PRESENT_FRAME, &request,
+                       sizeof(request), &reply, sizeof(reply), &length, 0);
+    if (result == RPC_OK &&
+        (length != sizeof(reply) || reply.buffer != (window->buffer ^ 1)))
+      result = RPC_ERR_TRANSPORT;
+    /* A lost reply leaves ownership uncertain. Never expose either plane for
+     * drawing again; close_window still retains the ID needed for cleanup. */
+    window->buffer = result == RPC_OK ? reply.buffer : 2;
+  } else {
+    gui_rpc_window_request_t request = {.window_id = window->id};
+    result = mode == GUI_UPDATE_COPY
+                 ? rpc_call(&gui_endpoint, GUI_RPC_REFRESH_WINDOW, &request,
+                              sizeof(request), NULL, 0, NULL, 0)
+                 : rpc_notify(&gui_endpoint, GUI_RPC_REFRESH_WINDOW, &request,
+                                sizeof(request));
+  }
   if (result != RPC_OK) {
     gui_damage_unsignal(&window->shared->damage);
     gui_connection_failed(result);
@@ -250,11 +270,15 @@ static int gui_window_update(window_t window, int first, int last, bool wait) {
 }
 
 void window_refresh(window_t window, int first, int last) {
-  gui_window_update(window, first, last, false);
+  gui_window_update(window, first, last, GUI_UPDATE_ASYNC);
 }
 
 int window_present(window_t window, int first, int last) {
-  return gui_window_update(window, first, last, true);
+  return gui_window_update(window, first, last, GUI_UPDATE_COPY);
+}
+
+int window_present_frame(window_t window, int first, int last) {
+  return gui_window_update(window, first, last, GUI_UPDATE_FRAME);
 }
 
 void *window_get_fb(window_t window) {
@@ -269,10 +293,11 @@ int window_get_buffer(window_t window, window_buffer_t *buffer) {
   struct gui_window *entry = gui_windows;
   while (entry && entry != window)
     entry = entry->next;
-  bool valid = entry && entry->id;
+  bool valid = entry && entry->id && entry->buffer <= 1;
   if (valid) {
     *buffer = (window_buffer_t){
-        .pixels = (uint32_t *)(entry->shared + 1),
+        .pixels = gui_window_pixels(entry->shared, entry->width, entry->height,
+                                    entry->buffer),
         .pitch = (size_t)entry->width * sizeof(uint32_t),
         .width = entry->width,
         .height = entry->height,

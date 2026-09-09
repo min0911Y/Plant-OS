@@ -194,7 +194,7 @@ int window_set_title(window_t *window, const char *title) {
 }
 
 window_t *create_window(desktop_t *desktop, const char *title, int xsize,
-                        int ysize, unsigned tid) {
+                        int ysize, unsigned tid, gui_window_shared_t *shared) {
   if (desktop == NULL || title == NULL || xsize < 40 || ysize < 28 ||
       (size_t)xsize >
           (SIZE_MAX - (VM_PAGE_SIZE - 1)) / sizeof(vram_t) / (size_t)ysize) {
@@ -208,7 +208,9 @@ window_t *create_window(desktop_t *desktop, const char *title, int xsize,
   res->desktop = desktop;
   size_t bytes = ((size_t)xsize * ysize * sizeof(vram_t) + VM_PAGE_SIZE - 1) &
                  ~(size_t)(VM_PAGE_SIZE - 1);
-  res->vram = vm_map(NULL, bytes);
+  res->shared = shared;
+  res->vram = shared ? gui_window_pixels(shared, xsize, ysize, 1)
+                     : vm_map(NULL, bytes);
   if (res->vram == NULL) {
     free(res);
     return NULL;
@@ -217,7 +219,8 @@ window_t *create_window(desktop_t *desktop, const char *title, int xsize,
   res->ysize = ysize;
   res->title = malloc(strlen(title) + 1);
   if (res->title == NULL) {
-    vm_unmap(res->vram, bytes);
+    if (!shared)
+      vm_unmap(res->vram, bytes);
     free(res);
     return NULL;
   }
@@ -225,7 +228,8 @@ window_t *create_window(desktop_t *desktop, const char *title, int xsize,
   res->sht = sheet_alloc(desktop->shtctl);
   if (res->sht == NULL) {
     free(res->title);
-    vm_unmap(res->vram, bytes);
+    if (!shared)
+      vm_unmap(res->vram, bytes);
     free(res);
     return NULL;
   }
@@ -241,14 +245,14 @@ window_t *create_window(desktop_t *desktop, const char *title, int xsize,
   res->handle_mouse_wheel = NULL;
   res->close = close_window;
   res->super_window = NULL;
-  res->shared = NULL;
   res->keyboard_events = false;
   res->sht->wnd = res;
   if (list_add_val((uintptr_t)res, desktop->window_list) == NULL) {
     res->sht->wnd = NULL;
     sheet_free(res->sht);
     free(res->title);
-    vm_unmap(res->vram, bytes);
+    if (!shared)
+      vm_unmap(res->vram, bytes);
     free(res);
     return NULL;
   }
@@ -296,7 +300,8 @@ void destroy_window(window_t *window) {
   size_t bytes = ((size_t)window->xsize * window->ysize * sizeof(vram_t) +
                   VM_PAGE_SIZE - 1) &
                  ~(size_t)(VM_PAGE_SIZE - 1);
-  vm_unmap(window->vram, bytes);
+  if (!window->shared)
+    vm_unmap(window->vram, bytes);
   free(window->title);
   free(window);
 }

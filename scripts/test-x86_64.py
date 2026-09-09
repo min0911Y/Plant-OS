@@ -600,6 +600,7 @@ def main():
     parser.add_argument("--timeout", type=int, default=120)
     gui_mode = parser.add_mutually_exclusive_group()
     gui_mode.add_argument("--capacity", action="store_true", help="also cross the 255-task boundary")
+    gui_mode.add_argument("--gui-frames", action="store_true", help="benchmark frame exchange and verify ownership / exposure pixels")
     gui_mode.add_argument("--mouse", action="store_true", help="validate PS/2 motion, buttons and wheel using QMP")
     gui_mode.add_argument("--console", action="store_true", help="validate GUI shell rendering, input echo, backspace and scrolling")
     gui_mode.add_argument("--terminal-load", type=int, metavar="COUNT",
@@ -665,6 +666,9 @@ def main():
                 "GUISTRESS PASS" if args.capacity else "GUITEST PASS"]
     if args.mouse:
         expected.append("GUIMOUSE PASS events=15")
+    if args.gui_frames:
+        commands = ["guitest.bin frames"]
+        expected = ["GUIFRAME PASS"]
     if args.console:
         commands = ["guitest.bin terminal"]
     if args.terminal_load:
@@ -1253,6 +1257,55 @@ def main():
                                     raise RuntimeError("cube did not rotate")
                                 qmp.press("key", key={"type": "qcode", "data": "spc"})
                                 frames_checked.add(phase)
+                            finally:
+                                qmp.close()
+                        for phase, left, top, w, h, color in re.findall(
+                                r"GUIFRAME READY phase=(\d+) x=(\d+) y=(\d+) width=(\d+) height=(\d+) color=([0-9a-f]+)", text):
+                            if not args.gui_frames or phase in frames_checked:
+                                continue
+                            terminal = re.search(r"TERM ready x=(-?\d+) y=(-?\d+) width=(\d+) height=(\d+)", text)
+                            if phase == "0" and not terminal:
+                                continue
+                            qmp = QMP(qmp_path)
+                            try:
+                                width, height, _ = qmp.screenshot(output / f"gui-frame-{phase}.ppm")
+                                if phase == "0":
+                                    tx, ty, tw, _ = map(int, terminal.groups())
+                                    qmp.move(tx + tw - 13 - width // 2, ty + 15 - height // 2)
+                                    qmp.press("btn", button="left")
+                                # Cross the client and leave it: cursor restoration
+                                # must never expose the poisoned next-frame plane.
+                                qmp.move(-width, -height)
+                                qmp.move(116, 93)
+                                qmp.press("btn", button="left")
+                                qmp.move(100, 100)
+                                qmp.move(-width, -height)
+                                width, _, pixels = qmp.screenshot(output / f"gui-frame-{phase}.ppm")
+                                x, y, w, h = map(int, (left, top, w, h))
+                                expected_pixel = bytes.fromhex(color.zfill(6))
+                                client = b"".join(pixels[((y + row) * width + x + 4) * 3:
+                                                        ((y + row) * width + x + w - 4) * 3]
+                                                  for row in range(24, h - 4))
+                                expected_client = bytearray(expected_pixel * ((w - 8) * (h - 28)))
+                                if phase == "2":
+                                    offset = (4 * (w - 8) + 4) * 3
+                                    expected_client[offset:offset + 3] = bytes([255]) * 3
+                                if client != expected_client:
+                                    raise RuntimeError(f"GUI frame {phase}: committed pixels changed or partial update was lost")
+                                decoration = b"".join(
+                                    pixels[((y + row) * width + x) * 3:((y + row) * width + x + w) * 3]
+                                    if row < 24 or row >= h - 4 else
+                                    pixels[((y + row) * width + x) * 3:((y + row) * width + x + 4) * 3] +
+                                    pixels[((y + row) * width + x + w - 4) * 3:((y + row) * width + x + w) * 3]
+                                    for row in range(h))
+                                reference = output / "gui-frame-decoration.rgb"
+                                if phase == "0":
+                                    reference.write_bytes(decoration)
+                                elif decoration != reference.read_bytes():
+                                    raise RuntimeError(f"GUI frame {phase}: decorations changed during buffer exchange")
+                                qmp.press("key", key={"type": "qcode", "data": "spc"})
+                                frames_checked.add(phase)
+                                print(f"GUI frame {phase} PASS: committed pixels, exposure, decorations", flush=True)
                             finally:
                                 qmp.close()
                         mouse = re.search(r"GUIMOUSE READY origin=(\d+),(\d+) target=(\d+),(\d+)", text)

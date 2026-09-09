@@ -12,6 +12,7 @@ typedef struct gui_remote_window {
   window_t *window;
   uint32_t mapping_size;
   uint32_t id;
+  uint32_t front;
   uint32_t owner_tid;
   uint32_t owner_generation;
   bool event_notifications;
@@ -98,8 +99,9 @@ static gui_remote_window_t *gui_remote_find(const rpc_call_t *call,
 }
 
 static void gui_remote_destroy(gui_remote_window_t *remote) {
-  vm_unmap(remote->window->shared, remote->mapping_size);
+  gui_window_shared_t *shared = remote->window->shared;
   destroy_window(remote->window);
+  vm_unmap(shared, remote->mapping_size);
   free(remote);
 }
 
@@ -162,7 +164,7 @@ static int gui_create_window(rpc_call_t *call) {
   TaskLock();
   window_t *window =
       create_window(desktop0, title, (int)request->width, (int)request->height,
-                    call->caller_tid);
+                    call->caller_tid, shared);
   if (window == NULL) {
     TaskUnlock();
     vm_unmap(shared, mapping_size);
@@ -170,15 +172,12 @@ static int gui_create_window(rpc_call_t *call) {
     return RPC_ERR_NOMEM;
   }
 
-  /* The shared pixels are the client's render buffer. Only committed damage
-     reaches the private sheet used for exposure, mouse and window redraws. */
-  memcpy((unsigned char *)shared + sizeof(*shared), window->vram,
-         (size_t)window->xsize * window->ysize * sizeof(vram_t));
+  memcpy(gui_window_pixels(shared, window->xsize, window->ysize, 0),
+         window->vram, (size_t)window->xsize * window->ysize * sizeof(vram_t));
   gui_event_queue_init(&shared->events);
   gui_event_queue_init(&shared->key_press);
   gui_event_queue_init(&shared->key_up);
   gui_damage_init(&shared->damage);
-  window->shared = shared;
   window->keyboard_events = false;
   window->handle_stay = gui_event_stay;
   window->handle_client_left = gui_event_left;
@@ -204,6 +203,7 @@ static int gui_create_window(rpc_call_t *call) {
   remote->window = window;
   remote->mapping_size = mapping_size;
   remote->id = id;
+  remote->front = 1;
   remote->owner_tid = call->caller_tid;
   remote->owner_generation = call->caller_generation;
   remote->event_notifications = false;
@@ -242,44 +242,75 @@ static int gui_close_window(rpc_call_t *call) {
   return RPC_OK;
 }
 
-static int gui_refresh_window(rpc_call_t *call) {
-  if (call->arg_len != sizeof(gui_rpc_window_request_t)) {
-    return RPC_ERR_INVAL;
+static void gui_copy_rect(vram_t *target, const vram_t *source, size_t stride,
+                           int x0, int y0, int x1, int y1) {
+  if (x0 >= x1 || y0 >= y1)
+    return;
+  size_t bytes = (size_t)(x1 - x0) * sizeof(*source);
+  for (int y = y0; y < y1; y++) {
+    size_t offset = (size_t)y * stride + x0;
+    memcpy(target + offset, source + offset, bytes);
   }
+}
+
+static int gui_refresh_window(rpc_call_t *call) {
+  bool exchange = call->opcode == GUI_RPC_PRESENT_FRAME;
+  if (call->arg_len != (exchange ? sizeof(gui_rpc_frame_request_t)
+                                : sizeof(gui_rpc_window_request_t)))
+    return RPC_ERR_INVAL;
+  if (exchange && call->ret_cap < sizeof(gui_rpc_frame_reply_t))
+    return RPC_ERR_TOOBIG;
 
   const gui_rpc_window_request_t *request = call->arg;
   TaskLock();
   gui_remote_window_t *remote = gui_remote_find(call, request->window_id);
-  if (remote == NULL) {
+  if (!remote ||
+      (exchange && ((const gui_rpc_frame_request_t *)call->arg)->buffer !=
+                       (remote->front ^ 1))) {
     TaskUnlock();
     return RPC_ERR_INVAL;
   }
 
-  gui_rect_t rect;
-  if (gui_damage_take(&remote->window->shared->damage, &rect)) {
-    if (rect.x0 < 0) {
-      rect.x0 = 0;
+  window_t *window = remote->window;
+  gui_rect_t rect = {0};
+  gui_damage_take(&window->shared->damage, &rect);
+  if (rect.x0 < 0)
+    rect.x0 = 0;
+  if (rect.y0 < 0)
+    rect.y0 = 0;
+  if (rect.x1 > window->xsize)
+    rect.x1 = window->xsize;
+  if (rect.y1 > window->ysize)
+    rect.y1 = window->ysize;
+  bool dirty = rect.x0 < rect.x1 && rect.y0 < rect.y1;
+  vram_t *back = gui_window_pixels(window->shared, window->xsize,
+                                   window->ysize, remote->front ^ 1);
+  if (exchange) {
+    if (dirty) {
+      /* Preserve everything outside damage, including current decorations.
+       * The client completely overwrites damage before handing off its plane. */
+      gui_copy_rect(back, window->vram, window->xsize, 0, 0, window->xsize, rect.y0);
+      gui_copy_rect(back, window->vram, window->xsize, 0, rect.y1,
+                    window->xsize, window->ysize);
+      gui_copy_rect(back, window->vram, window->xsize, 0, rect.y0, rect.x0, rect.y1);
+      gui_copy_rect(back, window->vram, window->xsize, rect.x1, rect.y0,
+                    window->xsize, rect.y1);
+    } else {
+      gui_copy_rect(back, window->vram, window->xsize, 0, 0,
+                    window->xsize, window->ysize);
     }
-    if (rect.y0 < 0) {
-      rect.y0 = 0;
-    }
-    if (rect.x1 > remote->window->xsize) {
-      rect.x1 = remote->window->xsize;
-    }
-    if (rect.y1 > remote->window->ysize) {
-      rect.y1 = remote->window->ysize;
-    }
-    if (rect.x0 < rect.x1 && rect.y0 < rect.y1) {
-      window_t *window = remote->window;
-      const vram_t *source = (const vram_t *)(window->shared + 1);
-      size_t row_bytes = (size_t)(rect.x1 - rect.x0) * sizeof(*source);
-      for (int y = rect.y0; y < rect.y1; y++) {
-        size_t offset = (size_t)y * window->xsize + rect.x0;
-        memcpy(window->vram + offset, source + offset, row_bytes);
-      }
-      sheet_refresh(window->sht, rect.x0, rect.y0, rect.x1, rect.y1);
-    }
+    remote->front ^= 1;
+    window->vram = back;
+    window->sht->buf = back;
+    gui_rpc_frame_reply_t reply = {.buffer = remote->front ^ 1};
+    memcpy(call->ret, &reply, sizeof(reply));
+    call->ret_len = sizeof(reply);
+  } else if (dirty) {
+    gui_copy_rect(window->vram, back, window->xsize,
+                  rect.x0, rect.y0, rect.x1, rect.y1);
   }
+  if (dirty)
+    sheet_refresh(window->sht, rect.x0, rect.y0, rect.x1, rect.y1);
   TaskUnlock();
   return RPC_OK;
 }
@@ -326,8 +357,9 @@ static int gui_set_title(rpc_call_t *call) {
   if (result == 0) {
     window_t *window = remote->window;
     size_t rows = window->ysize < 20 ? window->ysize : 20;
-    memcpy(window->shared + 1, window->vram,
-           rows * window->xsize * sizeof(vram_t));
+    memcpy(gui_window_pixels(window->shared, window->xsize, window->ysize,
+                              remote->front ^ 1),
+           window->vram, rows * window->xsize * sizeof(vram_t));
   }
   TaskUnlock();
   return result == 0 ? RPC_OK : RPC_ERR_INVAL;
@@ -351,6 +383,7 @@ static const rpc_handler_t gui_handlers[GUI_RPC_COUNT] = {
     [GUI_RPC_CREATE_WINDOW] = gui_create_window,
     [GUI_RPC_CLOSE_WINDOW] = gui_close_window,
     [GUI_RPC_REFRESH_WINDOW] = gui_refresh_window,
+    [GUI_RPC_PRESENT_FRAME] = gui_refresh_window,
     [GUI_RPC_START_KEYBOARD] = gui_start_keyboard,
     [GUI_RPC_STOP_KEYBOARD] = gui_stop_keyboard,
     [GUI_RPC_SET_TITLE] = gui_set_title,

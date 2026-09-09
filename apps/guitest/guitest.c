@@ -400,6 +400,117 @@ static int gui_test_basic(void) {
   return 0;
 }
 
+static int gui_test_frames(void) {
+  enum { W = 648, H = 428, FIRST = (4 << 16) | 24,
+         LAST = ((W - 4) << 16) | (H - 4) };
+  window_t window = create_window("GUI frame ownership", 64, 64, W, H);
+  if (!window)
+    return 1;
+  window_start_recv_keyboard(window);
+  uint32_t *planes[2] = {NULL, NULL};
+  int status = 1;
+  for (unsigned phase = 0; phase < 4; phase++) {
+    if (phase == 1) {
+      for (unsigned round = 0; round < 3; round++) {
+        for (unsigned order = 0; order < 2; order++) {
+          bool exchange = (order ^ (round & 1)) != 0;
+          uint64_t present_ns = 0, start = monotonic_ns();
+          for (unsigned frame = 0; frame < 240; frame++) {
+            window_buffer_t buffer;
+            if (window_get_buffer(window, &buffer))
+              goto done;
+            for (int y = 24; y < H - 4; y++)
+              for (int x = 4; x < W - 4; x++)
+                buffer.pixels[y * W + x] = (frame * 0x010307u) & 0xffffff;
+            uint64_t before = monotonic_ns();
+            int result = exchange ? window_present_frame(window, FIRST, LAST)
+                                  : window_present(window, FIRST, LAST);
+            present_ns += monotonic_ns() - before;
+            if (result)
+              goto done;
+          }
+          logkf("GUIFRAME BENCH mode=%s round=%u frames=240 elapsed_ns=%llu "
+                "present_ns=%llu\n", exchange ? "exchange" : "copy", round,
+                (unsigned long long)(monotonic_ns() - start),
+                (unsigned long long)present_ns);
+        }
+      }
+    }
+    window_buffer_t buffer;
+    if (window_get_buffer(window, &buffer) || buffer.pitch != W * 4 ||
+        buffer.width != W || buffer.height != H)
+      goto done;
+    uint32_t color = (phase + 1) * 0x203040u;
+    for (int y = 0; y < H; y++)
+      for (int x = 0; x < W; x++)
+        buffer.pixels[y * W + x] =
+            x >= 4 && x < W - 4 && y >= 24 && y < H - 4 ? color : 0xff00ff;
+    uint32_t *submitted = buffer.pixels;
+    if (window_present_frame(window, FIRST, LAST) ||
+        window_get_buffer(window, &buffer) || buffer.pixels == submitted)
+      goto done;
+    if (!phase) {
+      planes[0] = submitted;
+      planes[1] = buffer.pixels;
+    } else if (submitted != planes[phase & 1] || buffer.pixels != planes[(phase & 1) ^ 1]) {
+      goto done;
+    }
+    /* Poison only the newly acquired plane. Exposure must use the submitted
+     * plane, even while a subsequent frame is being drawn. */
+    for (int i = 0; i < W * H; i++)
+      buffer.pixels[i] = 0xff00ff;
+    if (phase == 2) {
+      draw_px(window, 8, 28, 0xffffff);
+      window_refresh(window, (8 << 16) | 28, (9 << 16) | 29);
+      if (window_present(window, (8 << 16) | 28, (9 << 16) | 29))
+        goto done;
+    }
+    window_t cover = create_window("Exposure", 100, 120, 128, 96);
+    if (!cover)
+      goto done;
+    close_window(cover);
+    if (phase == 3) {
+      unsigned parent = NowTaskID();
+      int child = fork();
+      if (child < 0)
+        goto done;
+      if (!child) {
+        window_t orphan = create_window("Orphan frame", 100, 120, 128, 96);
+        window_buffer_t pixels;
+        int result = !orphan || window_get_buffer(orphan, &pixels);
+        if (!result) {
+          for (unsigned i = 0; i < pixels.width * pixels.height; i++)
+            pixels.pixels[i] = 0x123456;
+          result = window_present_frame(orphan, 0, (128 << 16) | 96);
+        }
+        ipc_send_to(parent, 0, 0, &result, sizeof(result), 5000);
+        _exit(result ? 1 : 0); // Intentionally leave a submitted window to reap.
+      }
+      int result = -1;
+      ipc_msg_t message;
+      if (ipc_recv_from(child, &result, sizeof(result), &message, 30000) !=
+              sizeof(result) || result)
+        goto done;
+      sleep(2100); // GUI's owner-generation reaper runs every second.
+    }
+    logkf("GUIFRAME READY phase=%u x=64 y=64 width=%u height=%u color=%06x\n",
+          phase, W, H, color);
+    unsigned deadline = (unsigned)clock() + 30000;
+    while (!window_get_key_press_status(window)) {
+      if ((int)((unsigned)clock() - deadline) >= 0)
+        goto done;
+      sleep(10);
+    }
+    while (window_get_key_press_status(window))
+      window_get_key_press_data(window);
+  }
+  status = 0;
+done:
+  close_window(window);
+  logkf("GUIFRAME %s\n", status ? "FAIL" : "PASS");
+  return status;
+}
+
 static int gui_stress_load_process(unsigned parent_tid, unsigned index,
                                    unsigned window_processes) {
   window_t window = NULL;
@@ -778,6 +889,8 @@ int main(int argc, char **argv) {
                                ? GUI_STRESS_WINDOW_PROCESSES
                                : 0);
   }
+  if (argc == 2 && strcmp(argv[1], "frames") == 0)
+    return gui_test_frames();
   result = gui_test_basic();
   if (result != 0) {
     return result;

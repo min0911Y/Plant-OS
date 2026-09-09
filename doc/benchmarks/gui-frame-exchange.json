@@ -1,0 +1,306 @@
+{
+  "before": {
+    "configuration": {
+      "guest": {
+        "cpus": "4",
+        "workers": "auto",
+        "size": "300x300"
+      },
+      "qemu": {
+        "arch": "x86_64",
+        "firmware": "bios",
+        "accel": "kvm",
+        "cpu": "host",
+        "cpus": 4,
+        "memory_mib": 3072,
+        "machine": "pc",
+        "qemu": "QEMU emulator version 10.2.1 (Debian 1:10.2.1+ds-1ubuntu3.2)"
+      }
+    },
+    "runs": [
+      {
+        "directory": "/tmp/gui-frames-before",
+        "samples": [
+          {
+            "round": 0,
+            "frames": 3600,
+            "elapsed_ns": 1230013561,
+            "render_ns": 882597252,
+            "present_ns": 343259651
+          },
+          {
+            "round": 1,
+            "frames": 3600,
+            "elapsed_ns": 1234596934,
+            "render_ns": 876613090,
+            "present_ns": 352035977
+          },
+          {
+            "round": 2,
+            "frames": 3600,
+            "elapsed_ns": 1235268049,
+            "render_ns": 876763911,
+            "present_ns": 352455626
+          }
+        ]
+      },
+      {
+        "directory": "/tmp/gui-frames-before2",
+        "samples": [
+          {
+            "round": 0,
+            "frames": 3600,
+            "elapsed_ns": 1237723949,
+            "render_ns": 881211914,
+            "present_ns": 352285503
+          },
+          {
+            "round": 1,
+            "frames": 3600,
+            "elapsed_ns": 1198669590,
+            "render_ns": 858634725,
+            "present_ns": 333904619
+          },
+          {
+            "round": 2,
+            "frames": 3600,
+            "elapsed_ns": 1206406721,
+            "render_ns": 859498376,
+            "present_ns": 340876979
+          }
+        ]
+      }
+    ],
+    "summary": {
+      "fps": 2941.70568760725,
+      "elapsed_us_per_frame": 339.93883351851855,
+      "render_us_per_frame": 242.37589203703703,
+      "present_us_per_frame": 96.05640532407408
+    }
+  },
+  "after": {
+    "configuration": {
+      "guest": {
+        "cpus": "4",
+        "workers": "auto",
+        "size": "300x300"
+      },
+      "qemu": {
+        "arch": "x86_64",
+        "firmware": "bios",
+        "accel": "kvm",
+        "cpu": "host",
+        "cpus": 4,
+        "memory_mib": 3072,
+        "machine": "pc",
+        "qemu": "QEMU emulator version 10.2.1 (Debian 1:10.2.1+ds-1ubuntu3.2)"
+      }
+    },
+    "runs": [
+      {
+        "directory": "/tmp/gui-frames-final-after",
+        "samples": [
+          {
+            "round": 0,
+            "frames": 3600,
+            "elapsed_ns": 1166425434,
+            "render_ns": 861248661,
+            "present_ns": 301368205
+          },
+          {
+            "round": 1,
+            "frames": 3600,
+            "elapsed_ns": 1133611114,
+            "render_ns": 841316387,
+            "present_ns": 286299666
+          },
+          {
+            "round": 2,
+            "frames": 3600,
+            "elapsed_ns": 1136752335,
+            "render_ns": 838676394,
+            "present_ns": 291876891
+          }
+        ]
+      },
+      {
+        "directory": "/tmp/gui-frames-final-after2",
+        "samples": [
+          {
+            "round": 0,
+            "frames": 3600,
+            "elapsed_ns": 1185205906,
+            "render_ns": 871801280,
+            "present_ns": 309649461
+          },
+          {
+            "round": 1,
+            "frames": 3600,
+            "elapsed_ns": 1159335811,
+            "render_ns": 853392786,
+            "present_ns": 300244375
+          },
+          {
+            "round": 2,
+            "frames": 3600,
+            "elapsed_ns": 1156155775,
+            "render_ns": 851916586,
+            "present_ns": 298561683
+          }
+        ]
+      }
+    ],
+    "summary": {
+      "fps": 3113.519628353865,
+      "elapsed_us_per_frame": 321.17992476851856,
+      "render_us_per_frame": 236.9607450925926,
+      "present_us_per_frame": 82.77779078703703
+    }
+  },
+  "date": "2026-09-09",
+  "host": "Intel Core Ultra 7 270K Plus, Linux / Hyper-V (WSL2), same host for before and after",
+  "baseline_commit": "42ba5e45baf26b9f7e2510bb81b8e66e68b9c33d",
+  "change": "GUI frame ownership exchange; EGL uses window_present_frame. Final constructor initializes directly in the shared committed plane. No rasterizer or synchronization policy changes.",
+  "gui_present": {
+    "x86_64": {
+      "directory": "/tmp/gui-frames-final-frames64",
+      "client_size": [
+        640,
+        400
+      ],
+      "samples": [
+        {
+          "mode": "copy",
+          "round": 0,
+          "frames": 240,
+          "elapsed_ns": 43557133,
+          "present_ns": 37966891
+        },
+        {
+          "mode": "exchange",
+          "round": 0,
+          "frames": 240,
+          "elapsed_ns": 41094035,
+          "present_ns": 35523174
+        },
+        {
+          "mode": "exchange",
+          "round": 1,
+          "frames": 240,
+          "elapsed_ns": 36730503,
+          "present_ns": 31434633
+        },
+        {
+          "mode": "copy",
+          "round": 1,
+          "frames": 240,
+          "elapsed_ns": 40988282,
+          "present_ns": 35601674
+        },
+        {
+          "mode": "copy",
+          "round": 2,
+          "frames": 240,
+          "elapsed_ns": 40472703,
+          "present_ns": 35005498
+        },
+        {
+          "mode": "exchange",
+          "round": 2,
+          "frames": 240,
+          "elapsed_ns": 34743559,
+          "present_ns": 29439615
+        }
+      ],
+      "summary": {
+        "copy": {
+          "elapsed_us_per_frame": 173.63627499999998,
+          "present_us_per_frame": 150.79730972222222
+        },
+        "exchange": {
+          "elapsed_us_per_frame": 156.34457916666668,
+          "present_us_per_frame": 133.8853083333333
+        }
+      }
+    },
+    "i386": {
+      "directory": "/tmp/gui-frames-final-frames32",
+      "client_size": [
+        640,
+        400
+      ],
+      "samples": [
+        {
+          "mode": "copy",
+          "round": 0,
+          "frames": 240,
+          "elapsed_ns": 43455478,
+          "present_ns": 35510000
+        },
+        {
+          "mode": "exchange",
+          "round": 0,
+          "frames": 240,
+          "elapsed_ns": 32211306,
+          "present_ns": 24380650
+        },
+        {
+          "mode": "exchange",
+          "round": 1,
+          "frames": 240,
+          "elapsed_ns": 32272476,
+          "present_ns": 24418964
+        },
+        {
+          "mode": "copy",
+          "round": 1,
+          "frames": 240,
+          "elapsed_ns": 41238467,
+          "present_ns": 33361366
+        },
+        {
+          "mode": "copy",
+          "round": 2,
+          "frames": 240,
+          "elapsed_ns": 41884102,
+          "present_ns": 34005112
+        },
+        {
+          "mode": "exchange",
+          "round": 2,
+          "frames": 240,
+          "elapsed_ns": 32210158,
+          "present_ns": 24380468
+        }
+      ],
+      "summary": {
+        "copy": {
+          "elapsed_us_per_frame": 175.80284305555557,
+          "present_us_per_frame": 142.8839972222222
+        },
+        "exchange": {
+          "elapsed_us_per_frame": 134.29713888888887,
+          "present_us_per_frame": 101.63900277777778
+        }
+      }
+    }
+  },
+  "validation": {
+    "opengl_bios_hashes": [
+      "7fe5054d",
+      "e33873d8"
+    ],
+    "opengl_uefi_hashes": [
+      "7fe5054d",
+      "e33873d8"
+    ],
+    "frame_ownership": [
+      "x86_64",
+      "i386"
+    ],
+    "sdl_pixels_input": [
+      "x86_64",
+      "i386"
+    ]
+  }
+}

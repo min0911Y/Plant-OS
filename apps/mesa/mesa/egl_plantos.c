@@ -244,7 +244,7 @@ static bool surface_present(struct st_context *st,
     memcpy(destination + y * (size_t)buffer.pitch,
            pixels + y * (size_t)transfer->stride, (size_t)window->width * 4);
   pipe_texture_unmap(st->pipe, transfer);
-  return window_present(window->window, (window->x << 16) | window->y,
+  return window_present_frame(window->window, (window->x << 16) | window->y,
                         ((window->x + window->width) << 16) |
                             (window->y + window->height)) == 0;
 }

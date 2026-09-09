@@ -24,8 +24,14 @@ void draw_px(window_t window, int x, int y, int color);
 void window_refresh(window_t window, int first, int last);
 /* Publish complete pixels and wait until the compositor has copied them. */
 int window_present(window_t window, int first, int last);
+/* Transfer the current drawing plane and wait for display. On success, all
+ * previous drawing pointers are invalid: reacquire with window_get_buffer().
+ * The returned plane contains an older frame inside the submitted rectangle;
+ * redraw that rectangle completely. Other pixels are preserved by the server.
+ * Calls and drawing are serialized by the window owner, including refreshes. */
+int window_present_frame(window_t window, int first, int last);
 void *window_get_fb(window_t window);
-/* The window owns this ARGB8888 buffer until close_window(). */
+/* ARGB8888 drawing plane, valid until frame exchange or close_window(). */
 int window_get_buffer(window_t window, window_buffer_t *buffer);
 void window_start_recv_keyboard(window_t window);
 void window_stop_recv_keyboard(window_t window);

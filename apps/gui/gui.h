@@ -111,7 +111,7 @@ struct super_window {
 };
 
 window_t *create_window(desktop_t *desktop, const char *title, int xsize,
-                        int ysize, unsigned tid);
+                        int ysize, unsigned tid, gui_window_shared_t *shared);
 void window_focus(window_t *window);
 void close_window(window_t *window);
 int window_set_title(window_t *window, const char *title);

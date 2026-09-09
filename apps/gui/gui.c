@@ -316,7 +316,7 @@ void main() {
   }
 
   window_t *window1 =
-      create_window(desktop0, "ToolBox", 200, 200, NowTaskID());
+      create_window(desktop0, "ToolBox", 200, 200, NowTaskID(), NULL);
   if (window1 == NULL) {
     logkf("GUI failed to create toolbox window\n");
     return;

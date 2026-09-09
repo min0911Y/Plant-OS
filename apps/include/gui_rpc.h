@@ -182,6 +182,7 @@ enum gui_rpc_opcode {
   GUI_RPC_STOP_KEYBOARD,
   GUI_RPC_SET_TITLE,
   GUI_RPC_EVENT_NOTIFICATIONS,
+  GUI_RPC_PRESENT_FRAME,
   GUI_RPC_COUNT,
 };
 
@@ -195,15 +196,23 @@ static inline int gui_window_shared_mapping_size(uint32_t width,
     return 0;
   }
   uint32_t pixels = width * height;
-  if (pixels > (0xffffffffu - sizeof(gui_window_shared_t)) / sizeof(uint32_t)) {
+  if (pixels > (0xffffffffu - sizeof(gui_window_shared_t)) / (2 * sizeof(uint32_t))) {
     return 0;
   }
-  uint32_t size = sizeof(gui_window_shared_t) + pixels * sizeof(uint32_t);
+  uint32_t size = sizeof(gui_window_shared_t) + 2 * pixels * sizeof(uint32_t);
   if (size > 0xffffffffu - 0xfffu) {
     return 0;
   }
   *size_out = (size + 0xfffu) & ~0xfffu;
   return 1;
+}
+
+/* Two complete planes: the compositor holds front, the client owns front ^ 1.
+ * Only a successful frame RPC transfers ownership; events stay at a fixed VA. */
+static inline uint32_t *gui_window_pixels(gui_window_shared_t *shared,
+                                           uint32_t width, uint32_t height,
+                                           unsigned buffer) {
+  return (uint32_t *)(shared + 1) + (size_t)width * height * buffer;
 }
 
 typedef struct {
@@ -222,6 +231,23 @@ typedef struct {
 typedef struct {
   uint32_t window_id;
 } gui_rpc_window_request_t;
+
+typedef struct {
+  uint32_t window_id;
+  uint32_t buffer;
+} gui_rpc_frame_request_t;
+
+typedef struct {
+  uint32_t buffer;
+} gui_rpc_frame_reply_t;
+
+#ifdef __cplusplus
+static_assert(sizeof(gui_rpc_frame_request_t) == 8, "GUI frame request ABI");
+static_assert(sizeof(gui_rpc_frame_reply_t) == 4, "GUI frame reply ABI");
+#else
+_Static_assert(sizeof(gui_rpc_frame_request_t) == 8, "GUI frame request ABI");
+_Static_assert(sizeof(gui_rpc_frame_reply_t) == 4, "GUI frame reply ABI");
+#endif
 
 typedef struct {
   uint32_t window_id;
