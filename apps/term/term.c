@@ -330,7 +330,7 @@ int main(int argc, char **argv) {
                     : DEFAULT_HEIGHT + TITLE_HEIGHT + BORDER;
   int x = (display.width - term.width) / 2;
   int y = (display.height - term.height) / 2;
-  term.window = create_window("term", x, y, term.width, term.height);
+  term.window = create_window("term", x, y, term.width, term.height, 0);
   if (!term.window)
     goto done;
   TerminalDisplay surface = {

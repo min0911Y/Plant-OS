@@ -55,6 +55,7 @@ struct desktop {
   int xsize, ysize;
   struct List *window_list;
   window_t *focused_window;
+  gmouse_t *mouse;
   void (*display)(desktop_t *desktop, const framebuffer_info_t *framebuffer);
   void (*hide)(desktop_t *desktop);
   void (*draw)(desktop_t *desktop, int x, int y, int x1, int y1, color_t color);
@@ -113,6 +114,7 @@ struct super_window {
 window_t *create_window(desktop_t *desktop, const char *title, int xsize,
                         int ysize, unsigned tid, gui_window_shared_t *shared);
 void window_focus(window_t *window);
+void window_show(window_t *window, bool focused);
 void close_window(window_t *window);
 int window_set_title(window_t *window, const char *title);
 void destroy_window(window_t *window);
@@ -168,5 +170,6 @@ int gui_rpc_service_start(void);
 /* The caller holds TaskLock and takes the snapshot under that lock. */
 void gui_rpc_reap_windows(const task_info_t *tasks, size_t count);
 void gui_wake_window(window_t *window);
+void gui_update_window_states(desktop_t *desktop);
 
 #endif

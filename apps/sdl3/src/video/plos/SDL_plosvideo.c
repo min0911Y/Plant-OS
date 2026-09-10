@@ -100,7 +100,7 @@ static bool PLOS_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window,
   data->height = window->h;
   data->handle = create_window(window->title ? window->title : "SDL3",
                                window->x, window->y, window->w + 2 * BORDER,
-                               window->h + TITLE + BORDER);
+                               window->h + TITLE + BORDER, 0);
   if (!data->handle) {
     SDL_free(data);
     return SDL_SetError("Cannot create a GUI window; start gui.bin first");

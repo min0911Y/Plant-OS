@@ -69,7 +69,8 @@ void draw_line(unsigned int *fb,int x1,int y1,int x2,int y2,int xsize,unsigned c
 }
 #define PACK(x,y,x1,y1) PACK_XYL(x,y,x1,y1),PACK_XYR(x,y,x1,y1)
 int main() {
-  window_t wnd = create_window("My first Plant OS Window",(1024-640)/2,(768-480)/2,640,480);
+  window_t wnd = create_window("My first Plant OS Window", (1024 - 640) / 2,
+                               (768 - 480) / 2, 640, 480, 0);
   unsigned *framebuffer = (unsigned *)window_get_fb(wnd);
   printf("%p\n",framebuffer);
   int mx = -1,my = -1;

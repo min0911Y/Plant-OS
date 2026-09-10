@@ -93,7 +93,8 @@ static void gui_window_remove(struct gui_window *window) {
   }
 }
 
-window_t create_window(const char *title, int x, int y, int width, int height) {
+window_t create_window(const char *title, int x, int y, int width, int height,
+                       unsigned flags) {
   if (title == NULL || width <= 0 || height <= 0) {
     return NULL;
   }
@@ -138,6 +139,7 @@ window_t create_window(const char *title, int x, int y, int width, int height) {
   request->height = (unsigned)height;
   request->client_mapping = mapping;
   request->title_length = title_length;
+  request->flags = flags;
   memcpy(request_buffer + sizeof(*request), title, title_length);
 
   gui_rpc_create_reply_t reply;
@@ -192,11 +194,49 @@ int window_set_title(window_t window, const char *title) {
 }
 
 int window_set_event_notifications(window_t window, bool enabled) {
+  return window_set_event_target(window, enabled ? NowTaskID() : 0,
+                                 enabled ? ipc_generation() : 0);
+}
+
+int window_set_event_target(window_t window, unsigned tid,
+                            unsigned generation) {
   if (!window)
     return RPC_ERR_INVAL;
-  gui_rpc_event_notifications_t request = {window->id, enabled};
+  gui_rpc_event_notifications_t request = {window->id, tid != 0, tid,
+                                           generation};
   return gui_call(GUI_RPC_EVENT_NOTIFICATIONS, &request, sizeof(request), NULL,
                   0, NULL);
+}
+
+int window_get_state(window_t window, gui_window_state_t *state) {
+  if (!window || !state)
+    return RPC_ERR_INVAL;
+  gui_window_shared_t *shared = window->shared;
+  for (;;) {
+    uint32_t sequence =
+        __atomic_load_n(&shared->state_sequence, __ATOMIC_ACQUIRE);
+    if (sequence & 1)
+      continue;
+    state->x = __atomic_load_n(&shared->state.x, __ATOMIC_RELAXED);
+    state->y = __atomic_load_n(&shared->state.y, __ATOMIC_RELAXED);
+    state->cursor_x =
+        __atomic_load_n(&shared->state.cursor_x, __ATOMIC_RELAXED);
+    state->cursor_y =
+        __atomic_load_n(&shared->state.cursor_y, __ATOMIC_RELAXED);
+    state->flags = __atomic_load_n(&shared->state.flags, __ATOMIC_RELAXED);
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+    if (__atomic_load_n(&shared->state_sequence, __ATOMIC_RELAXED) == sequence)
+      return RPC_OK;
+  }
+}
+
+int window_control(window_t window, enum gui_window_control operation, int x,
+                   int y) {
+  if (!window)
+    return RPC_ERR_INVAL;
+  gui_rpc_window_control_t request = {window->id, operation, x, y};
+  return gui_call(GUI_RPC_WINDOW_CONTROL, &request, sizeof(request), NULL, 0,
+                  NULL);
 }
 
 void draw_px(window_t window, int x, int y, int color) {

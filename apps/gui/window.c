@@ -18,10 +18,8 @@ static void desktop_focus_top_window(desktop_t *desktop) {
   }
 }
 
-void window_focus(window_t *window) {
-  if (window == NULL || !window->using1 || window->sht == NULL) {
-    return;
-  }
+void window_show(window_t *window, bool focused) {
+  window->using1 = true;
   int top_window = window->desktop->sht->height;
   for (int height = top_window + 1; height <= window->sht->ctl->top; height++) {
     if (window->sht->ctl->sheets[height]->wnd != NULL) {
@@ -30,15 +28,22 @@ void window_focus(window_t *window) {
   }
   sheet_updown(window->sht,
                window->sht->height < 0 ? top_window + 1 : top_window);
-  window->desktop->focused_window = window;
+  if (focused)
+    window->desktop->focused_window = window;
+  gui_update_window_states(window->desktop);
+}
+
+void window_focus(window_t *window) {
+  if (window == NULL || !window->using1 || window->sht == NULL)
+    return;
+  window_show(window, true);
 }
 
 void display_window(window_t *window, int x, int y) {
   window->x = x;
   window->y = y;
-  window->using1 = true;
   sheet_slide(window->sht, x, y);
-  window_focus(window);
+  window_show(window, true);
 }
 
 void hide_window(window_t *window) {
@@ -51,6 +56,7 @@ void hide_window(window_t *window) {
   if (focused) {
     desktop_focus_top_window(window->desktop);
   }
+  gui_update_window_states(window->desktop);
 }
 
 void close_window(window_t *window) {
@@ -79,6 +85,7 @@ void w_drop() {
   backup_w->x += mouse_event.x;
   backup_w->y += mouse_event.y;
   sheet_slide(backup_w->sht, backup_w->x, backup_w->y);
+  gui_update_window_states(backup_w->desktop);
 }
 void handle_left_window(window_t *window, gmouse_t *gmouse) {
   if (!window->using1)
@@ -297,6 +304,7 @@ void destroy_window(window_t *window) {
   if (focused) {
     desktop_focus_top_window(window->desktop);
   }
+  gui_update_window_states(window->desktop);
   size_t bytes = ((size_t)window->xsize * window->ysize * sizeof(vram_t) +
                   VM_PAGE_SIZE - 1) &
                  ~(size_t)(VM_PAGE_SIZE - 1);

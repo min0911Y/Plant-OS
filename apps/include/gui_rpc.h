@@ -14,6 +14,18 @@
 #endif
 #define GUI_SHARED_REGION_END (GUI_SHARED_REGION_START + 0xf00000u)
 
+enum gui_window_flag {
+  GUI_WINDOW_VISIBLE = 1u,
+  GUI_WINDOW_FOCUSED = 2u,
+  GUI_WINDOW_HOVERED = 4u,
+};
+
+typedef struct {
+  int32_t x, y;
+  int32_t cursor_x, cursor_y;
+  uint32_t flags;
+} gui_window_state_t;
+
 #define GUI_EVENT_QUEUE_CAPACITY 64u
 
 enum gui_event {
@@ -45,6 +57,8 @@ typedef struct {
 } gui_damage_t;
 
 typedef struct {
+  uint32_t state_sequence;
+  gui_window_state_t state;
   gui_event_queue_t events;
   gui_event_queue_t key_press;
   gui_event_queue_t key_up;
@@ -183,6 +197,7 @@ enum gui_rpc_opcode {
   GUI_RPC_SET_TITLE,
   GUI_RPC_EVENT_NOTIFICATIONS,
   GUI_RPC_PRESENT_FRAME,
+  GUI_RPC_WINDOW_CONTROL,
   GUI_RPC_COUNT,
 };
 
@@ -222,6 +237,7 @@ typedef struct {
   uint32_t height;
   uintptr_t client_mapping;
   uint32_t title_length;
+  uint32_t flags;
 } gui_rpc_create_request_t;
 
 typedef struct {
@@ -252,6 +268,43 @@ _Static_assert(sizeof(gui_rpc_frame_reply_t) == 4, "GUI frame reply ABI");
 typedef struct {
   uint32_t window_id;
   uint32_t enabled;
+  uint32_t tid;
+  uint32_t generation;
 } gui_rpc_event_notifications_t;
+
+enum gui_window_create_flag {
+  GUI_CREATE_HIDDEN = 1u,
+  GUI_CREATE_UNFOCUSED = 2u,
+};
+
+enum gui_window_control {
+  GUI_WINDOW_MOVE,
+  GUI_WINDOW_SHOW,
+  GUI_WINDOW_HIDE,
+  GUI_WINDOW_FOCUS,
+};
+
+typedef struct {
+  uint32_t window_id;
+  uint32_t operation;
+  int32_t x, y;
+} gui_rpc_window_control_t;
+
+#ifdef __cplusplus
+static_assert(sizeof(gui_rpc_create_request_t) == (sizeof(uintptr_t) == 8 ? 32 : 28),
+              "GUI create request ABI");
+static_assert(sizeof(gui_window_state_t) == 20, "GUI window state ABI");
+static_assert(sizeof(gui_rpc_window_control_t) == 16, "GUI window control ABI");
+static_assert(sizeof(gui_rpc_event_notifications_t) == 16,
+              "GUI event target ABI");
+#else
+_Static_assert(sizeof(gui_rpc_create_request_t) == (sizeof(uintptr_t) == 8 ? 32 : 28),
+               "GUI create request ABI");
+_Static_assert(sizeof(gui_window_state_t) == 20, "GUI window state ABI");
+_Static_assert(sizeof(gui_rpc_window_control_t) == 16,
+               "GUI window control ABI");
+_Static_assert(sizeof(gui_rpc_event_notifications_t) == 16,
+               "GUI event target ABI");
+#endif
 
 #endif

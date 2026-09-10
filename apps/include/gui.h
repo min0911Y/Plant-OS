@@ -15,7 +15,8 @@ typedef struct {
   uint32_t width, height;
 } window_buffer_t;
 
-window_t create_window(const char *title, int x, int y, int width, int height);
+window_t create_window(const char *title, int x, int y, int width, int height,
+                       unsigned flags);
 int window_get_event(window_t window);
 void close_window(window_t window);
 int window_set_title(window_t window, const char *title);
@@ -37,6 +38,12 @@ void window_start_recv_keyboard(window_t window);
 void window_stop_recv_keyboard(window_t window);
 /* Wake rpc_serve_once() when a window event or keyboard input is queued. */
 int window_set_event_notifications(window_t window, bool enabled);
+/* The target must be a live thread in the window owner's task group.
+ * A zero TID disables notifications. No application IPC is consumed here. */
+int window_set_event_target(window_t window, unsigned tid, unsigned generation);
+int window_get_state(window_t window, gui_window_state_t *state);
+int window_control(window_t window, enum gui_window_control operation, int x,
+                   int y);
 
 int window_get_key_press_data(window_t window);
 int window_get_key_press_status(window_t window);

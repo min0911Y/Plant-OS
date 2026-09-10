@@ -124,6 +124,7 @@ void gmouse(gmouse_t *gmouse) {
           gmouse->y = -19;
         }
         sheet_slide(gmouse->sht, gmouse->x, gmouse->y);
+        gui_update_window_states(gmouse->desktop);
       }
     } else if (key_press_status() != 0) {
 
@@ -216,5 +217,6 @@ gmouse_t *create_gmouse(desktop_t *desktop, int x, int y, int pos) {
     return NULL;
   }
 
+  desktop->mouse = res;
   return res;
 }

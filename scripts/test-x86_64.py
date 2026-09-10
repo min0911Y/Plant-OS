@@ -621,6 +621,7 @@ def main():
     gui_mode.add_argument("--threads", action="store_true", help="validate pthreads, ELF TLS, synchronization and thread resource release")
     gui_mode.add_argument("--llvm", action="store_true", help="validate native LLVM MCJIT, relocations, W^X and concurrent compilation")
     gui_mode.add_argument("--lavapipe", action="store_true", help="validate native Vulkan compute, SDL triangle pixels and window presentation")
+    gui_mode.add_argument("--glfw", action="store_true", help="validate native GLFW contexts, event waits, window pixels and input")
     gui_mode.add_argument("--opengl", action="store_true", help="validate llvmpipe EGL/GLSL/contexts and classic glxgears pixels and input")
     gui_mode.add_argument("--gears-bench", action="store_true", help="benchmark fixed glxgears frames with separate render and present timing")
     gui_mode.add_argument("--cube", action="store_true", help="benchmark the Vulkan rotating cube and verify two frames")
@@ -733,6 +734,11 @@ def main():
             parser.error("--lavapipe requires x86_64")
         commands = ["llvmtest.bin", "lvptest.bin --test"]
         expected = ["LLVMTEST PASS", "LVPCOMPUTE PASS", "LVPHEADLESS PASS", "LVPTEST PASS"]
+    if args.glfw:
+        if not native:
+            parser.error("--glfw requires x86_64")
+        commands = ["glfwtest.bin --test"]
+        expected = ["GLFWTEST PASS"]
     if args.opengl:
         if not native:
             parser.error("--opengl requires x86_64")
@@ -1190,6 +1196,51 @@ def main():
                         if args.rendertm and "RENDERTM OUTPUT" in text and "rendertm" not in frames_checked:
                             exercise_rendertm(qmp_path, serial, output)
                             frames_checked.add("rendertm")
+                        for phase, left, top, client_width, client_height, checksum in re.findall(
+                                r"GLFWTEST FRAME phase=(\d+) x=(-?\d+) y=(-?\d+) width=(\d+) height=(\d+) hash=([0-9a-f]+)", text):
+                            if not args.glfw or phase in frames_checked:
+                                continue
+                            terminal = re.search(r"TERM ready x=(-?\d+) y=(-?\d+) width=(\d+) height=(\d+)", text)
+                            if phase == "0" and not terminal:
+                                continue
+                            qmp = QMP(qmp_path)
+                            try:
+                                width, height, pixels = qmp.screenshot(output / f"glfw-{phase}.ppm")
+                                if phase == "0":
+                                    tx, ty, tw, _ = map(int, terminal.groups())
+                                    qmp.move(tx + tw - 13 - width // 2, ty + 15 - height // 2)
+                                    qmp.press("btn", button="left")
+                                    qmp.move(-width, -height)
+                                    width, height, pixels = qmp.screenshot(output / f"glfw-{phase}.ppm")
+                                x, y, w, h = map(int, (left, top, client_width, client_height))
+                                if x < 0 or y < 0 or x + w > width or y + h > height:
+                                    raise RuntimeError("GLFW window is outside the framebuffer")
+                                client = b"".join(pixels[((y + row) * width + x) * 3:
+                                                        ((y + row) * width + x + w) * 3]
+                                                  for row in range(h))
+                                actual = 2166136261
+                                for byte in client:
+                                    actual = ((actual ^ byte) * 16777619) & 0xffffffff
+                                if actual != int(checksum, 16):
+                                    raise RuntimeError(f"GLFW presented pixels differ: {actual:08x} != {checksum}")
+                                background = bytes((255, 0, 0) if phase == "0" else (0, 255, 0))
+                                colors = Counter(client[i:i + 3] for i in range(0, len(client), 3))
+                                if colors[background] != w * h * 3 // 4 or colors[bytes((0, 0, 255))] != w * h // 4:
+                                    raise RuntimeError("GLFW framebuffer lacks the expected clear/scissor colors")
+                                (output / f"glfw-{phase}.rgb").write_bytes(client)
+                                # The cursor is at the GUI's clamped (-16, -19) origin.
+                                if phase == "0":
+                                    qmp.move(x + 32 + 16, y + 32 + 19)
+                                    qmp.press("btn", button="left")
+                                    qmp.press("key", key={"type": "qcode", "data": "a"})
+                                    qmp.press("btn", button="wheel-up")
+                                    qmp.move(-width, -height)
+                                else:
+                                    qmp.move(x + w - 9 + 16, y - 12 + 19)
+                                    qmp.press("btn", button="left")
+                                frames_checked.add(phase)
+                            finally:
+                                qmp.close()
                         for phase, left, top, client_width, client_height, checksum in re.findall(
                                 r"GLXGEARS FRAME phase=(\d+) x=(-?\d+) y=(-?\d+) width=(\d+) height=(\d+) hash=([0-9a-f]+)", text):
                             if not args.opengl or phase in frames_checked:

@@ -2,7 +2,6 @@
 #ifndef PLANT_EGL_H
 #define PLANT_EGL_H
 
-#include <EGL/egl.h>
 #include <gui.h>
 
 /* Keep this descriptor alive until eglDestroySurface, on the GUI owner thread.

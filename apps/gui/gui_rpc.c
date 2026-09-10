@@ -15,7 +15,7 @@ typedef struct gui_remote_window {
   uint32_t front;
   uint32_t owner_tid;
   uint32_t owner_generation;
-  bool event_notifications;
+  rpc_endpoint_t event_target;
 } gui_remote_window_t;
 
 extern desktop_t *desktop0;
@@ -23,15 +23,61 @@ extern desktop_t *desktop0;
 static gui_remote_window_t *gui_remote_windows;
 static uint32_t gui_next_window_id = 1;
 
+/* Called under TaskLock. Publish coherent snapshots without per-frame RPC.
+ * Find the topmost window once; the mouse layer itself is not a window. */
+void gui_update_window_states(desktop_t *desktop) {
+  gmouse_t *mouse = desktop->mouse;
+  window_t *hovered = NULL;
+  if (mouse) {
+    for (int height = desktop->shtctl->top; height >= 0; height--) {
+      struct SHEET *sheet = desktop->shtctl->sheets[height];
+      if (sheet->wnd && Collision(sheet->vx0, sheet->vy0, sheet->bxsize,
+                                  sheet->bysize, mouse->x, mouse->y)) {
+        hovered = sheet->wnd;
+        break;
+      }
+    }
+  }
+  for (gui_remote_window_t *remote = gui_remote_windows; remote;
+       remote = remote->next) {
+    window_t *window = remote->window;
+    if (window->desktop != desktop)
+      continue;
+    gui_window_state_t state = {
+        .x = window->x,
+        .y = window->y,
+        .cursor_x = mouse ? mouse->x - window->x : 0,
+        .cursor_y = mouse ? mouse->y - window->y : 0,
+        .flags = (window->using1 ? GUI_WINDOW_VISIBLE : 0) |
+                 (desktop->focused_window == window ? GUI_WINDOW_FOCUSED : 0) |
+                 (hovered == window ? GUI_WINDOW_HOVERED : 0),
+    };
+    gui_window_shared_t *shared = window->shared;
+    if (!memcmp(&shared->state, &state, sizeof(state)))
+      continue;
+    bool changed = shared->state.x != state.x || shared->state.y != state.y ||
+                   shared->state.flags != state.flags;
+    uint32_t sequence =
+        __atomic_load_n(&shared->state_sequence, __ATOMIC_RELAXED) & ~1u;
+    __atomic_store_n(&shared->state_sequence, sequence + 1, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&shared->state.x, state.x, __ATOMIC_RELAXED);
+    __atomic_store_n(&shared->state.y, state.y, __ATOMIC_RELAXED);
+    __atomic_store_n(&shared->state.cursor_x, state.cursor_x, __ATOMIC_RELAXED);
+    __atomic_store_n(&shared->state.cursor_y, state.cursor_y, __ATOMIC_RELAXED);
+    __atomic_store_n(&shared->state.flags, state.flags, __ATOMIC_RELAXED);
+    __atomic_store_n(&shared->state_sequence, sequence + 2, __ATOMIC_RELEASE);
+    if (changed && remote->event_target.tid)
+      rpc_notify(&remote->event_target, GUI_RPC_EVENT_READY, NULL, 0);
+  }
+}
+
 void gui_wake_window(window_t *window) {
   for (gui_remote_window_t *remote = gui_remote_windows; remote;
        remote = remote->next) {
     if (remote->window != window)
       continue;
-    if (remote->event_notifications) {
-      rpc_endpoint_t owner = {remote->owner_tid, remote->owner_generation};
-      rpc_notify(&owner, GUI_RPC_EVENT_READY, NULL, 0);
-    }
+    if (remote->event_target.tid)
+      rpc_notify(&remote->event_target, GUI_RPC_EVENT_READY, NULL, 0);
     return;
   }
 }
@@ -132,7 +178,8 @@ static int gui_create_window(rpc_call_t *call) {
   unsigned title_length = request->title_length;
   if (title_length > GUI_TITLE_MAX ||
       title_length != call->arg_len - sizeof(*request) || request->width == 0 ||
-      request->height == 0) {
+      request->height == 0 ||
+      (request->flags & ~(GUI_CREATE_HIDDEN | GUI_CREATE_UNFOCUSED))) {
     return RPC_ERR_INVAL;
   }
 
@@ -184,7 +231,9 @@ static int gui_create_window(rpc_call_t *call) {
   window->handle_right = gui_event_right;
   window->handle_mouse_wheel = gui_event_wheel;
   window->close = gui_event_close;
-  window->display(window, request->x, request->y);
+  window->x = request->x;
+  window->y = request->y;
+  sheet_slide(window->sht, window->x, window->y);
 
   if (shared_memory_map_to(call->caller_tid, call->caller_generation, shared,
                            (void *)(uintptr_t)request->client_mapping,
@@ -206,9 +255,13 @@ static int gui_create_window(rpc_call_t *call) {
   remote->front = 1;
   remote->owner_tid = call->caller_tid;
   remote->owner_generation = call->caller_generation;
-  remote->event_notifications = false;
+  remote->event_target = (rpc_endpoint_t){0};
   remote->next = gui_remote_windows;
   gui_remote_windows = remote;
+  if (!(request->flags & GUI_CREATE_HIDDEN))
+    window_show(window, !(request->flags & GUI_CREATE_UNFOCUSED));
+  else
+    gui_update_window_states(desktop0);
   TaskUnlock();
 
   gui_rpc_create_reply_t reply = {.window_id = id};
@@ -371,12 +424,67 @@ static int gui_event_notifications(rpc_call_t *call) {
   const gui_rpc_event_notifications_t *request = call->arg;
   if (request->enabled > 1)
     return RPC_ERR_INVAL;
+  task_info_t *tasks = NULL;
+  size_t count = 0;
+  if (request->enabled && task_list(&tasks, &count) != 0)
+    return RPC_ERR_NOMEM;
+  const task_info_t *owner = task_snapshot_find(tasks, count, call->caller_tid);
+  const task_info_t *target = task_snapshot_find(tasks, count, request->tid);
+  bool valid =
+      !request->enabled ||
+      (owner && target && owner->generation == call->caller_generation &&
+       owner->tgid == target->tgid &&
+       target->generation == request->generation &&
+       target->state != TASK_INFO_ZOMBIE);
+  free(tasks);
+  if (!valid)
+    return RPC_ERR_INVAL;
   TaskLock();
   gui_remote_window_t *remote = gui_remote_find(call, request->window_id);
-  if (remote)
-    remote->event_notifications = request->enabled;
+  if (remote) {
+    remote->event_target = (rpc_endpoint_t){request->enabled ? request->tid : 0,
+                                            request->generation};
+    gui_wake_window(remote->window);
+  }
   TaskUnlock();
   return remote ? RPC_OK : RPC_ERR_INVAL;
+}
+
+static int gui_window_control(rpc_call_t *call) {
+  if (call->arg_len != sizeof(gui_rpc_window_control_t))
+    return RPC_ERR_INVAL;
+  const gui_rpc_window_control_t *request = call->arg;
+  if (request->operation > GUI_WINDOW_FOCUS || request->x < INT16_MIN ||
+      request->x > INT16_MAX || request->y < INT16_MIN ||
+      request->y > INT16_MAX)
+    return RPC_ERR_INVAL;
+  TaskLock();
+  gui_remote_window_t *remote = gui_remote_find(call, request->window_id);
+  if (!remote) {
+    TaskUnlock();
+    return RPC_ERR_INVAL;
+  }
+  window_t *window = remote->window;
+  switch (request->operation) {
+  case GUI_WINDOW_MOVE:
+    window->x = request->x;
+    window->y = request->y;
+    sheet_slide(window->sht, window->x, window->y);
+    gui_update_window_states(window->desktop);
+    break;
+  case GUI_WINDOW_SHOW:
+    if (!window->using1)
+      window_show(window, request->x != 0);
+    break;
+  case GUI_WINDOW_HIDE:
+    window->hide(window);
+    break;
+  case GUI_WINDOW_FOCUS:
+    window_focus(window);
+    break;
+  }
+  TaskUnlock();
+  return RPC_OK;
 }
 
 static const rpc_handler_t gui_handlers[GUI_RPC_COUNT] = {
@@ -388,6 +496,7 @@ static const rpc_handler_t gui_handlers[GUI_RPC_COUNT] = {
     [GUI_RPC_STOP_KEYBOARD] = gui_stop_keyboard,
     [GUI_RPC_SET_TITLE] = gui_set_title,
     [GUI_RPC_EVENT_NOTIFICATIONS] = gui_event_notifications,
+    [GUI_RPC_WINDOW_CONTROL] = gui_window_control,
 };
 
 int gui_rpc_service_start(void) {

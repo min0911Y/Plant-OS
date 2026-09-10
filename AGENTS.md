@@ -92,6 +92,8 @@ make -C kernel ARCH=x86_64 livecd
 - x86_64 SDL renderer 可选择原生 lavapipe；普通应用使用 SDL 的后端选择，回归显式固定软件后端并断言默认选择为 Vulkan。SDL window surface 默认使用直接共享缓冲。Vulkan WSI 使用 `window_get_buffer` 的实际布局，在渲染完成且同步 present 应答后才复用图像；平台代码、上游补丁与宿主生成器统一维护在 `apps/mesa/` 和 `scripts/build-mesa.py`，不引入宿主驱动或装载器。
 - x86_64 OpenGL 使用同一 Mesa 构建中的 llvmpipe 和原生 EGL，SDL 复用上游 EGL 上下文接口。GL dispatch/TLS 保持单一实现，当前 EGL 对象须保留至解绑；EGL 窗口每帧重新获取绘图平面，通过 `window_present_frame` 同步交接完整客户区，遵循 GUI owner 与缓冲所有权规则。经典 glxgears 仅替换窗口层，不引入 X11/GLX 兼容层；接口与验证见 [OpenGL](doc/opengl.md)。
 
+- x86_64 GLFW 使用 `apps/glfw/` 的上游核心和原生 GUI/EGL 后端；窗口创建显式传入标志，状态查询读取一致的共享快照。GUI 通知目标只允许同一 task group 中经过 TID/generation 校验的线程；GLFW 通过专用通知线程和私有 futex 等待，不消费应用线程的 IPC。功能边界与回归见 [GLFW](doc/glfw.md)。
+
 - RenderTM 的 `rendertm.bin` 保留原版终端行为；独立 SDL3 前端为 `renderhd.bin`，两者共用渲染、控制及 C++ modules，不复制渲染实现。并行像素阶段之间须完成同步，窗口缓冲在同步呈现完成后才能复用。终端应用的指针位置经当前 TTY 的受校验 RPC 查询，不接管 GUI 输入 owner。构建与验证见 [RenderTM](doc/rendertm.md)。
 
 ### 文件系统与设备
@@ -135,7 +137,7 @@ python3 scripts/test-x86_64.py --arch i386 --dynamic --memory 512
 | 用户态线程、TLS、运行库 | `--threads`、`--futex`，覆盖同步、分配、C/C++、stdio、浮点环境和动态链接/VM |
 | LLVM、Vulkan 与 WSI | x86_64 `--llvm`、`--lavapipe --memory 3072 --timeout 600` 验证着色器、窗口像素与输入；`--compute-bench` 比较多个 worker 数并逐块核验结果，性能数据须固定宿主与 QEMU 配置 |
 | OpenGL、EGL 与 llvmpipe | x86_64 `--opengl --memory 3072 --timeout 600`，覆盖离屏、GLSL、上下文共享、并发场景及 glxgears 两帧像素和键盘事件；`--gears-workers N` 选择光栅线程，性能另用 `--gears-bench`，固定宿主与 QEMU 配置 |
-| GUI、输入、SDL、工具 | `--mouse`、`--console`、`--editor`、`--sdl`、`--terminal-load COUNT`、`--desktop-app`（`lite` 或 `nk`）、`--tools` |
+| GUI、输入、SDL、工具 | `--mouse`、`--console`、`--editor`、`--sdl`、x86_64 `--glfw`、`--terminal-load COUNT`、`--desktop-app`（`lite` 或 `nk`）、`--tools` |
 | 动态链接与全部应用装载 | `--dynamic`、`--all-apps`，见 [动态链接验证](doc/dynamic-linking.md#验证) |
 | USB、PCI、AHCI | `--usb`、`--usb-hubs`、`--usb-irq`、`--usb-root-bus`、`--ahci --machine q35`；故障与模式组合见对应专题文档 |
 | APIC、SIMD 与 TLB 后端 | `--apic`、`--cpu`、`--tlb`，见 [多架构说明](doc/multiarch.md) |

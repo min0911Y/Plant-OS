@@ -252,7 +252,7 @@ static int gui_test_terminal_load(unsigned count) {
 }
 
 static int gui_test_mouse(void) {
-  window_t window = create_window("GUI mouse test", 64, 64, 256, 192);
+  window_t window = create_window("GUI mouse test", 64, 64, 256, 192, 0);
   framebuffer_info_t display;
   if (window == NULL || framebuffer_info(&display) < 0) {
     close_window(window);
@@ -302,7 +302,7 @@ static int gui_test_mouse(void) {
 }
 
 static int gui_test_usb_keyboard(void) {
-  window_t window = create_window("USB keyboard test", 64, 64, 256, 192);
+  window_t window = create_window("USB keyboard test", 64, 64, 256, 192, 0);
   if (window == NULL)
     return 50;
   window_start_recv_keyboard(window);
@@ -363,7 +363,7 @@ static int gui_test_usb_keyboard(void) {
 }
 
 static int gui_test_basic(void) {
-  window_t window = create_window("GUI RPC test", 48, 48, 64, 64);
+  window_t window = create_window("GUI RPC test", 48, 48, 64, 64, 0);
   if (window == NULL) {
     logkf("GUITEST FAIL create\n");
     return 3;
@@ -403,7 +403,7 @@ static int gui_test_basic(void) {
 static int gui_test_frames(void) {
   enum { W = 648, H = 428, FIRST = (4 << 16) | 24,
          LAST = ((W - 4) << 16) | (H - 4) };
-  window_t window = create_window("GUI frame ownership", 64, 64, W, H);
+  window_t window = create_window("GUI frame ownership", 64, 64, W, H, 0);
   if (!window)
     return 1;
   window_start_recv_keyboard(window);
@@ -465,7 +465,7 @@ static int gui_test_frames(void) {
       if (window_present(window, (8 << 16) | 28, (9 << 16) | 29))
         goto done;
     }
-    window_t cover = create_window("Exposure", 100, 120, 128, 96);
+    window_t cover = create_window("Exposure", 100, 120, 128, 96, 0);
     if (!cover)
       goto done;
     close_window(cover);
@@ -475,7 +475,7 @@ static int gui_test_frames(void) {
       if (child < 0)
         goto done;
       if (!child) {
-        window_t orphan = create_window("Orphan frame", 100, 120, 128, 96);
+        window_t orphan = create_window("Orphan frame", 100, 120, 128, 96, 0);
         window_buffer_t pixels;
         int result = !orphan || window_get_buffer(orphan, &pixels);
         if (!result) {
@@ -516,7 +516,7 @@ static int gui_stress_load_process(unsigned parent_tid, unsigned index,
   window_t window = NULL;
   if (index < window_processes) {
     window = create_window("GUI stress load", (int)(index * 13 % 320),
-                           (int)(index * 17 % 240), 648, 428);
+                           (int)(index * 17 % 240), 648, 428, 0);
   }
 
   gui_stress_status_t ready = {
@@ -552,7 +552,7 @@ static int gui_stress_load_process(unsigned parent_tid, unsigned index,
 
 static int gui_stress_refresh_process(unsigned parent_tid, unsigned index) {
   window_t window = create_window(index == 0 ? "GUI stress A" : "GUI stress B",
-                                  64 + (int)index * 280, 64, 258, 181);
+                                  64 + (int)index * 280, 64, 258, 181, 0);
   if (window == NULL) {
     return 10;
   }
