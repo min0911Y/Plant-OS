@@ -177,12 +177,15 @@ function core.load_plugins()
   local no_errors = true
   local files = system.list_dir(EXEDIR .. "/data/plugins")
   for _, filename in ipairs(files) do
-    local modname = "plugins." .. filename:gsub(".LUA$", "")
-    local ok = core.try(require, modname)
-    if ok then
-      core.log_quiet("Loaded plugin %q", modname)
-    else
-      no_errors = false
+    local name = filename:match("^(.*)%.[lL][uU][aA]$")
+    if name then
+      local modname = "plugins." .. name
+      local ok = core.try(require, modname)
+      if ok then
+        core.log_quiet("Loaded plugin %q", modname)
+      else
+        no_errors = false
+      end
     end
   end
   return no_errors

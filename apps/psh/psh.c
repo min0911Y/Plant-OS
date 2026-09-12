@@ -3,6 +3,7 @@
 #include <limits.h>
 #include <mst.h>
 #include <perf.h>
+#include <power.h>
 #include <pl_readline.h>
 #include <runtime_args.h>
 #include <stdint.h>
@@ -204,7 +205,7 @@ static const struct simple_command simple_commands[] = {
 
 static const char *const argument_commands[] = {
     "dir", "del", "cd", "mkfile", "type", "remount_drive",
-    "color", "mkdir", "insmod", "rmmod", "format", "perf",
+    "color", "mkdir", "insmod", "rmmod", "format", "perf", "shutdown",
 };
 
 static int control_profiler(int argc, char **argv) {
@@ -341,6 +342,17 @@ static int remount_drive(const char *argument) {
 static int run_command(int argc, char **argv) {
   int result = 0;
   if (argc == 0) {
+    return 1;
+  }
+  if (strcmp("shutdown", argv[0]) == 0) {
+    if (argc != 1) {
+      printf("shutdown takes no arguments.\n");
+      return 1;
+    }
+    printf("Shutting down...\n");
+    fflush(NULL);
+    power_off();
+    printf("ACPI power off failed or is unsupported.\n");
     return 1;
   }
   if (strcmp("dir", argv[0]) == 0) {

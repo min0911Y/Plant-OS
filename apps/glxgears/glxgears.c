@@ -270,15 +270,20 @@ int main(int argc, char **argv) {
       info = true;
     else if (!strcmp(argv[i], "--benchmark"))
       benchmark = true;
-    else if (!strcmp(argv[i], "--workers") && i + 1 < argc) {
+    else if ((!strcmp(argv[i], "--workers") ||
+              !strcmp(argv[i], "--vector-width")) && i + 1 < argc) {
+      bool vector_width = !strcmp(argv[i], "--vector-width");
       char *end;
       const char *value = argv[++i];
-      unsigned long workers = strtoul(value, &end, 10);
-      if (!*value || *end || workers > INT_MAX ||
-          setenv("LP_NUM_THREADS", value, 1))
+      unsigned long number = strtoul(value, &end, 10);
+      if (!*value || *end || number > INT_MAX ||
+          (vector_width && number != 128 && number != 256) ||
+          setenv(vector_width ? "LP_NATIVE_VECTOR_WIDTH" : "LP_NUM_THREADS",
+                 value, 1))
         return 1;
     } else {
       puts("Usage: glxgears.bin [-info] [--test | --benchmark] [--workers N]\n"
+           "                   [--vector-width 128|256]\n"
            "Arrow keys rotate, space pauses, Escape exits.");
       return 1;
     }

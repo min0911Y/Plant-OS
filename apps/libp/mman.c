@@ -16,15 +16,11 @@ int mprotect(void *address, size_t length, int protection) {
     errno = EINVAL;
     return -1;
   }
-  if (!protection) {
-    errno = ENOTSUP;
-    return -1;
-  }
   if ((protection & (PROT_WRITE | PROT_EXEC)) == (PROT_WRITE | PROT_EXEC)) {
     errno = EACCES;
     return -1;
   }
-  return vm_protect(address, size, VM_READ | protection);
+  return vm_protect(address, size, protection);
 }
 
 void *mmap(void *address, size_t length, int protection, int flags,
@@ -34,11 +30,16 @@ void *mmap(void *address, size_t length, int protection, int flags,
     errno = EINVAL;
     return MAP_FAILED;
   }
-  if (!protection ||
-      (flags & ~(MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE)) ||
-      (flags & (MAP_PRIVATE | MAP_ANONYMOUS)) !=
-          (MAP_PRIVATE | MAP_ANONYMOUS) ||
-      descriptor != -1 || offset) {
+  bool anonymous = flags & MAP_ANONYMOUS;
+  int kind = flags & (MAP_PRIVATE | MAP_SHARED);
+  if ((kind != MAP_PRIVATE && kind != MAP_SHARED) || offset < 0 ||
+      ((uint64_t)offset & (VM_PAGE_SIZE - 1))) {
+    errno = EINVAL;
+    return MAP_FAILED;
+  }
+  if ((flags & ~(MAP_PRIVATE | MAP_SHARED | MAP_ANONYMOUS | MAP_FIXED |
+                 MAP_FIXED_NOREPLACE | MAP_NORESERVE)) ||
+      (anonymous && (kind == MAP_SHARED || descriptor != -1 || offset))) {
     errno = ENOTSUP;
     return MAP_FAILED;
   }
@@ -46,25 +47,28 @@ void *mmap(void *address, size_t length, int protection, int flags,
     errno = EACCES;
     return MAP_FAILED;
   }
-  if ((flags & MAP_FIXED_NOREPLACE) &&
-      (!address || ((uintptr_t)address & (VM_PAGE_SIZE - 1)))) {
+  if (((flags & (MAP_FIXED | MAP_FIXED_NOREPLACE)) ==
+       (MAP_FIXED | MAP_FIXED_NOREPLACE)) ||
+      ((flags & (MAP_FIXED | MAP_FIXED_NOREPLACE)) &&
+       (!address || ((uintptr_t)address & (VM_PAGE_SIZE - 1))))) {
     errno = EINVAL;
     return MAP_FAILED;
   }
   address = (void *)((uintptr_t)address & ~(uintptr_t)(VM_PAGE_SIZE - 1));
-  void *mapping = vm_map(address, size);
-  if (!mapping && address && !(flags & MAP_FIXED_NOREPLACE))
-    mapping = vm_map(NULL, size);
-  if (!mapping)
-    return MAP_FAILED;
-  if (protection != (PROT_READ | PROT_WRITE) &&
-      mprotect(mapping, size, protection)) {
-    int error = errno;
-    vm_unmap(mapping, size);
-    errno = error;
-    return MAP_FAILED;
+  unsigned options = (flags & MAP_FIXED ? VM_REPLACE : 0) |
+                     (kind == MAP_SHARED ? VM_SHARED : 0);
+  bool fixed = flags & (MAP_FIXED | MAP_FIXED_NOREPLACE);
+  for (unsigned attempt = 0; attempt < 2; attempt++) {
+    void *mapping =
+        anonymous
+            ? vm_map_aligned(address, size, VM_PAGE_SIZE, protection, options)
+            : vm_map_file(address, size, protection, options, descriptor, offset);
+    if (mapping || fixed)
+      return mapping ? mapping : MAP_FAILED;
+    /* A used address is only a hint for a non-fixed mapping. */
+    address = NULL;
   }
-  return mapping;
+  return MAP_FAILED;
 }
 
 int munmap(void *address, size_t length) {
@@ -74,4 +78,25 @@ int munmap(void *address, size_t length) {
     return -1;
   }
   return vm_unmap(address, size);
+}
+
+int madvise(void *address, size_t length, int advice) {
+  size_t size = mapping_size(length);
+  if (!size || ((uintptr_t)address & (VM_PAGE_SIZE - 1)) ||
+      advice != MADV_DONTNEED) {
+    errno = EINVAL;
+    return -1;
+  }
+  return vm_discard(address, size);
+}
+
+int msync(void *address, size_t length, int flags) {
+  size_t size = mapping_size(length);
+  if (!size || ((uintptr_t)address & (VM_PAGE_SIZE - 1)) ||
+      (flags & ~(MS_SYNC | MS_ASYNC | MS_INVALIDATE)) ||
+      (flags & (MS_SYNC | MS_ASYNC)) == (MS_SYNC | MS_ASYNC)) {
+    errno = EINVAL;
+    return -1;
+  }
+  return vm_sync(address, size);
 }

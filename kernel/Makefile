@@ -48,7 +48,7 @@ DEL      = rm
 
 OBJS_BOOTPACK = $(OUTPATH)boot_entry.obj $(OUTPATH)boot.o \
 				$(OUTPATH)kernelc.o $(OUTPATH)screen.o $(OUTPATH)command.o $(OUTPATH)timer.o \
-				$(OUTPATH)memory.o $(OUTPATH)heap.o $(LIBALLOC_KERNEL) $(OUTPATH)user_vm.o $(OUTPATH)file.o $(OUTPATH)bios_interrupt.obj \
+				$(OUTPATH)memory.o $(OUTPATH)heap.o $(LIBALLOC_KERNEL) $(OUTPATH)user_vm.o $(OUTPATH)user_vm_file.o $(OUTPATH)file.o $(OUTPATH)bios_interrupt.obj \
 				$(OUTPATH)interrupt_entries.obj $(OUTPATH)exceptions.obj $(OUTPATH)vga.o $(OUTPATH)tm.o  \
 				$(OUTPATH)mouse.o $(OUTPATH)acpi.o $(OUTPATH)is.o $(OUTPATH)descriptor_tables.o $(OUTPATH)arg.o \
 				$(OUTPATH)other.o $(OUTPATH)floppy.o $(OUTPATH)dma.o $(OUTPATH)init.o $(OUTPATH)main.o \

@@ -168,12 +168,11 @@ truncate -s "${image_mib}M" "$initramfs"
 mformat -T "$image_sectors" -h 64 -s 16 -i "$initramfs"
 mcopy -s -i "$initramfs" "$payload_dir"/* ::/
 
-# Record the real FAT paths for runtime verification, including long-name aliases.
+# Verify applications through their original names, including VFAT long names.
 while IFS= read -r program; do
   path=$program
   if [ "$program" = doom.bin ]; then path=games/$program; fi
-  short=$(fat_short_path "$initramfs" "$path")
-  printf '/%s\n' "$short"
+  printf '/%s\n' "$path"
 done < "$apps_out_dir/applications.list" > "$payload_dir/apps.lst"
 mcopy -i "$initramfs" "$payload_dir/apps.lst" ::/apps.lst
 
@@ -182,22 +181,20 @@ setup_manifest=$payload_dir/setup.mst
 loader_source=$(fat_short_path "$initramfs" DOSLDR.bin)
 {
   printf '"files" = [\n'
-  printf '    {"type" = "file" "source" = "%s" "path" = "DOSLDR.bin" "fat" = "%s"}' \
-    "$loader_source" "$loader_source"
+  printf '    {"type" = "file" "source" = "%s" "path" = "DOSLDR.bin"}' \
+    "$loader_source"
   find "$payload_dir" -mindepth 1 -type d -printf '%P\n' | sort |
     while IFS= read -r path; do
-      fat_path=$(fat_short_path "$initramfs" "$path")
-      printf ',\n    {"type" = "dir" "path" = "%s" "fat" = "%s"}' \
-        "$path" "$fat_path"
+      printf ',\n    {"type" = "dir" "path" = "%s"}' "$path"
     done
   find "$payload_dir" -type f ! -name DOSLDR.bin ! -name setup.mst \
       -printf '%P\n' | sort |
     while IFS= read -r path; do
       source=$(fat_short_path "$initramfs" "$path")
-      printf ',\n    {"type" = "file" "source" = "%s" "path" = "%s" "fat" = "%s"}' \
-        "$source" "$path" "$source"
+      printf ',\n    {"type" = "file" "source" = "%s" "path" = "%s"}' \
+        "$source" "$path"
     done
-  printf ',\n    {"type" = "file" "source" = "SETUP.MST" "path" = "setup.mst" "fat" = "SETUP.MST"}\n]\n'
+  printf ',\n    {"type" = "file" "source" = "SETUP.MST" "path" = "setup.mst"}\n]\n'
 } >"$setup_manifest"
 mcopy -i "$initramfs" "$setup_manifest" ::/setup.mst
 

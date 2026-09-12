@@ -79,19 +79,21 @@ PCID 要求 IA-32e 分页，i386 保留原来的 CR3 路径；`--arch i386 --dyn
 
 系统调用保留 Plant API 的语义编号，但使用完整的 64 位参数：`RAX` 为编号，参数为 `RDI, RSI, RDX, R10, R8, R9`。这不是 Linux ABI。入口通过 `swapgs` 取得每 CPU 内核栈，屏蔽 IF/TF/DF/NT/AC；NMI、双重故障和机器检查有独立 IST。用户中断系统调用门未开放，32 位程序会在 ELF 检查时被拒绝。
 
-用户与内核都以 `-mno-red-zone -msse2 -mfpmath=sse -mlong-double-64` 构建。调度器在 CPU 支持时使用 XSAVEOPT64/XRSTOR64，否则使用 FXSAVE64/FXRSTOR64；BSP 选择后端，AP 验证能力。XSAVEOPT 后端启用 CR4.OSXSAVE，并在每个 CPU 设置 XCR0=3，只保存 x87 和 SSE；任务保存区为 64 字节对齐的 576-byte 标准 XSAVE 格式，任务注册表按页分配。保存区在恢复和下次保存之间保持完整，当前任务 reset 同时重置硬件状态跟踪。
+用户与内核都以 `-mno-red-zone -msse2 -mfpmath=sse -mlong-double-64` 构建，不要求基础二进制使用 AVX。BSP 根据 CPUID 选择 XSAVEOPT64、XSAVE64 或 FXSAVE64，AP 验证同一后端和状态集合。XSAVE 后端启用 CR4.OSXSAVE；支持 AVX 且 CPUID 的 YMM 状态布局匹配时设置 XCR0=7，否则为 3。AVX2、FMA、F16C 复用 AVX 状态，由用户态 CPUID 检测决定使用；AVX-512 未启用。任务保存区为 64 字节对齐的 832-byte 标准 XSAVE 格式，包含 x87/SSE、header 和 YMM 高半部分，任务注册表按页分配。XSAVEOPT 保存区在恢复和下次保存之间保持完整，当前任务 reset 同时重置硬件状态跟踪。
 
-临时中断及 syscall 栈帧在执行 C 代码前仍保存完整 FXSAVE64 状态并装入内核 MXCSR，返回时恢复；清零或复用的临时栈不能依赖 XSAVEOPT 跳过未修改状态。调度、fork 和信号返回保留全部 XMM、x87 和 MXCSR。FSGSBASE 未启用，用户 FS base 指向原生 TLS，用户 GS 固定为零，AVX 不属于当前 ABI。i386 使用 GS 描述符提供 TLS，并保持禁用 SSE。新线程继承创建者的浮点环境，`fenv.h` 在 x86_64 同步 x87/MXCSR，i386 只操作 x87。信号返回使用编号 `0x65`，检查用户 frame 后经 `iretq` 恢复完整寄存器；信号 frame 保持完整的 FXSAVE 格式，不接受用户提供的 XSAVE header。
+临时中断及 syscall 栈帧使用 FXSAVE64 保存 x87/XMM/MXCSR。支持 XGETBV(1) 时，根据 XINUSE 的 AVX 位，仅在 YMM 高半部分非初始状态时以 VEXTRACTF128 保存全部 16 个高半部分，并执行 VZEROUPPER；不支持该查询的 CPU 完整保存。返回时以 FXRSTOR64 恢复传统状态，按保存的标志选择 VINSERTF128 或 VZEROUPPER，避免把已清空的 YMM 重新标为使用中。该标志位于 FXSAVE 的软件保留区，入口帧不必扩容；不在每次入口清零整个缓冲，只在向用户导出信号帧前清理保留字节、x87 槽位填充和未使用的 YMM 数据。信号返回校验标志及 CPU 能力，不接受用户提供的 XSAVE header。调度、fork、信号返回和浮点 reset 覆盖完整状态。FSGSBASE 未启用，用户 FS base 指向原生 TLS，用户 GS 固定为零。i386 使用 GS 描述符提供 TLS，并保持禁用 SSE。新线程继承创建者的浮点环境，`fenv.h` 在 x86_64 同步 x87/MXCSR，i386 只操作 x87。信号返回使用编号 `0x65`，检查用户 frame 后经 `iretq` 恢复完整寄存器。
 
-`simdtest.bin` 验证多核切换、fork、x87、16 个 XMM、MXCSR 和显式 reset。以下 CPU 配置分别覆盖 XSAVEOPT、只有 XSAVE、没有 XSAVE；串口 `simd: context=... xcr0=...` 显示实际选择，这些配置均运行完整回归：
+`simdtest.bin` 检查 XMM/YMM、x87 和 MXCSR 在 fork、竞争调度、定时器中断及 reset 后的内容，并在支持 XGETBV(1) 时确认已清空的 YMM 保持未使用状态。`--simd` 以真实 Ctrl+C 事件分别验证非空和已清空的 YMM 信号返回，并检查信号帧保留区及未使用数据全部清零。串口 `simd: context=... xcr0=... xgetbv1=...` 显示实际后端。专项回归可使用：
 
 ```sh
-python3 scripts/test-x86_64.py --cpu max
-python3 scripts/test-x86_64.py --cpu max,xsaveopt=off,enforce
-python3 scripts/test-x86_64.py --cpu max,xsave=off,xsaveopt=off,xsavec=off,xsaves=off,enforce
-# 支持 XSAVEOPT 的宿主：验证真实硬件优化，而非仅 TCG 的指令模拟
-python3 scripts/test-x86_64.py --accel kvm --cpu host,enforce
+python3 scripts/test-x86_64.py --simd --accel kvm --cpu host
+python3 scripts/test-x86_64.py --simd --cpu max,-xgetbv1
+python3 scripts/test-x86_64.py --simd --cpu max,-xsaveopt
+python3 scripts/test-x86_64.py --simd --cpu max,-avx
+python3 scripts/test-x86_64.py --simd --cpu qemu64
 ```
+
+省略 `--simd` 运行完整回归；`--firmware uefi` 验证 UEFI 启动。
 
 调度专用时钟集中在 `kernel/arch/x86/common/clock.c`，通过 `arch.h` 提供
 CPU 本地纳秒读数。KVM 下使用版本化 pvclock；其他环境在支持 invariant TSC、
@@ -179,7 +181,7 @@ SDL3 操作普遍以 `true` 表示成功，窗口事件直接使用 `SDL_EVENT_W
 
 `sdltest.bin` 验证 SDL3 版本、软件渲染、PNG 内存流往返、VFS 文件流、字体、计时、真实鼠标/方向键与 Shift 文本输入，以及未提交画面隔离、局部 damage 和遮挡恢复。
 
-lite 的渲染器按 surface pitch 寻址，命令缓存按结构对齐；文件查询和路径接口使用真实 VFS 结果。nk 根据实际屏幕尺寸限制窗口，字体来自 `/data/fonts/mono.ttf`。两者均可通过 GUI 窗口关闭按钮退出。
+lite 的渲染器按 surface pitch 寻址，命令缓存按结构对齐；文件查询和路径接口使用真实 VFS 结果。插件加载按 Lua 扩展名提取模块名，保留文件名主体；语法识别统一按小写文件名匹配规则，不依赖 FAT 将目录项转成大写。nk 根据实际屏幕尺寸限制窗口，字体来自 `/data/fonts/mono.ttf`。两者均可通过 GUI 窗口关闭按钮退出。
 
 ## 日期与时间
 

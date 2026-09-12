@@ -159,7 +159,8 @@ void x64_syscall_dispatch(x64_interrupt_frame_t *frame) {
     uint32_t mxcsr = saved.simd.mxcsr;
     if (saved.rip < USER_SPACE_START || saved.rip >= USER_SPACE_END ||
         saved.rsp < USER_SPACE_START || saved.rsp >= USER_SPACE_END ||
-        (mxcsr & ~x64_mxcsr_mask))
+        (mxcsr & ~x64_mxcsr_mask) || saved.simd.ymm_inuse > 1 ||
+        (saved.simd.ymm_inuse && !(x64_xstate_mask & 4)))
       task_exit(141);
     saved.cs = USER_CODE;
     saved.ss = USER_DATA;
@@ -174,8 +175,10 @@ void x64_syscall_dispatch(x64_interrupt_frame_t *frame) {
                             frame->r10, frame->r8,  frame->r9};
   irq_enable();
   syscall_dispatch(&call);
-  if (reset_simd)
+  if (reset_simd) {
     frame->simd = current_task()->fpu_state.legacy;
+    memcpy(frame->ymm_hi, current_task()->fpu_state.ymm_hi, sizeof(frame->ymm_hi));
+  }
   frame->rax = call.value;
   frame->rdi = call.argument0;
   frame->rsi = call.argument1;

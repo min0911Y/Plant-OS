@@ -1,9 +1,102 @@
 #include <arg.h>
+#include <dirent.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <syscall.h>
+
+static int long_filename_test(void) {
+  const char *directory = "Long filename regression directory";
+  const char *renamed = "Renamed long filename directory";
+  const char *names[] = {"Mixed Case filename.txt",
+                         "collision filename one.txt",
+                         "collision filename two.txt",
+                         "multiple.dots.in.a.filename",
+                         "1234567890123",
+                         "12345678901234567890123456xx",
+                         "\xe4\xb8\xad\xe6\x96\x87-\xf0\x9f\x8c\xb1.txt"};
+  if (mkdir(directory) != 0 || chdir(directory) != 0) {
+    return 40;
+  }
+  const char *invalid[] = {"bad?.txt",         "trailing.",
+                           "trailing ",        "\xc0\xaf.txt",
+                           "\xed\xa0\x80.txt", "\xf4\x90\x80\x80.txt"};
+  for (unsigned i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++) {
+    int fd = open(invalid[i], O_WRONLY | O_CREAT, 0);
+    if (fd >= 0) {
+      close(fd);
+      return 56;
+    }
+  }
+  char maximum[255];
+  memset(maximum, 'x', sizeof(maximum) - 1);
+  maximum[sizeof(maximum) - 1] = 0;
+  for (unsigned i = 0; i <= sizeof(names) / sizeof(names[0]); i++) {
+    const char *name =
+        i == sizeof(names) / sizeof(names[0]) ? maximum : names[i];
+    FILE *file = fopen(name, "wb");
+    if (!file || fwrite(name, 1, strlen(name), file) != strlen(name) ||
+        fclose(file)) {
+      return 41;
+    }
+    char readback[255] = {0};
+    file = fopen(name, "rb");
+    if (!file || fread(readback, 1, sizeof(readback), file) != strlen(name) ||
+        strcmp(readback, name) || fclose(file)) {
+      return 42;
+    }
+  }
+  struct stat info;
+  if (stat("MIXED CASE FILENAME.TXT", &info) || stat("COLLIS~1.TXT", &info) ||
+      stat("COLLIS~2.TXT", &info)) {
+    return 43;
+  }
+  DIR *stream = opendir(".");
+  if (!stream) {
+    return 44;
+  }
+  unsigned found = 0;
+  struct dirent *entry;
+  while ((entry = readdir(stream))) {
+    for (unsigned i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+      if (!strcmp(entry->d_name, names[i])) {
+        found |= 1u << i;
+      }
+    }
+  }
+  closedir(stream);
+  if (found != (1u << (sizeof(names) / sizeof(names[0]))) - 1) {
+    return 45;
+  }
+  if (rename(names[0], "A substantially longer renamed filename.data") ||
+      stat(names[0], &info) == 0 ||
+      rename("A substantially longer renamed filename.data", "short.txt") ||
+      unlink("short.txt")) {
+    return 46;
+  }
+  for (unsigned i = 1; i < sizeof(names) / sizeof(names[0]); i++) {
+    if (unlink(names[i])) {
+      return 47;
+    }
+  }
+  if (unlink(maximum)) {
+    return 48;
+  }
+  /* Repeated reuse must reclaim the entire LFN sequence. */
+  for (unsigned i = 0; i < 48; i++) {
+    FILE *file = fopen(maximum, "wb");
+    if (!file || fclose(file) || unlink(maximum)) {
+      return 49;
+    }
+  }
+  if (chdir("..") || rename(directory, renamed) || rmdir(renamed)) {
+    return 50;
+  }
+  logkf("LFNTEST PASS\n");
+  return 0;
+}
 
 static int file_size(const char *path) {
   struct stat status;
@@ -158,6 +251,48 @@ static int orphan_survival_test(const char *path) {
 }
 
 int main(int argc, char **argv) {
+  if (argc >= 2 && !strcmp(argv[1], "--lfn")) {
+    if (argc == 3 && chdir(argv[2])) {
+      return 39;
+    }
+    if (argc == 3) {
+      struct stat info;
+      if (stat("Damaged long filename.txt", &info) == 0 ||
+          stat("DAMAGE~1.TXT", &info) || info.st_size != 12) {
+        return 55;
+      }
+      FILE *file = fopen("External long filename from mtools.txt", "rb");
+      char data[16] = {0};
+      if (!file || fread(data, 1, 16, file) != 12 || fclose(file) ||
+          strcmp(data, "mtools seed\n")) {
+        return 51;
+      }
+      file = fopen("External empty long filename.txt", "wb");
+      if (!file || fwrite("Plant LFN\n", 1, 10, file) != 10 || fclose(file) ||
+          rename("External empty long filename.txt",
+                 "Exported long filename from Plant.txt")) {
+        return 52;
+      }
+    }
+    int status = long_filename_test();
+    if (!status && argc == 3) {
+      uint8_t drive = argv[2][0];
+      if (chdir("R:") || !vfs_unmount_disk(drive) || !vfs_mount(drive, drive) ||
+          chdir(argv[2])) {
+        return 53;
+      }
+      FILE *file = fopen("Exported long filename from Plant.txt", "rb");
+      char data[16] = {0};
+      if (!file || fread(data, 1, 16, file) != 10 || fclose(file) ||
+          strcmp(data, "Plant LFN\n")) {
+        return 54;
+      }
+    }
+    if (status) {
+      logkf("LFNTEST FAIL stage=%d errno=%d\n", status, errno);
+    }
+    return status;
+  }
   char parent_path[64] = "parent.log";
   char child_path[64] = "child.log";
   char orphan_path[64] = "orphan.log";

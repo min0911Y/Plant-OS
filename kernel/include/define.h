@@ -110,6 +110,7 @@ typedef struct {
   mtask *owner;
   unsigned value;
   mtask *waiter;
+  mtask *waiter_tail;
 } lock_t;
 #define LOCK_UNLOCKED 0
 #define LOCK_LOCKED 1
@@ -202,6 +203,9 @@ typedef struct mtask {
   uint32_t waittid;
   uint32_t wait_generation;
   enum WAIT_REASON wait_reason;
+  lock_t *waiting_lock;
+  struct mtask *lock_next;
+  struct mtask *lock_previous;
   uint32_t group_lock_owner;
   uint32_t group_lock_depth;
   int ready; // 如果为waiting 则无视wating
@@ -247,7 +251,7 @@ struct FAT_CACHE {
   int *fat;
   int FatMaxTerms;
   unsigned int ClustnoBytes;
-  unsigned short RootMaxFiles;
+  unsigned int RootMaxFiles;
   unsigned int RootDictAddress;
   unsigned int FileDataAddress;
   unsigned int imgTotalSize;

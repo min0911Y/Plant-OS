@@ -1,9 +1,16 @@
 bits 64
 default rel
+; Offsets are checked against x64_interrupt_frame_t in task.h.
+%define SIMD_SIZE 768
+%define YMM_INUSE 464
+%define FRAME_VECTOR (SIMD_SIZE + 15 * 8)
+%define FRAME_CS (FRAME_VECTOR + 3 * 8)
 section .text
 extern x64_interrupt_dispatch
 extern x64_syscall_dispatch
 extern kernel_lock_leave
+extern x64_xstate_mask
+extern x64_xgetbv1
 global x64_syscall_entry
 global x64_return_to_user
 global arch_task_interrupt_return
@@ -24,19 +31,46 @@ global arch_task_interrupt_return
   push r13
   push r14
   push r15
-  sub rsp, 512
-  mov rdi, rsp
-  xor eax, eax
-  mov ecx, 64
-  rep stosq
-  ; A transient frame needs a complete image: XSAVEOPT's modified-state
-  ; optimization cannot be used with a cleared or reused stack buffer.
+  sub rsp, SIMD_SIZE
+  ; Reserved FXSAVE bytes are sanitized only when exporting a signal frame.
   fxsave64 [rsp]
+  mov qword [rsp + YMM_INUSE], 0
+  test dword [rel x64_xstate_mask], 4
+  jz %%saved
+  cmp dword [rel x64_xgetbv1], 0
+  je %%save_ymm
+  mov ecx, 1
+  xgetbv
+  test eax, 4
+  jz %%saved
+%%save_ymm:
+  mov qword [rsp + YMM_INUSE], 1
+%assign reg 0
+%rep 16
+  vextractf128 [rsp + 512 + reg * 16], ymm%+reg, 1
+%assign reg reg + 1
+%endrep
+  ; C code uses SSE; clear upper lanes after preserving the interrupted state.
+  vzeroupper
+%%saved:
   ldmxcsr [kernel_mxcsr]
 %endmacro
 %macro RESTORE_REGISTERS 0
   fxrstor64 [rsp]
-  add rsp, 512
+  test dword [rel x64_xstate_mask], 4
+  jz %%restored
+  cmp qword [rsp + YMM_INUSE], 0
+  jne %%restore_ymm
+  vzeroupper
+  jmp %%restored
+%%restore_ymm:
+%assign reg 0
+%rep 16
+  vinsertf128 ymm%+reg, ymm%+reg, [rsp + 512 + reg * 16], 1
+%assign reg reg + 1
+%endrep
+%%restored:
+  add rsp, SIMD_SIZE
   pop r15
   pop r14
   pop r13
@@ -85,14 +119,14 @@ x64_vector_%+vector:
 x64_interrupt_common:
   cld
   SAVE_REGISTERS
-  mov rax, [rsp + 632]
+  mov rax, [rsp + FRAME_VECTOR]
   cmp eax, 2
   je .paranoid
   cmp eax, 8
   je .paranoid
   cmp eax, 18
   je .paranoid
-  test byte [rsp + 656], 3
+  test byte [rsp + FRAME_CS], 3
   jz .dispatch
   swapgs
   lfence
@@ -105,13 +139,13 @@ x64_interrupt_common:
   js .dispatch
   swapgs
   lfence
-  bts qword [rsp + 632], 63
+  bts qword [rsp + FRAME_VECTOR], 63
 .dispatch:
   mov rdi, rsp
   call x64_interrupt_dispatch
 
 x64_restore:
-  cmp qword [rsp + 632], 256
+  cmp qword [rsp + FRAME_VECTOR], 256
   je .sysret
   RESTORE_REGISTERS
   bt qword [rsp], 63

@@ -14,6 +14,8 @@ typedef struct {
   uint8_t blue_size, blue_shift;
 } platform_video_info_t;
 
+/* Returns -1 when firmware cannot power off; success does not return. */
+int platform_power_off(void);
 bool platform_rtc_timestamp(uint32_t *timestamp);
 uint64_t platform_monotonic_time_ns(void);
 void platform_early_initialize(void);

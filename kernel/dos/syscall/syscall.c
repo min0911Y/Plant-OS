@@ -291,6 +291,7 @@ enum syscall_id {
   SYSCALL_USER_FUTEX = SYSCALL_FUTEX,
   SYSCALL_NATIVE_THREAD = SYSCALL_THREAD,
   SYSCALL_TTY_POINTER = 0x69,
+  SYSCALL_POWER_OFF = 0x6a,
   SYSCALL_COUNT,
 };
 
@@ -1206,7 +1207,9 @@ static void syscall_virtual_memory(syscall_context_t *frame) {
     frame->value = VM_ERROR_FAULT;
     return;
   }
+  user_vm_lock();
   frame->value = user_vm_operation(frame->argument0, &request);
+  user_vm_unlock();
 }
 
 static void syscall_futex(syscall_context_t *frame) {
@@ -1932,7 +1935,12 @@ static void syscall_perf_control(syscall_context_t *frame) {
   perf_get_status(&request->status);
 }
 
+static void syscall_power_off(syscall_context_t *frame) {
+  frame->value = platform_power_off();
+}
+
 static const syscall_handler_t syscall_handlers[SYSCALL_COUNT] = {
+    [SYSCALL_POWER_OFF] = syscall_power_off,
     [SYSCALL_VERSION] = syscall_version,
     [SYSCALL_PRINT_CHARACTER] = syscall_print_character,
     [SYSCALL_LEGACY_GRAPHICS] = syscall_legacy_graphics,

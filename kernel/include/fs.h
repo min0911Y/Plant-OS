@@ -8,6 +8,22 @@ typedef struct FILE FILE;
 typedef struct vfs_handle vfs_handle_t;
 typedef struct vfs_context vfs_context_t;
 
+/* File mapping backing owns pinned cache pages and an open-file reference.
+ * References change only while the VM mapping lock is held. */
+typedef struct vfs_mapping {
+  vfs_handle_t *handle;
+  size_t count;
+  uint64_t offset;
+  uint32_t references;
+  bool shared, writable;
+  void *pages[];
+} vfs_mapping_t;
+int vfs_mapping_create(vfs_context_t *context, int descriptor, uint64_t offset,
+                       size_t length, bool shared, vfs_mapping_t **result);
+void vfs_mapping_retain(vfs_mapping_t *mapping);
+void vfs_mapping_release(vfs_mapping_t *mapping);
+int vfs_mapping_sync(vfs_mapping_t *mapping, size_t first, size_t count);
+
 enum vfs_error {
   VFS_OK = 0,
   VFS_ERROR_NO_ENTRY = -2,

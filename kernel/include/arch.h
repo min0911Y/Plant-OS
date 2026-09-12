@@ -50,6 +50,8 @@ arch_address_space_t
 arch_address_space_clone(arch_address_space_t source_address_space);
 void arch_address_space_retain(arch_address_space_t address_space);
 void arch_address_space_release(arch_address_space_t address_space);
+/* The caller holds the VM mapping lock and owns the final address-space ref. */
+void arch_address_space_release_locked(arch_address_space_t address_space);
 bool arch_address_space_prepare_exec(arch_address_space_t address_space);
 bool arch_address_space_share(uintptr_t source, uintptr_t target, size_t size,
                               arch_address_space_t source_address_space,

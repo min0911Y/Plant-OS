@@ -8,7 +8,6 @@ char checksum(unsigned char *addr, unsigned int length);
 unsigned int *acpi_find_rsdp(void);
 void *acpi_find_table(char *Signature);
 void init_acpi(void);
-int acpi_shutdown(void);
 bool hpet_available(void);
 uint64_t monotonic_time_ns(void);
 void usleep(uint64_t nanoseconds);

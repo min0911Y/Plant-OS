@@ -1,0 +1,162 @@
+{
+  "description": "Alternating unconditional versus XINUSE-based YMM entry save/restore; 256-bit llvmpipe throughout.",
+  "limitations": "Nested KVM on a Microsoft hypervisor; uncontrolled host scheduling/frequency. Small overlapping differences are not proof of a bare-metal speedup.",
+  "host_cpu": "Intel Core Ultra 7 270K Plus",
+  "configuration": {
+    "arch": "x86_64",
+    "firmware": "bios",
+    "accel": "kvm",
+    "cpu": "host",
+    "cpus": 4,
+    "memory_mib": 3072,
+    "machine": "pc",
+    "qemu": "QEMU emulator version 10.2.1 (Debian 1:10.2.1+ds-1ubuntu3.2)"
+  },
+  "application": {
+    "workers": 4,
+    "vector_bits": 256,
+    "width": 300,
+    "height": 300,
+    "warmup_frames": 180,
+    "rounds_per_boot": 3,
+    "frames_per_round": 3600
+  },
+  "entry_sha256": {
+    "before": "84206d0394735cf6aa57fb597c3faf64b3e74c08f14b4b7618ad44a094e462a3",
+    "after": "cc4fc2d7e59f1dce2113da2b5db12c21b10fe6c461b629e446a443ae3a299ef2"
+  },
+  "runs": [
+    {
+      "variant": "before",
+      "run": 2,
+      "rounds": [
+        {
+          "round": 0,
+          "frames": 3600,
+          "elapsed_ns": 1005544068,
+          "render_ns": 757299097,
+          "present_ns": 244455942,
+          "fps": 3580.151
+        },
+        {
+          "round": 1,
+          "frames": 3600,
+          "elapsed_ns": 992327130,
+          "render_ns": 745768791,
+          "present_ns": 240784326,
+          "fps": 3627.836
+        },
+        {
+          "round": 2,
+          "frames": 3600,
+          "elapsed_ns": 980601834,
+          "render_ns": 736990277,
+          "present_ns": 238005879,
+          "fps": 3671.215
+        }
+      ]
+    },
+    {
+      "variant": "after",
+      "run": 2,
+      "rounds": [
+        {
+          "round": 0,
+          "frames": 3600,
+          "elapsed_ns": 1023899565,
+          "render_ns": 766544006,
+          "present_ns": 253890814,
+          "fps": 3515.97
+        },
+        {
+          "round": 1,
+          "frames": 3600,
+          "elapsed_ns": 1000771593,
+          "render_ns": 745680455,
+          "present_ns": 249829668,
+          "fps": 3597.224
+        },
+        {
+          "round": 2,
+          "frames": 3600,
+          "elapsed_ns": 973079532,
+          "render_ns": 733250064,
+          "present_ns": 234723507,
+          "fps": 3699.595
+        }
+      ]
+    },
+    {
+      "variant": "before",
+      "run": 3,
+      "rounds": [
+        {
+          "round": 0,
+          "frames": 3600,
+          "elapsed_ns": 1078447321,
+          "render_ns": 791806334,
+          "present_ns": 282598936,
+          "fps": 3338.132
+        },
+        {
+          "round": 1,
+          "frames": 3600,
+          "elapsed_ns": 1030307836,
+          "render_ns": 760461879,
+          "present_ns": 264009471,
+          "fps": 3494.101
+        },
+        {
+          "round": 2,
+          "frames": 3600,
+          "elapsed_ns": 1027104152,
+          "render_ns": 760771778,
+          "present_ns": 260639181,
+          "fps": 3505.0
+        }
+      ]
+    },
+    {
+      "variant": "after",
+      "run": 3,
+      "rounds": [
+        {
+          "round": 0,
+          "frames": 3600,
+          "elapsed_ns": 1009518881,
+          "render_ns": 757090686,
+          "present_ns": 248709883,
+          "fps": 3566.055
+        },
+        {
+          "round": 1,
+          "frames": 3600,
+          "elapsed_ns": 986628728,
+          "render_ns": 738686810,
+          "present_ns": 242525222,
+          "fps": 3648.789
+        },
+        {
+          "round": 2,
+          "frames": 3600,
+          "elapsed_ns": 969143533,
+          "render_ns": 727784322,
+          "present_ns": 236044356,
+          "fps": 3714.62
+        }
+      ]
+    }
+  ],
+  "aggregate": {
+    "before": {
+      "fps": 3532.6833406094042,
+      "render_us_per_frame": 210.7915812962963,
+      "present_us_per_frame": 70.8561914351852
+    },
+    "after": {
+      "fps": 3622.3123379893136,
+      "render_us_per_frame": 206.89983069444446,
+      "present_us_per_frame": 67.85756712962963
+    }
+  }
+}

@@ -21,7 +21,7 @@ local function find(string, field)
 end
 
 function syntax.get(filename, header)
-  return find(filename, "files")
+  return find(filename:lower(), "files")
       or find(header, "headers")
       or plain_text_syntax
 end

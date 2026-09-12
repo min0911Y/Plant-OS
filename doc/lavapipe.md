@@ -120,7 +120,9 @@ SDL 的 Vulkan loader 钩子返回已由 ELF 解释器链接的 ICD，不调用�
   与 GNU C++ 头文件副本已移除，C++ 应用统一使用配套 libc++ 头文件。
 - MCJIT 使用 `SectionMemoryManager`，先分配 RW，再将代码设为 RX、常量设为 R。
   不开放 W+X。使用大代码模型处理任意用户地址，优化后为所有生成函数设置
-  `noredzone`。Mesa 的 CPUID/XCR0 检查控制 SIMD 特性，当前 XCR0=3，不使用 AVX。
+  `noredzone`。Mesa 的 CPUID/XCR0 检查控制 SIMD 特性；内核启用 AVX 时
+  XCR0=7，JIT 可使用 CPU 支持的 AVX/AVX2/FMA/F16C，向量宽度可达 256 位；
+  不支持 AVX 时继续使用 128 位路径，基础库仍以 SSE2 目标构建。AVX-512 未启用。
 - `libp` 提供原生 pthread、mutex/condvar/rwlock/barrier/once、TSS 和 C++ TLS 析构。
   ELF TLS variant II 的装载与重定位见 [动态链接](dynamic-linking.md)。errno、locale
   和线程数据隔离；新线程继承浮点环境，i386 使用 x87，x86_64 同步 x87/MXCSR。

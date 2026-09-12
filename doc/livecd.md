@@ -39,10 +39,11 @@ LiveCD 上的编译器可以直接链接应用。SDK 归档由 `apps/build.mk` �
 打包脚本按 `sdk-libraries.list` 复制到镜像。
 
 LiveCD 构建在 FAT initramfs 完成后自动生成 `/setup.mst`。清单覆盖 initramfs 中的全部
-目录和文件，`DOSLDR.bin` 固定为第一个安装文件，并同时记录源盘的实际 FAT 短别名、
-PFS 目标原名和 FAT 目标 8.3 名。`setup1.bin` 不再假定安装源是 A:，而是从自身所在盘
-复制到 C:；用户仍可选择 FAT 或 PFS。选择 FAT 时，超过 8.3 的名称使用 mtools 为
-LiveCD 生成的无冲突短别名，选择 PFS 时保留原始名称。
+目录和文件，`DOSLDR.bin` 固定为第一个安装文件；`source` 记录源盘的实际 FAT
+短别名，`path` 记录安装目标原名。`setup1.bin` 从自身所在盘复制到 C:，FAT 与 PFS
+均保留原始名称；FAT 通过 VFAT LFN 创建长名及唯一短别名，不再使用第二份短名目标路径。
+`apps.lst` 也使用应用构建清单中的原名。initramfs 已由 mtools 写入标准 VFAT 目录项，
+内核与普通 FAT 磁盘共用同一套读写实现，见 [FAT 长文件名](fat-lfn.md)。
 
 i386 LiveCD 使用 legacy BIOS；x86_64 LiveCD 同时支持 BIOS 与 UEFI，构建命令为
 `make -C kernel ARCH=x86_64 livecd`，产物为 `kernel/plant-os-x86_64.iso`。

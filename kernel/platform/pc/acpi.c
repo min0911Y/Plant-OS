@@ -1,7 +1,10 @@
 #include <arch/x86/io.h>
 #include <dos.h>
 #include <platform.h>
+#include <irq.h>
+#include <stdint.h>
 #include <platform/pc.h>
+#include "acpi_aml.h"
 
 typedef struct {
   uint8_t type;
@@ -352,6 +355,8 @@ static void hpet_initialize(void) {
        period_fs);
 }
 
+static void acpi_power_initialize(void);
+
 void init_acpi(void) {
   RSDP = (struct ACPI_RSDP*)acpi_find_rsdp();
   if (RSDP == 0) {
@@ -378,31 +383,9 @@ void init_acpi(void) {
   }
 
   FADT = (struct ACPI_FADT*)acpi_find_table("FACP");
-  if (FADT && !checksum((unsigned char*)FADT, FADT->h.Length)) {
-    logk("acpi: invalid FADT checksum\n");
+  if (FADT && FADT->h.Length < offsetof(struct ACPI_FADT, ResetReg)) {
+    logk("acpi: truncated FADT\n");
     FADT = NULL;
-  }
-
-  if (FADT && !(x86_port_read16(FADT->PM1aControlBlock) & 1)) {
-    if (FADT->SMI_CommandPort && FADT->AcpiEnable) {
-      x86_port_write8(FADT->SMI_CommandPort, FADT->AcpiEnable);
-      for (int i = 0; i < 300; i++) {
-        if (x86_port_read16(FADT->PM1aControlBlock) & 1) {
-          break;
-        }
-        for (volatile int j = 0; j < 1000000; j++) {
-        }
-      }
-      if (FADT->PM1bControlBlock) {
-        for (int i = 0; i < 300; i++) {
-          if (x86_port_read16(FADT->PM1bControlBlock) & 1) {
-            break;
-          }
-          for (volatile int j = 0; j < 1000000; j++) {
-          }
-        }
-      }
-    }
   }
 
   MADT = (struct ACPI_MADT*)acpi_find_table("APIC");
@@ -417,47 +400,147 @@ void init_acpi(void) {
   }
 
   hpet_initialize();
+  acpi_power_initialize();
 }
 
-int acpi_shutdown(void) {
-  unsigned short SLP_TYPa = 0, SLP_TYPb = 0;
-  struct ACPISDTHeader* header = (struct ACPISDTHeader*)acpi_find_table("DSDT");
-  if (header == NULL || FADT == NULL) {
-    return 0;
-  }
-  char* S5Addr = (char*)header;
-  int dsdtLength = (header->Length - sizeof(struct ACPISDTHeader)) / 4;
+typedef struct {
+  uint16_t port;
+  volatile uint16_t *memory;
+} AcpiControl;
 
-  for (int i = 0; i < dsdtLength; i++) {
-    if (memcmp(S5Addr, "_S5_", 4) == 0) {
-      break;
+static struct {
+  AcpiControl control[2];
+  uint16_t types[2];
+  uint16_t smi_port;
+  uint8_t enable;
+  unsigned count;
+} acpi_power;
+
+static bool acpi_control(unsigned index, AcpiControl *control) {
+  uint32_t legacy = index ? FADT->PM1bControlBlock : FADT->PM1aControlBlock;
+  size_t offset = index ? offsetof(struct ACPI_FADT, X_PM1bControlBlock)
+                        : offsetof(struct ACPI_FADT, X_PM1aControlBlock);
+  GenericAddressStructure gas = {0};
+  if (FADT->h.Length >= offset + sizeof(gas))
+    memcpy(&gas, (uint8_t *)FADT + offset, sizeof(gas));
+  uint64_t address = (uint64_t)gas.Address[0] | (uint64_t)gas.Address[1] << 32;
+  *control = (AcpiControl){0};
+  if (!address) {
+    if (!legacy)
+      return index != 0;
+    if (FADT->PM1ControlLength < 2 || legacy > 0xfffe)
+      return false;
+    control->port = legacy;
+    return true;
+  }
+  if (gas.BitOffset || gas.BitWidth != 16 ||
+      (gas.AccessSize && gas.AccessSize != 2))
+    return false;
+  if (gas.AddressSpace == 1 && address <= 0xfffe) {
+    control->port = address;
+    return true;
+  }
+  if (gas.AddressSpace != 0 || (address & 1) || address > UINT64_MAX - 2)
+    return false;
+  control->memory = arch_mmio_map(address, 2);
+  return control->memory != NULL;
+}
+
+static uint16_t acpi_control_read(const AcpiControl *control) {
+  return control->memory ? *control->memory : x86_port_read16(control->port);
+}
+
+static void acpi_control_write(const AcpiControl *control, uint16_t value) {
+  if (control->memory)
+    *control->memory = value;
+  else
+    x86_port_write16(control->port, value);
+}
+
+static void acpi_power_initialize(void) {
+  /* HW_REDUCED_ACPI needs the distinct Sleep Control register protocol. */
+  if (!FADT || (FADT->Flags & (1u << 20)))
+    return;
+  uint64_t address = FADT->Dsdt;
+  if (FADT->h.Length >= offsetof(struct ACPI_FADT, X_Dsdt) + sizeof(FADT->X_Dsdt)) {
+    uint64_t extended = (uint64_t)FADT->X_Dsdt[0] |
+                        (uint64_t)FADT->X_Dsdt[1] << 32;
+    if (extended)
+      address = extended;
+  }
+  if (!address)
+    return;
+  struct ACPISDTHeader *dsdt = arch_mmio_map(address, sizeof(*dsdt));
+  if (!dsdt || dsdt->Length < sizeof(*dsdt) ||
+      memcmp(dsdt->Signature, "DSDT", 4) != 0 ||
+      address > UINT64_MAX - dsdt->Length)
+    return;
+  dsdt = arch_mmio_map(address, dsdt->Length);
+  uint16_t types[2];
+  if (!dsdt || !checksum((uint8_t *)dsdt, dsdt->Length) ||
+      !aml_s5((AcpiAml){(uint8_t *)(dsdt + 1), (uint8_t *)dsdt + dsdt->Length},
+              types)) {
+    logk("acpi: static DSDT _S5 package unavailable\n");
+    return;
+  }
+  AcpiControl control[2];
+  if (!acpi_control(0, &control[0]) || !acpi_control(1, &control[1]))
+    return;
+  memcpy(acpi_power.control, control, sizeof(control));
+  memcpy(acpi_power.types, types, sizeof(types));
+  if (FADT->SMI_CommandPort <= 0xffff)
+    acpi_power.smi_port = FADT->SMI_CommandPort;
+  acpi_power.enable = FADT->AcpiEnable;
+  acpi_power.count = control[1].port || control[1].memory ? 2 : 1;
+}
+
+int platform_power_off(void) {
+  unsigned count = acpi_power.count;
+  if (!count)
+    return -1;
+  const AcpiControl *control = acpi_power.control;
+  bool enabled = true;
+  for (unsigned i = 0; i < count; i++)
+    enabled &= (acpi_control_read(&control[i]) & 1) != 0;
+  if (!enabled) {
+    if (!acpi_power.smi_port || !acpi_power.enable)
+      return -1;
+    x86_port_write8(acpi_power.smi_port, acpi_power.enable);
+    uint64_t started = monotonic_time_ns();
+    do {
+      enabled = true;
+      for (unsigned i = 0; i < count; i++)
+        enabled &= (acpi_control_read(&control[i]) & 1) != 0;
+      if (enabled)
+        break;
+      sleep(1);
+    } while (monotonic_time_ns() - started < 3000000000ull);
+    if (!enabled) {
+      logk("acpi: enable timed out\n");
+      return -1;
     }
-    S5Addr++;
   }
 
-  if ((*(S5Addr - 1) == 0x08 ||
-       (*(S5Addr - 2) == 0x08 && *(S5Addr - 1) == '\\')) &&
-      *(S5Addr + 4) == 0x12) {
-    S5Addr += 5;
-    S5Addr += ((*S5Addr & 0xc0) >> 6) + 2;
-
-    if (*S5Addr == 0x0a) {
-      S5Addr++;
+  /* VFS writes through; flush block device caches before requesting S5. */
+  for (char drive = first_vdisk(); drive; drive = next_vdisk(drive)) {
+    if (vdisk_type(drive) == VDISK_TYPE_BLOCK && !disk_sync(drive)) {
+      logk("acpi: disk %c sync failed\n", drive);
+      return -1;
     }
-    SLP_TYPa = *(S5Addr) << 10;
-    S5Addr++;
-
-    if (*S5Addr == 0x0a) {
-      S5Addr++;
-    }
-    SLP_TYPb = *(S5Addr) << 10;
   }
-
-  x86_port_write16(FADT->PM1aControlBlock, SLP_TYPa | 1 << 13);
-  if (FADT->PM1bControlBlock != 0) {
-    x86_port_write16(FADT->PM1bControlBlock, SLP_TYPb | 1 << 13);
+  logk("acpi: entering S5\n");
+  irq_state_t state = irq_save();
+  uint16_t values[2];
+  for (unsigned i = 0; i < count; i++) {
+    values[i] = (acpi_control_read(&control[i]) & ~((7u << 10) | (1u << 13))) |
+                acpi_power.types[i];
+    acpi_control_write(&control[i], values[i]);
   }
-  return 1;
+  for (unsigned i = 0; i < count; i++)
+    acpi_control_write(&control[i], values[i] | (1u << 13));
+  irq_restore(state);
+  logk("acpi: S5 request returned without powering off\n");
+  return -1;
 }
 
 bool hpet_available(void) { return hpetInfo != NULL; }

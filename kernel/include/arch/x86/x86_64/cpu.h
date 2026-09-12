@@ -16,6 +16,7 @@ typedef struct {
 extern uintptr_t x64_hhdm;
 extern arch_address_space_t x64_kernel_cr3;
 extern uint32_t x64_mxcsr_mask;
+extern uint32_t x64_xstate_mask;
 
 static inline uint64_t x64_msr_read(uint32_t msr) {
   uint32_t lo, hi;

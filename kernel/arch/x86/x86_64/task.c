@@ -40,7 +40,16 @@ bool arch_task_prepare_signal(mtask *task, uintptr_t handler,
   if (handler < USER_SPACE_START || handler >= USER_SPACE_END ||
       !x64_user_access(stack - 8, sizeof(*frame) + 8, true))
     return false;
-  *(x64_interrupt_frame_t *)stack = *frame;
+  x64_interrupt_frame_t saved = *frame;
+  saved.simd.reserved0 = 0;
+  saved.simd.opcode &= 0x7ff;
+  memset(saved.simd.reserved1, 0, sizeof(saved.simd.reserved1));
+  memset(saved.simd.reserved2, 0, sizeof(saved.simd.reserved2));
+  for (unsigned i = 0; i < 8; i++)
+    memset(saved.simd.x87[i] + 10, 0, 6);
+  if (!saved.simd.ymm_inuse)
+    memset(saved.ymm_hi, 0, sizeof(saved.ymm_hi));
+  *(x64_interrupt_frame_t *)stack = saved;
   *(uint64_t *)(stack - 8) = trampoline;
   frame->rsp = stack - 8;
   frame->rip = handler;

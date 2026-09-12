@@ -51,6 +51,7 @@ static struct PAGE_INFO *pages = (struct PAGE_INFO *)I386_PAGE_METADATA;
 static uint32_t *page_free_bitmap = (uint32_t *)PAGE_BITMAP_ADDRESS;
 static unsigned page_alloc_limit = PAGE_TOTAL_COUNT;
 static unsigned page_low_hint = 0;
+static uintptr_t zero_page;
 static unsigned page_high_hint = PAGE_TOTAL_COUNT - 1;
 static unsigned page_run_hint = 0;
 
@@ -153,7 +154,9 @@ static inline unsigned page_refcount_idx(unsigned idx) {
 }
 
 static inline unsigned page_refcount_entry(uint32_t entry) {
-  return page_refcount_idx(IDX(page_entry_addr(entry)));
+  return zero_page && page_entry_addr(entry) == zero_page
+             ? 2
+             : page_refcount_idx(IDX(page_entry_addr(entry)));
 }
 
 static void page_note_free_idx(unsigned idx) {
@@ -181,6 +184,8 @@ static void page_note_alloc_idx(unsigned idx) {
 }
 
 static void page_ref_inc_idx(unsigned idx) {
+  if (zero_page && idx == IDX(zero_page))
+    return;
   if (idx >= PAGE_TOTAL_COUNT) {
     page_ref_panic("retain index out of range", idx);
   }
@@ -198,6 +203,8 @@ static void page_ref_inc_idx(unsigned idx) {
 }
 
 static void page_ref_dec_idx(unsigned idx) {
+  if (zero_page && idx == IDX(zero_page))
+    return;
   if (idx >= PAGE_TOTAL_COUNT) {
     page_ref_panic("release index out of range", idx);
   }
@@ -506,9 +513,11 @@ bool page_reserve_physical_range(uintptr_t start, uint32_t size) {
 // OS应该是用不完0x70000000的，所以应用程序大概是可以用满2GB
 arch_address_space_t
 arch_address_space_clone(arch_address_space_t address_space) {
+  user_vm_lock();
   arch_address_space_t result =
       (arch_address_space_t)(uintptr_t)page_malloc_one_no_mark();
   if (result == 0) {
+    user_vm_unlock();
     return 0;
   }
 
@@ -522,7 +531,7 @@ arch_address_space_clone(arch_address_space_t address_space) {
     page_ref_inc_entry(*pde_entry);
     for (int j = 0; j < 0x1000; j += 4) {
       unsigned int *pte_entry = (unsigned int *)(p + j);
-      if (!page_entry_has_all(*pte_entry, PAGE_USER_PRESENT_FLAGS)) {
+      if (!page_entry_has_all(*pte_entry, PG_USU)) {
         continue;
       }
       page_ref_inc_entry(*pte_entry);
@@ -536,7 +545,12 @@ arch_address_space_clone(arch_address_space_t address_space) {
   }
   memcpy((void *)result, (void *)address_space, 0x1000);
   page_table_access_end(&access);
-
+  if (!user_vm_clone(address_space, result)) {
+    arch_address_space_release_locked(result);
+    user_vm_unlock();
+    return 0;
+  }
+  user_vm_unlock();
   return result;
 }
 void arch_address_space_retain(arch_address_space_t address_space) {
@@ -544,7 +558,7 @@ void arch_address_space_retain(arch_address_space_t address_space) {
     page_ref_inc_idx(IDX(address_space));
   }
 }
-void arch_address_space_release(arch_address_space_t address_space) {
+void arch_address_space_release_locked(arch_address_space_t address_space) {
   if (address_space == arch_address_space_kernel()) {
     return;
   }
@@ -564,7 +578,7 @@ void arch_address_space_release(arch_address_space_t address_space) {
     }
     for (int j = 0; j < 0x1000; j += 4) {
       unsigned int *pte_entry = (unsigned int *)(p + j);
-      if (page_entry_has_all(*pte_entry, PAGE_USER_PRESENT_FLAGS)) {
+      if (page_entry_has_all(*pte_entry, PG_USU)) {
         page_ref_dec_entry(*pte_entry);
       }
     }
@@ -573,9 +587,24 @@ void arch_address_space_release(arch_address_space_t address_space) {
   }
   page_free_one((void *)address_space);
   page_table_access_end(&access);
+  user_vm_release_locked(address_space);
 }
 
-bool arch_address_space_prepare_exec(arch_address_space_t address_space) {
+void arch_address_space_release(arch_address_space_t address_space) {
+  if (address_space == arch_address_space_kernel()) {
+    return;
+  }
+  if (page_refcount_idx(IDX(address_space)) > 1) {
+    page_ref_dec_idx(IDX(address_space));
+    return;
+  }
+  user_vm_lock();
+  arch_address_space_release_locked(address_space);
+  user_vm_unlock();
+}
+
+static bool arch_address_space_prepare_exec_locked(
+    arch_address_space_t address_space) {
   bool result = true;
   page_table_access_t access = page_table_access_begin();
 
@@ -606,7 +635,7 @@ bool arch_address_space_prepare_exec(arch_address_space_t address_space) {
     *directory = page_entry_add_flags(*directory, PAGE_USER_RW_FLAGS);
     for (uint32_t index = 0; index < PAGE_ENTRY_COUNT; index++) {
       uint32_t *entry = page_table_entry_from_dir(*directory, index << 12);
-      if (!page_entry_has_all(*entry, PAGE_USER_PRESENT_FLAGS)) {
+      if (!page_entry_has_all(*entry, PG_USU)) {
         continue;
       }
       /* A new executable must not inherit any of its parent's user mappings. */
@@ -619,6 +648,17 @@ bool arch_address_space_prepare_exec(arch_address_space_t address_space) {
   }
 
   page_table_access_end(&access);
+  return result;
+}
+
+bool arch_address_space_prepare_exec(arch_address_space_t address_space) {
+  if (address_space == arch_address_space_kernel())
+    return false;
+  user_vm_lock();
+  bool result = arch_address_space_prepare_exec_locked(address_space);
+  if (result)
+    user_vm_release_locked(address_space);
+  user_vm_unlock();
   return result;
 }
 
@@ -778,7 +818,7 @@ static int page_link_pde(uintptr_t addr, arch_address_space_t pde) {
     goto restore;
   }
   memset(new_page, 0, PAGE_SIZE_BYTES);
-  if (page_entry_has_all(*entry, PAGE_USER_PRESENT_FLAGS)) {
+  if (page_entry_has_all(*entry, PG_USU)) {
     page_ref_dec_entry(*entry);
   }
   *entry = page_entry_make((uint32_t)(uintptr_t)new_page, PAGE_USER_RW_FLAGS);
@@ -791,32 +831,56 @@ int page_link(uintptr_t addr) {
   return page_link_pde(addr, current_task()->address_space);
 }
 
-bool arch_user_map_zero(uintptr_t address) {
-  static uintptr_t zero_page;
-  if (address < USER_SPACE_START || address >= USER_HEAP_END ||
-      (address & (PAGE_SIZE_BYTES - 1)))
-    return false;
+bool arch_user_map_pages(uintptr_t address, size_t size, unsigned protection,
+                         bool replace, void *const *backing, bool shared) {
   bool result = false;
   page_table_access_t access = page_table_access_begin();
-  uint32_t *directory = page_dir_entry(access.active_address_space, address);
-  if (!page_prepare_user_table(directory))
-    goto done;
-  uint32_t *entry = page_table_entry_from_dir(*directory, address);
-  if (*entry & PG_P)
-    goto done;
-  if (!zero_page) {
+  if (!backing && !zero_page) {
     void *page = page_alloc_single_high();
     if (!page)
       goto done;
     memset(page, 0, PAGE_SIZE_BYTES);
     zero_page = (uintptr_t)page;
   }
-  page_ref_inc_idx(IDX(zero_page));
-  *entry = page_entry_make(zero_page, PAGE_USER_PRESENT_FLAGS | PG_COW);
+  for (size_t offset = 0; offset < size; offset += PAGE_SIZE_BYTES) {
+    uint32_t *directory =
+        page_dir_entry(access.active_address_space, address + offset);
+    if (!page_prepare_user_table(directory))
+      goto done;
+    uint32_t entry = *page_table_entry_from_dir(*directory, address + offset);
+    if (entry && (!replace || ((entry & PG_DEVICE) ||
+                               ((entry & PG_SHARED) &&
+                                !user_vm_file_page(address + offset)))))
+      goto done;
+  }
+  for (size_t offset = 0; offset < size; offset += PAGE_SIZE_BYTES) {
+    uint32_t directory =
+        *page_dir_entry(access.active_address_space, address + offset);
+    uint32_t *entry = page_table_entry_from_dir(directory, address + offset);
+    if (*entry & PG_USU)
+      page_ref_dec_entry(*entry);
+    uintptr_t physical =
+        backing ? (uintptr_t)backing[offset / PAGE_SIZE_BYTES] : zero_page;
+    page_ref_inc_idx(IDX(physical));
+    *entry = page_entry_make(
+        physical, PG_USU | (protection ? PG_P : 0) | (shared ? PG_SHARED : 0) |
+                      (protection & VM_WRITE ? (shared ? PG_RWW : PG_COW) : 0));
+  }
   result = true;
 done:
   page_table_access_end(&access);
   return result;
+}
+
+bool arch_user_map(uintptr_t address, size_t size, unsigned protection,
+                   bool replace) {
+  return arch_user_map_pages(address, size, protection, replace, NULL, false);
+}
+
+bool arch_user_map_zero(uintptr_t address) {
+  return address >= USER_SPACE_START && address < USER_HEAP_END &&
+         !(address & (PAGE_SIZE_BYTES - 1)) &&
+         arch_user_map(address, PAGE_SIZE_BYTES, VM_READ | VM_WRITE, false);
 }
 
 unsigned arch_user_page_flags(uintptr_t address) {
@@ -825,14 +889,18 @@ unsigned arch_user_page_flags(uintptr_t address) {
   unsigned flags = 0;
   if (page_entry_has_all(directory, PAGE_USER_PRESENT_FLAGS)) {
     uint32_t entry = *page_table_entry_from_dir(directory, address);
-    if (page_entry_has_all(entry, PAGE_USER_PRESENT_FLAGS))
-      flags = VM_READ | (entry & (PG_RWW | PG_COW) ? VM_WRITE : 0);
+    if (entry & PG_USU)
+      flags =
+          VM_MAPPED |
+          (entry & PG_P ? VM_READ | (entry & (PG_RWW | PG_COW) ? VM_WRITE : 0)
+                        : 0);
   }
   page_table_access_end(&access);
   return flags;
 }
 
-uintptr_t arch_user_find_free(uintptr_t lower, uintptr_t upper, size_t size) {
+uintptr_t arch_user_find_free(uintptr_t lower, uintptr_t upper, size_t size,
+                              size_t alignment) {
   page_table_access_t access = page_table_access_begin();
   size_t available = 0;
   uintptr_t result = 0;
@@ -841,10 +909,9 @@ uintptr_t arch_user_find_free(uintptr_t lower, uintptr_t upper, size_t size) {
     uint32_t directory = *page_dir_entry(access.active_address_space, page);
     bool occupied =
         page_entry_has_all(directory, PAGE_USER_PRESENT_FLAGS) &&
-        page_entry_has_all(*page_table_entry_from_dir(directory, page),
-                           PAGE_USER_PRESENT_FLAGS);
+        page_entry_has_all(*page_table_entry_from_dir(directory, page), PG_USU);
     available = occupied ? 0 : available + PAGE_SIZE_BYTES;
-    if (available == size) {
+    if (available >= size && !(page & (alignment - 1))) {
       result = page;
       break;
     }
@@ -853,32 +920,74 @@ uintptr_t arch_user_find_free(uintptr_t lower, uintptr_t upper, size_t size) {
   return result;
 }
 
+bool arch_user_validate(uintptr_t address, size_t size) {
+  bool result = true;
+  page_table_access_t access = page_table_access_begin();
+  for (size_t offset = 0; offset < size; offset += PAGE_SIZE_BYTES) {
+    uint32_t directory =
+        *page_dir_entry(access.active_address_space, address + offset);
+    if (!page_entry_has_all(directory, PAGE_USER_PRESENT_FLAGS)) {
+      result = false;
+      break;
+    }
+    uint32_t entry =
+        *page_table_entry_from_dir(directory, address + offset);
+    if (!(entry & PG_USU) || (entry & PG_DEVICE) ||
+        ((entry & PG_SHARED) && !user_vm_file_page(address + offset))) {
+      result = false;
+      break;
+    }
+  }
+  page_table_access_end(&access);
+  return result;
+}
+
 static bool user_pages_change(uintptr_t address, size_t size,
-                              unsigned protection, bool unmap) {
+                              unsigned protection, unsigned operation) {
   bool result = false;
   page_table_access_t access = page_table_access_begin();
   for (size_t offset = 0; offset < size; offset += PAGE_SIZE_BYTES) {
     uint32_t *directory =
         page_dir_entry(access.active_address_space, address + offset);
-    if (!page_entry_has_all(*directory, PAGE_USER_PRESENT_FLAGS))
+    if (!page_entry_has_all(*directory, PAGE_USER_PRESENT_FLAGS)) {
+      if (operation == VM_UNMAP)
+        continue;
       goto done;
+    }
     uint32_t entry = *page_table_entry_from_dir(*directory, address + offset);
-    if (!page_entry_has_all(entry, PAGE_USER_PRESENT_FLAGS) ||
-        (entry & PG_DEVICE) || (!unmap && (entry & PG_SHARED)) ||
+    if (!(entry & PG_USU) && operation == VM_UNMAP)
+      continue;
+    if (!(entry & PG_USU) || (entry & PG_DEVICE) ||
+        (operation != VM_UNMAP && (entry & PG_SHARED) &&
+         !user_vm_file_page(address + offset)) ||
         !page_prepare_user_table(directory))
       goto done;
   }
   for (size_t offset = 0; offset < size; offset += PAGE_SIZE_BYTES) {
     uint32_t directory =
         *page_dir_entry(access.active_address_space, address + offset);
+    if (!page_entry_has_all(directory, PAGE_USER_PRESENT_FLAGS))
+      continue;
     uint32_t *entry = page_table_entry_from_dir(directory, address + offset);
-    if (unmap) {
+    if (!(*entry & PG_USU))
+      continue;
+    if (operation == VM_UNMAP) {
       page_ref_dec_entry(*entry);
       *entry = 0;
+    } else if (operation == VM_DISCARD) {
+      uint32_t flags = page_entry_flags(*entry);
+      page_ref_dec_entry(*entry);
+      page_ref_inc_idx(IDX(zero_page));
+      *entry = page_entry_make(zero_page, (flags & ~PG_RWW) |
+                                              (flags & PG_RWW ? PG_COW : 0));
     } else {
-      *entry &= ~(PG_RWW | PG_COW);
-      if (protection & VM_WRITE)
-        *entry |= page_refcount_entry(*entry) > 1 ? PG_COW : PG_RWW;
+      *entry = (*entry & ~(PG_P | PG_RWW | PG_COW)) | (protection ? PG_P : 0);
+      if (protection & VM_WRITE) {
+        bool shared = *entry & PG_SHARED;
+        bool copied = !shared && user_vm_file_page(address + offset);
+        copied |= page_refcount_entry(*entry) > 1;
+        *entry |= shared ? PG_RWW : copied ? PG_COW : PG_RWW;
+      }
     }
   }
   result = true;
@@ -889,10 +998,13 @@ done:
 
 bool arch_user_protect(uintptr_t address, size_t size, unsigned protection) {
   /* Non-PAE i386 has no NX bit; read-only protection is still enforced. */
-  return user_pages_change(address, size, protection, false);
+  return user_pages_change(address, size, protection, VM_PROTECT);
 }
 bool arch_user_unmap(uintptr_t address, size_t size) {
-  return user_pages_change(address, size, 0, true);
+  return user_pages_change(address, size, 0, VM_UNMAP);
+}
+bool arch_user_discard(uintptr_t address, size_t size) {
+  return user_pages_change(address, size, 0, VM_DISCARD);
 }
 void *arch_module_allocate(size_t size) { return page_malloc(size); }
 bool arch_module_protect(void *address, size_t size, bool writable,

@@ -52,9 +52,8 @@ static void memory_copy(void) {
   check(mapping != MAP_FAILED, "memcpy guard mapping");
   if (mapping == MAP_FAILED)
     return;
-  /* Native VM has no PROT_NONE; leave unmapped pages after both buffers. */
-  bool guards[2] = {munmap(mapping + page, page) == 0,
-                    munmap(mapping + 3 * page, page) == 0};
+  bool guards[2] = {mprotect(mapping + page, page, PROT_NONE) == 0,
+                    mprotect(mapping + 3 * page, page, PROT_NONE) == 0};
   if (guards[0] && guards[1]) {
     for (size_t i = 0; i < page; i++)
       mapping[i] = (unsigned char)(i * 37);
@@ -68,9 +67,7 @@ static void memory_copy(void) {
   } else {
     check(false, "memcpy guard protection");
   }
-  for (unsigned i = 0; i < 4; i++)
-    if (!(i & 1) || !guards[i / 2])
-      check(munmap(mapping + i * page, page) == 0, "memcpy guard release");
+  check(munmap(mapping, 4 * page) == 0, "memcpy guard release");
 }
 static void allocations(void) {
   void *blocks[17] = {0};

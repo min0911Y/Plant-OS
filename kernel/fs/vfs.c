@@ -78,7 +78,8 @@ struct vfs_cache_page {
   struct vfs_mount *mount;
   vfs_node_id_t node;
   uint32_t index;
-  uint8_t data[VFS_CACHE_PAGE_SIZE];
+  uint32_t mappings, writers;
+  uint8_t *data;
 };
 
 struct vfs_disk_state {
@@ -195,17 +196,23 @@ static void vfs_cache_free_page(struct vfs_cache_page *page) {
     *entry = page->hash_next;
   }
   vfs_cache_unlink(page);
+  page_free(page->data, VFS_CACHE_PAGE_SIZE);
   free(page);
   vfs_cache_pages--;
 }
 
 static void vfs_cache_evict(void) {
-  while (vfs_cache_pages > vfs_cache_limit && vfs_cache_tail != NULL) {
-    vfs_cache_free_page(vfs_cache_tail);
+  struct vfs_cache_page *page = vfs_cache_tail;
+  while (vfs_cache_pages > vfs_cache_limit && page) {
+    struct vfs_cache_page *previous = page->previous;
+    if (!page->mappings)
+      vfs_cache_free_page(page);
+    page = previous;
   }
 }
 
 static void vfs_cache_insert(struct vfs_cache_page *page) {
+  vfs_cache_evict();
   uint32_t bucket = vfs_cache_bucket(page->mount, &page->node, page->index);
   page->previous = NULL;
   page->hash_next = vfs_cache_hash[bucket];
@@ -218,7 +225,6 @@ static void vfs_cache_insert(struct vfs_cache_page *page) {
   }
   vfs_cache_head = page;
   vfs_cache_pages++;
-  vfs_cache_evict();
 }
 
 static struct vfs_cache_page *
@@ -236,12 +242,42 @@ vfs_cache_find(struct vfs_mount *mount, const vfs_node_id_t *node,
   return NULL;
 }
 
+static bool vfs_cache_mapped(struct vfs_mount *mount, const vfs_node_id_t *node) {
+  for (struct vfs_cache_page *page = vfs_cache_head; page; page = page->next)
+    if (page->mappings && page->mount == mount && vfs_node_equal(&page->node, node))
+      return true;
+  return false;
+}
+
+static int vfs_cache_writeback(struct vfs_dentry *dentry, uint32_t first, size_t count) {
+  struct vfs_mount *mount = dentry->mount;
+  for (struct vfs_cache_page *page = vfs_cache_head; page; page = page->next) {
+    if (!page->writers || page->mount != mount ||
+        !vfs_node_equal(&page->node, &dentry->node.id) || page->index < first ||
+        page->index - first >= count)
+      continue;
+    uint64_t offset = (uint64_t)page->index * VFS_CACHE_PAGE_SIZE;
+    if (offset >= dentry->node.size)
+      continue;
+    uint32_t length = dentry->node.size - offset;
+    if (length > VFS_CACHE_PAGE_SIZE)
+      length = VFS_CACHE_PAGE_SIZE;
+    int result = vfs_mount_status(mount,
+        disk_writable(mount->disk_number) && mount->filesystem->write
+            ? mount->filesystem->write(mount, &dentry->node, offset, page->data, length)
+            : VFS_ERROR_READ_ONLY);
+    if (result < 0 || (uint32_t)result != length)
+      return result < 0 ? result : VFS_ERROR_IO;
+  }
+  return VFS_OK;
+}
+
 static void vfs_cache_invalidate_node(struct vfs_mount *mount,
                                       const vfs_node_id_t *node) {
   struct vfs_cache_page *page = vfs_cache_head;
   while (page != NULL) {
     struct vfs_cache_page *next = page->next;
-    if (page->mount == mount && vfs_node_equal(&page->node, node)) {
+    if (page->mount == mount && vfs_node_equal(&page->node, node) && !page->mappings) {
       vfs_cache_free_page(page);
     }
     page = next;
@@ -252,7 +288,7 @@ static void vfs_cache_invalidate_mount(struct vfs_mount *mount) {
   struct vfs_cache_page *page = vfs_cache_head;
   while (page != NULL) {
     struct vfs_cache_page *next = page->next;
-    if (page->mount == mount) {
+    if (page->mount == mount && !page->mappings) {
       vfs_cache_free_page(page);
     }
     page = next;
@@ -262,7 +298,12 @@ static void vfs_cache_invalidate_mount(struct vfs_mount *mount) {
 static struct vfs_cache_page *vfs_cache_load(struct vfs_dentry *dentry,
                                               uint32_t index) {
   struct vfs_cache_page *page = malloc(sizeof(*page));
-  if (page == NULL) {
+  if (!page)
+    return NULL;
+  memset(page, 0, sizeof(*page));
+  page->data = page_malloc(VFS_CACHE_PAGE_SIZE);
+  if (!page->data) {
+    free(page);
     return NULL;
   }
   uint32_t offset = index * VFS_CACHE_PAGE_SIZE;
@@ -274,6 +315,7 @@ static struct vfs_cache_page *vfs_cache_load(struct vfs_dentry *dentry,
                                                  dentry->mount, &dentry->node,
                                                  offset, page->data, length));
   if (read < 0 || (uint32_t)read != length) {
+    page_free(page->data, VFS_CACHE_PAGE_SIZE);
     free(page);
     return NULL;
   }
@@ -342,7 +384,12 @@ static void vfs_cache_store_read(struct vfs_dentry *dentry, uint32_t offset,
       continue;
     }
     struct vfs_cache_page *page = malloc(sizeof(*page));
-    if (page == NULL) {
+    if (!page)
+      return;
+    memset(page, 0, sizeof(*page));
+    page->data = page_malloc(VFS_CACHE_PAGE_SIZE);
+    if (!page->data) {
+      free(page);
       return;
     }
     page->mount = dentry->mount;
@@ -779,7 +826,7 @@ void init_vfs(void) {
   if (cache_bytes > VFS_CACHE_MAX_BYTES) {
     cache_bytes = VFS_CACHE_MAX_BYTES;
   }
-  vfs_cache_limit = cache_bytes / sizeof(struct vfs_cache_page);
+  vfs_cache_limit = cache_bytes / (sizeof(struct vfs_cache_page) + VFS_CACHE_PAGE_SIZE);
 }
 
 bool vfs_register_fs(const vfs_filesystem_t *filesystem) {
@@ -1251,6 +1298,10 @@ int vfs_open(vfs_context_t *context, const char *path, uint32_t flags,
     vfs_dentry_release(dentry);
     return VFS_ERROR_READ_ONLY;
   }
+  if ((flags & VFS_OPEN_TRUNCATE) && vfs_cache_mapped(dentry->mount, &dentry->node.id)) {
+    vfs_dentry_release(dentry);
+    return VFS_ERROR_BUSY;
+  }
   if ((flags & VFS_OPEN_TRUNCATE) != 0) {
     if ((flags & VFS_OPEN_WRITE) == 0 ||
         dentry->mount->filesystem->truncate == NULL) {
@@ -1337,7 +1388,8 @@ int vfs_read(vfs_handle_t *handle, void *buffer, uint32_t length) {
     unlock(&mount->lock);
     return VFS_ERROR_IO;
   }
-  if (length >= VFS_CACHE_BULK_READ_SIZE) {
+  if (length >= VFS_CACHE_BULK_READ_SIZE &&
+      !vfs_cache_mapped(mount, &handle->dentry->node.id)) {
     uint32_t read_offset = handle->offset;
     if (vfs_cache_copy(handle->dentry, read_offset, buffer, length)) {
       handle->offset += length;
@@ -1472,6 +1524,8 @@ int vfs_sync(vfs_handle_t *handle) {
   struct vfs_mount *mount = handle->dentry->mount;
   lock(&mount->lock);
   int status = vfs_mount_status(mount, VFS_OK);
+  if (status == VFS_OK)
+    status = vfs_cache_writeback(handle->dentry, 0, (size_t)UINT32_MAX / VFS_CACHE_PAGE_SIZE + 1);
   if (status == VFS_OK && mount->filesystem->sync != NULL) {
     status = vfs_mount_status(mount, mount->filesystem->sync(mount));
   }
@@ -1818,6 +1872,8 @@ int vfs_fd_truncate(vfs_context_t *context, int descriptor, uint32_t length) {
   if (result == VFS_OK &&
       (!disk_writable(mount->disk_number) || !mount->filesystem->truncate))
     result = VFS_ERROR_READ_ONLY;
+  if (result == VFS_OK && vfs_cache_mapped(mount, &handle->dentry->node.id))
+    result = VFS_ERROR_BUSY;
   if (result == VFS_OK)
     result = mount->filesystem->truncate(mount, &handle->dentry->node, length);
   if (result == VFS_OK) {
@@ -1830,4 +1886,112 @@ int vfs_fd_truncate(vfs_context_t *context, int descriptor, uint32_t length) {
   vfs_close(handle);
   irq_restore(state);
   return result;
+}
+
+int vfs_mapping_create(vfs_context_t *context, int descriptor, uint64_t offset,
+                       size_t length, bool shared, vfs_mapping_t **result) {
+  /* Claim the descriptor atomically; a sibling thread may close it while the
+   * mapping is still being prepared. */
+  irq_state_t state = irq_save();
+  vfs_handle_t *handle = vfs_fd_get(context, descriptor);
+  if (!handle || !(handle->flags & VFS_OPEN_READ)) {
+    irq_restore(state);
+    return VFS_ERROR_BAD_DESCRIPTOR;
+  }
+  vfs_handle_retain(handle);
+  irq_restore(state);
+  struct vfs_mount *mount = handle->dentry->mount;
+  lock(&mount->lock);
+  /* The file may have been truncated or replaced since the descriptor was
+   * opened, so its identity and range are only valid under the mount lock. */
+  uint64_t end =
+      ((uint64_t)handle->dentry->node.size + VFS_CACHE_PAGE_SIZE - 1) &
+      ~(uint64_t)(VFS_CACHE_PAGE_SIZE - 1);
+  int status = vfs_mount_status(mount, VFS_OK);
+  if (status == VFS_OK && handle->dentry->node.type != VFS_NODE_FILE)
+    status = VFS_ERROR_IS_DIRECTORY;
+  if (status == VFS_OK && (offset >= end || length > end - offset))
+    status = VFS_ERROR_NOT_SUPPORTED;
+  size_t count = length / VFS_CACHE_PAGE_SIZE;
+  if (status == VFS_OK &&
+      count > (SIZE_MAX - sizeof(vfs_mapping_t)) / sizeof(void *))
+    status = VFS_ERROR_OVERFLOW;
+  vfs_mapping_t *mapping = NULL;
+  if (status == VFS_OK) {
+    mapping = malloc(sizeof(*mapping) + count * sizeof(void *));
+    if (!mapping)
+      status = VFS_ERROR_NO_MEMORY;
+  }
+  if (status == VFS_OK) {
+    memset(mapping, 0, sizeof(*mapping) + count * sizeof(void *));
+    mapping->handle = handle;
+    mapping->offset = offset;
+    mapping->shared = shared;
+    mapping->writable = !shared || (handle->flags & VFS_OPEN_WRITE);
+    mapping->references = 1;
+  }
+  for (size_t i = 0; status == VFS_OK && i < count; i++) {
+    uint32_t index = offset / VFS_CACHE_PAGE_SIZE + i;
+    struct vfs_cache_page *page =
+        vfs_cache_find(mount, &handle->dentry->node.id, index);
+    if (!page)
+      page = vfs_cache_load(handle->dentry, index);
+    if (!page) {
+      status = VFS_ERROR_IO;
+      break;
+    }
+    page->mappings++;
+    page->writers += shared && mapping->writable;
+    mapping->pages[mapping->count++] = page->data;
+  }
+  unlock(&mount->lock);
+  if (status == VFS_OK) {
+    *result = mapping;
+    return VFS_OK;
+  }
+  /* Release outside the mount lock: it evicts cache pages and closes the file. */
+  if (mapping)
+    vfs_mapping_release(mapping);
+  else
+    vfs_close(handle);
+  return status;
+}
+
+void vfs_mapping_retain(vfs_mapping_t *mapping) { mapping->references++; }
+
+void vfs_mapping_release(vfs_mapping_t *mapping) {
+  if (--mapping->references)
+    return;
+  struct vfs_dentry *dentry = mapping->handle->dentry;
+  for (size_t i = 0; i < mapping->count; i++) {
+    struct vfs_cache_page *page =
+        vfs_cache_find(dentry->mount, &dentry->node.id,
+                       mapping->offset / VFS_CACHE_PAGE_SIZE + i);
+    if (page) {
+      page->mappings--;
+      page->writers -= mapping->shared && mapping->writable;
+    }
+  }
+  vfs_close(mapping->handle);
+  free(mapping);
+  vfs_cache_evict();
+}
+
+int vfs_mapping_sync(vfs_mapping_t *mapping, size_t first, size_t count) {
+  if (!mapping->shared || !mapping->writable)
+    return VFS_OK;
+  struct vfs_dentry *dentry = mapping->handle->dentry;
+  struct vfs_mount *mount = dentry->mount;
+  lock(&mount->lock);
+  int status = vfs_mount_status(mount, VFS_OK);
+  if (!status)
+    status = vfs_cache_writeback(dentry,
+                                 mapping->offset / VFS_CACHE_PAGE_SIZE + first,
+                                 count);
+  if (!status && mount->filesystem->sync)
+    status = vfs_mount_status(mount, mount->filesystem->sync(mount));
+  if (!status && !disk_sync(mount->disk_number))
+    status = VFS_ERROR_IO;
+  unlock(&mount->lock);
+  return status;
 }

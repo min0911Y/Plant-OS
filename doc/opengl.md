@@ -104,7 +104,7 @@ python3 scripts/test-x86_64.py --cube --cube-workers 0 --accel kvm --cpu host \
 EGL、Vulkan WSI 和 GUI 的图像搬运共用 `libp` 的 `memcpy`。x86_64 使用 SSE2
 非对齐向量复制，i386 使用整数复制；两者均只访问请求范围内的完整块和尾部字节，
 不要求源、目标具有相同对齐。`libctest.bin` 覆盖对齐组合、块边界、目标哨兵及
-紧邻未映射页的读写。这里不引入 AVX，也不改变 GUI 同步提交和缓冲生命周期。
+紧邻未映射页的读写。这些内存接口使用基础 SSE2 目标；llvmpipe JIT 则按 CPUID/XCR0 使用 AVX，遵循相同的 GUI 同步提交和缓冲生命周期。
 
 2026-09-09 在 WSL2/KVM、Intel Core Ultra 7 270K Plus、QEMU 10.2.1、BIOS、
 `-cpu host -smp 4 -m 3072 -display none` 下比较上述复制实现。内核固定为同一
@@ -198,3 +198,41 @@ python3 scripts/test-x86_64.py --opengl --firmware uefi --memory 3072 --timeout 
 当前 GL 字符串报告 `llvmpipe (LLVM 21.1.8, 128 bits)` 与 OpenGL 4.6；
 验证范围为上述路径。两种固件下齿轮客户区的 FNV-1a 校验值均为
 `7fe5054d`、`e33873d8`，实际窗口与 GL 读回一致。
+
+## AVX 与向量宽度
+
+x86_64 内核在 CPU 支持时启用 AVX 状态，Mesa 自动选择 CPU 支持的
+AVX/AVX2/FMA 指令；无需给整个 Mesa 或内核增加 `-mavx2`。
+`GL_RENDERER` 中的 `256 bits` 可确认 llvmpipe 使用的向量宽度。
+状态保存与信号回归见 [多架构说明](multiarch.md)。
+
+使用 `--opengl --memory 3072 --timeout 600` 验证 GLSL、上下文、窗口像素及输入，
+另以 `--cpu max,-avx` 验证 SSE 回退。性能对比使用 `--gears-bench`，固定
+CPU、加速器、worker 数和宿主条件；可通过 CPU feature override 对照 AVX 与 SSE。
+TCG 的 SIMD 翻译成本与真机不同，TCG 结果不能用于推断真机或 KVM 的加速比例。
+
+
+高帧率的小窗口场景可能更受几何处理、任务唤醒和同步呈现影响；256 位 SIMD
+只能加速其中适合向量化的部分，不能保证比 128 位更快。内核根据 XINUSE 跳过
+未使用的 YMM 保存/恢复，避免所有 SSE 调用者都承担完整 AVX 入口开销。
+
+真机可使用相同镜像和 worker 数对照向量宽度：
+
+```sh
+glxgears.bin --benchmark --workers 4 --vector-width 128
+glxgears.bin --benchmark --workers 4 --vector-width 256
+```
+
+`--vector-width` 设置 Mesa 的 `LP_NATIVE_VECTOR_WIDTH`，不关闭 AVX/FMA；默认仍由
+Mesa 选择。宿主回归使用 `--gears-vector-width 128|256`，也适用于 `--opengl`
+的像素验证。对照时保留每轮 `render_ns` 和 `present_ns`，交替重复运行并固定
+窗口、worker 数、电源配置和宿主负载。仅关闭 CPU 的 AVX 还会改变内核状态保存
+路径，不能单独用来判断向量宽度的影响。
+
+
+入口路径的 KVM 交替对照样本保存在
+[simd-entry.json](benchmarks/simd-entry.json)：Core Ultra 7 270K Plus、Microsoft
+虚拟化宿主上的嵌套 KVM、4 vCPU、4 worker、300×300、256 位 llvmpipe。
+两次启动各三轮的合计吞吐为 3533→3622 FPS，约 +2.5%，呈现时间为
+70.86→67.86 微秒/帧；不同启动的结果有重叠，不能据此确认真机加速比例。
+`--benchmark` 以 `glFinish` 分隔渲染与呈现，比较时两侧必须使用相同模式。

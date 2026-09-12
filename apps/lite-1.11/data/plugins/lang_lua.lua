@@ -1,8 +1,8 @@
 local syntax = require "core.syntax"
 
 syntax.add {
-  files = "%.LUA$",
-  headers = "^#!.*[ /]LUA",
+  files = "%.lua$",
+  headers = "^#!.*[ /]lua",
   comment = "--",
   patterns = {
     { pattern = { '"', '"', '\\' },       type = "string"   },

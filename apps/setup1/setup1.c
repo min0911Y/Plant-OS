@@ -133,8 +133,7 @@ static void set(int current, int total) {
   }
   Set_Loading((int)((float)((float)(current) / (float)total) * 100.0));
 }
-static bool copy_manifest(Array *files, MST_Object *m, char source_drive,
-                          const char *filesystem) {
+static bool copy_manifest(Array *files, MST_Object *m, char source_drive) {
   int files_in_total = get_array_len(files);
   if (files_in_total < 0) {
     return false;
@@ -146,7 +145,6 @@ static bool copy_manifest(Array *files, MST_Object *m, char source_drive,
   if (loader_path == NULL || strcmp(loader_path, "DOSLDR.bin") != 0) {
     return false;
   }
-  bool fat = strcmp(filesystem, "FAT") == 0;
   Set_Loading(0);
   for (int i = 0; i < files_in_total; i++) {
     SPACE *entry = MST_get_space_in_array(m, i, files);
@@ -154,11 +152,8 @@ static bool copy_manifest(Array *files, MST_Object *m, char source_drive,
         entry == NULL ? NULL : MST_get_string_in_space(m, "type", entry);
     char *path =
         entry == NULL ? NULL : MST_get_string_in_space(m, "path", entry);
-    char *fat_path =
-        entry == NULL ? NULL : MST_get_string_in_space(m, "fat", entry);
-    char *destination_name = fat ? fat_path : path;
-    if (kind == NULL || path == NULL || fat_path == NULL ||
-        destination_name == NULL) {
+    char *destination_name = path;
+    if (kind == NULL || path == NULL) {
       return false;
     }
     setState(path);
@@ -316,7 +311,7 @@ int main() {
     goto fail;
   }
   Set_Loading(100);
-  if (!copy_manifest(files, m, source_drive, fs_choice)) {
+  if (!copy_manifest(files, m, source_drive)) {
     goto fail;
   }
   Set_Loading(0);

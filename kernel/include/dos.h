@@ -170,6 +170,7 @@ void md5f(char *filename, unsigned char *result);
 void lock(lock_t *key);
 void unlock(lock_t *key);
 void lock_init(lock_t *l);
+void lock_cancel_task(mtask *task);
 // mount.c
 int mount(char *fileName);
 void unmount(char drive);

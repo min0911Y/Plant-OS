@@ -32,7 +32,7 @@ Plant OS 的 ELF 动态链接器是独立程序 `/lib/ld.so`，源文件位于
 普通执行从内核模板建立新的用户地址空间，只有 fork 复制父进程的用户映射。
 启动参数及输入队列在发布任务前准备，任务持有它们直到退出，调用线程提前退出
 不会遗留分配。初始用户栈和堆以共享零页保留虚拟空间，首次写入时按 COW 分配
-物理页；明确申请的匿名 VM 区域仍按下面的 ABI 预先提交。
+物理页；匿名 VM 区域也使用同一共享零页和写时分配机制。
 
 ## 已实现的 ELF 行为
 
@@ -109,21 +109,66 @@ ABI 断言所需的名字，可用当前基础 C 头文件编译、链接并运�
 TCC 自身已动态链接，其现有代码生成器仍按原来的
 固定地址静态 ABI 生成新程序；`crti.c` 完整转发入口参数。
 
-## 匿名 VM ABI
+## 虚拟内存 ABI
 
-`apps/include/vm.h` 提供 `vm_map`、`vm_protect`、`vm_unmap`，由
-`SYSCALL_VM` (`0x66`) 和固定大小请求承载。映射是进程私有、按页对齐、
-预先提交且清零的内存；指定地址时绝不覆盖已有映射。失败时 `vm_map` 返回
-NULL，其他操作返回 -1，并设置 errno。保护模式支持 R、RW、RX，拒绝 W+X。
+`apps/include/vm.h` 提供 `vm_map`、`vm_map_aligned`、`vm_map_file`、
+`vm_protect`、`vm_discard`、`vm_sync` 和 `vm_unmap`，统一经过
+`SYSCALL_VM` (`0x66`)。请求包含地址、长度、对齐、权限、标志、文件偏移和
+descriptor，i386 为 36 字节，x86_64 为 48 字节，两侧共用声明和大小断言。
+`vm_map` 默认 RW；`vm_map_aligned` 接受不小于页大小的 2 次幂对齐，指定地址
+默认不覆盖，显式 `VM_REPLACE` 才替换整个范围。失败映射返回 NULL，其他操作
+返回 -1，并设置 errno。
 
-VM 自上向下分配，同一进程的线程共享查找游标；释放高处空洞后更新游标以复用它。
-heap 自下向上增长，二者在修改页表前检查冲突。范围及请求
-指针必须验证；失败分配回滚已建立的页。映射直接由地址空间持有，不使用另一份
-任务映射链表；fork、线程共享和进程回收沿用已有页表引用机制。i386 区分真实
-只读页与 COW 页，不能通过写故障把 RELRO 变成可写；用户映射和用户页表不归
-单个创建线程的 GC 所有。同一地址空间的线程沿用调度器的同 CPU 约束。
-匿名区域共享给其他进程后，创建者仍可解除自己的映射；物理页要等所有引用释放
-后才回收，共享期间不允许改变页面保护属性。
+`sys/mman.h` 支持匿名和文件映射、`MAP_PRIVATE` 与 `MAP_SHARED`、
+`PROT_NONE`/R/RW/RX、`MAP_FIXED`、`MAP_FIXED_NOREPLACE`、`MADV_DONTNEED`
+和 `msync`；普通地址是可回退的 hint。始终拒绝 W+X。非 PAE i386 没有 NX，
+不能硬件禁止可读页执行；`PROT_NONE` 在两个架构都禁止读、写和执行。
+
+HotSpot 平台层可按以下生命周期使用：
+
+- 预留：`mmap(..., PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)`；
+  需要大于页的对齐时用 `vm_map_aligned`，或额外预留后释放两端。
+- 提交：`mprotect(..., PROT_READ | PROT_WRITE)`。物理页在首次写入时分配；
+  这不是保证未来写入一定成功的物理内存承诺，耗尽时仍终止进程。
+- 保护页：`mprotect(..., PROT_NONE)`，保留原有内容，恢复权限后内容仍在。
+- 撤销提交：用匿名 `MAP_FIXED | PROT_NONE` 原位替换，保留地址并释放内容。
+  `madvise(..., MADV_DONTNEED)` 则保留每页当前权限，丢弃内容；再次读取为零。
+  不可读的页没有可保留的权限语义，因此拒绝而不是静默改变权限。
+- 代码缓存：RW 写入后改成 RX，再发布入口；修改前解除执行权限。
+- 释放：`munmap` 接受部分范围和空洞，释放预留地址及其内容。
+
+VM 自上向下查找满足对齐的空闲区，同一进程线程共享查找游标；heap 自下向上
+增长并检查冲突。页表兼作地址分配登记：用户叶 PTE 的 U 位表示地址被占用，
+P 位单独表示可访问；非 present 用户叶仍持有物理页引用。预留和未写匿名页
+引用永久共享零页，仅消耗页表空间，零页引用不随预留页数累加。
+fork、exec、退出和线程托管区域回收均保留这一约定。
+
+保护及替换先验证整个范围、准备私有页表，再改变叶映射，避免失败留下部分权限
+或丢失原内容；分配失败须回收新建的空页表，包括未完成的中间层。
+x86_64 替换/撤销提交必须在同步 TLB shootdown 完成后释放旧页；
+空页表分支须先从上级表摘除，再同步失效分页结构缓存，最后回收页表页。
+i386 沿用同一地址空间固定 CPU 的约束。GUI 共享页禁止保护、丢弃或原位替换，
+创建者仍可解除自己的映射，物理页等最后一个引用释放后回收。
+
+文件范围遍历须区分匿名空隙和文件区间；私有文件页 discard 按当前权限的连续
+区间恢复 backing，不能把首个页面的权限扩展到整个 extent。
+文件映射单独登记：匿名映射仍只由页表表示，文件映射在全局 extent 链表中按
+`address_space` 记录地址、长度、起始页和 backing。backing 持有 open-file 引用
+和固定的 VFS cache 页数组，因此映射既不消耗也不移动 descriptor offset，关闭
+descriptor、甚至 unlink 之后仍然有效。私有映射以同一 cache 页作为 COW 来源，
+共享映射直接映射同一批页；普通 read/write 与该 cache 共用，映射写和文件 I/O
+互相可见。共享可写映射经 `msync`/`fsync` 回写有效文件字节，末页 EOF 之后不写。
+`MAP_SHARED | MAP_ANONYMOUS` 明确不支持。为避免映射 straddle 到文件末尾之外
+留下未定义内容，范围必须落在“文件长度向上取整到页”之内，否则返回 ENOTSUP；
+有映射时 `ftruncate`/`O_TRUNC` 返回 EBUSY。文件页当前在映射时预读并 pin，不是
+按需缺页装载。`MS_ASYNC` 与 `MS_INVALIDATE` 目前和 `MS_SYNC` 一样同步完成。
+
+`--dynamic` 中的 `DYNTEST MMAN PASS` 覆盖保护页读/写/执行故障、fork 后隐藏内容
+和 COW、丢弃后的零填充、含空洞的替换/释放、溢出和对齐，以及 x86_64 4 GiB /
+i386 64 MiB 预留的物理页开销；`DYNTEST FILEMAP PASS` 覆盖共享/私有映射、
+fd offset、COW、alias 一致性、普通 I/O 可见性、私有丢弃、fork、只读 fd 权限、
+EOF 边界、msync/fsync、部分取消映射、close/exec/unlink 生命周期。
+`--threads` 还运行 libc 保护页边界和并发回归。
 
 ## TLS、线程与运行库生命周期
 
@@ -161,7 +206,9 @@ python3 scripts/test-x86_64.py --threads --arch i386 --memory 512
 弱符号、带空格和空参数的 argv、构造/析构顺序、fork/COW、RELRO、VM 页权限、
 创建线程退出后的映射存活、缺库/未定义符号，以及损坏的 LOAD、动态表、
 重定位长度、ELF machine 和 program header。宿主脚本另行核对串口中的析构
-次序。测试只临时修改 `kernel/res/init.mst`，结束后恢复脚本及正常启动镜像。
+次序。`--dynamic` 和 `--all-apps` 在命令结束后执行 `shutdown`，宿主确认
+ACPI S5 并核验结果后退出；超时仅用于检测启动或测试卡死。
+测试只临时修改 `kernel/res/init.mst`，结束后恢复脚本及正常启动镜像。
 
 `--all-apps` 先核对清单中的 ELF class/machine、PIE、PT_INTERP 与 DT_NEEDED，
 再通过 `dyntest --all` 逐项调用 `/lib/ld.so --verify`，实际完成依赖装载、符号

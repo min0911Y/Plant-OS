@@ -14,6 +14,42 @@ import tempfile
 import time
 
 
+def corrupt_lfn_fixture(path):
+    """Damage a checksum in the real mtools directory, leaving its SFN intact."""
+    with path.open("r+b") as image:
+        boot = image.read(512)
+        reserved = struct.unpack_from("<H", boot, 14)[0]
+        fat_size = struct.unpack_from("<H", boot, 22)[0]
+        root_count = struct.unpack_from("<H", boot, 17)[0]
+        if fat_size:
+            root = (reserved + boot[16] * fat_size) * 512
+            offsets = range(root, root + root_count * 32, 32)
+        else:
+            fat_size = struct.unpack_from("<I", boot, 36)[0]
+            data = (reserved + boot[16] * fat_size) * 512
+            cluster_bytes = boot[13] * 512
+            cluster = struct.unpack_from("<I", boot, 44)[0]
+            offsets = []
+            while cluster < 0x0ffffff8:
+                base = data + (cluster - 2) * cluster_bytes
+                offsets.extend(range(base, base + cluster_bytes, 32))
+                image.seek(reserved * 512 + cluster * 4)
+                cluster = struct.unpack("<I", image.read(4))[0] & 0x0fffffff
+        previous = None
+        for offset in offsets:
+            image.seek(offset)
+            entry = image.read(32)
+            if entry[:11] == b"DAMAGE~1TXT":
+                assert previous is not None
+                image.seek(previous + 13)
+                checksum = image.read(1)[0]
+                image.seek(previous + 13)
+                image.write(bytes([checksum ^ 1]))
+                return
+            previous = offset
+    raise RuntimeError("mtools did not produce the expected damaged-LFN fixture")
+
+
 class QMP:
     def __init__(self, path):
         self.socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -571,6 +607,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--arch", choices=("x86_64", "i386"), default="x86_64")
     parser.add_argument("--firmware", choices=("bios", "uefi"), default="bios")
+    parser.add_argument("--boot", choices=("livecd", "disk"), default="livecd",
+                        help="boot medium; disk covers i386 DOSLDR shutdown")
     parser.add_argument("--machine", choices=("pc", "q35"), default="pc",
                         help="QEMU chipset; q35 exercises ACPI MCFG/ECAM configuration access")
     parser.add_argument("--memory", type=int, default=1024, help="guest RAM in MiB")
@@ -613,12 +651,16 @@ def main():
     gui_mode.add_argument("--renderhd", action="store_true", help="validate the native-resolution SDL3 RenderTM and parallel renderer")
     gui_mode.add_argument("--desktop-app", choices=("lite", "nk"), help="capture and close an SDL desktop application")
     gui_mode.add_argument("--tools", action="store_true", help="run C4 pointer/VM, NASM object and JavaScript regressions")
+    gui_mode.add_argument("--lfn", action="store_true", help="validate FAT and initramfs long filenames")
     gui_mode.add_argument("--dynamic", action="store_true", help="run user ELF interpreter, shared libraries and page protection regressions")
     gui_mode.add_argument("--sched-fair", action="store_true", help="measure yielding worker fairness (use --cpus 1)")
     gui_mode.add_argument("--sched-balance", action="store_true", help="benchmark long/short runnable jobs and idle load balancing")
     gui_mode.add_argument("--sched-bench", type=int, metavar="SLEEPERS", help="measure scheduler handoff, yield and compute before/during/after parked threads")
     gui_mode.add_argument("--futex", action="store_true", help="validate native futex wait/wake, cancellation and concurrent allocation")
     gui_mode.add_argument("--threads", action="store_true", help="validate pthreads, ELF TLS, synchronization and thread resource release")
+    gui_mode.add_argument("--shutdown", action="store_true",
+                          help="request ACPI S5 through psh and verify QEMU shutdown state")
+    gui_mode.add_argument("--simd", action="store_true", help="validate SIMD registers across scheduling, fork, reset and keyboard signal return")
     gui_mode.add_argument("--llvm", action="store_true", help="validate native LLVM MCJIT, relocations, W^X and concurrent compilation")
     gui_mode.add_argument("--lavapipe", action="store_true", help="validate native Vulkan compute, SDL triangle pixels and window presentation")
     gui_mode.add_argument("--glfw", action="store_true", help="validate native GLFW contexts, event waits, window pixels and input")
@@ -628,6 +670,8 @@ def main():
     gui_mode.add_argument("--compute-bench", action="store_true", help="benchmark verified Vulkan TEA compute with 0, 1, 2 and 4 workers in both orders")
     parser.add_argument("--cube-workers", type=int, help="override cube LP_NUM_THREADS (0 runs without raster workers)")
     parser.add_argument("--gears-workers", type=int, help="override glxgears LP_NUM_THREADS for --opengl or --gears-bench")
+    parser.add_argument("--gears-vector-width", type=int, choices=(128, 256),
+                        help="override llvmpipe vector width without disabling AVX")
     gui_mode.add_argument("--all-apps", action="store_true", help="validate and relocate every built application, then run dynamic regressions")
     gui_mode.add_argument("--usb", action="store_true", help="validate xHCI enumeration, USB speeds, hotplug and ring wrap")
     parser.add_argument("--out", type=Path, default=Path("/tmp/plant-x86_64-smoke"))
@@ -651,8 +695,14 @@ def main():
     output = args.out.resolve()
     output.mkdir(parents=True, exist_ok=True)
     native = args.arch == "x86_64"
+    if args.boot == "disk" and (native or args.firmware != "bios" or
+                                args.machine != "pc" or not args.shutdown):
+        parser.error("--boot disk requires --arch i386 --firmware bios --machine pc --shutdown")
+    build_target = "default" if args.boot == "disk" else "livecd"
     if args.cube_workers is not None and (not args.cube or not 0 <= args.cube_workers <= 2147483647):
         parser.error("--cube-workers requires --cube and a nonnegative signed 32-bit value")
+    if args.gears_vector_width is not None and not (args.opengl or args.gears_bench):
+        parser.error("--gears-vector-width requires --opengl or --gears-bench")
     kernel_options = [f"USB_DEBUG={int(args.usb_debug)}"]
     commands = (["archtest.bin", "cpptest.bin", "simdtest.bin", "llvmtest.bin"] if native else ["fputest.bin"]) + [
         "timetest.bin", "thrdtest.bin", "libctest.bin", "cxxcheck.bin", "futest.bin", "exc_test.bin", "rpctest.bin", "dktest.bin", "dyntest.bin", "nettest.bin loopback",
@@ -665,6 +715,16 @@ def main():
                 "TIMETEST PASS", "THRDTEST PASS", "LIBCTEST PASS", "CXXCHECK PASS", "FUTEXTEST PASS", "EXCEPTION_TEST done checks=5 fails=0", "GUITEST THREAD PASS", "GMOUSE ID =",
                 "RPCTEST done checks=23 fails=0", "DKTEST PASS", "DYNTEST PASS", "DYNTEST TLB PASS",
                 "GUISTRESS PASS" if args.capacity else "GUITEST PASS"]
+    if args.simd:
+        if not native:
+            parser.error("--simd requires x86_64")
+        commands = ["simdtest.bin signal"]
+        expected = ["SIMDTEST PASS", "SIMDTEST SIGNAL PASS"]
+    if args.lfn:
+        commands = ["dktest.bin", "dktest.bin --lfn"]
+        for drive in "CDF":
+            commands += [f"psh.bin -c remount_drive {drive}:", f"dktest.bin --lfn {drive}:"]
+        expected = ["DKTEST PASS", "LFNTEST PASS"]
     if args.mouse:
         expected.append("GUIMOUSE PASS events=15")
     if args.gui_frames:
@@ -694,11 +754,24 @@ def main():
         commands = ["timetest.bin", f"sdltest.bin {args.desktop_app}.bin"]
         expected = ["TIMETEST PASS", f"SDLAPP EXIT {args.desktop_app}.bin status=0"]
         if args.desktop_app == "lite":
+            syntax_test = (
+                'package.path=[[/data/?.lua;]]..package.path;'
+                's=require([[core.syntax]]);require([[plugins.lang_c]]);require([[plugins.lang_lua]]);'
+                'assert(s.get([[Long]]..string.char(32)..[[source.c]],[[]]).comment==[[//]]);'
+                'assert(s.get([[Header.H]],[[]]).comment==[[//]]);'
+                'assert(s.get([[Mixed.CpP]],[[]]).comment==[[//]]);'
+                'assert(s.get([[Plugin.lua]],[[]]).comment==[[--]]);'
+                'assert(s.get([[MODULE.LUA]],[[]]).comment==[[--]]);'
+                'assert(s.get([[Mixed.LuA]],[[]]).comment==[[--]]);'
+                'assert(s.get([[script]],[[#!/usr/bin/env]]..string.char(32)..[[lua]]).comment==[[--]])')
+            commands.insert(0, "lua.bin -e " + syntax_test)
             expected.append("LITE EDIT PASS")
     if args.dynamic or args.all_apps:
         commands = ["dyntest.bin"]
-        expected = ["DYNAMIC PASS", "DYNAMIC DATA PASS", "DYNTEST PASS", "DYNTEST TLB PASS", "DYNAMIC ATEXIT",
-                    "DYNAMIC FINI main", "DYNAMIC FINI leaf", "DYNAMIC FINI base"]
+        expected = ["DYNAMIC PASS", "DYNAMIC DATA PASS", "DYNTEST PASS", "DYNTEST TLB PASS",
+                    "DYNTEST MMAN PASS", "DYNTEST FILEMAP PASS", "DYNTEST THREADS PASS",
+                    "DYNAMIC ATEXIT", "DYNAMIC FINI main", "DYNAMIC FINI leaf",
+                    "DYNAMIC FINI base"]
         if args.all_apps:
             programs = subprocess.check_output(
                 ["make", "--no-print-directory", "-s", "-C", str(repo / "apps"),
@@ -743,6 +816,8 @@ def main():
         if not native:
             parser.error("--opengl requires x86_64")
         workers = "" if args.gears_workers is None else f" --workers {args.gears_workers}"
+        if args.gears_vector_width is not None:
+            workers += f" --vector-width {args.gears_vector_width}"
         commands = ["libctest.bin", "glxgears.bin --test" + workers]
         expected = ["LIBCTEST PASS", "OPENGL TEST PASS", "GLXGEARS GL_RENDERER = llvmpipe", "GLXGEARS PASS"]
     if args.cube:
@@ -755,6 +830,8 @@ def main():
         if not native:
             parser.error("--gears-bench requires x86_64")
         workers = "" if args.gears_workers is None else f" --workers {args.gears_workers}"
+        if args.gears_vector_width is not None:
+            workers += f" --vector-width {args.gears_vector_width}"
         commands = ["glxgears.bin --benchmark" + workers]
         expected = ["GLXGEARS PASS"] + [f"GLXGEARS BENCH round={i} " for i in range(3)]
     if args.compute_bench:
@@ -816,6 +893,9 @@ def main():
             commands = []
             expected = ["ahci: port=0 command=ec completion=0", "command timeout or error",
                         "ahci: controllers=2 disks=0 initialization complete"]
+    if args.shutdown:
+        commands = ["psh.bin -c shutdown"]
+        expected = []
     if args.clock_source:
         expected.append(f"clock: monotonic={args.clock_source} platform epoch retained")
     iso = repo / "kernel" / ("plant-os-x86_64.iso" if native else "plant-os-livecd.iso")
@@ -825,8 +905,10 @@ def main():
     original_config = config.read_bytes() if args.usb else None
     def mst_quote(text):
         return '"' + text.replace('\\', '\\\\').replace('"', '\\"') + '"'
+    shutdown_after = args.dynamic or args.all_apps
+    final_command = "psh.bin -c shutdown" if shutdown_after else "psh.bin"
     actions = [f'  {{"action" = "run" "command_line" = {mst_quote(command)}}}'
-               for command in commands + ["psh.bin"]]
+               for command in commands + [final_command]]
     with (output / "build.log").open("w") as build_log:
         try:
             if original_config is not None:
@@ -852,7 +934,7 @@ def main():
                 subprocess.run(["make", "-C", str(repo / "loader")],
                                stdout=build_log, stderr=subprocess.STDOUT, check=True)
             subprocess.run(["make", "-C", str(repo / "kernel"), f"ARCH={args.arch}",
-                            *kernel_options, "livecd", "-j8"],
+                            *kernel_options, build_target, "-j8"],
                            stdout=build_log, stderr=subprocess.STDOUT, check=True)
         finally:
             init.write_bytes(original)
@@ -875,10 +957,16 @@ def main():
         (output / "configuration.json").write_text(json.dumps(configuration, indent=2) + "\n")
     command = ["qemu-system-x86_64", "-accel", args.accel, "-cpu", cpu, "-smp", str(args.cpus),
                "-machine", args.machine + (",i8042=off" if args.usb else ""),
-               "-m", str(args.memory), "-rtc", "base=2026-09-05T04:05:06,clock=vm", "-cdrom", str(iso),
-               "-boot", "d", "-display", "none", "-serial", f"file:{serial}",
+               "-m", str(args.memory), "-rtc", "base=2026-09-05T04:05:06,clock=vm",
+               "-display", "none", "-serial", f"file:{serial}",
                "-monitor", "none", "-no-reboot", "-no-shutdown", "-netdev", "user,id=net0",
                "-device", "pcnet,netdev=net0"]
+    if args.boot == "disk":
+        command += ["-boot", "c", "-snapshot"]
+        for name in ("boot.img", "disk.img"):
+            command += ["-drive", f"file={repo / 'kernel' / name},format=raw"]
+    else:
+        command += ["-cdrom", str(iso), "-boot", "d"]
     try:
         with tempfile.TemporaryDirectory(prefix="plant-ovmf-") as temporary:
             qmp_path = Path(temporary) / "qmp.sock"
@@ -889,6 +977,34 @@ def main():
                 command += ["-S", "-gdb", f"unix:{gdb_path},server=on,wait=off",
                             "-qtest", f"unix:{qtest_path},server=on,wait=off",
                             "-qtest-log", str(output / "qtest.log")]
+            lfn_images = []
+            if args.lfn:
+                if args.machine != "pc":
+                    parser.error("--lfn requires --machine pc for the IDE fixtures")
+                seed = Path(temporary) / "lfn-seed"
+                seed.write_bytes(b"mtools seed\n")
+                empty = Path(temporary) / "lfn-empty"
+                empty.write_bytes(b"")
+                for bits, sectors, index in ((12, 2880, 0), (16, 65536, 1), (32, 131072, 3)):
+                    disk = Path(temporary) / f"fat{bits}.img"
+                    with disk.open("wb") as stream:
+                        stream.truncate(sectors * 512)
+                    subprocess.run(["mformat", "-i", str(disk), "-T", str(sectors),
+                                    *(["-F"] if bits == 32 else []), "::"], check=True)
+                    # Force a multi-cluster FAT32 root before mounting it.
+                    if bits == 32:
+                        for number in range(40):
+                            subprocess.run(["mcopy", "-i", str(disk), str(empty),
+                                            f"::/Root directory padding filename {number}.txt"], check=True)
+                    subprocess.run(["mcopy", "-i", str(disk), str(seed),
+                                    "::/External long filename from mtools.txt"], check=True)
+                    subprocess.run(["mcopy", "-i", str(disk), str(empty),
+                                    "::/External empty long filename.txt"], check=True)
+                    subprocess.run(["mcopy", "-i", str(disk), str(seed),
+                                    "::/Damaged long filename.txt"], check=True)
+                    corrupt_lfn_fixture(disk)
+                    command += ["-drive", f"file={disk},format=raw,if=ide,index={index}"]
+                    lfn_images.append(disk)
             usb_images = []
             ahci_images = []
             if args.ahci:
@@ -974,16 +1090,33 @@ def main():
                     app_started = None
                     app_closed = False
                     usb_steps = set()
+                    simd_signals_sent = 0
                     while time.monotonic() < deadline and guest.poll() is None:
                         text = serial.read_text(errors="replace") if serial.exists() else ""
                         if re.search(r"PANIC|x86_64 exception .*cs=8", text):
                             raise RuntimeError(f"kernel failure; see {serial}")
+                        if args.shutdown and "acpi: entering S5" in text:
+                            qmp = QMP(qmp_path)
+                            try:
+                                powered_off = qmp.execute("query-status")["status"] == "shutdown"
+                            finally:
+                                qmp.close()
+                            if powered_off:
+                                print(f"{args.arch} {args.firmware} {args.machine} {args.boot} ACPI S5 PASS; {serial}")
+                                return
                         if args.terminal_load and ("TERMLOAD FAIL" in text or "TTY RPC disconnected" in text):
                             raise RuntimeError(f"terminal load failed; see {serial}")
                         if args.terminal_load and "TERMLOAD PASS" in text:
                             exercise_terminal_load(qmp_path, output)
                             print(f"{args.arch} TERMLOAD PASS: {args.terminal_load} terminals, input, pixels, program launch; {serial}")
                             return
+                        if args.simd and text.count("SIMDTEST SIGNAL READY") > simd_signals_sent:
+                            qmp = QMP(qmp_path)
+                            try:
+                                qmp.chord("ctrl", "c")
+                            finally:
+                                qmp.close()
+                            simd_signals_sent += 1
                         if args.tlb and "init.bin started" in text:
                             if f"tlb: pcid={pcid} invpcid={invpcid}\n" not in text:
                                 raise RuntimeError(f"TLB backend mismatch; see {serial}")
@@ -1052,6 +1185,13 @@ def main():
                                 qmp = QMP(qmp_path)
                                 try:
                                     if args.desktop_app == "lite":
+                                        width, height, _ = qmp.screenshot(output / "lite-before.ppm")
+                                        # GUI's startup terminal may have taken focus after Lite opened.
+                                        focus_x = (width - int(width * 0.8)) // 2 + 24
+                                        focus_y = (height - int(height * 0.8)) // 2 + 10
+                                        qmp.move(focus_x - width // 2, focus_y - height // 2)
+                                        qmp.press("btn", button="left")
+                                        qmp.move(width // 2 - focus_x, height // 2 - focus_y)
                                         qmp.chord("ctrl", "end")
                                         qmp.press("key", key={"type": "qcode", "data": "a"})
                                         qmp.chord("ctrl", "s")
@@ -1365,7 +1505,14 @@ def main():
                             target = tuple(map(int, mouse.group(3, 4)))
                             exercise_mouse(qmp_path, origin, target, output)
                             mouse_sent = True
-                        if "init: run psh.bin\n" in text:
+                        completed = "init: run psh.bin\n" in text
+                        if shutdown_after and "acpi: entering S5" in text:
+                            qmp = QMP(qmp_path)
+                            try:
+                                completed = qmp.execute("query-status")["status"] == "shutdown"
+                            finally:
+                                qmp.close()
+                        if completed:
                             statuses = re.findall(r"^init: command .* status=(-?\d+)$", text, re.M)
                             if len(statuses) != len(commands) or any(status != "0" for status in statuses):
                                 qmp = QMP(qmp_path)
@@ -1379,6 +1526,16 @@ def main():
                                 raise RuntimeError(f"unexpected monotonic clock fallback; see {serial}")
                             if missing:
                                 raise RuntimeError(f"missing {missing}; see {serial}")
+                            if args.lfn:
+                                if text.count("LFNTEST PASS") != 4:
+                                    raise RuntimeError("not all FAT variants passed LFN tests")
+                                for disk in lfn_images:
+                                    exported = Path(temporary) / "exported.txt"
+                                    subprocess.run(["mcopy", "-o", "-i", str(disk),
+                                                    "::/Exported long filename from Plant.txt",
+                                                    str(exported)], check=True)
+                                    if exported.read_bytes() != b"Plant LFN\n":
+                                        raise RuntimeError(f"LFN export mismatch: {disk.name}")
                             if args.compute_bench:
                                 subprocess.run(["python3", str(repo / "scripts/compare-compute.py"),
                                                 str(output), "--out", str(output / "results.json")], check=True)
@@ -1432,6 +1589,13 @@ def main():
                                 print("AHCI persistence PASS: two ports, read/write/flush, unaligned write, 48-bit capacity", flush=True)
                             elif args.ahci_no_irq:
                                 print("AHCI timeout PASS: lost IRQ did not stall startup", flush=True)
+                            if shutdown_after:
+                                qmp = QMP(qmp_path)
+                                try:
+                                    qmp.execute("quit")
+                                finally:
+                                    qmp.close()
+                                guest.wait(timeout=5)
                             print(f"{args.arch} {args.firmware} PASS: {args.cpus} CPUs, {args.memory} MiB; {serial}")
                             return
                         time.sleep(0.2)
@@ -1448,7 +1612,7 @@ def main():
         with (output / "restore.log").open("w") as restore_log:
             restore = ([str(repo / "scripts/build-livecd.sh"), str(iso), args.arch]
                        if native else ["make", "-C", str(repo / "kernel"),
-                                       "ARCH=i386", *kernel_options, "livecd", "-j8"])
+                                       "ARCH=i386", *kernel_options, build_target, "-j8"])
             subprocess.run(restore,
                            stdout=restore_log, stderr=subprocess.STDOUT, check=True)
 

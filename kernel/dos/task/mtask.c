@@ -657,6 +657,7 @@ static void task_clear_external_refs(mtask *task) {
     keyboard_use_task = NULL;
   }
   timer_cancel_for_task(task);
+  lock_cancel_task(task);
   futex_cancel_task(task);
 #if defined(KERNEL_ARCH_I386)
   high_text_cursor_task_exited(task);
@@ -1438,6 +1439,9 @@ int task_fork() {
   child->waittid = TASK_ID_NONE;
   child->wait_generation = 0;
   child->wait_reason = WAIT_REASON_NONE;
+  child->waiting_lock = NULL;
+  child->lock_next = NULL;
+  child->lock_previous = NULL;
   child->group_lock_owner = TASK_ID_NONE;
   child->group_lock_depth = 0;
   child->ready = 0;
