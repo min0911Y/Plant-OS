@@ -89,6 +89,8 @@ static int supervisor_write_cow_test(void) {
   return isolated;
 }
 
+int signal_tests(void);
+
 int main(int argc, char **argv) {
   (void)argc;
   (void)argv;
@@ -130,5 +132,5 @@ int main(int argc, char **argv) {
 
   printf("EXCEPTION_TEST done checks=%d fails=%d\n", checks, fails);
   logkf("EXCEPTION_TEST done checks=%d fails=%d\n", checks, fails);
-  return fails;
+  return fails + signal_tests();
 }

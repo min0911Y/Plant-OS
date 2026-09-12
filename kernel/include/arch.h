@@ -40,8 +40,6 @@ void arch_task_fork_context_init(struct mtask *task);
 __attribute__((noreturn)) void arch_task_enter_user(uintptr_t instruction_pointer,
                                                    uintptr_t stack_top,
                                                    uintptr_t argument);
-bool arch_task_prepare_signal(struct mtask *task, uintptr_t handler,
-                              uintptr_t trampoline);
 
 arch_address_space_t arch_address_space_current(void);
 arch_address_space_t arch_address_space_kernel(void);

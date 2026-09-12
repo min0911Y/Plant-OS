@@ -7,6 +7,7 @@
 #include <stdarg.h>
 #include <stddef.h>
 #include <user_thread.h>
+#include <user_signal.h>
 typedef unsigned int vram_t;
 typedef vram_t color_t;
 
@@ -213,10 +214,9 @@ typedef struct mtask {
   unsigned status;
   unsigned terminate_status;
   unsigned terminate_pending;
-  unsigned signal;
-  uintptr_t handler[30];
+  task_signal_state_t signals;
+  struct sigaction signal_actions[NSIG]; /* Used only by the group leader. */
   uintptr_t ret_to_app;
-  unsigned signal_disable;
 } mtask;
 struct FIFO8 {
   unsigned char *buf;
@@ -469,8 +469,4 @@ typedef struct {
   unsigned int max_transfer_sectors;
   char DriveName[50];
 } vdisk;
-// signal
-#define SIGINT 0
-#define SIGKIL 1
-#define SIGMASK(n) 1 << n
 #endif

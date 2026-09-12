@@ -5,10 +5,14 @@
 #include <string.h>
 #include <syscall.h>
 #include <task.h>
+#include <ucontext.h>
 
 int simd_probe(const void *expected, void *observed, unsigned mode,
                uint32_t control, uint32_t *observed_control, unsigned avx);
-void simd_signal_handler(int signal);
+_Static_assert(__builtin_offsetof(ucontext_t, uc_mcontext) == 48,
+               "SIMD signal probe ucontext offset");
+
+void simd_signal_handler(int signal, siginfo_t *information, void *context);
 unsigned simd_signal_avx;
 volatile unsigned simd_signal_received;
 
@@ -42,6 +46,16 @@ static int probe(unsigned seed, enum probe_mode mode, unsigned avx) {
            (mode == PROBE_RESET ? 0x37full : 0x803800037full);
   if (mode != PROBE_RESET)
     valid &= observed[65] == x87_value;
+  if (!valid) {
+    unsigned first = 0;
+    while (first < (avx ? 64u : 32u) && expected[first] == observed[first])
+      first++;
+    logkf("SIMDTEST mismatch seed=%u mode=%u slot=%u expected=%llx observed=%llx "
+          "mxcsr=%x/%x x87=%llx value=%llx xstate=%llx\n",
+          seed, mode, first, first < 64 ? expected[first] : 0,
+          first < 64 ? observed[first] : 0, control, observed_control,
+          observed[64], observed[65], observed[66]);
+  }
   if (mode == PROBE_FORK && child == 0)
     _exit(valid ? 0 : 1);
   if (mode == PROBE_FORK)
@@ -89,7 +103,10 @@ int main(int argc, char **argv) {
   free(children);
   if (argc == 2 && !strcmp(argv[1], "signal")) {
     simd_signal_avx = avx;
-    signal(SIGINT, simd_signal_handler);
+    struct sigaction action = {.sa_sigaction = simd_signal_handler,
+                               .sa_flags = SA_SIGINFO};
+    if (sigaction(SIGINT, &action, NULL))
+      return 1;
     failed |= !probe(0x77, PROBE_SIGNAL, avx) || simd_signal_received != 1;
     simd_signal_received = 0;
     failed |= !probe(0x99, PROBE_SIGNAL_CLEAN, avx) || simd_signal_received != 1;

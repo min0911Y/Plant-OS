@@ -82,7 +82,7 @@ CALL tty_stop_cur_moving, 0x43
 CALL tty_get_xsize, 0x45
 CALL tty_get_ysize, 0x46
 CALL logk, 0x48, a0
-CALL signal, 0x49, a0, a1
+CALL signal_call, 0x49, a0, a1, a2, a3
 CALL api_fork, 0x4a
 CALL waittid, 0x4b, a0
 CALL mouse_enable, 0x4d

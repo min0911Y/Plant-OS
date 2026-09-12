@@ -12,7 +12,5 @@ void x86_irq_dispatch(unsigned irq, x86_interrupt_frame_t *frame) {
 #endif
 
   irq_dispatch(irq);
-  if (irq <= 1) {
-    signal_deal();
-  }
+  x86_signal_dispatch(frame, 32, 0, 0);
 }

@@ -99,10 +99,15 @@ void x86_exception_dispatch(x86_exception_frame_t *frame) {
   }
   if (descriptor->policy == X86_EXCEPTION_USER_TERMINATE &&
       (frame->cs & 3u) == 3u) {
-    logk("exception: vector=%d name=%s error=%08x eip=%08x cr2=%08x tid=%d\n",
-         frame->vector, descriptor->name, frame->error, frame->eip,
-         frame->vector == 14 ? x86_cr2_read() : 0, current_task()->tid);
-    task_exit((unsigned)-1);
+    x86_interrupt_frame_t registers;
+    memcpy(&registers, frame, offsetof(x86_interrupt_frame_t, eip));
+    memcpy(&registers.eip, &frame->eip, 5 * sizeof(uint32_t));
+    x86_signal_dispatch(&registers, frame->vector,
+                         frame->vector == 14 ? x86_cr2_read() : frame->eip,
+                         frame->error);
+    memcpy(frame, &registers, offsetof(x86_interrupt_frame_t, eip));
+    memcpy(&frame->eip, &registers.eip, 5 * sizeof(uint32_t));
+    return;
   }
   x86_exception_fail_stop(frame, descriptor);
 }

@@ -1,4 +1,3 @@
-#include <errno.h>
 #include <futex.h>
 #include <pthread.h>
 #include <stdint.h>
@@ -34,7 +33,7 @@ static void *probe_worker(void *argument) {
     seen = generation;
     if (probe->protect) {
       __atomic_store_n(probe->pages, 0xbad, __ATOMIC_RELAXED);
-      return (void *)1; /* A real protection fault terminates this thread. */
+      return (void *)1; /* A real protection fault terminates this process. */
     }
     for (unsigned p = 0; p < probe->count; p++) {
       if (__atomic_load_n(probe->pages + p * (VM_PAGE_SIZE / 4),
@@ -106,9 +105,9 @@ static int probe_mapping(unsigned count, int protect) {
     __atomic_store_n(&probe.stopped, 1, __ATOMIC_RELEASE);
   void *result = (void *)4;
   int joined = pthread_join(thread, &result);
-  valid &= protect ? joined == EINVAL : joined == 0 && !result;
-  if (protect && valid)
-    valid = *probe.pages == 1;
+  /* A protection probe must never return from join: its unhandled SIGSEGV
+   * terminates the child process. The parent checks that exit status. */
+  valid &= !protect && joined == 0 && !result;
   if (!valid)
     logkf("THRDTEST SMP probe pages=%u protect=%d cpu=%u/%u generation=%u "
           "ack=%u result=%u\n",
@@ -160,7 +159,7 @@ int test_smp_vm(void) {
     int child = valid ? fork() : -1;
     if (!child)
       _exit(probe_mapping(1, 1) ? 0 : 1);
-    valid &= child > 0 && waittid(child) == 0;
+    valid &= child > 0 && waittid(child) == -1;
     valid &= probe_group_exit();
     logkf("THRDTEST SMP %s remap=1,64 protection=remote\n",
           valid ? "PASS" : "FAIL");

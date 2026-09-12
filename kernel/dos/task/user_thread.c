@@ -83,6 +83,7 @@ int user_thread_create(native_thread_request_t *request) {
     task_abort_creation(thread);
     return -12;
   }
+  thread->signals.blocked = self->signals.blocked;
   thread->thread_pointer = request->thread_pointer;
   thread->joinable = !!(request->flags & THREAD_JOINABLE);
   thread->user_tls = request->tls;

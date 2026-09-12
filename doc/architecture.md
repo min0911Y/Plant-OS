@@ -9,7 +9,7 @@
 - 内核保持 freestanding 编译约束，C++ 禁用异常和 RTTI。i386 使用 x87、禁用 MMX/SSE；x86_64 两侧使用 `-mno-red-zone -msse2 -mfpmath=sse -mlong-double-64`。i386 执行字符集为 GB2312，x86_64 应用为 UTF-8；修改文字输出时检查编码和字节长度。
 - 用户 syscall 编号和参数顺序统一维护在 `apps/libp/arch/syscalls.inc`。修改 ABI 时同步内核处理器、`apps/include/`、两种架构包装及调用方，保留结构大小断言；i386 包装必须保存 EBX、ESI、EDI、EBP。用户指针及其完整范围必须验证，变长结果使用 query + capacity。
 - 匿名 VM 的预留占用与访问权限分开表示；`PROT_NONE` 不释放地址或内容，`MADV_DONTNEED` 保留权限并丢弃内容。fork、exec、回收及空闲地址查找必须识别非 present 用户叶映射；替换和撤销提交须在 TLB 同步后回收旧页，保持 W^X。文件映射的 backing 另按 address space 登记，与 VFS cache 页共用同一份数据：私有映射经 COW、共享映射直接别名，普通 read/write 与映射写必须互相可见，范围、映射期间 truncate 及生命周期边界如实报错，不静默返回未定义内容。ABI、HotSpot 内存生命周期及当前限制见 [动态链接](dynamic-linking.md#虚拟内存-abi)。
-- 汇编保存顺序与 C 结构是内部 ABI；修改时检查任务初始栈、切换、fork、信号和返回路径。返回用户态前校验完整 frame；除合法 COW 和 lazy-FPU 恢复外，普通用户异常终止任务，内核异常及 NMI/双重故障/机器检查停机。
+- 汇编保存顺序与 C 结构是内部 ABI；修改时检查任务初始栈、切换、fork、信号和返回路径。返回用户态前校验完整 frame；除合法 COW 和 lazy-FPU 恢复外，普通用户异常经原生信号处理，未处理或不可恢复时终止所属进程；内核异常及 NMI/双重故障/机器检查停机。处理器、备用栈与受校验的上下文返回见 [用户异常与信号](signals.md)。
 - 正式应用使用原生 `ET_DYN` PIE、`/lib/ld.so` 和 `libp.so`，C++ 另用 `libcpp.so`；统一经 `apps/libp/entry.c` 初始化后调用 `main`。静态自举解释器与 i386 TCC SDK 单独构建，不混用 PIC/非 PIC 归档。
 - `libcpp.so` 使用配套的原生 libc++/libc++abi，禁用异常和 RTTI；C++ 头文件取对应架构的构建产物，不恢复旧 GNU C++ 头文件或第二套 ABI。每个 ELF 对象拥有独立 hidden `__dso_handle`，依赖装载与 TLS 保持在现有解释器中。
 - 动态链接只在 `apps/ldso/` 中实现。内核经 `loader_start_t` 交付原 ELF fd 和路径，从系统启动盘加载解释器；ELF 与启动 ABI 由 `apps/include/elf.h`、`loader.h` 单源定义。库搜索、重定位、构造/析构及 VM 权限规则见 [动态链接](dynamic-linking.md)。

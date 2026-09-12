@@ -73,12 +73,10 @@ get_xy:
 
 global return_to_app:function (return_to_app.end - return_to_app)
 return_to_app:
-  popa
-  pop gs
-  pop fs
-  pop es
-  pop ds
-  ret
+  mov ebx, [esp+12]
+  mov eax, 0x65
+  int 0x36
+  ud2
 return_to_app.end:
 
 global setjmp

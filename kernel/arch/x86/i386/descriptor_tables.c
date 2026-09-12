@@ -228,8 +228,9 @@ void arch_interrupt_init(void) {
   }
 
   for (unsigned vector = 0; vector < X86_EXCEPTION_COUNT; vector++) {
-    x86_interrupt_entry_set(vector, x86_exception_entries[vector],
-                            X86_ACCESS_INTERRUPT_GATE);
+    uint16_t access = vector == 3 ? X86_USER_ACCESS(X86_ACCESS_INTERRUPT_GATE)
+                                   : X86_ACCESS_INTERRUPT_GATE;
+    x86_interrupt_entry_set(vector, x86_exception_entries[vector], access);
   }
   for (unsigned irq = 0; irq < X86_IRQ_COUNT; irq++) {
     x86_interrupt_entry_set(X86_IRQ_VECTOR_BASE + irq, x86_irq_entries[irq],

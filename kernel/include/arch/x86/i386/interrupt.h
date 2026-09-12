@@ -89,5 +89,8 @@ void x86_smp_wake_entry(void);
 __attribute__((noreturn)) void
 x86_return_to_user(const x86_interrupt_frame_t *frame);
 void x86_syscall_dispatch(x86_interrupt_frame_t *frame);
+void x86_signal_dispatch(x86_interrupt_frame_t *frame, unsigned vector,
+                          uintptr_t address, uintptr_t error);
+bool x86_signal_restore(x86_interrupt_frame_t *frame, uintptr_t address);
 
 #endif

@@ -6,7 +6,6 @@ extern apic_send_eoi
 extern kernel_lock_enter
 extern kernel_lock_leave
 extern scheduler_reschedule_interrupt
-extern signal_deal
 extern x86_irq_dispatch
 extern x86_syscall_dispatch
 extern x86_user_frame_set_tls
@@ -50,7 +49,6 @@ x86_syscall_entry:
   push esp
   call x86_syscall_dispatch
   add esp, 4
-  call signal_deal
   call kernel_lock_leave
   X86_FRAME_RESTORE
   iretd

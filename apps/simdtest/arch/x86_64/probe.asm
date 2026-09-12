@@ -7,7 +7,8 @@ extern simd_signal_avx, simd_signal_received
 
 simd_signal_handler:
   ; No kernel stack padding or inactive YMM bytes may escape in a signal frame.
-  lea rdx, [rsp + 8]
+  ; ucontext.uc_mcontext starts at byte 48 (asserted by the C fixture).
+  add rdx, 48
   movzx eax, byte [rdx + 5]
 %assign offset 416
 %rep 6

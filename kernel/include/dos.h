@@ -69,7 +69,6 @@ int task_snapshot(task_info_t *entries, uint32_t capacity, uint32_t *count);
 bool task_pin_current(uint32_t cpu);
 unsigned task_wake_tty(struct tty *tty);
 void task_close_tty(struct tty *tty, struct tty *fallback);
-void signal_deal(void);
 // page.c
 void init_page(const boot_info_t *boot_info);
 bool page_reserve_physical_range(uintptr_t start, uint32_t size);
@@ -174,6 +173,4 @@ void lock_cancel_task(mtask *task);
 // mount.c
 int mount(char *fileName);
 void unmount(char drive);
-// signal.c
-void set_signal_handler(unsigned sig, uintptr_t handler);
 #endif

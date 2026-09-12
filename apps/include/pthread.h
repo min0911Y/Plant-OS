@@ -2,6 +2,7 @@
 #define PLANT_PTHREAD_H
 
 #include <stdint.h>
+#include <signal.h>
 #include <time.h>
 
 typedef struct __pthread *pthread_t;
@@ -71,6 +72,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attributes,
                    void *(*entry)(void *), void *argument);
 pthread_t pthread_self(void);
 int pthread_equal(pthread_t left, pthread_t right);
+int pthread_kill(pthread_t thread, int sig);
 void pthread_exit(void *result) __attribute__((noreturn));
 int pthread_join(pthread_t thread, void **result);
 int pthread_detach(pthread_t thread);

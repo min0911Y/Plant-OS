@@ -6,19 +6,8 @@
 typedef uintptr_t arch_address_space_t;
 enum { ARCH_SHARED_ADDRESS_SPACE_SMP = 1 };
 
-typedef struct {
-  uint16_t control, status;
-  uint8_t tag, reserved0;
-  uint16_t opcode;
-  uint64_t instruction_pointer, data_pointer;
-  uint32_t mxcsr, mxcsr_mask;
-  uint8_t x87[8][16];
-  uint8_t xmm[16][16];
-  uint8_t reserved1[48];
-  /* FXSAVE bytes 464..511 belong to software; entry frames use this flag. */
-  uint64_t ymm_inuse;
-  uint8_t reserved2[40];
-} __attribute__((aligned(16))) x64_fx_state_t;
+#include <signal_context.h>
+typedef signal_fpregs_t x64_fx_state_t;
 
 /* Standard XSAVE layout for the enabled x87, SSE and optional AVX state. */
 typedef struct {
@@ -34,14 +23,7 @@ typedef struct {
 } arch_task_context_t;
 
 /* Entry/signal frames contain register data only, never an XSAVE header. */
-typedef struct {
-  x64_fx_state_t simd;
-  uint8_t ymm_hi[16][16];
-  uint64_t r15, r14, r13, r12, r11, r10, r9, r8;
-  uint64_t rdi, rsi, rbp, rdx, rcx, rbx, rax;
-  uint64_t vector, error;
-  uint64_t rip, cs, rflags, rsp, ss;
-} x64_interrupt_frame_t;
+typedef mcontext_t x64_interrupt_frame_t;
 
 #ifdef __cplusplus
 #define X64_STATIC_ASSERT static_assert

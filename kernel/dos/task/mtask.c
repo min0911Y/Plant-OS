@@ -719,15 +719,12 @@ static void task_release_resources(mtask *task) {
   task->ready = 0;
   task->address_space = 0;
   task->sigint_up = 0;
-  task->signal = 0;
-  task->signal_disable = 0;
+  memset(&task->signals, 0, sizeof(task->signals));
   task->keyboard_press = NULL;
   task->keyboard_release = NULL;
   task->group_lock_owner = TASK_ID_NONE;
   task->group_lock_depth = 0;
-  for (int k = 0; k < 30; k++) {
-    task->handler[k] = 0;
-  }
+  memset(task->signal_actions, 0, sizeof(task->signal_actions));
 }
 
 void task_abort_creation(mtask *task) {
@@ -1447,7 +1444,11 @@ int task_fork() {
   child->ready = 0;
   child->urgent = 0;
   child->line = NULL;
-  child->signal = 0;
+  child->signals.pending = 0;
+  mtask *signal_owner = get_task(parent->tgid);
+  memcpy(child->signal_actions, signal_owner->signal_actions,
+         sizeof(child->signal_actions));
+  child->ret_to_app = signal_owner->ret_to_app;
   uintptr_t stack = (uintptr_t)page_malloc(STACK_SIZE);
   if (stack == 0)
     goto failed;

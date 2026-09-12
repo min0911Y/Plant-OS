@@ -406,7 +406,6 @@ static void syscall_mouse_event(syscall_context_t *frame) {
   for (;;) {
     if (!input_mouse_read(&event)) {
       task_fall_blocked_reason(WAITING, WAIT_REASON_INPUT);
-      signal_deal();
       continue;
     }
 
@@ -1345,14 +1344,12 @@ static void syscall_log(syscall_context_t *frame) {
 }
 
 static void syscall_signal_handler(syscall_context_t *frame) {
-  if (frame->argument0 >= sizeof(current_task()->handler) /
-                        sizeof(current_task()->handler[0])) {
-    frame->value = -1;
+  if (frame->argument0 >= SIGNAL_OPERATION_COUNT) {
+    frame->value = -22;
     return;
   }
-  unsigned old_handler = current_task()->handler[frame->argument0];
-  set_signal_handler(frame->argument0, frame->argument1);
-  frame->value = old_handler;
+  frame->value = user_signal_operation(frame->argument0, frame->argument1,
+                                       frame->argument2, frame->argument3);
 }
 
 static void syscall_fork(syscall_context_t *frame) {
@@ -1439,7 +1436,7 @@ static void syscall_tty_object(syscall_context_t *frame) {
 }
 
 static void syscall_return_to_app(syscall_context_t *frame) {
-  current_task()->ret_to_app = frame->argument0;
+  get_task(current_task()->tgid)->ret_to_app = frame->argument0;
 }
 
 static void syscall_tty_pointer(syscall_context_t *frame) {

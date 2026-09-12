@@ -88,6 +88,11 @@ int futex_operation(unsigned operation, const futex_request_t *request) {
     return FUTEX_TIMED_OUT;
   }
 
+  if (self->signals.pending & ~self->signals.blocked) {
+    irq_restore(state);
+    return FUTEX_INTERRUPTED;
+  }
+
   futex_waiter_t waiter = {
       .next = *bucket,
       .previous = bucket,

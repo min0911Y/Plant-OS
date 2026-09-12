@@ -19,6 +19,7 @@ python3 scripts/test-x86_64.py --arch i386 --dynamic --memory 512
 | --- | --- |
 | FAT 长文件名与 initramfs | `--lfn`，覆盖 FAT12/16/32、重挂载及 mtools 互操作，见 [FAT 长文件名](fat-lfn.md) |
 | IPC/RPC、磁盘、网络 | `rpctest.bin`、`dktest.bin`、`nettest.bin` |
+| 可恢复异常、信号与备用栈 | `--signals`，两种架构覆盖上下文恢复、线程信号和非法帧，完成后 shutdown；见 [用户异常与信号](signals.md) |
 | 任务、异常、浮点 | `guitest.bin stress`/`capacity`、`--memory-pressure`、`exc_test.bin`、i386 `fputest.bin`、x86_64 `simdtest.bin` |
 | 用户态线程、TLS、运行库 | `--threads`、`--futex`，覆盖同步、分配、C/C++、stdio、浮点环境和动态链接/VM |
 | LLVM、Vulkan 与 WSI | x86_64 `--llvm`、`--lavapipe --memory 3072 --timeout 600` 验证着色器、窗口像素与输入；`--compute-bench` 比较多个 worker 数并逐块核验结果，性能数据须固定宿主与 QEMU 配置 |

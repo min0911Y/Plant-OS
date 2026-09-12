@@ -1,24 +1,8 @@
 #include <arch.h>
 #include <arch/x86/i386/interrupt.h>
 #include <dos.h>
+#include <irq.h>
 #include <string.h>
-
-typedef struct {
-  uint32_t trampoline;
-  uint32_t edi;
-  uint32_t esi;
-  uint32_t ebp;
-  uint32_t esp_dummy;
-  uint32_t ebx;
-  uint32_t edx;
-  uint32_t ecx;
-  uint32_t eax;
-  uint32_t gs;
-  uint32_t fs;
-  uint32_t es;
-  uint32_t ds;
-  uint32_t instruction_pointer;
-} i386_signal_frame_t;
 
 void arch_task_context_init(arch_task_context_t *context, uintptr_t entry) {
   memset(context, 0, sizeof(*context));
@@ -49,32 +33,54 @@ arch_task_enter_user(uintptr_t instruction_pointer, uintptr_t stack_top,
   x86_return_to_user(&frame);
 }
 
-bool arch_task_prepare_signal(mtask *task, uintptr_t handler,
-                              uintptr_t trampoline) {
-  if (task == NULL || handler == 0 || trampoline == 0) {
-    return false;
-  }
+_Static_assert(offsetof(mcontext_t, fpregs) == sizeof(x86_interrupt_frame_t),
+               "i386 signal register prefix");
+_Static_assert(sizeof(((mcontext_t *)0)->fpregs) == sizeof(arch_fpu_state_t),
+               "i386 signal x87 image");
 
-  x86_interrupt_frame_t *interrupt_frame =
-      (x86_interrupt_frame_t *)(task->top - sizeof(x86_interrupt_frame_t));
-  i386_signal_frame_t *signal_frame =
-      (i386_signal_frame_t *)(uintptr_t)(interrupt_frame->esp -
-                                         sizeof(i386_signal_frame_t));
-  signal_frame->edi = interrupt_frame->edi;
-  signal_frame->esi = interrupt_frame->esi;
-  signal_frame->ebp = interrupt_frame->ebp;
-  signal_frame->esp_dummy = interrupt_frame->esp_dummy;
-  signal_frame->ebx = interrupt_frame->ebx;
-  signal_frame->ecx = interrupt_frame->ecx;
-  signal_frame->edx = interrupt_frame->edx;
-  signal_frame->eax = interrupt_frame->eax;
-  signal_frame->gs = interrupt_frame->gs;
-  signal_frame->fs = interrupt_frame->fs;
-  signal_frame->es = interrupt_frame->es;
-  signal_frame->ds = interrupt_frame->ds;
-  signal_frame->instruction_pointer = interrupt_frame->eip;
-  signal_frame->trampoline = (uint32_t)trampoline;
-  interrupt_frame->eip = (uint32_t)handler;
-  interrupt_frame->esp = (uint32_t)(uintptr_t)signal_frame;
+/* i386 keeps x87 state lazily, outside the interrupt stack frame. Flush the
+ * owner before exporting it and invalidate the handler's live state on return. */
+void x86_signal_dispatch(x86_interrupt_frame_t *frame, unsigned vector,
+                          uintptr_t address, uintptr_t error) {
+  if ((frame->cs & 3) != 3)
+    return;
+  irq_state_t flags = irq_save();
+  mtask *task = current_task();
+  if (vector >= 32 && !(task->signals.pending & ~task->signals.blocked)) {
+    irq_restore(flags);
+    return;
+  }
+  arch_fpu_handle_device_not_available(task);
+  arch_fpu_flush_cpu();
+  mcontext_t context = {0};
+  memcpy(&context, frame, sizeof(*frame));
+  memcpy(context.fpregs, &task->fpu_state, sizeof(task->fpu_state));
+  arch_fpu_state_t *fp = (void *)context.fpregs;
+  fp->reserved_control = fp->reserved_status = fp->reserved_tag = 0;
+  fp->instruction_selector_opcode &= 0x07ffffff;
+  fp->data_selector &= 0xffff;
+  unsigned top_register = (fp->status >> 11) & 7;
+  for (unsigned i = 0; i < 8; i++) {
+    unsigned physical = (top_register + i) & 7;
+    if (((fp->tag >> (physical * 2)) & 3) == 3)
+      memset(fp->registers + i * 10, 0, 10);
+  }
+  if (vector < 32)
+    user_signal_exception(&context, vector, address, error);
+  else
+    user_signal_dispatch(&context, NULL);
+  memcpy(frame, &context, sizeof(*frame));
+  irq_restore(flags);
+}
+
+bool x86_signal_restore(x86_interrupt_frame_t *frame, uintptr_t address) {
+  mcontext_t context;
+  if (!user_signal_restore(address, &context))
+    return false;
+  mtask *task = current_task();
+  arch_fpu_reset(task);
+  memcpy(&task->fpu_state, context.fpregs, sizeof(task->fpu_state));
+  task->fpu_initialized = true;
+  memcpy(frame, &context, sizeof(*frame));
   return true;
 }

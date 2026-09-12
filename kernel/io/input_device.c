@@ -180,7 +180,7 @@ bool input_keyboard_event(input_keyboard_t *source, uint16_t code,
     mtask *target = keyboard_use_task != NULL ? keyboard_use_task
                                               : keyboard_foreground_task();
     if (target != NULL && target->sigint_up) {
-      target->signal |= SIGMASK(SIGINT);
+      user_signal_send(target, SIGINT);
     }
   }
   bool reschedule = input_key_deliver(code, pressed);

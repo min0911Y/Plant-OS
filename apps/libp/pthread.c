@@ -120,6 +120,11 @@ pthread_t pthread_self(void) {
   return runtime->handle;
 }
 int pthread_equal(pthread_t left, pthread_t right) { return left == right; }
+int pthread_kill(pthread_t thread, int sig) {
+  if (!thread || sig < 0 || sig >= NSIG)
+    return EINVAL;
+  return -signal_call(SIGNAL_SEND, sig, thread->tid, thread->generation);
+}
 int sched_yield(void) {
   api_yield();
   return 0;

@@ -1,8 +1,15 @@
 #include <arch/x86/i386/interrupt.h>
+#include <dos.h>
 #include <irq.h>
 #include <syscall.h>
 
 void x86_syscall_dispatch(x86_interrupt_frame_t *frame) {
+  if (frame->eax == SYSCALL_ARCH_SIGNAL_RETURN) {
+    if (!x86_signal_restore(frame, frame->ebx))
+      task_exit_process((unsigned)-1);
+    x86_signal_dispatch(frame, 32, 0, 0);
+    return;
+  }
   syscall_context_t context = {
       .value = frame->eax,
       .argument0 = frame->ebx,
@@ -23,4 +30,5 @@ void x86_syscall_dispatch(x86_interrupt_frame_t *frame) {
   frame->esi = (uint32_t)context.argument3;
   frame->edi = (uint32_t)context.argument4;
   frame->ebp = (uint32_t)context.argument5;
+  x86_signal_dispatch(frame, 32, 0, 0);
 }

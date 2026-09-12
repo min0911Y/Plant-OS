@@ -660,6 +660,7 @@ def main():
     gui_mode.add_argument("--threads", action="store_true", help="validate pthreads, ELF TLS, synchronization and thread resource release")
     gui_mode.add_argument("--shutdown", action="store_true",
                           help="request ACPI S5 through psh and verify QEMU shutdown state")
+    gui_mode.add_argument("--signals", action="store_true", help="validate recoverable faults, signal stacks, masks and thread contexts, then shut down")
     gui_mode.add_argument("--simd", action="store_true", help="validate SIMD registers across scheduling, fork, reset and keyboard signal return")
     gui_mode.add_argument("--llvm", action="store_true", help="validate native LLVM MCJIT, relocations, W^X and concurrent compilation")
     gui_mode.add_argument("--lavapipe", action="store_true", help="validate native Vulkan compute, SDL triangle pixels and window presentation")
@@ -797,6 +798,12 @@ def main():
     if args.threads:
         commands = ["thrdtest.bin", "libctest.bin", "cxxcheck.bin", "futest.bin", "timetest.bin", "dyntest.bin"]
         expected = ["THRDTEST PASS", "LIBCTEST PASS", "CXXCHECK PASS", "FUTEXTEST PASS", "TIMETEST PASS", "DYNTEST PASS"]
+    if args.signals:
+        commands = ["exc_test.bin", "thrdtest.bin", "futest.bin", "dyntest.bin",
+                    "simdtest.bin" if native else "fputest.bin"]
+        expected = ["SIGNALTEST PASS", "EXCEPTION_TEST done checks=5 fails=0",
+                    "THRDTEST PASS", "FUTEXTEST PASS", "DYNTEST PASS",
+                    "SIMDTEST PASS" if native else "FPUTEST PASS"]
     if args.llvm:
         if not native:
             parser.error("--llvm currently requires x86_64")
@@ -905,7 +912,7 @@ def main():
     original_config = config.read_bytes() if args.usb else None
     def mst_quote(text):
         return '"' + text.replace('\\', '\\\\').replace('"', '\\"') + '"'
-    shutdown_after = args.dynamic or args.all_apps
+    shutdown_after = args.dynamic or args.all_apps or args.signals or args.simd or args.threads
     final_command = "psh.bin -c shutdown" if shutdown_after else "psh.bin"
     actions = [f'  {{"action" = "run" "command_line" = {mst_quote(command)}}}'
                for command in commands + [final_command]]
@@ -1113,7 +1120,14 @@ def main():
                         if args.simd and text.count("SIMDTEST SIGNAL READY") > simd_signals_sent:
                             qmp = QMP(qmp_path)
                             try:
-                                qmp.chord("ctrl", "c")
+                                # Queue the complete chord before the handler can
+                                # finish the test and power the guest off.
+                                qmp.execute("input-send-event", events=[
+                                    {"type": "key", "data": {"down": down,
+                                     "key": {"type": "qcode", "data": key}}}
+                                    for down, keys in ((True, ("ctrl", "c")),
+                                                       (False, ("c", "ctrl")))
+                                    for key in keys])
                             finally:
                                 qmp.close()
                             simd_signals_sent += 1

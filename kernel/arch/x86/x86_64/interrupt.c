@@ -72,7 +72,8 @@ void arch_interrupt_init(void) {
   for (size_t i = 0; i < 256; i++) {
     uintptr_t entry = (uintptr_t)x64_interrupt_entries[i];
     uint8_t ist = i == 2 ? 1 : i == 8 ? 2 : i == 18 ? 3 : 0;
-    idt[i] = (idt_entry_t){entry,       KERNEL_CODE, ist, 0x8e,
+    uint8_t attributes = i == 3 ? 0xee : 0x8e; /* User INT3, kernel-only IRQs. */
+    idt[i] = (idt_entry_t){entry,       KERNEL_CODE, ist, attributes,
                            entry >> 16, entry >> 32, 0};
   }
   descriptor_load();
@@ -123,6 +124,12 @@ void x64_interrupt_dispatch(x64_interrupt_frame_t *frame) {
       kernel_lock_leave();
       return;
     }
+    if ((frame->cs & 3) == 3) {
+      user_signal_exception(frame, vector,
+                            vector == 14 ? address : frame->rip, frame->error);
+      kernel_lock_leave();
+      return;
+    }
     logk(
         "x86_64 exception %u tid=%u rip=%llx address=%llx error=%llx cs=%llx\n",
         vector, current_task()->tid, frame->rip, address, frame->error,
@@ -131,20 +138,17 @@ void x64_interrupt_dispatch(x64_interrupt_frame_t *frame) {
          frame->rbx, frame->rcx, frame->rdx, frame->rsp);
     logk("registers rsi=%llx rdi=%llx rbp=%llx\n", frame->rsi, frame->rdi,
          frame->rbp);
-    if ((frame->cs & 3) == 3)
-      task_exit((unsigned)-1);
     arch_halt();
   }
   if (vector == 0xf0)
     scheduler_reschedule_interrupt();
   else if (vector >= 0x20 && vector < 0x38) {
     irq_dispatch(vector - 0x20);
-    if (vector <= 0x21)
-      signal_deal();
   } else if (vector >= X86_MESSAGE_VECTOR_FIRST &&
              vector < X86_MESSAGE_VECTOR_END) {
     irq_dispatch(vector);
   }
+  user_signal_dispatch(frame, NULL);
   kernel_lock_leave();
 }
 
@@ -153,20 +157,9 @@ void x64_syscall_dispatch(x64_interrupt_frame_t *frame) {
   if (current_task()->terminate_pending)
     task_exit(current_task()->terminate_status);
   if (frame->rax == SYSCALL_ARCH_SIGNAL_RETURN) {
-    if (!x64_user_access(frame->rdi, sizeof(*frame), false))
-      task_exit(141);
-    x64_interrupt_frame_t saved = *(const x64_interrupt_frame_t *)frame->rdi;
-    uint32_t mxcsr = saved.simd.mxcsr;
-    if (saved.rip < USER_SPACE_START || saved.rip >= USER_SPACE_END ||
-        saved.rsp < USER_SPACE_START || saved.rsp >= USER_SPACE_END ||
-        (mxcsr & ~x64_mxcsr_mask) || saved.simd.ymm_inuse > 1 ||
-        (saved.simd.ymm_inuse && !(x64_xstate_mask & 4)))
-      task_exit(141);
-    saved.cs = USER_CODE;
-    saved.ss = USER_DATA;
-    saved.rflags = (saved.rflags & 0x240dd5) | 0x202;
-    saved.vector = 0;
-    *frame = saved;
+    if (!user_signal_restore(frame->rdi, frame))
+      task_exit_process((unsigned)-1);
+    user_signal_dispatch(frame, NULL);
     kernel_lock_leave();
     return;
   }
@@ -186,7 +179,7 @@ void x64_syscall_dispatch(x64_interrupt_frame_t *frame) {
   frame->r10 = call.argument3;
   frame->r8 = call.argument4;
   frame->r9 = call.argument5;
-  signal_deal();
+  user_signal_dispatch(frame, NULL);
   if (frame->rip < USER_SPACE_START || frame->rip >= USER_SPACE_END ||
       frame->rsp < USER_SPACE_START || frame->rsp >= USER_SPACE_END)
     task_exit(141);
