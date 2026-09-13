@@ -50,6 +50,9 @@ PLANT_OPENJDK_DIR="$jdk_build/images/jdk" \
 ```
 
 打包会更新 ISO 与 `kernel/plant-os-x86_64-jdk.img`，启动时需要同时挂载两者。
+JDK 盘不携带 `libp.so`、`libcpp.so`、`libm.so.6`、`libz.so.1`；它们统一从
+启动盘的 `/lib` 加载，与 `ld.so` 一起更新。打包时会移除镜像中这些库的副本，
+避免 RPATH 优先命中旧 ABI 或宿主库。旧布局的 JDK 盘需要重新打包。
 验证通过临时 `kernel/res/init.mst` 执行 `C:/java/bin/java -version`、无参数
 启动器和带 classpath 的 Java 程序；程序输出在图形控制台，串口中的 init
 命令退出状态不能单独证明 JVM 初始化成功。测试后恢复 init 脚本与正常镜像。
@@ -74,6 +77,8 @@ python3 scripts/test-openjdk.py \
 
 `--javac` 指向宿主 JDK 17 或更新版本的编译器。脚本编译测试、构建原生应用和
 内核，在输出目录创建独立 ISO/JDK 磁盘，并临时替换后恢复 `init.mst`。
+脚本通过 Lua 的 `os.execute` 在同一进程中切换目录，检查绝对路径启动与
+进入 `C:/java/bin` 后由 shell 执行 `java --version` 均成功。
 测试成功须在磁盘写出 `OPENJDK NIO PASS` 且完成 ACPI S5；程序退出码或串口
 命令状态不能替代测试断言。TCG 可选，但 Zero 解释器执行大型 JDK 的耗时显著增加。
 测试日志与磁盘保留在输出目录；文件锁、完整 Java 网络库及 MC 本身不属于此测试。

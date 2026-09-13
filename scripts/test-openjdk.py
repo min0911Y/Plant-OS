@@ -22,6 +22,10 @@ def main():
     subprocess.run([args.javac, "--release", "17", "-d", str(classes),
                     str(repo / "apps/openjdk/Startup.java"),
                     str(repo / "apps/openjdk/Nio.java")], check=True)
+    launcher = output / "launcher.lua"
+    launcher.write_text('assert(os.execute("C:/java/bin/java --version"))\n'
+                        'assert(os.execute("cd C:/java/bin"))\n'
+                        'assert(os.execute("java --version"))\n')
     iso = output / "test.iso"
     disk = output / "test-jdk.img"
     init = repo / "kernel/res/init.mst"
@@ -33,6 +37,7 @@ def main():
                        stdout=log, stderr=subprocess.STDOUT, check=True)
         try:
             commands = [
+                'lua.bin C:/java/launcher.lua',
                 'C:/java/bin/java -Xms16m -Xmx128m -Djava.net.preferIPv4Stack=true -cp C:/missing;C:/java Nio C:/java/nio-result.txt',
                 'psh.bin -c shutdown',
             ]
@@ -47,7 +52,7 @@ def main():
                            env=environment, stdout=log, stderr=subprocess.STDOUT, check=True)
         finally:
             init.write_bytes(original)
-    for path in classes.glob("*.class"):
+    for path in [launcher, *classes.glob("*.class")]:
         subprocess.run(["mcopy", "-o", "-i", str(disk), str(path), "::/java/"], check=True)
     # The result must be produced by this boot, even if the supplied JDK image
     # happens to contain an earlier test's output.
@@ -67,6 +72,7 @@ def main():
     (output / "result.txt").write_text(result)
     text = serial.read_text(errors="replace")
     if (result != "OPENJDK NIO PASS\n" or "acpi: entering S5" not in text or
+            "lua.bin C:/java/launcher.lua status=0" not in text or
             "Nio C:/java/nio-result.txt status=0" not in text):
         raise RuntimeError(f"OpenJDK regression failed: {result.strip()}; see {output}")
     print(f"OPENJDK NIO PASS: {output}")

@@ -158,20 +158,13 @@ if [ -n "${PLANT_OPENJDK_DIR:-}" ]; then
   mkdir -p "$openjdk_payload_dir/java"
   cp -RL "$PLANT_OPENJDK_DIR"/. "$openjdk_payload_dir/java/"
   mkdir -p "$openjdk_payload_dir/java/lib"
-  for library in libp.so libcpp.so; do
-    if [ ! -f "$apps_out_dir/lib/$library" ]; then
-      echo "build-livecd: missing Plant runtime library: $apps_out_dir/lib/$library" >&2
+  for library in libp.so libcpp.so libm.so.6 libz.so.1; do
+    if [ ! -f "$payload_dir/lib/$library" ]; then
+      echo "build-livecd: missing Plant runtime library: $payload_dir/lib/$library" >&2
       exit 1
     fi
-    cp -L "$apps_out_dir/lib/$library" "$openjdk_payload_dir/java/lib/"
-  done
-  for library in libm.so.6 libz.so.1; do
-    if [ ! -f "$apps_out_dir/lib/$library" ]; then
-      echo "build-livecd: missing Plant runtime library: $apps_out_dir/lib/$library" >&2
-      exit 1
-    fi
-    # Replace host glibc copies; Plant's DSOs use the native syscall ABI.
-    cp -L "$apps_out_dir/lib/$library" "$openjdk_payload_dir/java/lib/"
+    # Resolve system DSOs beside ld.so, never through a stale JDK RPATH copy.
+    rm -f "$openjdk_payload_dir/java/lib/$library"
   done
   openjdk_interp=$work_dir/openjdk.interp
   printf '/lib/ld.so\0' >"$openjdk_interp"

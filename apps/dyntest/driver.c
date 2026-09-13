@@ -586,6 +586,9 @@ int main(int argc, char **argv) {
   failures += check(system("cd /lib") == 0 && getcwd(cwd, sizeof(cwd)) &&
                         !strcasecmp(cwd, "/lib"),
                     "system command returns cwd");
+  failures += check(system("cd .") == 0 && getcwd(cwd, sizeof(cwd)) &&
+                        !strcasecmp(cwd, "/lib"),
+                    "system shell inherits working directory");
   failures += check(system("cd /") == 0, "restore working directory");
   failures += check(exec("/psh.bin", "psh.bin -c cd /lib") == 0 &&
                         getcwd(cwd, sizeof(cwd)) && !strcmp(cwd, "/"),
@@ -596,7 +599,8 @@ int main(int argc, char **argv) {
     char executable[] = "?:/dynempty.bin";
     executable[0] = source_drive;
     failures +=
-        check(exec(executable, "dynempty.bin") == 0 && system("mem") == 0,
+        check(exec(executable, "dynempty.bin") == 0 && system("mem") == 0 &&
+                  api_current_drive() == 'B',
               "system interpreter and shell across drives");
     if (!vfs_change_disk(source_drive))
       return 1;

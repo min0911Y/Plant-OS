@@ -216,9 +216,6 @@ void task_to_user_mode_elf(char *filename) {
   char *interpreter = NULL;
   if (descriptor < 0)
     goto failed;
-  if (filename[0] && filename[1] == ':' &&
-      vfs_context_change_drive(task->fs_context, filename[0]) < 0)
-    goto failed;
   if (!executable_interpreter(descriptor, &interpreter))
     goto failed;
   bool dynamic = interpreter != NULL;
