@@ -6,6 +6,55 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <syscall.h>
+#include <unistd.h>
+
+static int cached_io_test(void) {
+  const size_t length = 129 * 4096 + 19, prefix = 4097;
+  unsigned char *data = malloc(length), *readback = malloc(length);
+  int fd = -1, gap = -1, status = 58;
+  if (!data || !readback)
+    goto done;
+  for (size_t i = 0; i < length; i++)
+    data[i] = (unsigned char)(i * 17 + (i >> 9));
+  fd = open("cache.dat", O_CREAT | O_TRUNC | O_RDWR, 0600);
+  gap = open("gap.dat", O_CREAT | O_TRUNC | O_RDWR, 0600);
+  /* Interleaved growth leaves a fragmented chain, even on a fresh FAT disk. */
+  if (fd < 0 || gap < 0 || write(fd, data, 4096) != 4096 ||
+      write(gap, data, 4096) != 4096 ||
+      write(fd, data + 4096, length - 4096) != (ssize_t)(length - 4096))
+    goto done;
+  if (pread(fd, readback, 17, 7) != 17 || memcmp(readback, data + 7, 17) ||
+      pread(fd, readback, 31, length / 2) != 31 ||
+      memcmp(readback, data + length / 2, 31) ||
+      pread(fd, readback, length - 13, 13) != (ssize_t)(length - 13) ||
+      memcmp(readback, data + 13, length - 13))
+    goto done;
+  memset(data + 131071, 93, 5);
+  if (pwrite(fd, data + 131071, 5, 131071) != 5 || fsync(fd) ||
+      pread(fd, readback, length, 0) != (ssize_t)length ||
+      memcmp(readback, data, length))
+    goto done;
+  /* A cached forward seek must not survive truncation and chain reuse. */
+  if (ftruncate(fd, prefix) || ftruncate(fd, length))
+    goto done;
+  memset(data + prefix, 0, length - prefix);
+  if (pread(fd, readback, length, 0) != (ssize_t)length ||
+      memcmp(readback, data, length) || fsync(fd))
+    goto done;
+  status = 0;
+done:
+  if (fd >= 0)
+    close(fd);
+  if (gap >= 0)
+    close(gap);
+  if (unlink("cache.dat") || unlink("gap.dat"))
+    status = 58;
+  free(data);
+  free(readback);
+  if (!status)
+    logkf("CACHEIO PASS\n");
+  return status;
+}
 
 static int long_filename_test(void) {
   const char *directory = "Long filename regression directory";
@@ -275,6 +324,8 @@ int main(int argc, char **argv) {
       }
     }
     int status = long_filename_test();
+    if (!status)
+      status = cached_io_test();
     if (!status && argc == 3) {
       uint8_t drive = argv[2][0];
       if (chdir("R:") || !vfs_unmount_disk(drive) || !vfs_mount(drive, drive) ||

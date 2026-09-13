@@ -210,7 +210,8 @@ static int reserved_memory(void) {
 }
 
 static int file_mappings(void) {
-  const size_t page = VM_PAGE_SIZE, length = 3 * VM_PAGE_SIZE + 17;
+  const size_t page = VM_PAGE_SIZE, length = 67 * VM_PAGE_SIZE + 17;
+  const size_t rounded = (length + page - 1) / page * page;
   unsigned char *seed = malloc(length), *readback = malloc(length);
   if (!seed || !readback) {
     free(seed);
@@ -218,7 +219,7 @@ static int file_mappings(void) {
     return check(0, "file mapping fixture allocation");
   }
   for (size_t i = 0; i < length; i++)
-    seed[i] = (unsigned char)(i * 17 + 31);
+    seed[i] = (unsigned char)(i * 17 + i / page * 13 + 31);
   int fd = open("/mapped.dat", O_CREAT | O_TRUNC | O_RDWR, 0600);
   if (fd < 0 || write(fd, seed, length) != (ssize_t)length) {
     if (fd >= 0)
@@ -227,20 +228,25 @@ static int file_mappings(void) {
     free(readback);
     return check(0, "file mapping fixture write");
   }
+  /* Leave a cached island inside a multi-command read, with misses on both
+   * sides. */
+  int failures = check(pread(fd, readback, 31, 35 * page + 7) == 31 &&
+                           !memcmp(readback, seed + 35 * page + 7, 31),
+                       "unaligned read before file mapping");
   unsigned char *shared =
       mmap(NULL, length, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
   unsigned char *alias = mmap(NULL, length, PROT_READ, MAP_SHARED, fd, 0);
   unsigned char *private =
       mmap(NULL, length, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
-  int failures = check(shared != MAP_FAILED && alias != MAP_FAILED &&
-                           private != MAP_FAILED,
-                       "shared and private file mappings");
+  failures += check(shared != MAP_FAILED && alias != MAP_FAILED &&
+                        private != MAP_FAILED,
+                    "shared and private file mappings");
   if (failures)
     goto done;
   failures += check(
       lseek(fd, 0, SEEK_CUR) == (off_t)length &&
           !memcmp(shared, seed, length) && !shared[length] &&
-          !shared[4 * page - 1],
+          !shared[rounded - 1],
       "file mapping preserves descriptor offset and zeroes final page tail");
   private[0] = 77;
   failures += check(shared[0] == seed[0] && alias[0] == seed[0],
@@ -330,7 +336,7 @@ static int file_mappings(void) {
   failures += check(ftruncate(fd, page) == -1 && errno == EBUSY,
                     "mapped file truncation is explicitly rejected");
   failures += check(
-      mmap(NULL, page, PROT_READ, MAP_PRIVATE, fd, 4 * page) == MAP_FAILED &&
+      mmap(NULL, page, PROT_READ, MAP_PRIVATE, fd, rounded) == MAP_FAILED &&
           errno == ENOTSUP &&
           mmap(NULL, page, PROT_READ, MAP_PRIVATE, fd, 1) == MAP_FAILED &&
           errno == EINVAL,

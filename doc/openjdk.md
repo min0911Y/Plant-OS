@@ -79,6 +79,11 @@ python3 scripts/test-openjdk.py \
 内核，在输出目录创建独立 ISO/JDK 磁盘，并临时替换后恢复 `init.mst`。
 脚本通过 Lua 的 `os.execute` 在同一进程中切换目录，检查绝对路径启动与
 进入 `C:/java/bin` 后由 shell 执行 `java --version` 均成功。
+`startup-times.txt` 记录一次开机中三次启动的秒数，依次为首次及两次重复启动。
+计时使用 Plant 的毫秒 `clock()`，包含进程启动和等待完成的时间；对比时固定
+QEMU 配置。文件读取和缓存策略见 [文件读取与缓存](storage-cache.md)。
+`--memory` 设置客户机内存 MiB（默认 2048）；较小内存也可验证模块映射大于
+缓存预算时的淘汰和重新读取。
 测试成功须在磁盘写出 `OPENJDK NIO PASS` 且完成 ACPI S5；程序退出码或串口
 命令状态不能替代测试断言。TCG 可选，但 Zero 解释器执行大型 JDK 的耗时显著增加。
 测试日志与磁盘保留在输出目录；文件锁、完整 Java 网络库及 MC 本身不属于此测试。

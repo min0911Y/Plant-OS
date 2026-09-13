@@ -54,11 +54,10 @@
 
 #define IDE_ATA_SECTOR_BYTES 512u
 #define IDE_ATAPI_SECTOR_BYTES 2048u
-#define IDE_DMA_BUFFER_BYTES 0x10000u
+#define IDE_DMA_BUFFER_BYTES 0x20000u
 #define IDE_DMA_MAX_ATA_SECTORS                                            \
   (IDE_DMA_BUFFER_BYTES / IDE_ATA_SECTOR_BYTES)
-#define IDE_DMA_MAX_ATAPI_SECTORS                                          \
-  (IDE_DMA_BUFFER_BYTES / IDE_ATAPI_SECTOR_BYTES)
+#define IDE_DMA_MAX_ATAPI_SECTORS (0x10000u / IDE_ATAPI_SECTOR_BYTES)
 #define IDE_BM_COMMAND 0u
 #define IDE_BM_STATUS 2u
 #define IDE_BM_PRDT 4u
@@ -266,7 +265,6 @@ static bool ide_dma_build_prdt(ide_channel_t *channel, uint32_t bytes) {
       channel->dma_buffer == NULL) {
     return false;
   }
-  memset(channel->prdt, 0, 4096);
   dma_addr_t mapped;
   if (!dma_map(channel->dma_buffer, bytes, UINT_MAX, &mapped)) {
     return false;
@@ -275,11 +273,12 @@ static bool ide_dma_build_prdt(ide_channel_t *channel, uint32_t bytes) {
   uint32_t remaining = bytes;
   unsigned int count = 0;
   while (remaining != 0) {
-    if (count >= 2) {
+    if (count >= 4096 / sizeof(*channel->prdt)) {
       return false;
     }
     uint32_t boundary = 0x10000u - (address & 0xffffu);
     uint32_t chunk = remaining < boundary ? remaining : boundary;
+    channel->prdt[count].flags = 0;
     channel->prdt[count].address = address;
     channel->prdt[count].byte_count =
         chunk == 0x10000u ? 0 : (uint16_t)chunk;
@@ -307,16 +306,17 @@ static void ide_dma_block(ide_channel_t *channel) {
   task->ready = 0;
 }
 
-static uint8_t ide_dma_transfer(uint8_t direction, uint8_t drive,
-                                uint32_t lba, uint8_t sectors, void *buffer) {
+static uint8_t ide_dma_transfer(uint8_t direction, uint8_t drive, uint32_t lba,
+                                uint32_t sectors, void *buffer) {
   ide_device_t *device = &ide_devices[drive];
   ide_channel_t *channel = &ide_channels[device->channel];
   uint32_t sector_bytes = device->type == IDE_ATAPI
                               ? IDE_ATAPI_SECTOR_BYTES
                               : IDE_ATA_SECTOR_BYTES;
   uint32_t bytes = (uint32_t)sectors * sector_bytes;
-  if (sectors == 0 || bytes > IDE_DMA_BUFFER_BYTES || buffer == NULL ||
-      (device->type == IDE_ATAPI && direction != ATA_READ) ||
+  if (sectors == 0 || sectors > IDE_DMA_MAX_ATA_SECTORS || buffer == NULL ||
+      (device->type == IDE_ATAPI &&
+       (direction != ATA_READ || sectors > IDE_DMA_MAX_ATAPI_SECTORS)) ||
       channel->bus_master_base == 0 || current_task() == NULL ||
       !ide_dma_build_prdt(channel, bytes) ||
       !ide_wait(device->channel, false, true)) {
@@ -346,7 +346,7 @@ static uint8_t ide_dma_transfer(uint8_t direction, uint8_t drive,
       ide_register_write(device->channel, ATA_REG_CONTROL, 0);
       return 2;
     }
-  } else if (lba >= 0x10000000u) {
+  } else if ((uint64_t)lba + sectors > 0x10000000u) {
     if ((device->command_sets & (1u << 26)) == 0) {
       return 2;
     }
@@ -405,7 +405,7 @@ static uint8_t ide_dma_transfer(uint8_t direction, uint8_t drive,
                            (device->drive << 4) | head);
     ide_delay_400ns(device->channel);
     if (lba_mode == 2) {
-      ide_register_write(device->channel, ATA_REG_SECCOUNT1, 0);
+      ide_register_write(device->channel, ATA_REG_SECCOUNT1, sectors >> 8);
       ide_register_write(device->channel, ATA_REG_LBA3, lba_io[3]);
       ide_register_write(device->channel, ATA_REG_LBA4, lba_io[4]);
       ide_register_write(device->channel, ATA_REG_LBA5, lba_io[5]);
@@ -463,53 +463,30 @@ static void ide_report_error(uint8_t drive, uint8_t error) {
        device != NULL && device->present ? device->model : "unknown");
 }
 
-bool ide_read_sectors(unsigned char drive, unsigned char sectors,
-                      unsigned int lba, unsigned short selector, void *buffer) {
-  (void)selector;
-  uint8_t error = 0;
-  if (drive >= 4 || !ide_devices[drive].present || sectors == 0 ||
-      (ide_devices[drive].type == IDE_ATA &&
-       (lba >= ide_devices[drive].sectors ||
-        sectors > ide_devices[drive].sectors - lba))) {
-    error = 1;
-  } else {
+static bool ide_transfer(char drive, uint8_t direction, unsigned char *buffer,
+                         unsigned int sectors, unsigned int lba) {
+  unsigned index = (unsigned)(drive - 'C');
+  uint8_t error = 1;
+  if (index < 4 && ide_devices[index].present && sectors &&
+      (ide_devices[index].type != IDE_ATA ||
+       (lba < ide_devices[index].sectors &&
+        sectors <= ide_devices[index].sectors - lba))) {
     lock(&ide_controller_lock);
-    error = ide_dma_transfer(ATA_READ, drive, lba, sectors, buffer);
+    error = ide_dma_transfer(direction, index, lba, sectors, buffer);
     unlock(&ide_controller_lock);
   }
-  ide_report_error(drive, error);
-  return error == 0;
-}
-
-bool ide_write_sectors(unsigned char drive, unsigned char sectors,
-                       unsigned int lba, unsigned short selector,
-                       void *buffer) {
-  (void)selector;
-  uint8_t error = 0;
-  if (drive >= 4 || !ide_devices[drive].present || sectors == 0 ||
-      ide_devices[drive].type != IDE_ATA ||
-      lba >= ide_devices[drive].sectors ||
-      sectors > ide_devices[drive].sectors - lba) {
-    error = 1;
-  } else {
-    lock(&ide_controller_lock);
-    error = ide_dma_transfer(ATA_WRITE, drive, lba, sectors, buffer);
-    unlock(&ide_controller_lock);
-  }
-  ide_report_error(drive, error);
+  ide_report_error(index, error);
   return error == 0;
 }
 
 static bool ide_vdisk_read(char drive, unsigned char *buffer,
                            unsigned int sectors, unsigned int lba) {
-  return ide_read_sectors((uint8_t)(drive - 'C'), (uint8_t)sectors, lba, 0,
-                          buffer);
+  return ide_transfer(drive, ATA_READ, buffer, sectors, lba);
 }
 
 static bool ide_vdisk_write(char drive, unsigned char *buffer,
                             unsigned int sectors, unsigned int lba) {
-  return ide_write_sectors((uint8_t)(drive - 'C'), (uint8_t)sectors, lba, 0,
-                           buffer);
+  return ide_transfer(drive, ATA_WRITE, buffer, sectors, lba);
 }
 
 bool ide_irq(unsigned irq) {

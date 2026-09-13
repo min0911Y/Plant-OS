@@ -5,6 +5,10 @@
 typedef struct {
   struct FAT_CACHE dm;
   uint32_t root_cluster;
+  struct {
+    int start, cluster;
+    uint32_t index;
+  } cursor;
 } fat_state_t;
 
 #define fat_state(vfs) ((fat_state_t *)vfs_mount_data(vfs))
@@ -225,6 +229,7 @@ void file_savefat(int *fat, int clustno, int count, vfs_t *vfs) {
       clustno > get_dm(vfs).FatMaxTerms - count) {
     return;
   }
+  fat_state(vfs)->cursor.start = 0;
   unsigned char *img =
       (unsigned char *)(uintptr_t)get_dm(vfs).ADR_DISKIMG +
       get_dm(vfs).Fat1Address;
@@ -1231,8 +1236,16 @@ static int fat_lookup(vfs_t *vfs, const vfs_node_t *directory_node,
 
 static bool fat_cluster_at(vfs_t *vfs, int start, uint32_t index,
                            int *cluster) {
+  if (index >= (uint32_t)get_dm(vfs).FatMaxTerms)
+    return false;
+  fat_state_t *state = fat_state(vfs);
   int current = start;
-  for (uint32_t position = 0; position < index; position++) {
+  uint32_t position = 0;
+  if (state->cursor.start == start && state->cursor.index <= index) {
+    current = state->cursor.cluster;
+    position = state->cursor.index;
+  }
+  for (; position < index; position++) {
     if (!fat_data_cluster_valid(vfs, current) ||
         fat_is_eoc(get_dm(vfs).type, get_dm(vfs).fat[current])) {
       return false;
@@ -1242,6 +1255,9 @@ static bool fat_cluster_at(vfs_t *vfs, int start, uint32_t index,
   if (!fat_data_cluster_valid(vfs, current)) {
     return false;
   }
+  state->cursor.start = start;
+  state->cursor.cluster = current;
+  state->cursor.index = index;
   *cluster = current;
   return true;
 }

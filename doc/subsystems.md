@@ -29,7 +29,7 @@
 - 用户文件操作统一经 `SYSCALL_VFS`，`FILE` 为不透明类型。读写返回实际字节数或错误；`mkdir`、`chdir`、`format` 等包装成功返回 0，失败返回 -1 并设置 `errno`，调用方按标准语义判断。
 - 目录流持有真实目录描述符；stat 的设备/节点身份由 VFS 维护，不暴露内核地址。realpath 和 truncate 走统一 VFS 操作。stdio 的文件与内存流共用实现，共享流须加锁，注册表与流锁按统一顺序获取；fork、失败回滚和部分写入必须保留一致状态。
 - `vdisk` 保留 64 位容量/LBA、真实 I/O 状态及设备传输能力，分批 I/O 间响应重调度，`fsync` 下传设备同步。FAT/PFS 只探测 512-byte 块盘，ISO9660 使用 2048-byte 光盘接口；保留 A:/B:/C: 的软驱/DEVFS/legacy IDE 槽位。
-- 文件缓存保持 write-through，写成功后才更新或失效缓存；连续簇/扇区批量 I/O，避免逐页拆分及多余复制。格式化先校验全部输入和布局，初始化保留区并回读验证，底层失败传播到 VFS、shell 和安装器。
+- 文件缓存保持 write-through，写成功后才更新或失效缓存；连续簇/扇区批量 I/O，避免逐页拆分及多余复制。缓存、映射固定页与设备传输约束见 [文件读取与缓存](storage-cache.md)。格式化先校验全部输入和布局，初始化保留区并回读验证，底层失败传播到 VFS、shell 和安装器。
 - PCI 统一经 `pci.h` 枚举与访问，驱动从注册表查询；ECAM 覆盖范围内的独立根总线不能遗漏，无对应 ECAM 时仅 segment 0 可用 CF8/CFC。BAR 探测只在接管静止设备时进行，配置访问遵守真实寄存器宽度及 W1C 语义。
 - `pci_irq_initialize` 按 MSI-X、MSI、共享 INTx 选择中断，Interrupt Line 为 255 不阻止消息中断；注销前停设备并关闭中断源。USB/Hub/HID/BOT 与 AHCI 的支持范围、DMA 生命周期和专项回归见 [USB](usb.md)、[AHCI](ahci.md)。
 

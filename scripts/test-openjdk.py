@@ -12,6 +12,7 @@ def main():
     parser.add_argument("--javac", required=True, help="host JDK 17+ javac")
     parser.add_argument("--out", type=Path, default=Path("/tmp/plant-openjdk-nio"))
     parser.add_argument("--timeout", type=int, default=600)
+    parser.add_argument("--memory", type=int, default=2048, help="guest RAM in MiB")
     parser.add_argument("--accel", choices=("tcg", "kvm"), default="tcg")
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
@@ -23,9 +24,16 @@ def main():
                     str(repo / "apps/openjdk/Startup.java"),
                     str(repo / "apps/openjdk/Nio.java")], check=True)
     launcher = output / "launcher.lua"
-    launcher.write_text('assert(os.execute("C:/java/bin/java --version"))\n'
-                        'assert(os.execute("cd C:/java/bin"))\n'
-                        'assert(os.execute("java --version"))\n')
+    launcher.write_text('local times = {}\n'
+                        'for i = 1, 3 do\n'
+                        '  local start = os.clock()\n'
+                        '  assert(os.execute(i == 1 and "C:/java/bin/java --version" or "java --version"))\n'
+                        '  times[i] = string.format("%.3f", os.clock() - start)\n'
+                        '  if i == 1 then assert(os.execute("cd C:/java/bin")) end\n'
+                        'end\n'
+                        'local file = assert(io.open("C:/java/startup-times.txt", "w"))\n'
+                        'assert(file:write(table.concat(times, "\\n"), "\\n"))\n'
+                        'assert(file:close())\n')
     iso = output / "test.iso"
     disk = output / "test-jdk.img"
     init = repo / "kernel/res/init.mst"
@@ -56,12 +64,13 @@ def main():
         subprocess.run(["mcopy", "-o", "-i", str(disk), str(path), "::/java/"], check=True)
     # The result must be produced by this boot, even if the supplied JDK image
     # happens to contain an earlier test's output.
-    subprocess.run(["mdel", "-i", str(disk), "::/java/nio-result.txt"],
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    for name in ("nio-result.txt", "startup-times.txt"):
+        subprocess.run(["mdel", "-i", str(disk), f"::/java/{name}"],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
     serial = output / "serial.log"
     command = ["qemu-system-x86_64", "-accel", args.accel, "-cpu",
                "host" if args.accel == "kvm" else "max,-xgetbv1", "-smp", "4",
-               "-m", "2048", "-display", "none", "-monitor", "none", "-no-reboot",
+               "-m", str(args.memory), "-display", "none", "-monitor", "none", "-no-reboot",
                "-qmp", f"unix:{output / 'qmp.sock'},server=on,wait=off",
                "-serial", f"file:{serial}", "-cdrom", str(iso), "-boot", "d",
                "-drive", f"file={disk},format=raw,if=ide,index=0"]
@@ -76,6 +85,13 @@ def main():
             "Nio C:/java/nio-result.txt status=0" not in text):
         raise RuntimeError(f"OpenJDK regression failed: {result.strip()}; see {output}")
     print(f"OPENJDK NIO PASS: {output}")
+    timings = subprocess.check_output(
+        ["mtype", "-i", str(disk), "::/java/startup-times.txt"], text=True)
+    (output / "startup-times.txt").write_text(timings)
+    seconds = [float(value) for value in timings.splitlines()]
+    if len(seconds) != 3 or any(value <= 0 for value in seconds):
+        raise RuntimeError(f"Invalid startup timings: {timings!r}")
+    print(f"Java startup seconds (cold, warm, warm): {seconds}")
 
 
 if __name__ == "__main__":

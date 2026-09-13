@@ -122,10 +122,6 @@ char next_vdisk(char drive);
 // timer.c
 void sleep(unsigned long long s);
 // ide.c
-bool ide_read_sectors(unsigned char drive, unsigned char numsects,
-                      unsigned int lba, unsigned short es, void *buffer);
-bool ide_write_sectors(unsigned char drive, unsigned char numsects,
-                       unsigned int lba, unsigned short es, void *buffer);
 void ide_initialize(void);
 // ahci.c
 void ahci_init(void);
