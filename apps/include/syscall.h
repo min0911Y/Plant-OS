@@ -29,6 +29,8 @@ enum vfs_open_flags {
   VFS_OPEN_TRUNCATE = 1u << 4,
   VFS_OPEN_APPEND = 1u << 5,
   VFS_OPEN_DIRECTORY = 1u << 6,
+  VFS_OPEN_NONBLOCK = 1u << 7,
+  VFS_OPEN_CLOEXEC = 1u << 8,
 };
 
 enum vfs_syscall_operation {
@@ -55,6 +57,9 @@ enum vfs_syscall_operation {
   VFS_SYSCALL_FORMAT,
   VFS_SYSCALL_TRUNCATE,
   VFS_SYSCALL_REALPATH,
+  VFS_SYSCALL_PREAD,
+  VFS_SYSCALL_FCHDIR,
+  VFS_SYSCALL_FCNTL,
   VFS_SYSCALL_COUNT,
 };
 
@@ -70,9 +75,20 @@ typedef struct {
     } descriptor;
     struct {
       int32_t descriptor;
+      int32_t command;
+      uintptr_t argument;
+    } fcntl;
+    struct {
+      int32_t descriptor;
       uintptr_t buffer;
       uint32_t length;
     } io;
+    struct {
+      int32_t descriptor;
+      uintptr_t buffer;
+      uint32_t length;
+      uint32_t offset;
+    } positioned_io;
     struct {
       int32_t descriptor;
       int32_t offset;

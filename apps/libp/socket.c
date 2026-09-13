@@ -1,5 +1,6 @@
 #include <socket.h>
 
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -50,7 +51,12 @@ int connect(socket_t socket, const struct sockaddr *address, socklen_t length) {
   request.socket = socket;
   request.address = (uintptr_t)address;
   request.address_length = length;
-  return socket_call(SOCKET_SYSCALL_CONNECT, &request);
+  int result = socket_call(SOCKET_SYSCALL_CONNECT, &request);
+  if (result == SOCKET_ERR_INPROGRESS) {
+    errno = EINPROGRESS;
+    return -1;
+  }
+  return result;
 }
 
 int listen(socket_t socket, int backlog) {
@@ -129,6 +135,165 @@ int recv(socket_t socket, void *data, uint32_t length, uint32_t flags) {
   return recvfrom(socket, data, length, flags, NULL, NULL);
 }
 
+int socket_error_number(int result) {
+  switch (result) {
+  case SOCKET_ERR_INVAL:
+    return EINVAL;
+  case SOCKET_ERR_NOMEM:
+    return ENOMEM;
+  case SOCKET_ERR_NOENT:
+    return EBADF;
+  case SOCKET_ERR_AGAIN:
+    return EAGAIN;
+  case SOCKET_ERR_NOTCONN:
+    return ENOTCONN;
+  case SOCKET_ERR_TIMEDOUT:
+    return ETIMEDOUT;
+  case SOCKET_ERR_NETDOWN:
+    return ENETDOWN;
+  case SOCKET_ERR_ADDRINUSE:
+    return EADDRINUSE;
+  case SOCKET_ERR_BUSY:
+    return EBUSY;
+  case SOCKET_ERR_PROTOCOL:
+    return ENOPROTOOPT;
+  case SOCKET_ERR_INPROGRESS:
+    return EINPROGRESS;
+  case SOCKET_ERR_PIPE:
+    return EPIPE;
+  default:
+    return EIO;
+  }
+}
+
+static int socket_iov_total(const struct iovec *vectors, int count,
+                            size_t *total) {
+  if (count < 0 || count > IOV_MAX || (count != 0 && vectors == NULL)) {
+    return EINVAL;
+  }
+  size_t length = 0;
+  for (int index = 0; index < count; index++) {
+    if (vectors[index].iov_len != 0 && vectors[index].iov_base == NULL) {
+      return EFAULT;
+    }
+    if (vectors[index].iov_len > SIZE_MAX - length) {
+      return EOVERFLOW;
+    }
+    length += vectors[index].iov_len;
+  }
+  if (length > UINT32_MAX || length > (size_t)__INT_MAX__) {
+    return EOVERFLOW;
+  }
+  *total = length;
+  return 0;
+}
+
+ssize_t sendmsg(socket_t socket, const struct msghdr *message,
+                uint32_t flags) {
+  if (message == NULL || message->msg_controllen != 0 ||
+      (message->msg_name == NULL && message->msg_namelen != 0)) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  size_t total;
+  int error = socket_iov_total(message->msg_iov, (int)message->msg_iovlen,
+                               &total);
+  if (error != 0) {
+    errno = error;
+    return -1;
+  }
+
+  void *buffer = NULL;
+  if (total != 0) {
+    buffer = malloc(total);
+    if (buffer == NULL) {
+      errno = ENOMEM;
+      return -1;
+    }
+  }
+  size_t offset = 0;
+  for (size_t index = 0; index < message->msg_iovlen; index++) {
+    memcpy((uint8_t *)buffer + offset, message->msg_iov[index].iov_base,
+           message->msg_iov[index].iov_len);
+    offset += message->msg_iov[index].iov_len;
+  }
+
+  int result = sendto(socket, buffer, (uint32_t)total, flags,
+                      (const struct sockaddr *)message->msg_name,
+                      message->msg_namelen);
+  free(buffer);
+  if (result < 0) {
+    errno = socket_error_number(result);
+    return -1;
+  }
+  return result;
+}
+
+ssize_t recvmsg(socket_t socket, struct msghdr *message, uint32_t flags) {
+  if (message == NULL || message->msg_controllen != 0 ||
+      (message->msg_name == NULL && message->msg_namelen != 0)) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  size_t total;
+  int error = socket_iov_total(message->msg_iov, (int)message->msg_iovlen,
+                               &total);
+  if (error != 0) {
+    errno = error;
+    return -1;
+  }
+
+  void *buffer = NULL;
+  if (total != 0) {
+    buffer = malloc(total);
+    if (buffer == NULL) {
+      errno = ENOMEM;
+      return -1;
+    }
+  }
+  socklen_t address_length = message->msg_namelen;
+  int result = recvfrom(socket, buffer, (uint32_t)total, flags,
+                        (struct sockaddr *)message->msg_name,
+                        message->msg_name == NULL ? NULL : &address_length);
+  if (result < 0) {
+    free(buffer);
+    errno = socket_error_number(result);
+    return -1;
+  }
+  if (message->msg_name != NULL) {
+    message->msg_namelen = address_length;
+  }
+
+  size_t remaining = (size_t)result;
+  size_t offset = 0;
+  for (size_t index = 0; index < message->msg_iovlen && remaining != 0;
+       index++) {
+    size_t part = message->msg_iov[index].iov_len < remaining
+                      ? message->msg_iov[index].iov_len
+                      : remaining;
+    memcpy(message->msg_iov[index].iov_base, (uint8_t *)buffer + offset, part);
+    offset += part;
+    remaining -= part;
+  }
+  free(buffer);
+  message->msg_flags = 0;
+  return result;
+}
+
+int socket_bytes_available(socket_t socket, uint32_t *bytes) {
+  if (bytes == NULL)
+    return SOCKET_ERR_INVAL;
+  socket_syscall_request_t request;
+  socket_request_init(&request);
+  request.socket = socket;
+  int result = socket_call(SOCKET_SYSCALL_AVAILABLE, &request);
+  if (!result)
+    *bytes = request.length;
+  return result;
+}
+
 static int socket_getname(socket_t socket, struct sockaddr *address,
                           socklen_t *length, unsigned operation) {
   if (address == NULL || length == NULL) {
@@ -156,28 +321,101 @@ int getpeername(socket_t socket, struct sockaddr *address, socklen_t *length) {
 
 int setsockopt(socket_t socket, int level, int option, const void *value,
                socklen_t length) {
-  if (level != SOL_SOCKET || option != SO_RCVTIMEO || value == NULL ||
-      length != sizeof(struct timeval)) {
-    return SOCKET_ERR_INVAL;
+  if (value == NULL || length == 0) {
+    errno = EINVAL;
+    return -1;
   }
-  const struct timeval *timeout = (const struct timeval *)value;
-  if (timeout->tv_sec < 0 || timeout->tv_usec < 0 ||
-      timeout->tv_usec >= 1000000) {
-    return SOCKET_ERR_INVAL;
-  }
-  uint64_t milliseconds = (uint64_t)(uint32_t)timeout->tv_sec * 1000ull +
-                          ((uint32_t)timeout->tv_usec + 999u) / 1000u;
-  if (milliseconds > 0xffffffffull) {
-    return SOCKET_ERR_INVAL;
-  }
-
   socket_syscall_request_t request;
   socket_request_init(&request);
   request.socket = socket;
   request.domain = level;
   request.type = option;
-  request.length = (uint32_t)milliseconds;
-  return socket_call(SOCKET_SYSCALL_SET_OPTION, &request);
+  request.buffer = (uintptr_t)value;
+  request.length = length;
+  int result = socket_call(SOCKET_SYSCALL_SET_OPTION, &request);
+  if (result < 0) {
+    errno = socket_error_number(result);
+    return -1;
+  }
+  return 0;
+}
+
+int getsockopt(socket_t socket, int level, int option, void *value,
+               socklen_t *length) {
+  if (value == NULL || length == NULL || *length == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  socket_syscall_request_t request;
+  socket_request_init(&request);
+  request.socket = socket;
+  request.domain = level;
+  request.type = option;
+  request.buffer = (uintptr_t)value;
+  request.length = *length;
+  int result = socket_call(SOCKET_SYSCALL_GET_OPTION, &request);
+  if (result < 0) {
+    errno = socket_error_number(result);
+    return -1;
+  }
+  *length = request.length;
+  return 0;
+}
+
+int shutdown(socket_t socket, int how) {
+  if (how < SHUT_RD || how > SHUT_RDWR) {
+    errno = EINVAL;
+    return -1;
+  }
+  socket_syscall_request_t request;
+  socket_request_init(&request);
+  request.socket = socket;
+  request.type = how;
+  int result = socket_call(SOCKET_SYSCALL_SHUTDOWN, &request);
+  if (result < 0) {
+    errno = socket_error_number(result);
+    return -1;
+  }
+  return 0;
+}
+
+int socketpair(int domain, int type, int protocol, socket_t sockets[2]) {
+  if (sockets == NULL) {
+    errno = EFAULT;
+    return -1;
+  }
+  socket_syscall_request_t request;
+  socket_request_init(&request);
+  request.domain = domain;
+  request.type = type;
+  request.protocol = protocol;
+  request.buffer = (uintptr_t)sockets;
+  request.length = sizeof(socket_t) * 2;
+  int result = socket_call(SOCKET_SYSCALL_PAIR, &request);
+  if (result < 0) {
+    errno = socket_error_number(result);
+    return -1;
+  }
+  return 0;
+}
+
+int socket_get_flags(socket_t socket) {
+  socket_syscall_request_t request;
+  socket_request_init(&request);
+  request.socket = socket;
+  int result = socket_call(SOCKET_SYSCALL_GET_FLAGS, &request);
+  if (result < 0) {
+    return result;
+  }
+  return (int)request.flags;
+}
+
+int socket_set_flags(socket_t socket, int flags) {
+  socket_syscall_request_t request;
+  socket_request_init(&request);
+  request.socket = socket;
+  request.flags = (uint32_t)flags;
+  return socket_call(SOCKET_SYSCALL_SET_FLAGS, &request);
 }
 
 int inet_pton(int family, const char *text, void *address) {
@@ -301,7 +539,8 @@ int getaddrinfo(const char *node, const char *service,
 
   int flags = hints == NULL ? 0 : hints->ai_flags;
   int family = hints == NULL ? AF_UNSPEC : hints->ai_family;
-  if ((flags & ~(AI_PASSIVE | AI_CANONNAME | AI_NUMERICHOST)) != 0) {
+  if ((flags & ~(AI_PASSIVE | AI_CANONNAME | AI_NUMERICHOST |
+                 AI_NUMERICSERV | AI_V4MAPPED | AI_ALL)) != 0) {
     return EAI_BADFLAGS;
   }
   if (family != AF_UNSPEC && family != AF_INET) {

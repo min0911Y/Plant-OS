@@ -8,7 +8,7 @@ extern const runtime_linker_t *runtime_linker;
 void *dlopen(const char *path, int flags) {
   tls_control_t *tls = tls_current();
   tls->loader_error = NULL;
-  if (flags & ~(RTLD_NOW | RTLD_LAZY | RTLD_GLOBAL)) {
+  if (flags & ~(RTLD_NOW | RTLD_LAZY | RTLD_GLOBAL | RTLD_NOLOAD)) {
     tls->loader_error = "unsupported dynamic loader flags";
     return NULL;
   }
@@ -16,17 +16,23 @@ void *dlopen(const char *path, int flags) {
     tls->loader_error = "no runtime linker";
     return NULL;
   }
-  if (path) {
-    tls->loader_error =
-        "loading additional shared objects is not yet available";
+  if (!path)
+    return PROCESS_HANDLE;
+  if (!runtime_linker->load) {
+    tls->loader_error = "dynamic object loading is unavailable";
     return NULL;
   }
-  return PROCESS_HANDLE;
+  void *handle = runtime_linker->load(path, flags);
+  if (!handle)
+    tls->loader_error = "shared object not found";
+  return handle;
 }
 void *dlsym(void *handle, const char *name) {
   tls_control_t *tls = tls_current();
   tls->loader_error = NULL;
-  if ((handle != PROCESS_HANDLE && handle != RTLD_DEFAULT) || !name ||
+  if ((handle != PROCESS_HANDLE && handle != RTLD_DEFAULT &&
+       handle != RTLD_NEXT) ||
+      !name ||
       !runtime_linker) {
     tls->loader_error = "invalid dynamic symbol lookup";
     return NULL;
@@ -41,8 +47,8 @@ void *dlsym(void *handle, const char *name) {
 int dlclose(void *handle) {
   tls_control_t *tls = tls_current();
   tls->loader_error =
-      handle == PROCESS_HANDLE ? NULL : "invalid dynamic library handle";
-  return handle == PROCESS_HANDLE ? 0 : -1;
+      handle ? NULL : "invalid dynamic library handle";
+  return handle ? 0 : -1;
 }
 char *dlerror(void) {
   tls_control_t *tls = tls_current();

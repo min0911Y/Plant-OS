@@ -13,6 +13,7 @@ enum {
   THREAD_TERMINATE,
   THREAD_WAIT_GROUP,
   THREAD_EXIT_PROCESS,
+  THREAD_GET_STACK,
   THREAD_OPERATION_COUNT,
 };
 enum { THREAD_JOINABLE = 1 };
@@ -44,7 +45,8 @@ _Static_assert(sizeof(native_thread_request_t) ==
  * releases them after the thread stops accessing user memory. A zero-sized
  * stack region leaves ownership of a caller-provided stack with the caller.
  * JOIN/DETACH/TERMINATE validate both TID and generation within this process.
- * GET_POINTER accepts NULL; other operations use a complete request. */
+ * GET_POINTER accepts NULL. GET_STACK returns the calling thread's registered
+ * stack region. Other operations use a complete request. */
 intptr_t native_thread_call(unsigned operation,
                             native_thread_request_t *request);
 uintptr_t native_thread_pointer(void);

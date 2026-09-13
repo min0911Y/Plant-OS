@@ -1,5 +1,6 @@
 #include <dos.h>
 #include <irq.h>
+#include <stdint.h>
 #include <user_signal.h>
 #include <user_space.h>
 #include <user_vm.h>
@@ -13,7 +14,7 @@ _Static_assert(sizeof(struct sigaction) == (sizeof(uintptr_t) == 8 ? 16 : 12),
                "native sigaction ABI");
 _Static_assert(sizeof(stack_t) == (sizeof(uintptr_t) == 8 ? 24 : 12),
                "native signal stack ABI");
-_Static_assert(sizeof(siginfo_t) == (sizeof(uintptr_t) == 8 ? 24 : 16),
+_Static_assert(sizeof(siginfo_t) == (sizeof(uintptr_t) == 8 ? 24 : 20),
                "native siginfo ABI");
 
 #define SIGNAL_BITS ((sigset_t)0x7fffffff)
@@ -38,7 +39,8 @@ void user_signal_send(mtask *task, int sig) {
   /* Futex waits explicitly return EINTR. Other wait APIs retain their current
    * completion semantics; do not tear down arbitrary resource wait queues. */
   if (!(task->signals.blocked & SIGMASK(sig)) &&
-      task->wait_reason == WAIT_REASON_FUTEX)
+      (task->wait_reason == WAIT_REASON_FUTEX ||
+       task->wait_reason == WAIT_REASON_SIGNAL))
     task_run(task);
 }
 
@@ -59,7 +61,8 @@ intptr_t user_signal_operation(unsigned operation, uintptr_t a, uintptr_t b,
       break;
     }
     if (b && (action.sa_flags & ~(SA_SIGINFO | SA_ONSTACK | SA_NODEFER |
-                                  SA_RESETHAND) ||
+                                  SA_RESETHAND | SA_NOCLDSTOP | SA_NOCLDWAIT |
+                                  SA_RESTART) ||
               (action.sa_handler != SIG_DFL && action.sa_handler != SIG_IGN &&
                !user_vm_readable((uintptr_t)action.sa_handler, 1))))
       break;
@@ -151,6 +154,44 @@ intptr_t user_signal_operation(unsigned operation, uintptr_t a, uintptr_t b,
     if (a)
       user_signal_send(target, a);
     result = 0;
+    break;
+  }
+  case SIGNAL_KILL: {
+    if (a >= NSIG || b > UINT32_MAX || (int32_t)(uint32_t)b <= 0) {
+      result = b > UINT32_MAX || (int32_t)(uint32_t)b <= 0 ? -95 : -22;
+      break;
+    }
+    mtask *target = get_task((uint32_t)b);
+    if (!target || target->tid != target->tgid || target->state == DIED) {
+      result = -3;
+      break;
+    }
+    if (a)
+      user_signal_send(target, (int)a);
+    result = 0;
+    break;
+  }
+  case SIGNAL_SUSPEND: {
+    sigset_t mask;
+    if (!a || !user_vm_copy_from(&mask, a, sizeof(mask))) {
+      result = -14;
+      break;
+    }
+    sigset_t previous = state->blocked;
+    state->blocked = mask & BLOCKABLE_BITS;
+    if (!(state->pending & ~state->blocked))
+      task_fall_blocked_reason(WAITING, WAIT_REASON_SIGNAL);
+
+    sigset_t pending = state->pending & ~state->blocked;
+    if (pending) {
+      unsigned sig = pending & SIGMASK(SIGKILL)
+                         ? SIGKILL
+                         : __builtin_ctz(pending) + 1;
+      if (previous & SIGMASK(sig))
+        state->pending &= ~SIGMASK(sig);
+    }
+    state->blocked = previous;
+    result = -4;
     break;
   }
   }

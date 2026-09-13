@@ -2,6 +2,7 @@
 #define PLANT_PTHREAD_H
 
 #include <stdint.h>
+#include <sched.h>
 #include <signal.h>
 #include <time.h>
 
@@ -88,6 +89,7 @@ int pthread_attr_setdetachstate(pthread_attr_t *attributes, int state);
 int pthread_attr_getdetachstate(const pthread_attr_t *attributes, int *state);
 int pthread_attr_setguardsize(pthread_attr_t *attributes, size_t size);
 int pthread_attr_getguardsize(const pthread_attr_t *attributes, size_t *size);
+int pthread_getattr_np(pthread_t thread, pthread_attr_t *attributes);
 int pthread_mutexattr_init(pthread_mutexattr_t *attributes);
 int pthread_mutexattr_destroy(pthread_mutexattr_t *attributes);
 int pthread_mutexattr_settype(pthread_mutexattr_t *attributes, int type);

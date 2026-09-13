@@ -22,6 +22,7 @@ enum {
 struct __pthread {
   uint32_t tid, generation, state, published;
   uintptr_t entry, argument;
+  thread_region_t stack;
   void *result;
 };
 typedef struct {
@@ -112,6 +113,11 @@ int runtime_thread_initialize(const runtime_linker_t *linker) {
     vm_unmap((void *)request.tls.address, request.tls.size);
     return -result;
   }
+  request = (native_thread_request_t){0};
+  result = native_thread_call(THREAD_GET_STACK, &request);
+  if (result)
+    return -result;
+  runtime->local.stack = request.stack;
   return 0;
 }
 
@@ -351,6 +357,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attributes,
   request.flags = attributes->detached ? 0 : THREAD_JOINABLE;
   handle->entry = (uintptr_t)entry;
   handle->argument = (uintptr_t)argument;
+  handle->stack = (thread_region_t){stack, size};
   handle->state = attributes->detached ? THREAD_DETACHED : 0;
   error = thread_start(&request, tls, handle);
   if (!error) {
@@ -476,6 +483,16 @@ int pthread_attr_setguardsize(pthread_attr_t *attributes, size_t size) {
 }
 int pthread_attr_getguardsize(const pthread_attr_t *attributes, size_t *size) {
   *size = attributes->guard_size;
+  return 0;
+}
+int pthread_getattr_np(pthread_t thread, pthread_attr_t *attributes) {
+  if (!thread || !attributes || !thread->stack.size)
+    return EINVAL;
+  *attributes = (pthread_attr_t){
+      .stack_size = thread->stack.size,
+      .stack_address = (void *)thread->stack.address,
+      .detached = !!(__atomic_load_n(&thread->state, __ATOMIC_ACQUIRE) &
+                     THREAD_DETACHED)};
   return 0;
 }
 

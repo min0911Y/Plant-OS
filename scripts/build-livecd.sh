@@ -29,6 +29,11 @@ payload_dir=$work_dir/payload
 initramfs=$work_dir/initramfs.img
 limine_dir=${LIMINE_DIR:-$kernel_dir/obj/limine-$limine_version}
 output=${1:-$kernel_dir/plant-os-livecd.iso}
+openjdk_payload_dir=$work_dir/openjdk-payload
+openjdk_disk=
+if [ -n "${PLANT_OPENJDK_DIR:-}" ]; then
+  openjdk_disk=${PLANT_OPENJDK_DISK:-${output%.iso}-jdk.img}
+fi
 
 fat_short_path() {
   image=$1
@@ -59,8 +64,8 @@ fat_short_path() {
   printf '%s\n' "$short"
 }
 
-for command in awk curl du find gzip make mcopy mformat mshortname sha256sum sort \
-               tar tr truncate; do
+for command in awk curl dirname du find gzip make mcopy mformat mshortname \
+               objcopy sha256sum sort tar tr truncate; do
   if ! command -v "$command" >/dev/null 2>&1; then
     echo "build-livecd: missing required command: $command" >&2
     exit 1
@@ -145,6 +150,41 @@ rm -f "$payload_dir/doom1.wad"
 cp "$kernel_dir/res/doom1.wad" "$payload_dir/games/"
 cp -R "$apps_out_dir/lib"/. "$payload_dir/lib/"
 
+if [ -n "${PLANT_OPENJDK_DIR:-}" ]; then
+  if [ "$architecture" != x86_64 ] || [ ! -d "$PLANT_OPENJDK_DIR" ]; then
+    echo "build-livecd: PLANT_OPENJDK_DIR requires an x86_64 JDK directory" >&2
+    exit 1
+  fi
+  mkdir -p "$openjdk_payload_dir/java"
+  cp -RL "$PLANT_OPENJDK_DIR"/. "$openjdk_payload_dir/java/"
+  mkdir -p "$openjdk_payload_dir/java/lib"
+  for library in libp.so libcpp.so; do
+    if [ ! -f "$apps_out_dir/lib/$library" ]; then
+      echo "build-livecd: missing Plant runtime library: $apps_out_dir/lib/$library" >&2
+      exit 1
+    fi
+    cp -L "$apps_out_dir/lib/$library" "$openjdk_payload_dir/java/lib/"
+  done
+  for library in libm.so.6 libz.so.1; do
+    if [ ! -f "$apps_out_dir/lib/$library" ]; then
+      echo "build-livecd: missing Plant runtime library: $apps_out_dir/lib/$library" >&2
+      exit 1
+    fi
+    # Replace host glibc copies; Plant's DSOs use the native syscall ABI.
+    cp -L "$apps_out_dir/lib/$library" "$openjdk_payload_dir/java/lib/"
+  done
+  openjdk_interp=$work_dir/openjdk.interp
+  printf '/lib/ld.so\0' >"$openjdk_interp"
+  for launcher in "$openjdk_payload_dir"/java/bin/*; do
+    if [ -f "$launcher" ] &&
+       ! objcopy --update-section ".interp=$openjdk_interp" "$launcher" \
+           >/dev/null 2>&1; then
+      echo "build-livecd: unable to patch OpenJDK launcher: $launcher" >&2
+      exit 1
+    fi
+  done
+fi
+
 if [ "$architecture" = i386 ]; then
   mkdir -p "$payload_dir/tcc/crt" "$payload_dir/tcc/include" \
            "$payload_dir/tcc/inst" "$payload_dir/tcc/lib"
@@ -165,8 +205,30 @@ fi
 image_sectors=$((image_mib * 2048))
 truncate -s 0 "$initramfs"
 truncate -s "${image_mib}M" "$initramfs"
-mformat -T "$image_sectors" -h 64 -s 16 -i "$initramfs"
+if [ "$image_mib" -ge 256 ]; then
+  mformat -F -T "$image_sectors" -h 64 -s 16 -i "$initramfs"
+else
+  mformat -T "$image_sectors" -h 64 -s 16 -i "$initramfs"
+fi
 mcopy -s -i "$initramfs" "$payload_dir"/* ::/
+
+if [ -n "$openjdk_disk" ]; then
+  openjdk_payload_kib=$(du -sk "$openjdk_payload_dir" | awk '{print $1}')
+  openjdk_image_mib=$(((openjdk_payload_kib + openjdk_payload_kib / 4 + 2048 + 1023) / 1024))
+  if [ "$openjdk_image_mib" -lt 16 ]; then
+    openjdk_image_mib=16
+  fi
+  openjdk_image_sectors=$((openjdk_image_mib * 2048))
+  mkdir -p "$(dirname "$openjdk_disk")"
+  truncate -s 0 "$openjdk_disk"
+  truncate -s "${openjdk_image_mib}M" "$openjdk_disk"
+  if [ "$openjdk_image_mib" -ge 256 ]; then
+    mformat -F -T "$openjdk_image_sectors" -h 64 -s 16 -i "$openjdk_disk"
+  else
+    mformat -T "$openjdk_image_sectors" -h 64 -s 16 -i "$openjdk_disk"
+  fi
+  mcopy -s -i "$openjdk_disk" "$openjdk_payload_dir"/* ::/
+fi
 
 # Verify applications through their original names, including VFAT long names.
 while IFS= read -r program; do
@@ -240,3 +302,6 @@ fi
 "$limine_dir/limine" bios-install --force "$output"
 
 echo "Plant OS LiveCD: $output"
+if [ -n "$openjdk_disk" ]; then
+  echo "Plant OS OpenJDK disk: $openjdk_disk"
+fi

@@ -1,13 +1,16 @@
 #include "runtime_lifecycle.h"
 #include <errno.h>
 #include <fcntl.h>
+#include <grp.h>
 #include <limits.h>
 #include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <syscall.h>
+#include <socket.h>
 #include <task.h>
 #include <unistd.h>
 #include <vm.h>
@@ -60,6 +63,53 @@ int getpwuid_r(uid_t uid, struct passwd *entry, char *buffer, size_t size,
   return getpwnam_r("root", entry, buffer, size, result);
 }
 
+static char *root_group_members[] = {NULL};
+static struct group root_group = {"root", "", 0, root_group_members};
+
+struct group *getgrgid(gid_t gid) { return gid == 0 ? &root_group : NULL; }
+
+struct group *getgrnam(const char *name) {
+  return name && !strcmp(name, root_group.gr_name) ? &root_group : NULL;
+}
+
+int getgrnam_r(const char *name, struct group *entry, char *buffer,
+               size_t size, struct group **result) {
+  *result = NULL;
+  struct group *group = getgrnam(name);
+  if (!group)
+    return 0;
+
+  size_t alignment = _Alignof(char *);
+  size_t padding = (-(uintptr_t)buffer) & (alignment - 1);
+  size_t name_size = strlen(group->gr_name) + 1;
+  size_t password_size = strlen(group->gr_passwd) + 1;
+  size_t required = padding + sizeof(char *) + name_size + password_size;
+  if (size < required)
+    return ERANGE;
+
+  char **members = (char **)(buffer + padding);
+  char *strings = (char *)(members + 1);
+  *entry = *group;
+  entry->gr_mem = members;
+  members[0] = NULL;
+  entry->gr_name = strings;
+  memcpy(strings, group->gr_name, name_size);
+  strings += name_size;
+  entry->gr_passwd = strings;
+  memcpy(strings, group->gr_passwd, password_size);
+  *result = entry;
+  return 0;
+}
+
+int getgrgid_r(gid_t gid, struct group *entry, char *buffer, size_t size,
+               struct group **result) {
+  if (gid) {
+    *result = NULL;
+    return 0;
+  }
+  return getgrnam_r("root", entry, buffer, size, result);
+}
+
 long sysconf(int name) {
   switch (name) {
   case _SC_PAGESIZE:
@@ -74,7 +124,10 @@ long sysconf(int name) {
   case _SC_OPEN_MAX:
     return __INT_MAX__;
   case _SC_GETPW_R_SIZE_MAX:
+  case _SC_GETGR_R_SIZE_MAX:
     return 1024;
+  case _SC_IOV_MAX:
+    return IOV_MAX;
   default:
     errno = EINVAL;
     return -1;
@@ -97,6 +150,10 @@ int gethostname(char *buffer, size_t size) {
 int isatty(int descriptor) {
   if (descriptor >= 0 && descriptor <= 2)
     return 1;
+  if (socket_handle_is_tagged(descriptor)) {
+    errno = ENOTTY;
+    return 0;
+  }
   struct stat status;
   if (!fstat(descriptor, &status))
     errno = ENOTTY;
@@ -151,14 +208,95 @@ int open(const char *path, int flags, ...) {
   }
   if (flags & O_DIRECTORY)
     vfs_flags |= VFS_OPEN_DIRECTORY;
+  if (flags & O_NONBLOCK)
+    vfs_flags |= VFS_OPEN_NONBLOCK;
+  if (flags & O_CLOEXEC)
+    vfs_flags |= VFS_OPEN_CLOEXEC;
   vfs_syscall_request_t request = {0};
   request.arguments.open.path = (uintptr_t)path;
   request.arguments.open.flags = vfs_flags;
   return vfs_result(vfs_invoke(VFS_SYSCALL_OPEN, &request));
 }
 
+int fcntl(int descriptor, int command, ...) {
+  if (descriptor < 0) {
+    errno = EBADF;
+    return -1;
+  }
+
+  uintptr_t argument = 0;
+  if (command == F_SETFL || command == F_SETFD) {
+    va_list arguments;
+    va_start(arguments, command);
+    argument = (uintptr_t)va_arg(arguments, int);
+    va_end(arguments);
+  } else if (command == F_GETLK || command == F_SETLK ||
+             command == F_SETLKW) {
+    va_list arguments;
+    va_start(arguments, command);
+    argument = (uintptr_t)va_arg(arguments, void *);
+    va_end(arguments);
+  }
+
+  if (descriptor <= STDERR_FILENO) {
+    switch (command) {
+    case F_GETFL:
+      return descriptor == STDIN_FILENO ? O_RDONLY : O_WRONLY;
+    case F_SETFL:
+    case F_GETFD:
+    case F_SETFD:
+      return 0;
+    default:
+      errno = EOPNOTSUPP;
+      return -1;
+    }
+  }
+
+  if (socket_handle_is_tagged(descriptor)) {
+    int result;
+    switch (command) {
+    case F_GETFL:
+      result = socket_get_flags(descriptor);
+      break;
+    case F_SETFL:
+      result = socket_set_flags(descriptor, (int)argument);
+      break;
+    case F_GETFD:
+      return 0;
+    case F_SETFD:
+      if (argument & ~((uintptr_t)FD_CLOEXEC)) {
+        errno = EINVAL;
+        return -1;
+      }
+      return 0;
+    default:
+      errno = ENOTSUP;
+      return -1;
+    }
+    if (result < 0) {
+      errno = socket_error_number(result);
+      return -1;
+    }
+    return result;
+  }
+
+  vfs_syscall_request_t request = {0};
+  request.arguments.fcntl.descriptor = descriptor;
+  request.arguments.fcntl.command = command;
+  request.arguments.fcntl.argument = argument;
+  return vfs_result(vfs_invoke(VFS_SYSCALL_FCNTL, &request));
+}
+
 int close(int descriptor) {
   if (descriptor >= 0 && descriptor <= 2) {
+    return 0;
+  }
+  if (socket_handle_is_tagged(descriptor)) {
+    int result = socket_close(descriptor);
+    if (result < 0) {
+      errno = socket_error_number(result);
+      return -1;
+    }
     return 0;
   }
   vfs_syscall_request_t request = {0};
@@ -178,6 +316,14 @@ ssize_t write(int descriptor, const void *buffer, size_t count) {
     errno = EBADF;
     return -1;
   }
+  if (socket_handle_is_tagged(descriptor)) {
+    int result = send(descriptor, buffer, (uint32_t)count, 0);
+    if (result < 0) {
+      errno = socket_error_number(result);
+      return -1;
+    }
+    return result;
+  }
   vfs_syscall_request_t request = {0};
   request.arguments.io.descriptor = descriptor;
   request.arguments.io.buffer = (uintptr_t)buffer;
@@ -194,6 +340,14 @@ ssize_t read(int descriptor, void *buffer, size_t count) {
     errno = EBADF;
     return -1;
   }
+  if (socket_handle_is_tagged(descriptor)) {
+    int result = recv(descriptor, buffer, (uint32_t)count, 0);
+    if (result < 0) {
+      errno = socket_error_number(result);
+      return -1;
+    }
+    return result;
+  }
   vfs_syscall_request_t request = {0};
   request.arguments.io.descriptor = descriptor;
   request.arguments.io.buffer = (uintptr_t)buffer;
@@ -201,9 +355,172 @@ ssize_t read(int descriptor, void *buffer, size_t count) {
   return vfs_result(vfs_invoke(VFS_SYSCALL_READ, &request));
 }
 
+static bool posix_descriptor_is_socket(int descriptor) {
+  return socket_handle_is_tagged(descriptor);
+}
+
+ssize_t readv(int descriptor, const struct iovec *vectors, int count) {
+  size_t total = 0;
+  if (count < 0 || count > IOV_MAX || (count != 0 && vectors == NULL)) {
+    errno = EINVAL;
+    return -1;
+  }
+  for (int index = 0; index < count; index++) {
+    if (vectors[index].iov_len != 0 && vectors[index].iov_base == NULL) {
+      errno = EFAULT;
+      return -1;
+    }
+    if (vectors[index].iov_len > SIZE_MAX - total) {
+      errno = EOVERFLOW;
+      return -1;
+    }
+    total += vectors[index].iov_len;
+  }
+  if (total > UINT32_MAX || total > (size_t)__INT_MAX__) {
+    errno = EOVERFLOW;
+    return -1;
+  }
+  if (count == 0 || total == 0) {
+    return 0;
+  }
+  if (posix_descriptor_is_socket(descriptor)) {
+    struct msghdr message = {0};
+    message.msg_iov = (struct iovec *)vectors;
+    message.msg_iovlen = (size_t)count;
+    return recvmsg(descriptor, &message, 0);
+  }
+
+  size_t completed = 0;
+  for (int index = 0; index < count; index++) {
+    ssize_t result = read(descriptor, vectors[index].iov_base,
+                          vectors[index].iov_len);
+    if (result < 0) {
+      return completed == 0 ? -1 : (ssize_t)completed;
+    }
+    completed += (size_t)result;
+    if ((size_t)result < vectors[index].iov_len) {
+      break;
+    }
+  }
+  return (ssize_t)completed;
+}
+
+ssize_t writev(int descriptor, const struct iovec *vectors, int count) {
+  size_t total = 0;
+  if (count < 0 || count > IOV_MAX || (count != 0 && vectors == NULL)) {
+    errno = EINVAL;
+    return -1;
+  }
+  for (int index = 0; index < count; index++) {
+    if (vectors[index].iov_len != 0 && vectors[index].iov_base == NULL) {
+      errno = EFAULT;
+      return -1;
+    }
+    if (vectors[index].iov_len > SIZE_MAX - total) {
+      errno = EOVERFLOW;
+      return -1;
+    }
+    total += vectors[index].iov_len;
+  }
+  if (total > UINT32_MAX || total > (size_t)__INT_MAX__) {
+    errno = EOVERFLOW;
+    return -1;
+  }
+  if (count == 0 || total == 0) {
+    return 0;
+  }
+  if (posix_descriptor_is_socket(descriptor)) {
+    struct msghdr message = {0};
+    message.msg_iov = (struct iovec *)vectors;
+    message.msg_iovlen = (size_t)count;
+    return sendmsg(descriptor, &message, 0);
+  }
+
+  size_t completed = 0;
+  for (int index = 0; index < count; index++) {
+    ssize_t result = write(descriptor, vectors[index].iov_base,
+                           vectors[index].iov_len);
+    if (result < 0) {
+      return completed == 0 ? -1 : (ssize_t)completed;
+    }
+    completed += (size_t)result;
+    if ((size_t)result < vectors[index].iov_len) {
+      break;
+    }
+  }
+  return (ssize_t)completed;
+}
+
+ssize_t pwrite(int descriptor, const void *buffer, size_t count,
+               off_t offset) {
+  if (descriptor < 3 || (count != 0 && buffer == NULL)) {
+    errno = EBADF;
+    return -1;
+  }
+  if (offset < 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (count > UINT32_MAX || (uint64_t)offset > UINT32_MAX) {
+    errno = EOVERFLOW;
+    return -1;
+  }
+  if (posix_descriptor_is_socket(descriptor)) {
+    errno = ESPIPE;
+    return -1;
+  }
+
+  off_t current = lseek(descriptor, 0, SEEK_CUR);
+  if (current < 0) {
+    return -1;
+  }
+  if (lseek(descriptor, offset, SEEK_SET) < 0) {
+    return -1;
+  }
+  ssize_t result = write(descriptor, buffer, count);
+  int saved_errno = errno;
+  if (lseek(descriptor, current, SEEK_SET) < 0 && result >= 0) {
+    errno = EIO;
+    return -1;
+  }
+  if (result < 0) {
+    errno = saved_errno;
+  }
+  return result;
+}
+
+ssize_t pread(int descriptor, void *buffer, size_t count, off_t offset) {
+  if (descriptor < 3 || (count != 0 && buffer == NULL)) {
+    errno = EBADF;
+    return -1;
+  }
+  if (offset < 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (count > UINT32_MAX || (uint64_t)offset > UINT32_MAX) {
+    errno = EOVERFLOW;
+    return -1;
+  }
+  if (posix_descriptor_is_socket(descriptor)) {
+    errno = ESPIPE;
+    return -1;
+  }
+  vfs_syscall_request_t request = {0};
+  request.arguments.positioned_io.descriptor = descriptor;
+  request.arguments.positioned_io.buffer = (uintptr_t)buffer;
+  request.arguments.positioned_io.length = count;
+  request.arguments.positioned_io.offset = offset;
+  return vfs_result(vfs_invoke(VFS_SYSCALL_PREAD, &request));
+}
+
 off_t lseek(int descriptor, off_t offset, int whence) {
   if (descriptor < 3) {
     errno = EINVAL;
+    return -1;
+  }
+  if (posix_descriptor_is_socket(descriptor)) {
+    errno = ESPIPE;
     return -1;
   }
   vfs_syscall_request_t request = {0};
@@ -214,6 +531,10 @@ off_t lseek(int descriptor, off_t offset, int whence) {
 }
 
 int fsync(int descriptor) {
+  if (posix_descriptor_is_socket(descriptor)) {
+    errno = EINVAL;
+    return -1;
+  }
   vfs_syscall_request_t request = {0};
   request.arguments.descriptor.descriptor = descriptor;
   return vfs_result(vfs_invoke(VFS_SYSCALL_SYNC, &request));
@@ -224,10 +545,29 @@ int ftruncate(int descriptor, off_t length) {
     errno = length < 0 ? EINVAL : EOVERFLOW;
     return -1;
   }
+  if (posix_descriptor_is_socket(descriptor)) {
+    errno = EINVAL;
+    return -1;
+  }
   vfs_syscall_request_t request = {0};
   request.arguments.truncate.descriptor = descriptor;
   request.arguments.truncate.length = length;
   return vfs_result(vfs_invoke(VFS_SYSCALL_TRUNCATE, &request));
+}
+
+int posix_fallocate(int descriptor, off_t offset, off_t length) {
+  if (offset < 0 || length <= 0)
+    return EINVAL;
+  if (posix_descriptor_is_socket(descriptor))
+    return ESPIPE;
+  if ((uint64_t)offset > UINT32_MAX ||
+      (uint64_t)length > UINT32_MAX - (uint64_t)offset)
+    return EFBIG;
+  struct stat status;
+  if (fstat(descriptor, &status))
+    return errno;
+  off_t end = offset + length;
+  return status.st_size >= end || ftruncate(descriptor, end) == 0 ? 0 : errno;
 }
 
 static int stat_from_vfs(const vfs_file_stat_t *source,
@@ -273,6 +613,13 @@ int fstat(int descriptor, struct stat *status) {
   if (descriptor >= 0 && descriptor <= 2) {
     memset(status, 0, sizeof(*status));
     status->st_mode = S_IFCHR | 0666;
+    status->st_nlink = 1;
+    status->st_blksize = VM_PAGE_SIZE;
+    return 0;
+  }
+  if (posix_descriptor_is_socket(descriptor)) {
+    memset(status, 0, sizeof(*status));
+    status->st_mode = S_IFSOCK | 0666;
     status->st_nlink = 1;
     status->st_blksize = VM_PAGE_SIZE;
     return 0;
@@ -355,6 +702,59 @@ int chdir(const char *path) {
   vfs_syscall_request_t request = {0};
   request.arguments.path.path = (uintptr_t)path;
   return vfs_result(vfs_invoke(VFS_SYSCALL_CHDIR, &request));
+}
+
+int fchdir(int descriptor) {
+  vfs_syscall_request_t request = {0};
+  request.arguments.descriptor.descriptor = descriptor;
+  return vfs_result(vfs_invoke(VFS_SYSCALL_FCHDIR, &request));
+}
+
+ssize_t getline(char **line, size_t *capacity, FILE *stream) {
+  if (line == NULL || capacity == NULL || stream == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (*line == NULL || *capacity == 0) {
+    *capacity = 128;
+    *line = malloc(*capacity);
+    if (*line == NULL) {
+      *capacity = 0;
+      errno = ENOMEM;
+      return -1;
+    }
+  }
+
+  size_t length = 0;
+  for (;;) {
+    int character = fgetc(stream);
+    if (character == EOF) {
+      if (length == 0) {
+        return -1;
+      }
+      break;
+    }
+    if (length + 1 >= *capacity) {
+      if (*capacity > SIZE_MAX / 2) {
+        errno = EOVERFLOW;
+        return -1;
+      }
+      size_t new_capacity = *capacity * 2;
+      char *new_line = realloc(*line, new_capacity);
+      if (new_line == NULL) {
+        errno = ENOMEM;
+        return -1;
+      }
+      *line = new_line;
+      *capacity = new_capacity;
+    }
+    (*line)[length++] = (char)character;
+    if (character == '\n') {
+      break;
+    }
+  }
+  (*line)[length] = '\0';
+  return (ssize_t)length;
 }
 
 int vfs_check_mount(uint8_t drive) {

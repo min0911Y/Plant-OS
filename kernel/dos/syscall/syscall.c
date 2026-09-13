@@ -2,6 +2,7 @@
 #include <cmd.h>
 #include <dos.h>
 #include <executable.h>
+#include <fcntl.h>
 #include <framebuffer.h>
 #include <futex.h>
 #include <input_device.h>
@@ -525,6 +526,13 @@ static int vfs_syscall_close(const vfs_syscall_request_t *request) {
                       request->arguments.descriptor.descriptor);
 }
 
+static int vfs_syscall_fcntl(const vfs_syscall_request_t *request) {
+  return vfs_fd_fcntl(current_task()->fs_context,
+                      request->arguments.fcntl.descriptor,
+                      request->arguments.fcntl.command,
+                      request->arguments.fcntl.argument);
+}
+
 static int vfs_syscall_read(const vfs_syscall_request_t *request) {
   if (request->arguments.io.length != 0 &&
       !user_range_ok(request->arguments.io.buffer,
@@ -535,6 +543,20 @@ static int vfs_syscall_read(const vfs_syscall_request_t *request) {
                      request->arguments.io.descriptor,
                      (void *)(uintptr_t)request->arguments.io.buffer,
                      request->arguments.io.length);
+}
+
+static int vfs_syscall_pread(const vfs_syscall_request_t *request) {
+  if (request->arguments.positioned_io.length != 0 &&
+      !user_range_ok(request->arguments.positioned_io.buffer,
+                     request->arguments.positioned_io.length)) {
+    return VFS_ERROR_INVALID;
+  }
+  return vfs_fd_pread(current_task()->fs_context,
+                      request->arguments.positioned_io.descriptor,
+                      (void *)(uintptr_t)
+                          request->arguments.positioned_io.buffer,
+                      request->arguments.positioned_io.length,
+                      request->arguments.positioned_io.offset);
 }
 
 static int vfs_syscall_write(const vfs_syscall_request_t *request) {
@@ -640,6 +662,11 @@ static int vfs_syscall_chdir(const vfs_syscall_request_t *request) {
   return vfs_syscall_single_path(request, vfs_context_chdir);
 }
 
+static int vfs_syscall_fchdir(const vfs_syscall_request_t *request) {
+  return vfs_context_fchdir(current_task()->fs_context,
+                            request->arguments.descriptor.descriptor);
+}
+
 static int vfs_syscall_rename(const vfs_syscall_request_t *request) {
   char *source = vfs_syscall_path(request->arguments.rename.source);
   char *destination =
@@ -730,6 +757,7 @@ static int vfs_syscall_realpath(const vfs_syscall_request_t *request) {
 static const vfs_syscall_handler_t vfs_syscall_handlers[VFS_SYSCALL_COUNT] = {
     [VFS_SYSCALL_OPEN] = vfs_syscall_open,
     [VFS_SYSCALL_CLOSE] = vfs_syscall_close,
+    [VFS_SYSCALL_FCNTL] = vfs_syscall_fcntl,
     [VFS_SYSCALL_READ] = vfs_syscall_read,
     [VFS_SYSCALL_WRITE] = vfs_syscall_write,
     [VFS_SYSCALL_SEEK] = vfs_syscall_seek,
@@ -751,6 +779,8 @@ static const vfs_syscall_handler_t vfs_syscall_handlers[VFS_SYSCALL_COUNT] = {
     [VFS_SYSCALL_FORMAT] = vfs_syscall_format,
     [VFS_SYSCALL_TRUNCATE] = vfs_syscall_truncate,
     [VFS_SYSCALL_REALPATH] = vfs_syscall_realpath,
+    [VFS_SYSCALL_PREAD] = vfs_syscall_pread,
+    [VFS_SYSCALL_FCHDIR] = vfs_syscall_fchdir,
 };
 
 static void syscall_vfs(syscall_context_t *frame) {
@@ -1248,7 +1278,8 @@ static void syscall_thread(syscall_context_t *frame) {
   irq_state_t state = irq_save();
   native_thread_request_t request;
   if (!user_vm_copy_from(&request, frame->argument1, sizeof(request)) ||
-      (frame->argument0 == THREAD_CREATE &&
+      ((frame->argument0 == THREAD_CREATE ||
+        frame->argument0 == THREAD_GET_STACK) &&
        !user_vm_prepare_write(frame->argument1, sizeof(request)))) {
     frame->value = -14;
     irq_restore(state);
@@ -1271,6 +1302,11 @@ static void syscall_thread(syscall_context_t *frame) {
     break;
   case THREAD_TERMINATE:
     frame->value = task_terminate_thread(request.tid, request.generation);
+    break;
+  case THREAD_GET_STACK:
+    frame->value = user_thread_get_stack(&request);
+    if (!frame->value)
+      memcpy((void *)frame->argument1, &request, sizeof(request));
     break;
   }
   irq_restore(state);
@@ -1845,8 +1881,75 @@ static int socket_syscall_interface_address(
 
 static int socket_syscall_set_option(
     uint32_t owner_group, net_socket_syscall_request_t *request) {
+  uint8_t value[NET_SOCKET_OPTION_VALUE_MAX];
+  if (request->length == 0 || request->length > sizeof(value) ||
+      !user_range_ok(request->buffer, request->length) ||
+      !user_vm_copy_from(value, request->buffer, request->length)) {
+    return NET_SOCKET_ERR_INVAL;
+  }
   return net_socket_set_option(owner_group, request->socket, request->domain,
-                               request->type, request->length);
+                               request->type, value, request->length);
+}
+
+static int socket_syscall_available(
+    uint32_t owner_group, net_socket_syscall_request_t *request) {
+  return net_socket_bytes_available(owner_group, request->socket,
+                                    &request->length);
+}
+
+static int socket_syscall_get_option(
+    uint32_t owner_group, net_socket_syscall_request_t *request) {
+  uint8_t value[NET_SOCKET_OPTION_VALUE_MAX];
+  if (request->length == 0 || request->length > sizeof(value) ||
+      !user_range_ok(request->buffer, request->length)) {
+    return NET_SOCKET_ERR_INVAL;
+  }
+  uint32_t length = request->length;
+  int result = net_socket_get_option(owner_group, request->socket,
+                                     request->domain, request->type, value,
+                                     &length);
+  if (result == 0 && !user_vm_copy_to(request->buffer, value, length)) {
+    return NET_SOCKET_ERR_INVAL;
+  }
+  request->length = length;
+  return result;
+}
+
+static int socket_syscall_shutdown(
+    uint32_t owner_group, net_socket_syscall_request_t *request) {
+  return net_socket_shutdown(owner_group, request->socket, request->type);
+}
+
+static int socket_syscall_pair(uint32_t owner_group,
+                               net_socket_syscall_request_t *request) {
+  if (!user_range_ok(request->buffer, sizeof(int32_t) * 2)) {
+    return NET_SOCKET_ERR_INVAL;
+  }
+  int handles[2];
+  int result = net_socket_pair(owner_group, request->domain, request->type,
+                              request->protocol, handles);
+  if (result == 0 && !user_vm_copy_to(request->buffer, handles,
+                                      sizeof(handles))) {
+    (void)net_socket_close(owner_group, handles[0]);
+    (void)net_socket_close(owner_group, handles[1]);
+    return NET_SOCKET_ERR_INVAL;
+  }
+  return result;
+}
+
+static int socket_syscall_get_flags(
+    uint32_t owner_group, net_socket_syscall_request_t *request) {
+  int result = net_socket_get_flags(owner_group, request->socket);
+  if (result >= 0) {
+    request->flags = (uint32_t)result;
+  }
+  return result;
+}
+
+static int socket_syscall_set_flags(
+    uint32_t owner_group, net_socket_syscall_request_t *request) {
+  return net_socket_set_flags(owner_group, request->socket,
+                              (int)request->flags);
 }
 
 static const socket_syscall_handler_t
@@ -1864,6 +1967,12 @@ static const socket_syscall_handler_t
         [NET_SOCKET_SYSCALL_RESOLVE] = socket_syscall_resolve,
         [NET_SOCKET_SYSCALL_INTERFACE_ADDRESS] = socket_syscall_interface_address,
         [NET_SOCKET_SYSCALL_SET_OPTION] = socket_syscall_set_option,
+        [NET_SOCKET_SYSCALL_AVAILABLE] = socket_syscall_available,
+        [NET_SOCKET_SYSCALL_GET_OPTION] = socket_syscall_get_option,
+        [NET_SOCKET_SYSCALL_SHUTDOWN] = socket_syscall_shutdown,
+        [NET_SOCKET_SYSCALL_PAIR] = socket_syscall_pair,
+        [NET_SOCKET_SYSCALL_GET_FLAGS] = socket_syscall_get_flags,
+        [NET_SOCKET_SYSCALL_SET_FLAGS] = socket_syscall_set_flags,
 };
 
 static void syscall_socket(syscall_context_t *frame) {

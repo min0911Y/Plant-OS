@@ -1,0 +1,7 @@
+#ifndef PLANT_NET_ETHERNET_H
+#define PLANT_NET_ETHERNET_H
+
+#define ETHER_ADDR_LEN 6
+#define ETHERNET_LEN 14
+
+#endif

@@ -741,6 +741,10 @@ void stdio_stream_unlock(FILE *stream) {
     pthread_mutex_unlock(&stream->lock);
 }
 
+void flockfile(FILE *stream) { stdio_stream_lock(stream); }
+
+void funlockfile(FILE *stream) { stdio_stream_unlock(stream); }
+
 #define STDIO_LOCKED(type, name, parameters, arguments)                        \
   type name parameters {                                                       \
     stdio_stream_lock(stream);                                                 \

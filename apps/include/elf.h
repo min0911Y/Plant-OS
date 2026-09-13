@@ -15,15 +15,24 @@ enum {
   ELFMAG1 = 'E',
   ELFMAG2 = 'L',
   ELFMAG3 = 'F',
+  ELFCLASSNONE = 0,
   ELFCLASS32 = 1,
   ELFCLASS64 = 2,
+  ELFDATANONE = 0,
   ELFDATA2LSB = 1,
+  ELFDATA2MSB = 2,
   EV_CURRENT = 1,
   ET_REL = 1,
   ET_EXEC = 2,
   ET_DYN = 3,
   EM_386 = 3,
+  EM_68K = 4,
+  EM_MIPS = 8,
+  EM_PARISC = 15,
+  EM_PPC = 20,
+  EM_ARM = 40,
   EM_X86_64 = 62,
+  EM_ALPHA = 0x9026,
   PT_NULL = 0,
   PT_LOAD = 1,
   PT_DYNAMIC = 2,
@@ -119,6 +128,7 @@ enum {
   DF_BIND_NOW = 8,
   DF_STATIC_TLS = 16,
   DF_1_NOW = 1,
+  DF_1_ORIGIN = 0x80,
   DF_1_PIE = 0x08000000,
   R_386_NONE = 0,
   R_386_32 = 1,
@@ -225,6 +235,8 @@ typedef struct {
 
 #define ELF32_ST_BIND(info) ((info) >> 4)
 #define ELF32_ST_TYPE(info) ((info) & 15)
+#define ELF64_ST_BIND(info) ((info) >> 4)
+#define ELF64_ST_TYPE(info) ((info) & 15)
 #define ELF32_R_SYM(info) ((info) >> 8)
 #define ELF32_R_TYPE(info) ((uint8_t)(info))
 #define ELF64_R_SYM(info) ((info) >> 32)
@@ -237,6 +249,7 @@ typedef Elf64_Sym Elf_Sym;
 typedef Elf64_Dyn Elf_Dyn;
 #define ELF_NATIVE_CLASS ELFCLASS64
 #define ELF_NATIVE_MACHINE EM_X86_64
+#define ELF_ST_TYPE(info) ELF64_ST_TYPE(info)
 #else
 typedef Elf32_Ehdr Elf_Ehdr;
 typedef Elf32_Phdr Elf_Phdr;
@@ -244,5 +257,6 @@ typedef Elf32_Sym Elf_Sym;
 typedef Elf32_Dyn Elf_Dyn;
 #define ELF_NATIVE_CLASS ELFCLASS32
 #define ELF_NATIVE_MACHINE EM_386
+#define ELF_ST_TYPE(info) ELF32_ST_TYPE(info)
 #endif
 #endif

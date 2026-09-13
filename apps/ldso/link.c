@@ -374,7 +374,9 @@ static void call_array(object_t *object, unsigned address_tag,
     call_initializer(entries[reverse ? count - 1 - i : i]);
 }
 
-static void initialize(void) {
+static void initialize_object_tree(object_t *root) {
+  if (!root || root->state != OBJECT_NEW)
+    return;
   typedef struct {
     object_t *object;
     size_t dependency;
@@ -383,9 +385,10 @@ static void initialize(void) {
     fail(NULL, "dependency graph size overflow");
   frame_t *stack = allocate(linker.count * sizeof(*stack));
   size_t depth = 1;
-  stack[0].object = linker.first;
-  linker.first->state = OBJECT_VISITING;
-  call_array(linker.first, DT_PREINIT_ARRAY, DT_PREINIT_ARRAYSZ, false);
+  stack[0].object = root;
+  root->state = OBJECT_VISITING;
+  if (root == linker.first)
+    call_array(root, DT_PREINIT_ARRAY, DT_PREINIT_ARRAYSZ, false);
   while (depth) {
     frame_t *frame = stack + depth - 1;
     object_t *object = frame->object;
@@ -406,6 +409,8 @@ static void initialize(void) {
     depth--;
   }
 }
+
+static void initialize(void) { initialize_object_tree(linker.first); }
 
 static void finalize(void) {
   while (linker.initialized_count) {
@@ -553,6 +558,110 @@ static int address_info(const void *pointer, Dl_info *information) {
   return 0;
 }
 
+static void *lookup_required(const char *name) {
+  void *address = NULL;
+  if (lookup_symbol(name, &address))
+    fail(name, "required runtime symbol not found");
+  return address;
+}
+
+static bool uses_runtime_entry(const object_t *object) {
+  if (object->entry < object->bias)
+    return false;
+  uintptr_t entry = object->entry - object->bias;
+  bool runtime_setup = false;
+  for (size_t i = 0; i < object->symbol_count; i++) {
+    const Elf_Sym *symbol = object->symbols + i;
+    const char *name = object_string(object, symbol->st_name);
+    if (symbol->st_shndx != SHN_UNDEF && symbol->st_value == entry &&
+        !strcmp(name, "Main"))
+      return true;
+    if (symbol->st_shndx == SHN_UNDEF &&
+        !strcmp(name, "runtime_thread_initialize"))
+      runtime_setup = true;
+  }
+  return runtime_setup;
+}
+
+static void *load_runtime_object(const char *path, int flags) {
+  object_t *parent = linker.first;
+  if (!parent || !path)
+    return NULL;
+  if (flags & RTLD_NOLOAD) {
+    char *absolute = absolute_path(path);
+    for (object_t *object = linker.first; object; object = object->next)
+      if (!strcmp(object->path, absolute))
+        return (void *)1;
+    return NULL;
+  }
+
+  object_t *object = NULL;
+  if (strchr(path, '/') || strchr(path, '\\') || strchr(path, ':')) {
+    object = object_open_path(parent, path);
+  } else {
+    if (!(parent->present & ((uint64_t)1 << DT_RUNPATH))) {
+      for (object_t *source = parent; source && !object;
+           source = source->parent) {
+        if (source->present & ((uint64_t)1 << DT_RPATH))
+          object = object_search_path(
+              parent, object_string(source, source->tags[DT_RPATH]), path);
+      }
+    } else {
+      object = object_search_path(
+          parent, object_string(parent, parent->tags[DT_RUNPATH]), path);
+    }
+    if (!object)
+      object = object_search_path(parent, linker.library_path, path);
+  }
+  if (!object)
+    return NULL;
+  if (object->linked)
+    return (void *)1;
+  if (object->tls)
+    fail(object->path, "late TLS loading is not supported");
+
+  object_resolve_dependencies(object);
+  for (object_t *cursor = object; cursor; cursor = cursor->next) {
+    if (cursor->tls)
+      fail(cursor->path, "late TLS loading is not supported");
+    object_relocate(cursor, false);
+    object_relocate(cursor, true);
+    object_protect(cursor);
+    cursor->linked = true;
+  }
+  if (linker.count > linker.initialized_capacity) {
+    if (linker.count > SIZE_MAX / sizeof(*linker.initialized))
+      fail(NULL, "dependency graph size overflow");
+    object_t **replacement =
+        allocate(linker.count * sizeof(*linker.initialized));
+    memcpy(replacement, linker.initialized,
+           linker.initialized_count * sizeof(*linker.initialized));
+    linker.initialized = replacement;
+    linker.initialized_capacity = linker.count;
+  }
+  initialize_object_tree(object);
+  return (void *)1;
+}
+
+static void normalize_program_argument(runtime_arguments_t *arguments,
+                                       const char *executable_path) {
+  if (!arguments->argv || arguments->argc == 0 || !arguments->argv[0])
+    return;
+  char *program = arguments->argv[0];
+  size_t length = strlen(program);
+  if (length >= 3 && program[1] == ':' &&
+      (program[2] == '/' || program[2] == '\\')) {
+    memmove(program, program + 2, strlen(program + 2) + 1);
+    return;
+  }
+  if (!strchr(program, '/') && !strchr(program, '\\') && executable_path) {
+    const char *canonical = executable_path;
+    if (canonical[1] == ':')
+      canonical += 2;
+    arguments->argv[0] = (char *)canonical;
+  }
+}
+
 void Main(const loader_start_t *start) {
   bool verify = start == NULL;
   loader_start_t request;
@@ -582,17 +691,17 @@ void Main(const loader_start_t *start) {
   linker.library_path = directory;
   object_load(start->executable_fd, absolute_path(start->executable_path),
               NULL);
+  bool runtime_entry = uses_runtime_entry(linker.first);
+  /* OpenJDK loads libjvm with dlopen; preloading it includes its PT_TLS in the
+   * initial thread block. Other standard ELF programs simply skip these paths. */
+  if (!runtime_entry)
+    (void)object_search_path(
+        linker.first,
+        "$ORIGIN/../lib/server:$ORIGIN/../lib/zero:$ORIGIN/../lib/client",
+        "libjvm.so");
   /* Appending objects while iterating gives breadth-first global symbol scope.
    * Register each object before its dependencies to break dependency cycles. */
-  for (object_t *object = linker.first; object; object = object->next) {
-    size_t needed = 0;
-    for (size_t i = 0; i < object->dynamic_count; i++) {
-      const Elf_Dyn *d = object->dynamic + i;
-      if (d->d_tag == DT_NEEDED)
-        object->dependencies[needed++] =
-            object_dependency(object, object_string(object, d->d_un.d_val));
-    }
-  }
+  object_resolve_dependencies(linker.first);
   prepare_tls();
   for (object_t *object = linker.first; object; object = object->next)
     object_relocate(object, false);
@@ -600,6 +709,8 @@ void Main(const loader_start_t *start) {
     object_relocate(object, true);
   for (object_t *object = linker.first; object; object = object->next)
     object_protect(object);
+  for (object_t *object = linker.first; object; object = object->next)
+    object->linked = true;
   if (verify) {
     print("ld.so: verified ");
     print((char *)start->executable_path);
@@ -610,9 +721,42 @@ void Main(const loader_start_t *start) {
   if (linker.count > SIZE_MAX / sizeof(object_t *))
     fail(NULL, "dependency graph size overflow");
   linker.initialized = allocate(linker.count * sizeof(object_t *));
-  const runtime_linker_t hooks = {initialize,   finalize,
-                                  tls_allocate, lookup_symbol,
-                                  address_info, linker.first->path};
-  ((void (*)(const runtime_linker_t *))linker.first->entry)(&hooks);
+  linker.initialized_capacity = linker.count;
+  const runtime_linker_t hooks = {
+      .initialize = initialize,
+      .finalize = finalize,
+      .tls_allocate = tls_allocate,
+      .symbol = lookup_symbol,
+      .address_info = address_info,
+      .executable_path = linker.first->path,
+      .load = load_runtime_object,
+  };
+  if (runtime_entry) {
+    ((void (*)(const runtime_linker_t *))linker.first->entry)(&hooks);
+    fail(NULL, "application entry returned");
+  }
+
+  typedef int (*thread_initialize_fn)(const runtime_linker_t *);
+  typedef void (*runtime_initialize_fn)(const runtime_linker_t *);
+  typedef int (*runtime_arguments_load_fn)(runtime_arguments_t *);
+  typedef void (*runtime_arguments_destroy_fn)(runtime_arguments_t *);
+  if (((thread_initialize_fn)lookup_required("runtime_thread_initialize"))(
+          &hooks))
+    fail(NULL, "runtime thread initialization failed");
+  ((void (*)(uintptr_t))lookup_required("set_rt"))(
+      (uintptr_t)lookup_required("return_to_app"));
+  ((void (*)(void))lookup_required("abi_alloc_init"))();
+  ((void (*)(void))lookup_required("stdio_initialize"))();
+  if (((runtime_arguments_load_fn)lookup_required("runtime_arguments_load"))(
+          &arguments))
+    fail(NULL, "cannot read command line");
+  normalize_program_argument(&arguments, linker.first->path);
+  ((void (*)(void))lookup_required("init_float"))();
+  ((runtime_initialize_fn)lookup_required("runtime_initialize"))(&hooks);
+  int status = ((int (*)(int, char **))linker.first->entry)(arguments.argc,
+                                                              arguments.argv);
+  ((runtime_arguments_destroy_fn)lookup_required("runtime_arguments_destroy"))(
+      &arguments);
+  ((void (*)(int))lookup_required("exit"))(status);
   fail(NULL, "application entry returned");
 }

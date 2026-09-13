@@ -27,7 +27,7 @@ struct object {
   object_t **dependencies;
   size_t dependency_count;
   enum { OBJECT_NEW, OBJECT_VISITING, OBJECT_INITIALIZED } state;
-  bool symbolic;
+  bool symbolic, linked;
   const Elf_Phdr *tls;
   size_t tls_module, tls_offset;
 };
@@ -35,7 +35,7 @@ struct object {
 typedef struct {
   object_t *first, *last;
   object_t **initialized;
-  size_t count, initialized_count;
+  size_t count, initialized_count, initialized_capacity;
   char *arena;
   size_t available;
   const char *cwd;
@@ -52,6 +52,10 @@ void *object_at(const object_t *object, uintptr_t address, size_t size,
                 unsigned flags);
 const char *object_string(const object_t *object, size_t offset);
 object_t *object_load(int descriptor, const char *path, object_t *parent);
+object_t *object_open_path(object_t *parent, const char *path);
 object_t *object_dependency(object_t *parent, const char *name);
+object_t *object_search_path(object_t *parent, const char *paths,
+                             const char *name);
+void object_resolve_dependencies(object_t *first);
 
 #endif

@@ -1,5 +1,7 @@
 #include <dos.h>
+#include <fcntl.h>
 #include <irq.h>
+#include <stdint.h>
 
 #include <lwip/dns.h>
 #include <lwip/err.h>
@@ -13,7 +15,7 @@
 #define NET_SOCKET_PACKET_CAPACITY 64u
 #define NET_SOCKET_INDEX_BITS 6u
 #define NET_SOCKET_INDEX_MASK ((1u << NET_SOCKET_INDEX_BITS) - 1u)
-#define NET_SOCKET_GENERATION_MAX 0x01ffffffu
+#define NET_SOCKET_GENERATION_MAX 0x00ffffffu
 #define NET_SOCKET_SLOT_NONE 0xffu
 #define NET_SOCKET_TASK_NONE ((uint32_t)-1)
 #define NET_SOCKET_RX_LIMIT (64u * 1024u)
@@ -22,6 +24,14 @@
 #define NET_SOCKET_CONNECT_TIMEOUT_TICKS 1000u
 #define NET_SOCKET_DNS_REQUEST_CAPACITY 4u
 #define NET_SOCKET_DNS_NAME_MAX 255u
+
+#define NET_SOCKET_OPTION_DEBUG (1u << 0)
+#define NET_SOCKET_OPTION_REUSEADDR (1u << 1)
+#define NET_SOCKET_OPTION_KEEPALIVE (1u << 2)
+#define NET_SOCKET_OPTION_DONTROUTE (1u << 3)
+#define NET_SOCKET_OPTION_BROADCAST (1u << 4)
+#define NET_SOCKET_OPTION_OOBINLINE (1u << 5)
+#define NET_SOCKET_OPTION_REUSEPORT (1u << 6)
 
 typedef enum {
   NET_SOCKET_FREE,
@@ -57,6 +67,11 @@ typedef struct {
   uint32_t generation;
   uint32_t queued_bytes;
   uint32_t receive_timeout_ticks;
+  uint32_t send_timeout_ticks;
+  uint32_t receive_buffer_size;
+  uint32_t send_buffer_size;
+  uint32_t option_flags;
+  uint32_t last_error;
   uint32_t peer_generation;
   uint32_t pending_parent_generation;
   uint16_t pending_count;
@@ -72,6 +87,14 @@ typedef struct {
   uint8_t backlog;
   bool bound;
   bool peer_closed;
+  bool nonblocking;
+  bool shutdown_read;
+  bool shutdown_write;
+  bool linger_enabled;
+  int32_t linger_seconds;
+  uint8_t ip_tos;
+  uint8_t multicast_ttl;
+  bool multicast_loop;
   net_socket_address_t local;
   net_socket_address_t peer;
   union {
@@ -290,14 +313,20 @@ static int net_socket_lwip_error(err_t error) {
 
 static int net_socket_handle(const net_socket_t *socket) {
   unsigned index = (unsigned)(socket - net_sockets);
-  return (int)((socket->generation << NET_SOCKET_INDEX_BITS) | (index + 1));
+  return (int)(NET_SOCKET_HANDLE_TAG |
+               (socket->generation << NET_SOCKET_INDEX_BITS) | (index + 1));
 }
 
 static net_socket_t *net_socket_find(uint32_t owner_group, int handle) {
   uint32_t value = (uint32_t)handle;
+  if (handle <= 0 || (value & NET_SOCKET_HANDLE_TAG_MASK) !=
+                         NET_SOCKET_HANDLE_TAG) {
+    return NULL;
+  }
   uint32_t slot = value & NET_SOCKET_INDEX_MASK;
-  uint32_t generation = value >> NET_SOCKET_INDEX_BITS;
-  if (handle <= 0 || slot == 0 || slot > NET_SOCKET_CAPACITY) {
+  uint32_t generation = (value & ~NET_SOCKET_HANDLE_TAG) >>
+                        NET_SOCKET_INDEX_BITS;
+  if (slot == 0 || slot > NET_SOCKET_CAPACITY || generation == 0) {
     return NULL;
   }
 
@@ -357,6 +386,10 @@ static net_socket_t *net_socket_reserve(uint32_t owner_group) {
     socket->pending_tail = NET_SOCKET_SLOT_NONE;
     socket->pending_next = NET_SOCKET_SLOT_NONE;
     socket->pending_parent = NET_SOCKET_SLOT_NONE;
+    socket->receive_buffer_size = NET_SOCKET_RX_LIMIT;
+    socket->send_buffer_size = NET_SOCKET_RX_LIMIT;
+    socket->multicast_ttl = 1;
+    socket->multicast_loop = true;
     net_socket_waiters_init(socket);
     return socket;
   }
@@ -592,9 +625,16 @@ static err_t net_socket_tcp_receive(void *arg, struct tcp_pcb *pcb,
     net_socket_waiter_wake(&socket->connector);
     return ERR_OK;
   }
+  if (socket->shutdown_read) {
+    u16_t length = packet->tot_len;
+    pbuf_free(packet);
+    tcp_recved(pcb, length);
+    return ERR_OK;
+  }
   if (error != ERR_OK) {
     pbuf_free(packet);
     socket->state = NET_SOCKET_INET_TCP_FAILED;
+    socket->last_error = 104; /* ECONNRESET */
     net_socket_wake_all(socket);
     return ERR_OK;
   }
@@ -626,6 +666,7 @@ static void net_socket_tcp_error(void *arg, err_t error) {
   socket->pcb.tcp = NULL;
   socket->state = NET_SOCKET_INET_TCP_FAILED;
   socket->peer_closed = true;
+  socket->last_error = 104; /* ECONNRESET */
   net_socket_wake_all(socket);
 }
 
@@ -635,12 +676,14 @@ static err_t net_socket_tcp_connected(void *arg, struct tcp_pcb *pcb,
   if (socket == NULL || error != ERR_OK) {
     if (socket != NULL) {
       socket->state = NET_SOCKET_INET_TCP_FAILED;
+      socket->last_error = 111; /* ECONNREFUSED */
       net_socket_wake_all(socket);
     }
     return ERR_OK;
   }
   socket->pcb.tcp = pcb;
   socket->state = NET_SOCKET_INET_TCP_CONNECTED;
+  socket->last_error = 0;
   net_socket_tcp_refresh_local(socket);
   net_socket_waiter_wake(&socket->connector);
   return ERR_OK;
@@ -668,6 +711,10 @@ static err_t net_socket_tcp_accept(void *arg, struct tcp_pcb *pcb,
   child->protocol = NET_SOCKET_PROTOCOL_TCP;
   child->state = NET_SOCKET_INET_TCP_CONNECTED;
   child->receive_timeout_ticks = listener->receive_timeout_ticks;
+  child->send_timeout_ticks = listener->send_timeout_ticks;
+  child->option_flags = listener->option_flags;
+  child->receive_buffer_size = listener->receive_buffer_size;
+  child->send_buffer_size = listener->send_buffer_size;
   child->pcb.tcp = pcb;
   net_socket_address_from_ip(&child->local, &pcb->local_ip,
                              lwip_htons(pcb->local_port));
@@ -720,6 +767,7 @@ static void net_socket_tcp_abort(net_socket_t *socket) {
   }
   socket->state = NET_SOCKET_INET_TCP_FAILED;
   socket->peer_closed = true;
+  socket->last_error = 104; /* ECONNRESET */
   net_socket_wake_all(socket);
 }
 
@@ -967,6 +1015,10 @@ static int net_socket_connect_local_stream(net_socket_t *socket,
   child->type = NET_SOCKET_STREAM;
   child->state = NET_SOCKET_LOCAL_CONNECTED;
   child->receive_timeout_ticks = listener->receive_timeout_ticks;
+  child->send_timeout_ticks = listener->send_timeout_ticks;
+  child->option_flags = listener->option_flags;
+  child->receive_buffer_size = listener->receive_buffer_size;
+  child->send_buffer_size = listener->send_buffer_size;
   child->local = listener->local;
   if (socket->bound) {
     child->peer = socket->local;
@@ -1064,9 +1116,14 @@ int net_socket_connect(uint32_t owner_group, int handle,
   }
   socket->peer = *address;
   socket->state = NET_SOCKET_INET_TCP_CONNECTING;
+  socket->last_error = 115; /* EINPROGRESS */
   uint32_t deadline = timerctl.count + NET_SOCKET_CONNECT_TIMEOUT_TICKS;
   net_stack_poll_local(address->value.inet.address);
   irq_restore(state);
+
+  if (socket->nonblocking) {
+    return NET_SOCKET_ERR_INPROGRESS;
+  }
 
   for (;;) {
     state = irq_save();
@@ -1169,6 +1226,10 @@ int net_socket_accept(uint32_t owner_group, int handle,
       int accepted = net_socket_handle(child);
       irq_restore(state);
       return accepted;
+    }
+    if (listener->nonblocking) {
+      irq_restore(state);
+      return NET_SOCKET_ERR_AGAIN;
     }
     if (deadline == 0 && listener->receive_timeout_ticks != 0) {
       deadline = net_socket_deadline_after(listener->receive_timeout_ticks);
@@ -1449,6 +1510,13 @@ int net_socket_sendto(uint32_t owner_group, int handle, const void *data,
     irq_restore(state);
     return NET_SOCKET_ERR_NOENT;
   }
+  if (socket->shutdown_write) {
+    irq_restore(state);
+    return NET_SOCKET_ERR_PIPE;
+  }
+  if (socket->nonblocking) {
+    flags |= NET_SOCKET_MSG_DONTWAIT;
+  }
   if (address != NULL && address->family != socket->domain) {
     irq_restore(state);
     return NET_SOCKET_ERR_INVAL;
@@ -1519,6 +1587,11 @@ int net_socket_recvfrom(uint32_t owner_group, int handle, void *data,
       irq_restore(state);
       return NET_SOCKET_ERR_NOENT;
     }
+    if (socket->shutdown_read) {
+      net_socket_clear_packets(socket);
+      irq_restore(state);
+      return 0;
+    }
     if (length == 0) {
       irq_restore(state);
       return 0;
@@ -1577,7 +1650,7 @@ int net_socket_recvfrom(uint32_t owner_group, int handle, void *data,
       irq_restore(state);
       return result;
     }
-    if (flags & NET_SOCKET_MSG_DONTWAIT) {
+    if ((flags & NET_SOCKET_MSG_DONTWAIT) || socket->nonblocking) {
       irq_restore(state);
       return NET_SOCKET_ERR_AGAIN;
     }
@@ -1617,12 +1690,55 @@ int net_socket_getname(uint32_t owner_group, int handle, bool peer,
   return 0;
 }
 
-int net_socket_set_option(uint32_t owner_group, int handle, int level,
-                          int option, uint32_t value) {
-  if (level != NET_SOCKET_SOL_SOCKET || option != NET_SOCKET_SO_RCVTIMEO) {
-    return NET_SOCKET_ERR_PROTOCOL;
+static bool net_socket_option_flag(int option, uint32_t *mask) {
+  switch (option) {
+  case NET_SOCKET_SO_DEBUG:
+    *mask = NET_SOCKET_OPTION_DEBUG;
+    return true;
+  case NET_SOCKET_SO_REUSEADDR:
+    *mask = NET_SOCKET_OPTION_REUSEADDR;
+    return true;
+  case NET_SOCKET_SO_KEEPALIVE:
+    *mask = NET_SOCKET_OPTION_KEEPALIVE;
+    return true;
+  case NET_SOCKET_SO_DONTROUTE:
+    *mask = NET_SOCKET_OPTION_DONTROUTE;
+    return true;
+  case NET_SOCKET_SO_BROADCAST:
+    *mask = NET_SOCKET_OPTION_BROADCAST;
+    return true;
+  case NET_SOCKET_SO_OOBINLINE:
+    *mask = NET_SOCKET_OPTION_OOBINLINE;
+    return true;
+  case NET_SOCKET_SO_REUSEPORT:
+    *mask = NET_SOCKET_OPTION_REUSEPORT;
+    return true;
+  default:
+    return false;
   }
-  uint32_t ticks = value / 10u + (value % 10u != 0);
+}
+
+static bool net_socket_timeval_to_ticks(const void *value, uint32_t length,
+                                        uint32_t *ticks) {
+  if (value == NULL || length != sizeof(net_socket_timeval_t)) {
+    return false;
+  }
+  const net_socket_timeval_t *time = (const net_socket_timeval_t *)value;
+  if (time->seconds < 0 || time->microseconds < 0 ||
+      time->microseconds >= 1000000) {
+    return false;
+  }
+  uint64_t milliseconds = (uint64_t)time->seconds * 1000ull +
+                          ((uint64_t)time->microseconds + 999u) / 1000u;
+  if (milliseconds > UINT32_MAX) {
+    return false;
+  }
+  *ticks = (uint32_t)(milliseconds / 10u + (milliseconds % 10u != 0));
+  return true;
+}
+
+int net_socket_set_option(uint32_t owner_group, int handle, int level,
+                          int option, const void *value, uint32_t length) {
   irq_state_t state = irq_save();
   net_socket_system_init();
   net_socket_t *socket = net_socket_find(owner_group, handle);
@@ -1630,7 +1746,407 @@ int net_socket_set_option(uint32_t owner_group, int handle, int level,
     irq_restore(state);
     return NET_SOCKET_ERR_NOENT;
   }
-  socket->receive_timeout_ticks = ticks;
+  if (value == NULL || length == 0) {
+    irq_restore(state);
+    return NET_SOCKET_ERR_INVAL;
+  }
+
+  uint32_t flag;
+  if (level == NET_SOCKET_SOL_SOCKET && net_socket_option_flag(option, &flag)) {
+    if (length != sizeof(int32_t)) {
+      irq_restore(state);
+      return NET_SOCKET_ERR_INVAL;
+    }
+    if (*(const int32_t *)value != 0) {
+      socket->option_flags |= flag;
+    } else {
+      socket->option_flags &= ~flag;
+    }
+    irq_restore(state);
+    return 0;
+  }
+
+  if (level == NET_SOCKET_SOL_SOCKET) {
+    switch (option) {
+    case NET_SOCKET_SO_RCVTIMEO:
+      if (!net_socket_timeval_to_ticks(value, length,
+                                       &socket->receive_timeout_ticks)) {
+        irq_restore(state);
+        return NET_SOCKET_ERR_INVAL;
+      }
+      irq_restore(state);
+      return 0;
+    case NET_SOCKET_SO_SNDTIMEO:
+      if (!net_socket_timeval_to_ticks(value, length,
+                                       &socket->send_timeout_ticks)) {
+        irq_restore(state);
+        return NET_SOCKET_ERR_INVAL;
+      }
+      irq_restore(state);
+      return 0;
+    case NET_SOCKET_SO_SNDBUF:
+    case NET_SOCKET_SO_RCVBUF: {
+      if (length != sizeof(int32_t) || *(const int32_t *)value <= 0) {
+        irq_restore(state);
+        return NET_SOCKET_ERR_INVAL;
+      }
+      uint32_t size = (uint32_t)*(const int32_t *)value;
+      if (option == NET_SOCKET_SO_SNDBUF) {
+        socket->send_buffer_size = size;
+      } else {
+        socket->receive_buffer_size = size;
+      }
+      irq_restore(state);
+      return 0;
+    }
+    case NET_SOCKET_SO_LINGER: {
+      if (length != sizeof(net_socket_linger_t)) {
+        irq_restore(state);
+        return NET_SOCKET_ERR_INVAL;
+      }
+      const net_socket_linger_t *linger =
+          (const net_socket_linger_t *)value;
+      if (linger->on < 0 || linger->on > 1 || linger->seconds < 0) {
+        irq_restore(state);
+        return NET_SOCKET_ERR_INVAL;
+      }
+      socket->linger_enabled = linger->on != 0;
+      socket->linger_seconds = linger->seconds;
+      irq_restore(state);
+      return 0;
+    }
+    case NET_SOCKET_SO_SNDLOWAT:
+    case NET_SOCKET_SO_RCVLOWAT:
+      /* The fixed queue has a one-byte low-water mark. */
+      if (length != sizeof(int32_t) || *(const int32_t *)value <= 0) {
+        irq_restore(state);
+        return NET_SOCKET_ERR_INVAL;
+      }
+      irq_restore(state);
+      return 0;
+    case NET_SOCKET_SO_ACCEPTCONN:
+    case NET_SOCKET_SO_ERROR:
+    case NET_SOCKET_SO_TYPE:
+      irq_restore(state);
+      return NET_SOCKET_ERR_PROTOCOL;
+    default:
+      break;
+    }
+  }
+
+  if (level == NET_SOCKET_IPPROTO_TCP && option == NET_SOCKET_TCP_NODELAY) {
+    if (length != sizeof(int32_t) || socket->protocol != NET_SOCKET_PROTOCOL_TCP) {
+      irq_restore(state);
+      return NET_SOCKET_ERR_INVAL;
+    }
+    if (socket->pcb.tcp != NULL) {
+      if (*(const int32_t *)value != 0) {
+        tcp_nagle_disable(socket->pcb.tcp);
+      } else {
+        tcp_nagle_enable(socket->pcb.tcp);
+      }
+    }
+    irq_restore(state);
+    return 0;
+  }
+
+  if (level == NET_SOCKET_IPPROTO_IP) {
+    if (option == NET_SOCKET_IP_TOS && length == sizeof(int32_t)) {
+      socket->ip_tos = (uint8_t)*(const int32_t *)value;
+      irq_restore(state);
+      return 0;
+    }
+    if (option == NET_SOCKET_IP_MULTICAST_TTL &&
+        (length == sizeof(int32_t) || length == sizeof(uint8_t))) {
+      socket->multicast_ttl = length == sizeof(uint8_t)
+                                  ? *(const uint8_t *)value
+                                  : (uint8_t)*(const int32_t *)value;
+      irq_restore(state);
+      return 0;
+    }
+    if (option == NET_SOCKET_IP_MULTICAST_LOOP && length == sizeof(int32_t)) {
+      socket->multicast_loop = *(const int32_t *)value != 0;
+      irq_restore(state);
+      return 0;
+    }
+  }
+
+  irq_restore(state);
+  return NET_SOCKET_ERR_PROTOCOL;
+}
+
+static int net_socket_option_copy(void *value, uint32_t *length,
+                                  const void *source, uint32_t size) {
+  if (value == NULL || length == NULL || *length < size) {
+    return NET_SOCKET_ERR_INVAL;
+  }
+  memcpy(value, source, size);
+  *length = size;
+  return 0;
+}
+
+int net_socket_get_option(uint32_t owner_group, int handle, int level,
+                          int option, void *value, uint32_t *length) {
+  irq_state_t state = irq_save();
+  net_socket_system_init();
+  net_socket_t *socket = net_socket_find(owner_group, handle);
+  if (socket == NULL) {
+    irq_restore(state);
+    return NET_SOCKET_ERR_NOENT;
+  }
+  if (level == NET_SOCKET_SOL_SOCKET) {
+    uint32_t flag;
+    if (net_socket_option_flag(option, &flag)) {
+      int32_t enabled = (socket->option_flags & flag) != 0;
+      int result = net_socket_option_copy(value, length, &enabled,
+                                          sizeof(enabled));
+      irq_restore(state);
+      return result;
+    }
+    switch (option) {
+    case NET_SOCKET_SO_RCVTIMEO: {
+      net_socket_timeval_t time = {
+          (int64_t)(socket->receive_timeout_ticks / 100u),
+          (int64_t)((socket->receive_timeout_ticks % 100u) * 10000u)};
+      int result = net_socket_option_copy(value, length, &time, sizeof(time));
+      irq_restore(state);
+      return result;
+    }
+    case NET_SOCKET_SO_SNDTIMEO: {
+      net_socket_timeval_t time = {
+          (int64_t)(socket->send_timeout_ticks / 100u),
+          (int64_t)((socket->send_timeout_ticks % 100u) * 10000u)};
+      int result = net_socket_option_copy(value, length, &time, sizeof(time));
+      irq_restore(state);
+      return result;
+    }
+    case NET_SOCKET_SO_SNDBUF: {
+      int32_t size = (int32_t)socket->send_buffer_size;
+      int result = net_socket_option_copy(value, length, &size, sizeof(size));
+      irq_restore(state);
+      return result;
+    }
+    case NET_SOCKET_SO_RCVBUF: {
+      int32_t size = (int32_t)socket->receive_buffer_size;
+      int result = net_socket_option_copy(value, length, &size, sizeof(size));
+      irq_restore(state);
+      return result;
+    }
+    case NET_SOCKET_SO_SNDLOWAT:
+    case NET_SOCKET_SO_RCVLOWAT: {
+      int32_t lowat = 1;
+      int result = net_socket_option_copy(value, length, &lowat, sizeof(lowat));
+      irq_restore(state);
+      return result;
+    }
+    case NET_SOCKET_SO_LINGER: {
+      net_socket_linger_t linger = {socket->linger_enabled ? 1 : 0,
+                                    socket->linger_seconds};
+      int result = net_socket_option_copy(value, length, &linger,
+                                          sizeof(linger));
+      irq_restore(state);
+      return result;
+    }
+    case NET_SOCKET_SO_ACCEPTCONN: {
+      int32_t listening = socket->state == NET_SOCKET_LOCAL_LISTENING ||
+                          socket->state == NET_SOCKET_INET_TCP_LISTENING;
+      int result = net_socket_option_copy(value, length, &listening,
+                                          sizeof(listening));
+      irq_restore(state);
+      return result;
+    }
+    case NET_SOCKET_SO_ERROR: {
+      uint32_t error = socket->state == NET_SOCKET_INET_TCP_CONNECTING
+                           ? 115
+                           : socket->last_error;
+      int32_t result_value = (int32_t)error;
+      int result = net_socket_option_copy(value, length, &result_value,
+                                          sizeof(result_value));
+      if (result == 0 && error != 115) {
+        socket->last_error = 0;
+      }
+      irq_restore(state);
+      return result;
+    }
+    case NET_SOCKET_SO_TYPE: {
+      int32_t type = socket->type;
+      int result = net_socket_option_copy(value, length, &type, sizeof(type));
+      irq_restore(state);
+      return result;
+    }
+    default:
+      break;
+    }
+  }
+
+  if (level == NET_SOCKET_IPPROTO_TCP && option == NET_SOCKET_TCP_NODELAY) {
+    if (socket->protocol != NET_SOCKET_PROTOCOL_TCP) {
+      irq_restore(state);
+      return NET_SOCKET_ERR_INVAL;
+    }
+    int32_t enabled = socket->pcb.tcp != NULL &&
+                      tcp_nagle_disabled(socket->pcb.tcp);
+    int result = net_socket_option_copy(value, length, &enabled,
+                                        sizeof(enabled));
+    irq_restore(state);
+    return result;
+  }
+  if (level == NET_SOCKET_IPPROTO_IP) {
+    if (option == NET_SOCKET_IP_TOS) {
+      int32_t tos = socket->ip_tos;
+      int result = net_socket_option_copy(value, length, &tos, sizeof(tos));
+      irq_restore(state);
+      return result;
+    }
+    if (option == NET_SOCKET_IP_MULTICAST_TTL) {
+      int32_t ttl = socket->multicast_ttl;
+      int result = net_socket_option_copy(value, length, &ttl, sizeof(ttl));
+      irq_restore(state);
+      return result;
+    }
+    if (option == NET_SOCKET_IP_MULTICAST_LOOP) {
+      int32_t enabled = socket->multicast_loop;
+      int result = net_socket_option_copy(value, length, &enabled,
+                                          sizeof(enabled));
+      irq_restore(state);
+      return result;
+    }
+    if (option == NET_SOCKET_IP_MULTICAST_IF) {
+      uint32_t address = net_stack_ipv4();
+      int result = net_socket_option_copy(value, length, &address,
+                                          sizeof(address));
+      irq_restore(state);
+      return result;
+    }
+  }
+
+  irq_restore(state);
+  return NET_SOCKET_ERR_PROTOCOL;
+}
+
+int net_socket_shutdown(uint32_t owner_group, int handle, int how) {
+  if (how < 0 || how > 2) {
+    return NET_SOCKET_ERR_INVAL;
+  }
+  irq_state_t state = irq_save();
+  net_socket_system_init();
+  net_socket_t *socket = net_socket_find(owner_group, handle);
+  if (socket == NULL) {
+    irq_restore(state);
+    return NET_SOCKET_ERR_NOENT;
+  }
+  bool shut_read = how == 0 || how == 2;
+  bool shut_write = how == 1 || how == 2;
+  if (socket->protocol == NET_SOCKET_PROTOCOL_TCP && socket->pcb.tcp != NULL) {
+    err_t error = tcp_shutdown(socket->pcb.tcp, shut_read, shut_write);
+    if (error != ERR_OK && error != ERR_CONN) {
+      irq_restore(state);
+      return net_socket_lwip_error(error);
+    }
+    if (shut_write && shut_read) {
+      socket->pcb.tcp = NULL;
+      socket->state = NET_SOCKET_INET_TCP_FAILED;
+      socket->peer_closed = true;
+    }
+  }
+  if (shut_read) {
+    socket->shutdown_read = true;
+    net_socket_clear_packets(socket);
+    net_socket_waiter_wake(&socket->reader);
+  }
+  if (shut_write) {
+    socket->shutdown_write = true;
+    net_socket_waiter_wake(&socket->writer);
+    net_socket_t *peer = net_socket_local_peer(socket);
+    if (peer != NULL) {
+      peer->peer_closed = true;
+      net_socket_waiter_wake(&peer->reader);
+      net_socket_waiter_wake(&peer->writer);
+    }
+  }
+  irq_restore(state);
+  return 0;
+}
+
+int net_socket_pair(uint32_t owner_group, int domain, int type, int protocol,
+                    int handles[2]) {
+  if (handles == NULL || domain != NET_SOCKET_AF_LOCAL ||
+      type != NET_SOCKET_STREAM || protocol != 0) {
+    return NET_SOCKET_ERR_PROTOCOL;
+  }
+  irq_state_t state = irq_save();
+  net_socket_system_init();
+  net_socket_t *left = net_socket_reserve(owner_group);
+  net_socket_t *right = left == NULL ? NULL : net_socket_reserve(owner_group);
+  if (left == NULL || right == NULL) {
+    if (left != NULL) {
+      net_socket_dispose(left);
+    }
+    irq_restore(state);
+    return NET_SOCKET_ERR_NOMEM;
+  }
+  left->domain = NET_SOCKET_AF_LOCAL;
+  left->type = NET_SOCKET_STREAM;
+  left->state = NET_SOCKET_LOCAL_CONNECTED;
+  right->domain = NET_SOCKET_AF_LOCAL;
+  right->type = NET_SOCKET_STREAM;
+  right->state = NET_SOCKET_LOCAL_CONNECTED;
+  net_socket_address_init(&left->local, NET_SOCKET_AF_LOCAL);
+  net_socket_address_init(&right->local, NET_SOCKET_AF_LOCAL);
+  left->peer_slot = (uint8_t)(right - net_sockets);
+  left->peer_generation = right->generation;
+  right->peer_slot = (uint8_t)(left - net_sockets);
+  right->peer_generation = left->generation;
+  handles[0] = net_socket_handle(left);
+  handles[1] = net_socket_handle(right);
+  irq_restore(state);
+  return 0;
+}
+
+int net_socket_get_flags(uint32_t owner_group, int handle) {
+  irq_state_t state = irq_save();
+  net_socket_system_init();
+  net_socket_t *socket = net_socket_find(owner_group, handle);
+  if (socket == NULL) {
+    irq_restore(state);
+    return NET_SOCKET_ERR_NOENT;
+  }
+  int flags = 2; /* O_RDWR */
+  if (socket->nonblocking) {
+    flags |= 0x2000; /* O_NONBLOCK */
+  }
+  irq_restore(state);
+  return flags;
+}
+
+int net_socket_set_flags(uint32_t owner_group, int handle, int flags) {
+  if (flags & ~(O_ACCMODE | O_NONBLOCK)) {
+    return NET_SOCKET_ERR_INVAL;
+  }
+  irq_state_t state = irq_save();
+  net_socket_system_init();
+  net_socket_t *socket = net_socket_find(owner_group, handle);
+  if (socket == NULL) {
+    irq_restore(state);
+    return NET_SOCKET_ERR_NOENT;
+  }
+  socket->nonblocking = (flags & O_NONBLOCK) != 0;
+  irq_restore(state);
+  return 0;
+}
+
+int net_socket_bytes_available(uint32_t owner_group, int handle,
+                               uint32_t *bytes) {
+  if (bytes == NULL)
+    return NET_SOCKET_ERR_INVAL;
+  irq_state_t state = irq_save();
+  net_socket_system_init();
+  net_socket_t *socket = net_socket_find(owner_group, handle);
+  if (socket == NULL) {
+    irq_restore(state);
+    return NET_SOCKET_ERR_NOENT;
+  }
+  *bytes = socket->queued_bytes;
   irq_restore(state);
   return 0;
 }

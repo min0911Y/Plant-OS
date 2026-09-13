@@ -26,6 +26,7 @@ python3 scripts/test-x86_64.py --arch i386 --dynamic --memory 512
 | OpenGL、EGL 与 llvmpipe | x86_64 `--opengl --memory 3072 --timeout 600`，覆盖离屏、GLSL、上下文共享、并发场景及 glxgears 两帧像素和键盘事件；`--gears-workers N` 选择光栅线程，性能另用 `--gears-bench`，固定宿主与 QEMU 配置 |
 | GUI、输入、SDL、工具 | `--mouse`、`--console`、`--editor`、`--sdl`、x86_64 `--glfw`、`--terminal-load COUNT`、`--desktop-app`（`lite` 或 `nk`）、`--tools` |
 | 动态链接与全部应用装载 | `--dynamic`、`--all-apps`，见 [动态链接验证](dynamic-linking.md#验证) |
+| OpenJDK 启动与路径 | x86_64 附加 JDK 磁盘，验证 `java -version`、无参数启动和 `Startup.java`，见 [OpenJDK](openjdk.md) |
 | USB、PCI、AHCI | `--usb`、`--usb-hubs`、`--usb-irq`、`--usb-root-bus`、`--ahci --machine q35`；故障与模式组合见对应专题文档 |
 | APIC、SIMD 与 TLB 后端 | `--apic`、`--cpu`、`--simd`、`--tlb`，见 [多架构说明](multiarch.md) |
 

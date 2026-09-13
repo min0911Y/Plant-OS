@@ -1,5 +1,6 @@
 #include <ctype.h>
 #include <errno.h>
+#include <langinfo.h>
 #include <locale.h>
 #include <native_thread.h>
 #include <stdlib.h>
@@ -125,4 +126,11 @@ size_t strxfrm_l(char *destination, const char *source, size_t size,
 size_t strftime_l(char *s, size_t size, const char *format,
                   const struct tm *time, locale_t locale) {
   return strftime(s, size, format, time);
+}
+
+char *nl_langinfo(nl_item item) {
+  if (item == CODESET)
+    return "UTF-8";
+  errno = EINVAL;
+  return "";
 }

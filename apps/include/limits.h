@@ -25,6 +25,8 @@
 * required for the NUL. TODO: Test?
 */
 #define PATH_MAX (259)
+#define OPEN_MAX 1024
+#define NAME_MAX 255
 /*
 * Characteristics of the char data type.
 *

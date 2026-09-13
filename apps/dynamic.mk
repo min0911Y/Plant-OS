@@ -40,8 +40,12 @@ DYN_SOURCES := $(filter-out libp/entry.c libp/dso.c libp/tinyalloc.c,$(wildcard 
     log2f_data.c logb.c rint.c round.c expm1.c ilogb.c __expo2.c exp2f.c \
     fma.c fmaf.c fmax.c fmaxf.c fmin.c fminf.c frexpf.c ldexpf.c llrint.c \
     lrint.c lrintf.c nextafterf.c rintf.c trunc.c truncf.c sin.c cos.c)
+DYN_ZLIB_SOURCES := $(addprefix zlib/,adler32.c compress.c crc32.c deflate.c \
+  gzclose.c gzlib.c gzread.c gzwrite.c infback.c inffast.c inflate.c \
+  inftrees.c trees.c uncompr.c zutil.c)
 DYN_OBJECTS := $(patsubst %.c,$(DYN_BUILD)/%.o,$(DYN_SOURCES)) \
   $(DYN_BUILD)/libp/arch/$(ARCH)/syscall.obj
+DYN_ZLIB_OBJECTS := $(patsubst %.c,$(DYN_BUILD)/%.o,$(DYN_ZLIB_SOURCES))
 DYN_BUILTINS := $(if $(filter i386,$(ARCH)),$(DYN_BUILD)/libtcc1.a)
 DYN_DSO := $(DYN_BUILD)/libp/dso.o
 CXX_BUILD := $(DYN_OUT)/mesa/libcxx
@@ -58,7 +62,8 @@ $(DYN_BUILD)/libp/arch/$(ARCH)/syscall.obj: libp/arch/syscalls.inc
 .PHONY: dynamic
 DYN_PROGRAMS := dynmain dyncopy dynbad dynempty dyntest
 DYN_TARGETS := $(addprefix $(DYN_OUT)/,$(addsuffix .bin,$(DYN_PROGRAMS)))
-dynamic: $(DYN_LIB)/ld.so $(DYN_LIB)/libp.so $(DYN_LIB)/libcpp.so $(DYN_TARGETS)
+dynamic: $(DYN_LIB)/ld.so $(DYN_LIB)/libp.so $(DYN_LIB)/libcpp.so \
+  $(DYN_LIB)/libm.so.6 $(DYN_LIB)/libz.so.1 $(DYN_TARGETS)
 
 $(DYN_BUILD)/%.o: %.c dynamic.mk
 	@mkdir -p $(dir $@)
@@ -83,6 +88,12 @@ $(DYN_LIB)/libp.so: $(DYN_BUILD)/libp.a $(DYN_BUILTINS) $(DYN_DSO)
 $(DYN_LIB)/libcpp.so: $(CXX_CONFIG) $(DYN_LIB)/libp.so $(DYN_DSO)
 	ld $(DYN_LDFLAGS) -shared --no-undefined --hash-style=both -soname libcpp.so -o $@ \
 	  $(DYN_DSO) --whole-archive $(CXX_ARCHIVE) --no-whole-archive $(DYN_LIB)/libp.so
+$(DYN_LIB)/libz.so.1: $(DYN_ZLIB_OBJECTS) $(DYN_LIB)/libp.so $(DYN_DSO)
+	ld $(DYN_LDFLAGS) -shared --no-undefined --hash-style=both -soname libz.so.1 -o $@ \
+	  $(filter %.o,$^) $(DYN_LIB)/libp.so
+$(DYN_LIB)/libm.so.6: $(DYN_BUILD)/libp.a $(DYN_BUILTINS) $(DYN_DSO)
+	ld $(DYN_LDFLAGS) -shared --no-undefined --hash-style=both -soname libm.so.6 -o $@ \
+	  --whole-archive $(DYN_BUILD)/libp.a --no-whole-archive $(DYN_BUILTINS) $(DYN_DSO)
 $(DYN_LIB)/ld.so: $(DYN_BUILD)/ldso/object.o $(DYN_BUILD)/ldso/link.o $(DYN_BUILD)/libp.a ldso/static.ld $(DYN_BUILTINS) $(DYN_DSO)
 	@mkdir -p $(dir $@)
 	ld $(DYN_LDFLAGS) -static --gc-sections --defsym=USER_BASE=$(DYN_BASE) -T ldso/static.ld -o $@ \

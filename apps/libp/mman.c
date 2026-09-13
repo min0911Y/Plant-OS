@@ -83,11 +83,31 @@ int munmap(void *address, size_t length) {
 int madvise(void *address, size_t length, int advice) {
   size_t size = mapping_size(length);
   if (!size || ((uintptr_t)address & (VM_PAGE_SIZE - 1)) ||
-      advice != MADV_DONTNEED) {
+      (advice != MADV_DONTNEED && advice != MADV_WILLNEED)) {
     errno = EINVAL;
     return -1;
   }
+  if (advice == MADV_WILLNEED) {
+    return 0;
+  }
   return vm_discard(address, size);
+}
+
+int mincore(void *address, size_t length, unsigned char *vec) {
+  if (address == NULL || length == 0 || vec == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+  uintptr_t offset = (uintptr_t)address & (VM_PAGE_SIZE - 1);
+  if (length > SIZE_MAX - offset - (VM_PAGE_SIZE - 1)) {
+    errno = EOVERFLOW;
+    return -1;
+  }
+  size_t pages = (length + offset + VM_PAGE_SIZE - 1) / VM_PAGE_SIZE;
+  for (size_t index = 0; index < pages; index++) {
+    vec[index] = 1;
+  }
+  return 0;
 }
 
 int msync(void *address, size_t length, int flags) {

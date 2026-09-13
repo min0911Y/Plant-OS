@@ -56,6 +56,9 @@ void init() {
     if (!vfs_mount_disk(BOOT_INITRAMFS_DRIVE, BOOT_INITRAMFS_DRIVE)) {
       Panic_K("unable to mount initramfs");
     }
+    /* Keep the RAM-backed system volume authoritative, but expose attached
+     * block devices as ordinary drive-letter volumes as well. */
+    vfs_mount_all_disks();
     system_drive = BOOT_INITRAMFS_DRIVE;
   } else {
     vfs_mount_all_disks();

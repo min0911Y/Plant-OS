@@ -112,6 +112,14 @@ int user_thread_set_pointer(const native_thread_request_t *request) {
   return 0;
 }
 
+int user_thread_get_stack(native_thread_request_t *request) {
+  thread_region_t stack = current_task()->user_stack;
+  if (!stack.size)
+    return -2;
+  request->stack = stack;
+  return 0;
+}
+
 void user_thread_release(mtask *task) {
   if (!task->address_space || (!task->user_tls.size && !task->user_stack.size))
     return;

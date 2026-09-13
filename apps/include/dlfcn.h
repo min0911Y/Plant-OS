@@ -5,7 +5,9 @@
 #define RTLD_NOW 2
 #define RTLD_LOCAL 0
 #define RTLD_GLOBAL 0x100
+#define RTLD_NOLOAD 0x0004
 #define RTLD_DEFAULT ((void *)0)
+#define RTLD_NEXT ((void *)-1L)
 
 typedef struct native_dl_info {
   const char *dli_fname;

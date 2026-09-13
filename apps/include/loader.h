@@ -23,17 +23,18 @@ typedef struct {
   int (*symbol)(const char *name, void **address);
   int (*address_info)(const void *address, struct native_dl_info *information);
   const char *executable_path;
+  void *(*load)(const char *path, int flags);
 } runtime_linker_t;
 
 #ifdef __cplusplus
 static_assert(sizeof(loader_start_t) == 8 + 2 * sizeof(void *),
               "loader startup ABI");
-static_assert(sizeof(runtime_linker_t) == 6 * sizeof(void *),
+static_assert(sizeof(runtime_linker_t) == 7 * sizeof(void *),
               "runtime linker ABI");
 #else
 _Static_assert(sizeof(loader_start_t) == 8 + 2 * sizeof(void *),
                "loader startup ABI");
-_Static_assert(sizeof(runtime_linker_t) == 6 * sizeof(void *),
+_Static_assert(sizeof(runtime_linker_t) == 7 * sizeof(void *),
                "runtime linker ABI");
 #endif
 

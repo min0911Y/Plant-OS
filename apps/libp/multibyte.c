@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <wchar.h>
 
@@ -108,4 +109,53 @@ int wctomb(char *text, wchar_t wide) {
     return 0;
   size_t result = wcrtomb(text, wide, NULL);
   return result == (size_t)-1 ? -1 : (int)result;
+}
+
+size_t mbstowcs(wchar_t *wide, const char *text, size_t size) {
+  mbstate_t state = {0};
+  size_t count = 0;
+  while (*text) {
+    wchar_t value;
+    size_t length = mbrtowc(&value, text, (size_t)-1, &state);
+    if (length == (size_t)-1 || length == (size_t)-2)
+      return (size_t)-1;
+    if (wide) {
+      if (count == size)
+        return count;
+      wide[count] = value;
+    }
+    count++;
+    text += length;
+  }
+  if (wide && count < size)
+    wide[count] = 0;
+  return count;
+}
+
+size_t wcstombs(char *text, const wchar_t *wide, size_t size) {
+  mbstate_t state = {0};
+  size_t count = 0;
+  while (*wide) {
+    char encoded[MB_LEN_MAX];
+    size_t length = wcrtomb(encoded, *wide++, &state);
+    if (length == (size_t)-1)
+      return (size_t)-1;
+    if (text) {
+      if (length > size - count)
+        return count;
+      for (size_t i = 0; i < length; i++)
+        text[count + i] = encoded[i];
+    }
+    count += length;
+  }
+  if (text && count < size)
+    text[count] = '\0';
+  return count;
+}
+
+size_t wcslen(const wchar_t *text) {
+  const wchar_t *end = text;
+  while (*end)
+    end++;
+  return end - text;
 }

@@ -1,0 +1,12 @@
+--- a/src/hotspot/os_cpu/bsd_zero/os_bsd_zero.cpp
++++ b/src/hotspot/os_cpu/bsd_zero/os_bsd_zero.cpp
+@@ -63,8 +63,7 @@
+ #endif
+ 
+ address os::current_stack_pointer() {
+-  address dummy = (address) &dummy;
+-  return dummy;
++  return (address)__builtin_frame_address(0);
+ }
+ 
+ frame os::get_sender_for_C_frame(frame* fr) {

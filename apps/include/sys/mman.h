@@ -16,6 +16,7 @@
 #define MS_ASYNC 1
 #define MS_INVALIDATE 2
 #define MS_SYNC 4
+#define MADV_WILLNEED 3
 #define MADV_DONTNEED 4
 #define MAP_FAILED ((void *)-1)
 /* Partial POSIX mapping interface used by the HotSpot port and the runtime.
@@ -40,6 +41,7 @@ void *mmap(void *address, size_t length, int protection, int flags,
            int descriptor, off_t offset);
 int msync(void *address, size_t length, int flags);
 int madvise(void *address, size_t length, int advice);
+int mincore(void *address, size_t length, unsigned char *vec);
 int munmap(void *address, size_t length);
 int mprotect(void *address, size_t length, int protection);
 #ifdef __cplusplus

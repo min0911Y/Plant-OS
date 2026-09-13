@@ -5,8 +5,10 @@
 #include <rand.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <sys/time.h>
 #include <time.h>
+#include <wchar.h>
 
 /* The RTC stores UTC; the system's local timezone is UTC+08:00. */
 #define LOCAL_OFFSET_SECONDS (8 * 60 * 60)
@@ -62,11 +64,19 @@ time_t time(time_t *timer) {
 }
 
 struct tm *gmtime_r(const time_t *timer, struct tm *result) {
-  return breakdown(*timer, result);
+  if (!breakdown(*timer, result))
+    return NULL;
+  result->tm_gmtoff = 0;
+  result->tm_zone = "UTC";
+  return result;
 }
 
 struct tm *localtime_r(const time_t *timer, struct tm *result) {
-  return breakdown((int64_t)*timer + LOCAL_OFFSET_SECONDS, result);
+  if (!breakdown((int64_t)*timer + LOCAL_OFFSET_SECONDS, result))
+    return NULL;
+  result->tm_gmtoff = LOCAL_OFFSET_SECONDS;
+  result->tm_zone = "CST";
+  return result;
 }
 
 struct tm *gmtime(const time_t *timer) {
@@ -95,6 +105,8 @@ static time_t make_time(struct tm *tm, int offset) {
   time_t result = seconds;
   if (!breakdown(seconds + offset, tm))
     return (time_t)-1;
+  tm->tm_gmtoff = offset;
+  tm->tm_zone = offset ? "CST" : "UTC";
   return result;
 }
 time_t mktime(struct tm *tm) { return make_time(tm, LOCAL_OFFSET_SECONDS); }
@@ -213,6 +225,39 @@ int nanosleep(const struct timespec *duration, struct timespec *remaining) {
   return -1;
 }
 
+size_t wcsftime(wchar_t *text, size_t size, const wchar_t *format,
+                const struct tm *time) {
+  if (!size)
+    return 0;
+  size_t format_size = wcstombs(NULL, format, 0);
+  if (format_size == (size_t)-1 || format_size == SIZE_MAX)
+    return 0;
+  char *narrow_format = malloc(format_size + 1);
+  if (!narrow_format)
+    return 0;
+  wcstombs(narrow_format, format, format_size + 1);
+
+  if (size > SIZE_MAX / MB_LEN_MAX) {
+    free(narrow_format);
+    return 0;
+  }
+  char *narrow_text = malloc(size * MB_LEN_MAX);
+  if (!narrow_text) {
+    free(narrow_format);
+    return 0;
+  }
+  size_t result = strftime(narrow_text, size * MB_LEN_MAX, narrow_format, time);
+  if (result) {
+    size_t wide_size = mbstowcs(NULL, narrow_text, 0);
+    result = wide_size == (size_t)-1 || wide_size >= size
+                 ? 0
+                 : mbstowcs(text, narrow_text, size);
+  }
+  free(narrow_text);
+  free(narrow_format);
+  return result == (size_t)-1 ? 0 : result;
+}
+
 char *asctime_r(const struct tm *value, char *buffer) {
   static const char *const days[] = {"Sun", "Mon", "Tue", "Wed",
                                      "Thu", "Fri", "Sat"};
@@ -245,4 +290,26 @@ char *ctime_r(const time_t *value, char *buffer) {
 char *ctime(const time_t *value) {
   static char buffer[26];
   return ctime_r(value, buffer);
+}
+
+void tzset(void) {}
+
+int setitimer(int which, const struct itimerval *value,
+              struct itimerval *old_value) {
+  (void)which;
+  (void)value;
+  if (old_value != NULL) {
+    *old_value = (struct itimerval){0};
+  }
+  errno = ENOTSUP;
+  return -1;
+}
+
+int getitimer(int which, struct itimerval *value) {
+  if (which < ITIMER_REAL || which > ITIMER_PROF || value == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+  *value = (struct itimerval){0};
+  return 0;
 }

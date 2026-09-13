@@ -44,6 +44,7 @@ void *memset(void *dest, int c, size_t n);
 void *memcpy(void *dest, const void *src, size_t n);
 void *mempcpy(void *dest, const void *src, size_t n);
 void *memmove(void *_d, const void *_s, size_t _n);
+void bzero(void *destination, size_t size);
 char *strdup(const char *s);
 char *strndup(const char *s, size_t limit);
 char *strsep(char **string, const char *separators);

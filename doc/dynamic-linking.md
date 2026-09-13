@@ -20,8 +20,10 @@ Plant OS 的 ELF 动态链接器是独立程序 `/lib/ld.so`，源文件位于
 `ld.so` 本身是无 `PT_INTERP`、无 `PT_DYNAMIC` 的静态 ELF，不需要自举
 重定位或另一份链接器。它使用独立匿名映射保存元数据，不初始化或占用应用
 的 malloc arena。随后由它装载 PIE 和依赖库，完成重定位、设置页面权限，
-最后调用程序的 `Main(runtime_linker_t *)`。`libp` 先建立当前线程的 TLS，
-再初始化分配器、stdio 和命令行，随后调用链接器的初始化钩子；普通 `exit()` 调用析构钩子。
+最后按入口协议调用程序：Plant 应用使用 `Main(runtime_linker_t *)`，标准
+`main(int, char **)` 程序使用解析后的命令行。后者会先由 loader 初始化
+`libp` 的 TLS、分配器、stdio 和构造器，以便运行 OpenJDK 等标准入口程序。
+普通 `exit()` 调用析构钩子。
 内核不搜索共享库、不解释动态符号，也不执行用户 ELF 重定位。
 
 `init`、shell 和普通应用使用同一启动路径。内核不再缓存静态 shell 镜像或维护
@@ -50,6 +52,8 @@ Plant OS 的 ELF 动态链接器是独立程序 `/lib/ld.so`，源文件位于
 - `DT_RUNPATH` 的直接依赖搜索、无 RUNPATH 时沿装载祖先搜索 `DT_RPATH`、
   `$ORIGIN`/`${ORIGIN}`，最后搜索系统解释器所在的 `lib` 目录。包含路径分隔符的 NEEDED 项直接
   按路径查找；空搜索项表示当前目录。
+- GNU 符号版本段（`DT_VERSYM`、`DT_VERDEF`、`DT_VERNEED`）按普通符号名解析并忽略版本约束；
+  Plant ABI 没有独立的符号版本命名空间。
 - 主程序 PREINIT_ARRAY、依赖先于使用者的 INIT/INIT_ARRAY，逆序
   FINI_ARRAY/FINI。图遍历使用显式栈，循环依赖不会无限递归，初始化一次。
 - 重定位完成后应用 LOAD 权限及 GNU RELRO。x86_64 同时执行写保护和 NX；
@@ -58,9 +62,10 @@ Plant OS 的 ELF 动态链接器是独立程序 `/lib/ld.so`，源文件位于
   校验基于实际 LOAD 页面，不能误拒绝 GNU ld 生成的这种合法布局。
 
 当前仅接收 PIE 动态主程序，普通固定地址 `ET_EXEC` 主程序仍采用静态链接。
-支持 `dlopen(NULL)`、`RTLD_DEFAULT`、`dlsym`、`dladdr` 和对应的 `dlerror`/`dlclose`；
-查找 TLS 符号返回当前线程的地址。非 NULL 路径的 `dlopen`、IFUNC、符号版本、
-RELR、`LD_PRELOAD` 和 `LD_LIBRARY_PATH` 尚未实现。不支持的 ELF 元数据会明确失败，
+支持按路径装载无 TLS 的新对象、`dlopen(NULL)`、`RTLD_DEFAULT`、`dlsym`、
+`dladdr` 和对应的 `dlerror`/`dlclose`；句柄查找使用全局符号范围，动态对象
+不会卸载。带 `PT_TLS` 的对象必须在初始线程建立前预加载。IFUNC、RELR、
+`LD_PRELOAD` 和 `LD_LIBRARY_PATH` 尚未实现。不支持的 ELF 元数据会明确失败，
 不会假装已完成链接。用户态装载错误打印 `ld.so:` 诊断并退出 `127`；
 内核无法打开解释器或解析启动 ELF 时返回 `-1`。
 
@@ -100,6 +105,22 @@ PIC 的 GOT 寄存器及其他 callee-saved 寄存器。运行库的有符号 64
 也包含动态运行库。镜像中的 `apps.lst` 由 `mshortname` 记录每个应用的真实
 FAT 路径，包括 `/games/doom.bin` 与长文件名别名，供逐项装载验证使用；
 安装清单继续从镜像内容自动生成。
+
+x86_64 LiveCD 可将 OpenJDK 放入独立 FAT32 磁盘，避免扩大 initramfs：
+
+```sh
+PLANT_OPENJDK_DIR=apps/out/x86_64/openjdk/configure-probe-9/images/jdk \
+  scripts/build-livecd.sh kernel/plant-os-x86_64.iso x86_64
+```
+
+脚本会在同目录生成 `kernel/plant-os-x86_64-jdk.img`（可用
+`PLANT_OPENJDK_DISK` 改名），替换宿主 glibc 的 `libm.so.6`/`libz.so.1`，
+并将 JDK 启动器的解释器改为 `/lib/ld.so`。内核启动时保留 `R:` initramfs
+作为系统盘，同时挂载附加块设备；上述示例中的 JDK 盘通常分配为 `C:`，可用
+`C:/java/bin/java` 启动。
+
+OpenJDK 的模块化目录布局、带盘符的 Java 路径列表和已有移植构建的更新步骤见
+[OpenJDK](openjdk.md)。
 
 i386 的 `sdk` 目标额外生成 TCC 使用的 `libp.a`、`libcpps.a`、`libabi.a`、
 `crti.obj`，以及内核使用的独立非 PIC `libtcc1.a`；这些是编译器 SDK 归档，
@@ -175,10 +196,11 @@ EOF 边界、msync/fsync、部分取消映射、close/exec/unlink 生命周期�
 TLS 使用 x86 ELF variant II：模块存储位于 TCB 前方，TCB 包含自身指针、模块
 地址表和原生线程运行时。x86_64 经 FS base 访问，i386 使用每 CPU 的 GS 描述符。
 内核在线程切换和用户返回路径中保存、恢复线程指针；`__tls_get_addr` 从当前
-TCB 查找模块。所有依赖在进入 main 前装载，没有固定大小的动态 TLS 余量。
+TCB 查找模块。带 TLS 的依赖在进入 main 前装载；晚加载对象必须没有 `PT_TLS`，
+因此不需要预留固定大小的动态 TLS 余量。
 
-`runtime_linker_t` 统一提供初始化/析构、TLS 分配、符号与地址查询，以及可执行
-文件的规范路径。每个 ELF 对象链接独立的 hidden `__dso_handle`。C++ 全局对象、
+`runtime_linker_t` 统一提供初始化/析构、TLS 分配、符号与地址查询、按路径装载，
+以及可执行文件的规范路径。每个 ELF 对象链接独立的 hidden `__dso_handle`。C++ 全局对象、
 局部静态对象和 thread_local 析构使用同一套原生运行库。
 
 线程创建、join/detach、栈和 TLS 映射的托管由原生 syscall `0x68` 完成；

@@ -15,4 +15,10 @@ typedef int64_t blkcnt_t;
 typedef long blksize_t, suseconds_t;
 typedef unsigned useconds_t;
 
+/* BSD network headers expose these historical aliases through sys/types.h. */
+typedef unsigned char u_char;
+typedef unsigned short u_short;
+typedef unsigned long u_long;
+typedef char *caddr_t;
+
 #endif

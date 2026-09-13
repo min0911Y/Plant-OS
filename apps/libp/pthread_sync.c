@@ -1,12 +1,11 @@
+#include "time_internal.h"
+
 #include <errno.h>
 #include <futex.h>
 #include <limits.h>
 #include <pthread.h>
 #include <string.h>
 #include <syscall.h>
-
-int runtime_deadline(clockid_t clock, const struct timespec *time,
-                     uint64_t *deadline);
 
 int pthread_mutexattr_init(pthread_mutexattr_t *attributes) {
   *attributes = (pthread_mutexattr_t){PTHREAD_MUTEX_NORMAL};

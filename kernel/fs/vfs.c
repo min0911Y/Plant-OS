@@ -1,4 +1,5 @@
 #include <dos.h>
+#include <fcntl.h>
 #include <irq.h>
 #include <limits.h>
 #include <stdint.h>
@@ -1368,39 +1369,41 @@ int vfs_close(vfs_handle_t *handle) {
   return VFS_OK;
 }
 
-int vfs_read(vfs_handle_t *handle, void *buffer, uint32_t length) {
+static int vfs_read_at(vfs_handle_t *handle, void *buffer, uint32_t length,
+                       uint32_t *offset) {
   if (handle == NULL || (length != 0 && buffer == NULL) ||
       (handle->flags & VFS_OPEN_READ) == 0) {
     return VFS_ERROR_BAD_DESCRIPTOR;
   }
   if (handle->dentry->node.type != VFS_NODE_FILE)
     return VFS_ERROR_IS_DIRECTORY;
-  if (length == 0 || handle->offset >= handle->dentry->node.size) {
-    return 0;
-  }
-  uint32_t available = handle->dentry->node.size - handle->offset;
-  if (length > available) {
-    length = available;
-  }
   struct vfs_mount *mount = handle->dentry->mount;
   lock(&mount->lock);
   if (vfs_mount_status(mount, VFS_OK) < 0) {
     unlock(&mount->lock);
     return VFS_ERROR_IO;
   }
+  if (length == 0 || *offset >= handle->dentry->node.size) {
+    unlock(&mount->lock);
+    return 0;
+  }
+  uint32_t available = handle->dentry->node.size - *offset;
+  if (length > available) {
+    length = available;
+  }
   if (length >= VFS_CACHE_BULK_READ_SIZE &&
       !vfs_cache_mapped(mount, &handle->dentry->node.id)) {
-    uint32_t read_offset = handle->offset;
+    uint32_t read_offset = *offset;
     if (vfs_cache_copy(handle->dentry, read_offset, buffer, length)) {
-      handle->offset += length;
+      *offset += length;
       unlock(&mount->lock);
       return length;
     }
     int read = vfs_mount_status(
         mount, mount->filesystem->read(mount, &handle->dentry->node,
-                                       handle->offset, buffer, length));
+                                       *offset, buffer, length));
     if (read > 0 && (uint32_t)read <= length) {
-      handle->offset += (uint32_t)read;
+      *offset += (uint32_t)read;
       vfs_cache_store_read(handle->dentry, read_offset, buffer,
                            (uint32_t)read);
     } else if (read > 0) {
@@ -1411,8 +1414,8 @@ int vfs_read(vfs_handle_t *handle, void *buffer, uint32_t length) {
   }
   uint32_t completed = 0;
   while (completed < length) {
-    uint32_t page_index = handle->offset / VFS_CACHE_PAGE_SIZE;
-    uint32_t page_offset = handle->offset % VFS_CACHE_PAGE_SIZE;
+    uint32_t page_index = *offset / VFS_CACHE_PAGE_SIZE;
+    uint32_t page_offset = *offset % VFS_CACHE_PAGE_SIZE;
     struct vfs_cache_page *page =
         vfs_cache_find(mount, &handle->dentry->node.id, page_index);
     if (page == NULL) {
@@ -1428,10 +1431,21 @@ int vfs_read(vfs_handle_t *handle, void *buffer, uint32_t length) {
     }
     memcpy((uint8_t *)buffer + completed, page->data + page_offset, chunk);
     completed += chunk;
-    handle->offset += chunk;
+    *offset += chunk;
   }
   unlock(&mount->lock);
   return completed;
+}
+
+int vfs_read(vfs_handle_t *handle, void *buffer, uint32_t length) {
+  if (handle == NULL)
+    return VFS_ERROR_BAD_DESCRIPTOR;
+  return vfs_read_at(handle, buffer, length, &handle->offset);
+}
+
+int vfs_pread(vfs_handle_t *handle, void *buffer, uint32_t length,
+              uint32_t offset) {
+  return vfs_read_at(handle, buffer, length, &offset);
 }
 
 int vfs_write(vfs_handle_t *handle, const void *buffer, uint32_t length) {
@@ -1782,6 +1796,21 @@ static vfs_handle_t *vfs_fd_get(vfs_context_t *context, int descriptor) {
   return context->descriptors.entries[descriptor];
 }
 
+int vfs_context_fchdir(vfs_context_t *context, int descriptor) {
+  vfs_handle_t *handle = vfs_fd_get(context, descriptor);
+  if (handle == NULL) {
+    return VFS_ERROR_BAD_DESCRIPTOR;
+  }
+  if (handle->dentry->node.type != VFS_NODE_DIRECTORY) {
+    return VFS_ERROR_NOT_DIRECTORY;
+  }
+  struct vfs_dentry *replacement = vfs_dentry_retain(handle->dentry);
+  struct vfs_dentry *previous = context->cwd;
+  context->cwd = replacement;
+  vfs_dentry_release(previous);
+  return VFS_OK;
+}
+
 int vfs_fd_open(vfs_context_t *context, const char *path, uint32_t flags) {
   if (context == NULL) {
     return VFS_ERROR_INVALID;
@@ -1826,11 +1855,64 @@ int vfs_fd_close(vfs_context_t *context, int descriptor) {
   return vfs_close(handle);
 }
 
+static int vfs_handle_status_flags(const vfs_handle_t *handle) {
+  int flags = (handle->flags & VFS_OPEN_WRITE) == 0
+                  ? O_RDONLY
+                  : (handle->flags & VFS_OPEN_READ) == 0 ? O_WRONLY : O_RDWR;
+  if (handle->flags & VFS_OPEN_APPEND)
+    flags |= O_APPEND;
+  if (handle->flags & VFS_OPEN_NONBLOCK)
+    flags |= O_NONBLOCK;
+  return flags;
+}
+
+int vfs_fd_fcntl(vfs_context_t *context, int descriptor, int command,
+                 uintptr_t argument) {
+  vfs_handle_t *handle = vfs_fd_get(context, descriptor);
+  if (handle == NULL)
+    return VFS_ERROR_BAD_DESCRIPTOR;
+
+  switch (command) {
+  case F_GETFL:
+    return vfs_handle_status_flags(handle);
+  case F_SETFL:
+    handle->flags &= ~(VFS_OPEN_APPEND | VFS_OPEN_NONBLOCK);
+    if (argument & O_APPEND)
+      handle->flags |= VFS_OPEN_APPEND;
+    if (argument & O_NONBLOCK)
+      handle->flags |= VFS_OPEN_NONBLOCK;
+    return VFS_OK;
+  case F_GETFD:
+    return (handle->flags & VFS_OPEN_CLOEXEC) != 0 ? FD_CLOEXEC : 0;
+  case F_SETFD:
+    if (argument & ~((uintptr_t)FD_CLOEXEC))
+      return VFS_ERROR_INVALID;
+    if (argument & FD_CLOEXEC)
+      handle->flags |= VFS_OPEN_CLOEXEC;
+    else
+      handle->flags &= ~VFS_OPEN_CLOEXEC;
+    return VFS_OK;
+  case F_GETLK:
+  case F_SETLK:
+  case F_SETLKW:
+    return VFS_ERROR_NOT_SUPPORTED;
+  default:
+    return VFS_ERROR_INVALID;
+  }
+}
+
 int vfs_fd_read(vfs_context_t *context, int descriptor, void *buffer,
                 uint32_t length) {
   vfs_handle_t *handle = vfs_fd_get(context, descriptor);
   return handle == NULL ? VFS_ERROR_BAD_DESCRIPTOR
                         : vfs_read(handle, buffer, length);
+}
+
+int vfs_fd_pread(vfs_context_t *context, int descriptor, void *buffer,
+                 uint32_t length, uint32_t offset) {
+  vfs_handle_t *handle = vfs_fd_get(context, descriptor);
+  return handle == NULL ? VFS_ERROR_BAD_DESCRIPTOR
+                        : vfs_pread(handle, buffer, length, offset);
 }
 
 int vfs_fd_write(vfs_context_t *context, int descriptor, const void *buffer,

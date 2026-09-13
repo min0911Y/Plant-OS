@@ -1,0 +1,42 @@
+--- a/src/java.base/unix/classes/java/io/UnixFileSystem.java
++++ b/src/java.base/unix/classes/java/io/UnixFileSystem.java
+@@ -61,6 +61,14 @@
+         return colon;
+     }
+ 
++    private boolean isDrivePath(String path, int offset) {
++        if (colon != ';' || path.length() < offset + 2 || path.charAt(offset + 1) != ':') {
++            return false;
++        }
++        char drive = path.charAt(offset);
++        return (drive >= 'A' && drive <= 'Z') || (drive >= 'a' && drive <= 'z');
++    }
++
+     /* A normal Unix pathname contains no duplicate slashes and does not end
+        with a slash.  It may be the empty string. */
+ 
+@@ -92,6 +100,10 @@
+        This way we iterate through the whole pathname string only once. */
+     @Override
+     public String normalize(String pathname) {
++        // File URLs encode a drive path as /C:/..., while VFS expects C:/....
++        if (pathname.startsWith("/") && isDrivePath(pathname, 1)) {
++            pathname = pathname.substring(1);
++        }
+         int doubleSlash = pathname.indexOf("//");
+         if (doubleSlash >= 0) {
+             return normalize(pathname, doubleSlash);
+@@ -104,11 +116,13 @@
+ 
+     @Override
+     public int prefixLength(String pathname) {
++        if (isDrivePath(pathname, 0)) return 2;
+         return pathname.startsWith("/") ? 1 : 0;
+     }
+ 
+     @Override
+     public String resolve(String parent, String child) {
++        if (isDrivePath(child, 0)) return child;
+         if (child.isEmpty()) return parent;
+         if (child.charAt(0) == '/') {
+             if (parent.equals("/")) return child;

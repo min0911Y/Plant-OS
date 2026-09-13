@@ -167,7 +167,10 @@ static void dynamic_parse(object_t *object, const Elf_Phdr *segment) {
     case DT_VERDEFNUM:
     case DT_VERNEED:
     case DT_VERNEEDNUM:
-      fail(object->path, "symbol versioning is not supported");
+      /* Plant's ABI resolves symbols by name and has no version namespace.
+       * Ignore GNU version metadata while retaining the ordinary symbol
+       * table and relocation information. */
+      continue;
     case DT_RELR:
     case DT_RELRSZ:
     case DT_RELRENT:
@@ -175,7 +178,7 @@ static void dynamic_parse(object_t *object, const Elf_Phdr *segment) {
     case DT_TEXTREL:
       fail(object->path, "text relocations are not supported");
     case DT_FLAGS_1:
-      if (value & ~(DF_1_NOW | DF_1_PIE))
+      if (value & ~(DF_1_NOW | DF_1_ORIGIN | DF_1_PIE))
         fail(object->path, "unsupported dynamic flags");
       continue;
     case DT_RELCOUNT:
@@ -451,6 +454,10 @@ static object_t *dependency_open(object_t *parent, const char *path) {
   return object_load(fd, path, parent);
 }
 
+object_t *object_open_path(object_t *parent, const char *path) {
+  return dependency_open(parent, path);
+}
+
 static object_t *search_path(object_t *parent, object_t *origin,
                              const char *paths, const char *name) {
   const char *slash = strrchr(origin->path, '/');
@@ -502,6 +509,11 @@ static object_t *search_path(object_t *parent, object_t *origin,
   return NULL;
 }
 
+object_t *object_search_path(object_t *parent, const char *paths,
+                             const char *name) {
+  return search_path(parent, parent, paths, name);
+}
+
 object_t *object_dependency(object_t *parent, const char *name) {
   if (!*name)
     fail(parent->path, "empty shared library name");
@@ -533,4 +545,16 @@ object_t *object_dependency(object_t *parent, const char *name) {
   if (!result)
     fail(name, "shared library not found");
   return result;
+}
+
+void object_resolve_dependencies(object_t *first) {
+  for (object_t *object = first; object; object = object->next) {
+    size_t needed = 0;
+    for (size_t i = 0; i < object->dynamic_count; i++) {
+      const Elf_Dyn *d = object->dynamic + i;
+      if (d->d_tag == DT_NEEDED)
+        object->dependencies[needed++] =
+            object_dependency(object, object_string(object, d->d_un.d_val));
+    }
+  }
 }

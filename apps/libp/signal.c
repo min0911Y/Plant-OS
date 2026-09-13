@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <signal.h>
+#include <sys/types.h>
 
 static int signal_result(intptr_t result) {
   if (result < 0) {
@@ -55,8 +56,20 @@ int sigaltstack(const stack_t *stack, stack_t *old) {
   return signal_result(signal_call(SIGNAL_STACK, (uintptr_t)stack,
                                    (uintptr_t)old, 0));
 }
+int sigsuspend(const sigset_t *mask) {
+  return signal_result(signal_call(SIGNAL_SUSPEND, (uintptr_t)mask, 0, 0));
+}
 int raise(int sig) {
   if (sig <= 0 || sig >= NSIG)
     return signal_result(-EINVAL);
   return signal_result(signal_call(SIGNAL_RAISE, sig, 0, 0));
+}
+
+int kill(pid_t pid, int sig) {
+  if (pid <= 0)
+    return signal_result(-ENOTSUP);
+  if (sig < 0 || sig >= NSIG)
+    return signal_result(-EINVAL);
+  return signal_result(signal_call(SIGNAL_KILL, (uintptr_t)(unsigned)sig,
+                                   (uintptr_t)(uint32_t)pid, 0));
 }

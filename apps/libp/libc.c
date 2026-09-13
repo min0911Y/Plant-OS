@@ -153,6 +153,10 @@ void *memset(void *dest, int c, size_t n) {
 
 	return dest;
 }
+
+void bzero(void *destination, size_t size) {
+  (void)memset(destination, 0, size);
+}
 // memcmp
 int memcmp(const void *vl, const void *vr, size_t n) {
   const unsigned char *l = vl, *r = vr;

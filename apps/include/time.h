@@ -19,11 +19,14 @@ struct tm {
   int tm_wday;
   int tm_yday;
   int tm_isdst;
+  long tm_gmtoff;
+  const char *tm_zone;
 };
 #define CLOCK_REALTIME 0
 #define CLOCK_MONOTONIC 1
 #define TIMER_ABSTIME 1
 #define TIME_UTC 1
+#define CLK_TCK 100
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -50,6 +53,7 @@ char *asctime(const struct tm *time);
 char *asctime_r(const struct tm *time, char *buffer);
 char *ctime(const time_t *time);
 char *ctime_r(const time_t *time, char *buffer);
+void tzset(void);
 #ifdef __cplusplus
 }
 #endif

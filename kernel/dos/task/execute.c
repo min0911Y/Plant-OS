@@ -11,6 +11,7 @@
 #include <user_vm.h>
 extern char default_drive;
 #define PAGE_SIZE_BYTES 0x1000u
+enum { USER_STACK_PAGES = 512 };
 
 static bool task_map_user_pages(uintptr_t start, size_t count) {
   if (count != 0 && count - 1 > ((uintptr_t)-1 - start) / PAGE_SIZE_BYTES) {
@@ -213,7 +214,12 @@ void task_to_user_mode_elf(char *filename) {
   int executable_size = 0;
   char *p = NULL;
   char *interpreter = NULL;
-  if (descriptor < 0 || !executable_interpreter(descriptor, &interpreter))
+  if (descriptor < 0)
+    goto failed;
+  if (filename[0] && filename[1] == ':' &&
+      vfs_context_change_drive(task->fs_context, filename[0]) < 0)
+    goto failed;
+  if (!executable_interpreter(descriptor, &interpreter))
     goto failed;
   bool dynamic = interpreter != NULL;
   int image_fd = descriptor;
@@ -224,7 +230,9 @@ void task_to_user_mode_elf(char *filename) {
     p = task_read_executable(image_fd, &executable_size);
   if (dynamic && image_fd >= 0)
     vfs_fd_close(task->fs_context, image_fd);
-  if (!p || (dynamic && vfs_fd_seek(task->fs_context, descriptor, 0, 0) < 0))
+  if (!p)
+    goto failed;
+  if (dynamic && vfs_fd_seek(task->fs_context, descriptor, 0, 0) < 0)
     goto failed;
   uintptr_t user_eip;
   uintptr_t image_end;
@@ -236,7 +244,8 @@ void task_to_user_mode_elf(char *filename) {
       (image_end + PAGE_SIZE_BYTES - 1) & ~(uintptr_t)(PAGE_SIZE_BYTES - 1);
   size_t pg = size_div_round_up(*(task->alloc_size), PAGE_SIZE_BYTES);
   struct user_runtime_layout layout;
-  if (!user_runtime_layout_calculate(alloc_addr, pg, 512, user_eip, &layout) ||
+  if (!user_runtime_layout_calculate(alloc_addr, pg, USER_STACK_PAGES, user_eip,
+                                     &layout) ||
       !task_map_user_pages(alloc_addr, layout.total_pages)) {
     goto failed;
   }
@@ -270,6 +279,8 @@ void task_to_user_mode_elf(char *filename) {
   } else {
     vfs_fd_close(task->fs_context, descriptor);
   }
+  task->user_stack = (thread_region_t){alloc_addr,
+                                       USER_STACK_PAGES * PAGE_SIZE_BYTES};
   task->user_mode = 1;
   arch_task_set_kernel_stack(task->top);
 

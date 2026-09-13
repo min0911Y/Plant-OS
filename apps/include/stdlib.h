@@ -15,6 +15,8 @@ extern "C" {
 int mblen(const char *text, size_t size);
 int mbtowc(wchar_t *wide, const char *text, size_t size);
 int wctomb(char *text, wchar_t wide);
+size_t mbstowcs(wchar_t *wide, const char *text, size_t size);
+size_t wcstombs(char *text, const wchar_t *wide, size_t size);
 typedef struct {
   int quot, rem;
 } div_t;
@@ -54,6 +56,8 @@ void *bsearch(const void *key, const void *base, size_t count, size_t size,
 char *getenv(const char *name);
 int setenv(const char *name, const char *value, int overwrite);
 int unsetenv(const char *name);
+int putenv(char *entry);
+int getloadavg(double averages[], int count);
 char *realpath(const char *path, char *resolved);
 int mkstemp(char *path);
 int mkstemps(char *path, int suffix_length);

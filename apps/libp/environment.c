@@ -107,3 +107,24 @@ int unsetenv(const char *name) {
   pthread_mutex_unlock(&runtime_environment_lock);
   return result;
 }
+
+int putenv(char *entry) {
+  if (!entry) {
+    errno = EINVAL;
+    return -1;
+  }
+  char *separator = strchr(entry, '=');
+  if (separator == entry) {
+    errno = EINVAL;
+    return -1;
+  }
+  size_t name_size = (size_t)(separator - entry);
+  char *name = malloc(name_size + 1);
+  if (!name)
+    return -1;
+  memcpy(name, entry, name_size);
+  name[name_size] = '\0';
+  int result = setenv(name, separator + 1, 1);
+  free(name);
+  return result;
+}
