@@ -754,7 +754,36 @@ static int vfs_syscall_realpath(const vfs_syscall_request_t *request) {
   return status;
 }
 
+static int vfs_syscall_pipe(const vfs_syscall_request_t *request) {
+  uintptr_t address = request->arguments.io.buffer;
+  if (!user_vm_prepare_write(address, 2 * sizeof(int)))
+    return -14;
+  int descriptors[2];
+  int result = vfs_fd_pipe(current_task()->fs_context, descriptors,
+                           request->arguments.io.length);
+  if (!result && !user_vm_copy_to(address, descriptors, sizeof(descriptors))) {
+    vfs_fd_close(current_task()->fs_context, descriptors[0]);
+    vfs_fd_close(current_task()->fs_context, descriptors[1]);
+    return -14;
+  }
+  return result;
+}
+
+static int vfs_syscall_poll(const vfs_syscall_request_t *request) {
+  return io_poll((void *)request->arguments.poll.fds,
+                 request->arguments.poll.count, request->arguments.poll.timeout,
+                 true);
+}
+
+static int vfs_syscall_available(const vfs_syscall_request_t *request) {
+  return vfs_fd_available(current_task()->fs_context,
+                          request->arguments.descriptor.descriptor);
+}
+
 static const vfs_syscall_handler_t vfs_syscall_handlers[VFS_SYSCALL_COUNT] = {
+    [VFS_SYSCALL_PIPE] = vfs_syscall_pipe,
+    [VFS_SYSCALL_POLL] = vfs_syscall_poll,
+    [VFS_SYSCALL_AVAILABLE] = vfs_syscall_available,
     [VFS_SYSCALL_OPEN] = vfs_syscall_open,
     [VFS_SYSCALL_CLOSE] = vfs_syscall_close,
     [VFS_SYSCALL_FCNTL] = vfs_syscall_fcntl,

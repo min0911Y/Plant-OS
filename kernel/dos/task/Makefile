@@ -5,7 +5,7 @@ TOOLPATH := ../../../tools/
 MAKE     := $(TOOLPATH)make.exe -r
 obj_dos := $(out_path_src)ipc.o $(out_path_src)lock.o $(out_path_src)mtask.o $(out_path_src)basetask.o $(out_path_src)execute.o $(out_path_src)signal.o
 TASK_O0 := execute
-obj_dos += $(out_path_src)futex.o
+obj_dos += $(out_path_src)futex.o $(out_path_src)io_poll.o
 obj_dos += $(out_path_src)user_thread.o
 -include $(call kernel_depfiles,$(obj_dos))
 default : $(obj_dos)

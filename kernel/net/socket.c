@@ -35,6 +35,7 @@
 
 typedef enum {
   NET_SOCKET_FREE,
+  NET_SOCKET_RESERVED,
   NET_SOCKET_INET_UDP,
   NET_SOCKET_INET_RAW,
   NET_SOCKET_INET_TCP_READY,
@@ -51,6 +52,7 @@ typedef struct {
   uint32_t tid;
   uint32_t generation;
   uint32_t deadline;
+  io_poll_queue_t *poll;
 } net_socket_waiter_t;
 
 typedef struct net_socket_packet {
@@ -104,6 +106,7 @@ typedef struct {
   } pcb;
   net_socket_packet_t *receive_head;
   net_socket_packet_t *receive_tail;
+  io_poll_queue_t poll;
   net_socket_waiter_t reader;
   net_socket_waiter_t writer;
   net_socket_waiter_t connector;
@@ -168,6 +171,7 @@ static bool net_socket_waiter_matches(const net_socket_waiter_t *waiter,
 }
 
 static void net_socket_waiter_wake(net_socket_waiter_t *waiter) {
+  io_poll_wake(waiter->poll);
   if (waiter->tid == NET_SOCKET_TASK_NONE) {
     return;
   }
@@ -358,6 +362,8 @@ static void net_socket_waiters_init(net_socket_t *socket) {
   net_socket_waiter_init(&socket->writer);
   net_socket_waiter_init(&socket->connector);
   net_socket_waiter_init(&socket->acceptor);
+  socket->reader.poll = socket->writer.poll = socket->connector.poll =
+      socket->acceptor.poll = &socket->poll;
 }
 
 static void net_socket_wake_all(net_socket_t *socket) {
@@ -380,6 +386,7 @@ static net_socket_t *net_socket_reserve(uint32_t owner_group) {
     }
     memset(socket, 0, sizeof(*socket));
     socket->generation = generation;
+    socket->state = NET_SOCKET_RESERVED;
     socket->owner_group = owner_group;
     socket->peer_slot = NET_SOCKET_SLOT_NONE;
     socket->pending_head = NET_SOCKET_SLOT_NONE;
@@ -658,15 +665,17 @@ static err_t net_socket_tcp_sent(void *arg, struct tcp_pcb *pcb, u16_t length) {
 }
 
 static void net_socket_tcp_error(void *arg, err_t error) {
-  (void)error;
   net_socket_t *socket = (net_socket_t *)arg;
   if (socket == NULL) {
     return;
   }
+  socket->last_error =
+      error == ERR_RST && socket->state == NET_SOCKET_INET_TCP_CONNECTING
+          ? 111 /* ECONNREFUSED */
+          : 104 /* ECONNRESET */;
   socket->pcb.tcp = NULL;
   socket->state = NET_SOCKET_INET_TCP_FAILED;
   socket->peer_closed = true;
-  socket->last_error = 104; /* ECONNRESET */
   net_socket_wake_all(socket);
 }
 
@@ -814,7 +823,8 @@ static void net_socket_dispose(net_socket_t *socket) {
       }
     } else {
       net_socket_tcp_clear_callbacks(socket->pcb.tcp);
-      tcp_abort(socket->pcb.tcp);
+      if (socket->queued_bytes || tcp_close(socket->pcb.tcp) != ERR_OK)
+        tcp_abort(socket->pcb.tcp);
     }
   } else if (socket->protocol == NET_SOCKET_PROTOCOL_ICMP &&
              socket->pcb.raw != NULL) {
@@ -1116,7 +1126,7 @@ int net_socket_connect(uint32_t owner_group, int handle,
   }
   socket->peer = *address;
   socket->state = NET_SOCKET_INET_TCP_CONNECTING;
-  socket->last_error = 115; /* EINPROGRESS */
+  socket->last_error = 0;
   uint32_t deadline = timerctl.count + NET_SOCKET_CONNECT_TIMEOUT_TICKS;
   net_stack_poll_local(address->value.inet.address);
   irq_restore(state);
@@ -2133,6 +2143,45 @@ int net_socket_set_flags(uint32_t owner_group, int handle, int flags) {
   socket->nonblocking = (flags & O_NONBLOCK) != 0;
   irq_restore(state);
   return 0;
+}
+
+short net_socket_poll(uint32_t owner_group, int handle, short events,
+                      io_poll_watch_t *watch) {
+  net_socket_system_init();
+  net_socket_t *socket = net_socket_find(owner_group, handle);
+  if (!socket)
+    return POLLNVAL;
+  io_poll_watch(&socket->poll, watch);
+  short ready = socket->last_error ? POLLERR : 0;
+  if (socket->state == NET_SOCKET_INET_TCP_FAILED)
+    return ready | POLLHUP | (events & (POLLIN | POLLOUT));
+  bool listener = socket->state == NET_SOCKET_INET_TCP_LISTENING ||
+                  socket->state == NET_SOCKET_LOCAL_LISTENING;
+  bool readable = listener ? socket->pending_count != 0
+                           : socket->receive_head != NULL ||
+                                 socket->peer_closed || socket->shutdown_read;
+  if (readable)
+    ready |= events & POLLIN;
+  if (socket->peer_closed && socket->shutdown_write)
+    ready |= POLLHUP;
+  if (socket->state == NET_SOCKET_LOCAL_CONNECTED &&
+      !net_socket_local_peer(socket))
+    ready |= POLLHUP;
+  bool writable = socket->shutdown_write;
+  if (socket->type != NET_SOCKET_STREAM) {
+    writable = true;
+  } else if (socket->state == NET_SOCKET_INET_TCP_CONNECTED &&
+             socket->pcb.tcp) {
+    writable |= tcp_sndbuf(socket->pcb.tcp) != 0 &&
+                tcp_sndqueuelen(socket->pcb.tcp) < TCP_SND_QUEUELEN;
+  } else if (socket->state == NET_SOCKET_LOCAL_CONNECTED) {
+    net_socket_t *peer = net_socket_local_peer(socket);
+    writable |=
+        !peer || peer->shutdown_read || net_socket_queue_has_room(peer, 1);
+  }
+  if (writable && !listener)
+    ready |= events & POLLOUT;
+  return ready;
 }
 
 int net_socket_bytes_available(uint32_t owner_group, int handle,

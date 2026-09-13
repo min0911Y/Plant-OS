@@ -515,10 +515,15 @@ static int concurrent_mappings(void) {
   return failures;
 }
 
+int runtime_loading(void);
+int io_poll_tests(void);
+
 int main(int argc, char **argv) {
   int failures = cached_translations() + reserved_memory() + file_mappings();
 
   failures += concurrent_mappings();
+  failures += runtime_loading();
+  failures += io_poll_tests();
   char *pages = vm_map(NULL, 2 * VM_PAGE_SIZE);
   if (!pages)
     return 1;

@@ -3,7 +3,6 @@
 #include <tls.h>
 
 extern const runtime_linker_t *runtime_linker;
-#define PROCESS_HANDLE ((void *)1)
 
 void *dlopen(const char *path, int flags) {
   tls_control_t *tls = tls_current();
@@ -16,29 +15,24 @@ void *dlopen(const char *path, int flags) {
     tls->loader_error = "no runtime linker";
     return NULL;
   }
-  if (!path)
-    return PROCESS_HANDLE;
-  if (!runtime_linker->load) {
-    tls->loader_error = "dynamic object loading is unavailable";
-    return NULL;
-  }
-  void *handle = runtime_linker->load(path, flags);
-  if (!handle)
-    tls->loader_error = "shared object not found";
+  runtime_linker->lock(true);
+  void *handle = runtime_linker->load(path, flags, __builtin_return_address(0));
+  runtime_linker->lock(false);
   return handle;
 }
 void *dlsym(void *handle, const char *name) {
   tls_control_t *tls = tls_current();
   tls->loader_error = NULL;
-  if ((handle != PROCESS_HANDLE && handle != RTLD_DEFAULT &&
-       handle != RTLD_NEXT) ||
-      !name ||
-      !runtime_linker) {
+  if (!name || !runtime_linker) {
     tls->loader_error = "invalid dynamic symbol lookup";
     return NULL;
   }
-  void *address;
-  if (runtime_linker->symbol(name, &address)) {
+  void *address = NULL;
+  runtime_linker->lock(true);
+  int result = runtime_linker->symbol(handle, name, __builtin_return_address(0),
+                                      &address);
+  runtime_linker->lock(false);
+  if (result) {
     tls->loader_error = "symbol not found";
     return NULL;
   }
@@ -46,9 +40,14 @@ void *dlsym(void *handle, const char *name) {
 }
 int dlclose(void *handle) {
   tls_control_t *tls = tls_current();
-  tls->loader_error =
-      handle ? NULL : "invalid dynamic library handle";
-  return handle ? 0 : -1;
+  int result = -1;
+  if (runtime_linker) {
+    runtime_linker->lock(true);
+    result = runtime_linker->close(handle);
+    runtime_linker->lock(false);
+  }
+  tls->loader_error = result ? "invalid dynamic library handle" : NULL;
+  return result;
 }
 char *dlerror(void) {
   tls_control_t *tls = tls_current();
@@ -57,7 +56,10 @@ char *dlerror(void) {
   return (char *)error;
 }
 int dladdr(const void *address, Dl_info *information) {
-  return runtime_linker && information
-             ? runtime_linker->address_info(address, information)
-             : 0;
+  if (!runtime_linker || !information)
+    return 0;
+  runtime_linker->lock(true);
+  int result = runtime_linker->address_info(address, information);
+  runtime_linker->lock(false);
+  return result;
 }

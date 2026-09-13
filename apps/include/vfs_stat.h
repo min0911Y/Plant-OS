@@ -2,6 +2,8 @@
 #define PLANT_VFS_STAT_H
 #include <ctypes.h>
 
+enum { VFS_STAT_PIPE = 0x100 };
+
 typedef struct {
   uint32_t type, attributes, size, modified_time;
   uint64_t device, inode;

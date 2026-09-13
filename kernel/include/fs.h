@@ -3,6 +3,7 @@
 
 #include "../../apps/include/vfs_stat.h"
 #include <define.h>
+#include <io_poll.h>
 
 typedef struct FILE FILE;
 typedef struct vfs_handle vfs_handle_t;
@@ -27,6 +28,10 @@ int vfs_mapping_sync(vfs_mapping_t *mapping, size_t first, size_t count);
 enum vfs_error {
   VFS_OK = 0,
   VFS_ERROR_NO_ENTRY = -2,
+  VFS_ERROR_INTERRUPTED = -4,
+  VFS_ERROR_AGAIN = -11,
+  VFS_ERROR_NOT_SEEKABLE = -29,
+  VFS_ERROR_PIPE = -32,
   VFS_ERROR_IO = -5,
   VFS_ERROR_BAD_DESCRIPTOR = -9,
   VFS_ERROR_NO_MEMORY = -12,
@@ -85,12 +90,20 @@ enum vfs_syscall_operation {
   VFS_SYSCALL_PREAD,
   VFS_SYSCALL_FCHDIR,
   VFS_SYSCALL_FCNTL,
+  VFS_SYSCALL_PIPE,
+  VFS_SYSCALL_POLL,
+  VFS_SYSCALL_AVAILABLE,
   VFS_SYSCALL_COUNT,
 };
 
 typedef struct {
   uint32_t size;
   union {
+    struct {
+      uintptr_t fds;
+      uint32_t count;
+      int32_t timeout;
+    } poll;
     struct {
       uintptr_t path;
       uint32_t flags;
@@ -215,6 +228,10 @@ int vfs_rmdir(vfs_context_t *context, const char *path);
 int vfs_rename(vfs_context_t *context, const char *source,
                const char *destination);
 
+int vfs_fd_pipe(vfs_context_t *context, int descriptors[2], uint32_t flags);
+int vfs_fd_available(vfs_context_t *context, int descriptor);
+short vfs_fd_poll(vfs_context_t *context, int descriptor, short events,
+                  io_poll_watch_t *watch);
 int vfs_fd_open(vfs_context_t *context, const char *path, uint32_t flags);
 int vfs_fd_close(vfs_context_t *context, int descriptor);
 int vfs_fd_fcntl(vfs_context_t *context, int descriptor, int command,

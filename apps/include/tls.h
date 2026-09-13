@@ -12,6 +12,8 @@ typedef struct {
   int error_number;
   unsigned locale;
   const char *loader_error;
+  thread_region_t dynamic_vector;
+  struct tls_allocation *dynamic_blocks;
 } __attribute__((aligned(16))) tls_control_t;
 
 typedef struct {

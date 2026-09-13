@@ -2,6 +2,7 @@
 #define KERNEL_NET_H
 
 #include <ctypes.h>
+#include <io_poll.h>
 
 #define NET_SOCKET_LOCAL_PATH_MAX 108u
 #define NET_SOCKET_HANDLE_TAG 0x40000000u
@@ -158,6 +159,8 @@ void net_stack_poll_local(uint32_t address);
 bool net_stack_ready(void);
 uint32_t net_stack_ipv4(void);
 
+short net_socket_poll(uint32_t owner_group, int handle, short events,
+                      io_poll_watch_t *watch);
 int net_socket_create(uint32_t owner_group, int domain, int type,
                       int protocol);
 int net_socket_close(uint32_t owner_group, int handle);

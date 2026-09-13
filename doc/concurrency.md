@@ -3,6 +3,7 @@
 [开发指南](development.md)
 
 - 普通临界区成对使用 `irq_save()`/`irq_restore()`，保留调用者中断状态。等待路径在同一临界区检查条件、发布等待并处理 ready 竞态；调度启动后用 waiter/timer 阻塞，不持有 kernel lock 忙等。
+- 描述符事件使用 [管道与事件等待](io-poll.md) 的资源队列；检查就绪、登记订阅和阻塞在同一临界区完成，关闭及任务回收先摘除订阅。
 - 用户态地址等待统一使用 `apps/include/futex.h` 的进程私有 futex，使用绝对单调 deadline 和原子谓词，不能消费 IPC 消息或自旋替代阻塞；任务回收前必须摘除内核栈上的等待记录。运行库与渲染器依赖见 [lavapipe 移植](lavapipe.md)。
 - 原生线程通过 `native_thread.h` 管理 TLS 指针及可选托管栈/TLS 映射；退出后由内核释放映射。pthread 和 `AddThread` 共用 TLS 初始化，errno、locale、TSS、C++ 线程析构与浮点环境按线程处理；x86_64 使用 FS，i386 使用 GS。修改线程运行库时同步 fork 的锁交接和子线程身份恢复。
 - 信号处理器在线程组内共享，pending、屏蔽字、备用栈和活动帧按线程管理；只在返回用户态时分派，futex 中断返回 EINTR。异常上下文、fork/线程继承与支持边界见 [用户异常与信号](signals.md)。

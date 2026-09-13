@@ -328,7 +328,10 @@ ssize_t write(int descriptor, const void *buffer, size_t count) {
   request.arguments.io.descriptor = descriptor;
   request.arguments.io.buffer = (uintptr_t)buffer;
   request.arguments.io.length = count;
-  return vfs_result(vfs_invoke(VFS_SYSCALL_WRITE, &request));
+  int result = vfs_invoke(VFS_SYSCALL_WRITE, &request);
+  if (result == -EPIPE)
+    raise(SIGPIPE);
+  return vfs_result(result);
 }
 
 ssize_t read(int descriptor, void *buffer, size_t count) {
@@ -577,7 +580,9 @@ static int stat_from_vfs(const vfs_file_stat_t *source,
     return -1;
   }
   memset(destination, 0, sizeof(*destination));
-  destination->st_mode = (source->type == FILE_DIRECTORY ? S_IFDIR : S_IFREG) |
+  destination->st_mode = (source->type == VFS_STAT_PIPE    ? S_IFIFO
+                          : source->type == FILE_DIRECTORY ? S_IFDIR
+                                                           : S_IFREG) |
                          (source->attributes == RDO ? 0555 : 0777);
   destination->st_dev = source->device;
   destination->st_ino = source->inode;

@@ -3,9 +3,10 @@
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <socket.h>
-#include <string.h>
 #include <stdarg.h>
+#include <string.h>
 #include <sys/ioctl.h>
+#include <syscall.h>
 
 static struct ifaddrs *ioctl_find_interface(const char *name,
                                             struct ifaddrs **list) {
@@ -116,6 +117,17 @@ int ioctl(int descriptor, unsigned long request, ...) {
     return 0;
   }
 
+  if (!socket_handle_is_tagged(descriptor)) {
+    vfs_syscall_request_t query = {.size = sizeof(query)};
+    query.arguments.descriptor.descriptor = descriptor;
+    int bytes = vfs_syscall(VFS_SYSCALL_AVAILABLE, &query);
+    if (bytes < 0) {
+      errno = -bytes;
+      return -1;
+    }
+    *(int *)result = bytes;
+    return 0;
+  }
   uint32_t bytes;
   int error = socket_bytes_available(descriptor, &bytes);
   if (error) {

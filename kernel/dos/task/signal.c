@@ -36,10 +36,11 @@ void user_signal_send(mtask *task, int sig) {
   if (!owner || owner->signal_actions[sig].sa_handler == SIG_IGN)
     return;
   task->signals.pending |= SIGMASK(sig);
-  /* Futex waits explicitly return EINTR. Other wait APIs retain their current
-   * completion semantics; do not tear down arbitrary resource wait queues. */
+  /* Futex, poll and pipe waits return EINTR and detach their own queues.
+   * Other wait APIs retain their existing completion semantics. */
   if (!(task->signals.blocked & SIGMASK(sig)) &&
       (task->wait_reason == WAIT_REASON_FUTEX ||
+       task->wait_reason == WAIT_REASON_IO ||
        task->wait_reason == WAIT_REASON_SIGNAL))
     task_run(task);
 }

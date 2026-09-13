@@ -1,9 +1,11 @@
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <spawn.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <sys/time.h>
+#include <syscall.h>
 #include <unistd.h>
 
 char **environ;
@@ -21,16 +23,24 @@ static int unsupported(void) {
   return -1;
 }
 
-int pipe(int descriptors[2]) {
-  (void)descriptors;
-  return unsupported();
+int pipe2(int descriptors[2], int flags) {
+  if (!descriptors || (flags & ~(O_NONBLOCK | O_CLOEXEC))) {
+    errno = descriptors ? EINVAL : EFAULT;
+    return -1;
+  }
+  vfs_syscall_request_t request = {.size = sizeof(request)};
+  request.arguments.io.buffer = (uintptr_t)descriptors;
+  request.arguments.io.length = (flags & O_NONBLOCK ? VFS_OPEN_NONBLOCK : 0) |
+                                (flags & O_CLOEXEC ? VFS_OPEN_CLOEXEC : 0);
+  int result = vfs_syscall(VFS_SYSCALL_PIPE, &request);
+  if (result < 0) {
+    errno = -result;
+    return -1;
+  }
+  return result;
 }
 
-int pipe2(int descriptors[2], int flags) {
-  (void)descriptors;
-  (void)flags;
-  return unsupported();
-}
+int pipe(int descriptors[2]) { return pipe2(descriptors, 0); }
 
 int dup(int descriptor) {
   (void)descriptor;

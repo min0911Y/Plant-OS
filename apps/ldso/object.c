@@ -8,6 +8,10 @@
 linker_t linker;
 
 void fail(const char *object, const char *reason) {
+  if (linker.recovery) {
+    linker.error = reason;
+    longjmp(*linker.recovery, 1);
+  }
   print("ld.so: ");
   if (object) {
     print((char *)object);
@@ -30,18 +34,37 @@ void *allocate(size_t size) {
   if (size > linker.available) {
     if (size > SIZE_MAX - (VM_PAGE_SIZE - 1))
       fail(NULL, "metadata size overflow");
-    size_t capacity = (size + VM_PAGE_SIZE - 1) & ~(size_t)(VM_PAGE_SIZE - 1);
+    if (size > SIZE_MAX - sizeof(arena_block_t) - (VM_PAGE_SIZE - 1))
+      fail(NULL, "metadata size overflow");
+    size_t capacity = (size + sizeof(arena_block_t) + VM_PAGE_SIZE - 1) &
+                      ~(size_t)(VM_PAGE_SIZE - 1);
     if (capacity < 4 * VM_PAGE_SIZE)
       capacity = 4 * VM_PAGE_SIZE;
-    linker.arena = vm_map(NULL, capacity);
-    if (!linker.arena)
+    arena_block_t *block = vm_map(NULL, capacity);
+    if (!block)
       fail(NULL, "out of memory");
-    linker.available = capacity;
+    *block = (arena_block_t){linker.blocks, capacity};
+    linker.blocks = block;
+    linker.arena = (char *)(block + 1);
+    linker.available = capacity - sizeof(*block);
   }
   void *result = linker.arena;
   linker.arena += size;
   linker.available -= size;
   return result;
+}
+
+void arena_restore(const linker_t *saved) {
+  while (linker.blocks != saved->blocks) {
+    arena_block_t *block = linker.blocks;
+    linker.blocks = block->next;
+    vm_unmap(block, block->size);
+  }
+  if (saved->available)
+    memset(saved->arena, 0, saved->available);
+  linker.arena = saved->arena;
+  linker.available = saved->available;
+  linker.cwd = saved->cwd;
 }
 
 char *absolute_path(const char *name) {
@@ -322,6 +345,7 @@ static void dynamic_parse(object_t *object, const Elf_Phdr *segment) {
 }
 
 object_t *object_load(int fd, const char *path, object_t *parent) {
+  linker.loading_fd = fd;
   struct stat status;
   Elf_Ehdr header;
   if (fstat(fd, &status) || !S_ISREG(status.st_mode) ||
@@ -343,6 +367,12 @@ object_t *object_load(int fd, const char *path, object_t *parent) {
   object_t *object = allocate(sizeof(*object));
   object->path = path;
   object->parent = parent;
+  if (linker.last)
+    linker.last->next = object;
+  else
+    linker.first = object;
+  linker.last = object;
+  linker.count++;
   object->segment_count = header.e_phnum;
   size_t phsize = header.e_phnum * sizeof(Elf_Phdr);
   object->segments = allocate(phsize);
@@ -407,6 +437,7 @@ object_t *object_load(int fd, const char *path, object_t *parent) {
   size_t span = end - first;
   size_t reservation_size = span + alignment - VM_PAGE_SIZE;
   void *reservation = vm_map(NULL, reservation_size);
+  object->mapping = (thread_region_t){(uintptr_t)reservation, reservation_size};
   if (!reservation || (uintptr_t)reservation < first ||
       (uintptr_t)reservation - first > UINTPTR_MAX - alignment + 1)
     fail(path, "cannot map ELF image");
@@ -419,6 +450,7 @@ object_t *object_load(int fd, const char *path, object_t *parent) {
   size_t suffix = reservation_size - prefix - span;
   if (suffix && vm_unmap((void *)(start + span), suffix))
     fail(path, "cannot trim ELF mapping");
+  object->mapping = (thread_region_t){start, span};
   for (size_t i = 0; i < header.e_phnum; i++) {
     const Elf_Phdr *p = object->segments + i;
     if (p->p_type == PT_LOAD && p->p_filesz)
@@ -426,16 +458,11 @@ object_t *object_load(int fd, const char *path, object_t *parent) {
               path);
   }
   close(fd);
+  linker.loading_fd = -1;
   object->entry = object->bias + header.e_entry;
   dynamic_parse(object, dynamic);
   if (parent && object->tags[DT_PREINIT_ARRAYSZ])
     fail(path, "shared library has a preinit array");
-  if (linker.last)
-    linker.last->next = object;
-  else
-    linker.first = object;
-  linker.last = object;
-  linker.count++;
   return object;
 }
 

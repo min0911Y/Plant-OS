@@ -2,6 +2,7 @@
 #define PLANT_LDSO_H
 #include <elf.h>
 #include <loader.h>
+#include <setjmp.h>
 #include <stdint.h>
 #include <string.h>
 #include <syscall.h>
@@ -27,10 +28,19 @@ struct object {
   object_t **dependencies;
   size_t dependency_count;
   enum { OBJECT_NEW, OBJECT_VISITING, OBJECT_INITIALIZED } state;
-  bool symbolic, linked;
+  bool symbolic, linked, global;
+  size_t references;
+  object_t *scope_owner, **scope;
+  size_t scope_count;
+  thread_region_t mapping;
   const Elf_Phdr *tls;
   size_t tls_module, tls_offset;
 };
+
+typedef struct arena_block {
+  struct arena_block *next;
+  size_t size;
+} __attribute__((aligned(16))) arena_block_t;
 
 typedef struct {
   object_t *first, *last;
@@ -41,11 +51,17 @@ typedef struct {
   const char *cwd;
   const char *library_path;
   size_t tls_count, tls_size, tls_alignment;
+  size_t static_tls_count;
+  arena_block_t *blocks;
+  jmp_buf *recovery;
+  const char *error;
+  int loading_fd;
 } linker_t;
 extern linker_t linker;
 
 __attribute__((noreturn)) void fail(const char *object, const char *reason);
 void *allocate(size_t size);
+void arena_restore(const linker_t *saved);
 char *absolute_path(const char *name);
 /* Returns a checked pointer into a single PT_LOAD, never a hole or padding. */
 void *object_at(const object_t *object, uintptr_t address, size_t size,

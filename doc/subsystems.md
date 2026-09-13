@@ -40,3 +40,5 @@
 - `clock()` 保持毫秒 ABI，高分辨率计时使用 `monotonic_ns()`；调度后的 sleep 使用阻塞 timer。RTC 提供 UTC，`localtime`/`mktime` 当前为 UTC+08:00。
 - `time_t` 在两个架构均为有符号 64 位秒；标准 timespec/clock_gettime/nanosleep 由原生包装提供。标量数学与 `fenv` 保留舍入及异常标志语义，i386 不执行 SSE；不能以简化公式替代 FMA 等要求单次舍入的操作。
 - 正常热路径不输出逐次分配、裸地址或输入报告。性能采样 IRQ 仅写固定聚合表，格式与控制 ABI 同宿主解析器同步；采集和火焰图说明见 [性能分析](performance.md)。
+
+匿名管道、混合文件/socket 的 poll、阻塞及关闭语义见 [管道与事件等待](io-poll.md)。

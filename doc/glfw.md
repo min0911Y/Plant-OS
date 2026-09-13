@@ -41,8 +41,8 @@ i386 不构建 GLFW，显式请求 `glfw` 或 `glfwtest` 会报不支持架构�
 
 `libglfw.so` 的 `DT_NEEDED` 显式包含原生 `libp.so`、`libEGL.so` 和 `libGL.so`。
 GLFW 的 module hooks 仅为这两个已装载图形库取得主符号作用域，入口来自现有
-ELF 解释器的 `dlsym`。它没有增加按路径 `dlopen` 的能力，不装载 Linux 库。
-这仍是将来 JNI/LWJGL 移植需要单独解决的问题。
+ELF 解释器的 `dlsym`。运行时按路径加载及 TLS 使用现有 [动态链接器](dynamic-linking.md)，不装载 Linux 库。
+LWJGL 的 Java 平台适配和 JNI 原生库仍需独立移植。
 
 ## 窗口和输入
 

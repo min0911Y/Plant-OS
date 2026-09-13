@@ -1,8 +1,10 @@
 #include <dos.h>
 #include <fcntl.h>
+#include <io_poll.h>
 #include <irq.h>
 #include <limits.h>
 #include <stdint.h>
+#include <user_vm.h>
 
 #define VFS_MAX_FILESYSTEMS 26
 #define VFS_MAX_MOUNTS 26
@@ -50,17 +52,32 @@ struct vfs_mount {
   vfs_identity_t *identities[VFS_IDENTITY_BUCKETS];
 };
 
+enum { VFS_PIPE_CAPACITY = 65536, VFS_PIPE_ATOMIC = 4096 };
+typedef struct {
+  io_poll_queue_t readers, writers;
+  uint64_t identity;
+  uint32_t head, used;
+  bool read_open, write_open;
+  unsigned char data[VFS_PIPE_CAPACITY];
+} vfs_pipe_t;
+
 struct vfs_handle {
   struct vfs_handle *previous;
   struct vfs_handle *next;
   struct vfs_dentry *dentry;
+  vfs_pipe_t *pipe;
   uint32_t offset;
   uint32_t flags;
   uint32_t references;
 };
 
+typedef struct {
+  vfs_handle_t *handle;
+  bool close_on_exec;
+} vfs_descriptor_t;
+
 struct vfs_fd_table {
-  vfs_handle_t **entries;
+  vfs_descriptor_t *entries;
   uint32_t capacity;
 };
 
@@ -755,8 +772,8 @@ static void vfs_fd_table_destroy(struct vfs_fd_table *table) {
     return;
   }
   for (uint32_t descriptor = 3; descriptor < table->capacity; descriptor++) {
-    if (table->entries[descriptor] != NULL) {
-      vfs_close(table->entries[descriptor]);
+    if (table->entries[descriptor].handle != NULL) {
+      vfs_close(table->entries[descriptor].handle);
     }
   }
   free(table->entries);
@@ -775,8 +792,8 @@ static bool vfs_fd_table_fork(struct vfs_fd_table *destination,
   destination->capacity = source->capacity;
   for (uint32_t descriptor = 3; descriptor < destination->capacity;
        descriptor++) {
-    if (destination->entries[descriptor] != NULL) {
-      vfs_handle_retain(destination->entries[descriptor]);
+    if (destination->entries[descriptor].handle != NULL) {
+      vfs_handle_retain(destination->entries[descriptor].handle);
     }
   }
   return true;
@@ -1331,7 +1348,7 @@ int vfs_open(vfs_context_t *context, const char *path, uint32_t flags,
   }
   memset(handle, 0, sizeof(*handle));
   handle->dentry = dentry;
-  handle->flags = flags;
+  handle->flags = flags & ~VFS_OPEN_CLOEXEC;
   handle->offset = (flags & VFS_OPEN_APPEND) != 0 ? dentry->node.size : 0;
   handle->references = 1;
   handle->next = vfs_handles;
@@ -1356,6 +1373,19 @@ int vfs_close(vfs_handle_t *handle) {
   if (--handle->references != 0) {
     return VFS_OK;
   }
+  if (handle->pipe) {
+    vfs_pipe_t *pipe = handle->pipe;
+    if (handle->flags & VFS_OPEN_READ)
+      pipe->read_open = false;
+    else
+      pipe->write_open = false;
+    io_poll_wake(&pipe->readers);
+    io_poll_wake(&pipe->writers);
+    if (!pipe->read_open && !pipe->write_open)
+      free(pipe);
+    free(handle);
+    return VFS_OK;
+  }
   if (handle->previous != NULL) {
     handle->previous->next = handle->next;
   } else {
@@ -1375,6 +1405,8 @@ static int vfs_read_at(vfs_handle_t *handle, void *buffer, uint32_t length,
       (handle->flags & VFS_OPEN_READ) == 0) {
     return VFS_ERROR_BAD_DESCRIPTOR;
   }
+  if (handle->pipe)
+    return VFS_ERROR_NOT_SEEKABLE;
   if (handle->dentry->node.type != VFS_NODE_FILE)
     return VFS_ERROR_IS_DIRECTORY;
   struct vfs_mount *mount = handle->dentry->mount;
@@ -1437,10 +1469,48 @@ static int vfs_read_at(vfs_handle_t *handle, void *buffer, uint32_t length,
   return completed;
 }
 
+/* Nonblocking ring operations; fd dispatch below owns waiting and revalidates
+ * user buffers/descriptors after every wake. Writes up to PIPE_BUF are atomic.
+ */
+static int vfs_pipe_io(vfs_handle_t *handle, void *buffer, uint32_t length,
+                       bool write) {
+  if (!(handle->flags & (write ? VFS_OPEN_WRITE : VFS_OPEN_READ)))
+    return VFS_ERROR_BAD_DESCRIPTOR;
+  if (!length)
+    return 0;
+  vfs_pipe_t *pipe = handle->pipe;
+  if (write && !pipe->read_open)
+    return VFS_ERROR_PIPE;
+  uint32_t available = write ? VFS_PIPE_CAPACITY - pipe->used : pipe->used;
+  if (!available || (write && length <= VFS_PIPE_ATOMIC && length > available))
+    return !write && !pipe->write_open ? 0 : VFS_ERROR_AGAIN;
+  if (length > available)
+    length = available;
+  uint32_t position =
+      write ? (pipe->head + pipe->used) % VFS_PIPE_CAPACITY : pipe->head;
+  uint32_t first = VFS_PIPE_CAPACITY - position;
+  if (first > length)
+    first = length;
+  if (write) {
+    memcpy(pipe->data + position, buffer, first);
+    memcpy(pipe->data, (char *)buffer + first, length - first);
+    pipe->used += length;
+    io_poll_wake(&pipe->readers);
+  } else {
+    memcpy(buffer, pipe->data + position, first);
+    memcpy((char *)buffer + first, pipe->data, length - first);
+    pipe->head = (pipe->head + length) % VFS_PIPE_CAPACITY;
+    pipe->used -= length;
+    io_poll_wake(&pipe->writers);
+  }
+  return length;
+}
+
 int vfs_read(vfs_handle_t *handle, void *buffer, uint32_t length) {
   if (handle == NULL)
     return VFS_ERROR_BAD_DESCRIPTOR;
-  return vfs_read_at(handle, buffer, length, &handle->offset);
+  return handle->pipe ? vfs_pipe_io(handle, buffer, length, false)
+                      : vfs_read_at(handle, buffer, length, &handle->offset);
 }
 
 int vfs_pread(vfs_handle_t *handle, void *buffer, uint32_t length,
@@ -1456,6 +1526,8 @@ int vfs_write(vfs_handle_t *handle, const void *buffer, uint32_t length) {
   if (length == 0) {
     return 0;
   }
+  if (handle->pipe)
+    return vfs_pipe_io(handle, (void *)buffer, length, true);
   struct vfs_mount *mount = handle->dentry->mount;
   lock(&mount->lock);
   if (vfs_mount_status(mount, VFS_OK) < 0) {
@@ -1513,6 +1585,8 @@ int vfs_seek(vfs_handle_t *handle, int32_t offset, int whence) {
   if (handle == NULL) {
     return VFS_ERROR_BAD_DESCRIPTOR;
   }
+  if (handle->pipe)
+    return VFS_ERROR_NOT_SEEKABLE;
   int64_t base;
   if (whence == SEEK_SET) {
     base = 0;
@@ -1535,6 +1609,8 @@ int vfs_sync(vfs_handle_t *handle) {
   if (handle == NULL) {
     return VFS_ERROR_BAD_DESCRIPTOR;
   }
+  if (handle->pipe)
+    return VFS_ERROR_INVALID;
   struct vfs_mount *mount = handle->dentry->mount;
   lock(&mount->lock);
   int status = vfs_mount_status(mount, VFS_OK);
@@ -1589,6 +1665,12 @@ static int vfs_dentry_stat(struct vfs_dentry *dentry, vfs_stat_t *status) {
 int vfs_fstat(vfs_handle_t *handle, vfs_stat_t *status) {
   if (handle == NULL || status == NULL) {
     return VFS_ERROR_INVALID;
+  }
+  if (handle->pipe) {
+    *status = (vfs_stat_t){.type = VFS_STAT_PIPE,
+                           .size = handle->pipe->used,
+                           .inode = handle->pipe->identity};
+    return VFS_OK;
   }
   if (vfs_mount_status(handle->dentry->mount, VFS_OK) < 0) {
     return VFS_ERROR_IO;
@@ -1793,7 +1875,7 @@ static vfs_handle_t *vfs_fd_get(vfs_context_t *context, int descriptor) {
       (uint32_t)descriptor >= context->descriptors.capacity) {
     return NULL;
   }
-  return context->descriptors.entries[descriptor];
+  return context->descriptors.entries[descriptor].handle;
 }
 
 int vfs_context_fchdir(vfs_context_t *context, int descriptor) {
@@ -1801,7 +1883,7 @@ int vfs_context_fchdir(vfs_context_t *context, int descriptor) {
   if (handle == NULL) {
     return VFS_ERROR_BAD_DESCRIPTOR;
   }
-  if (handle->dentry->node.type != VFS_NODE_DIRECTORY) {
+  if (handle->pipe || handle->dentry->node.type != VFS_NODE_DIRECTORY) {
     return VFS_ERROR_NOT_DIRECTORY;
   }
   struct vfs_dentry *replacement = vfs_dentry_retain(handle->dentry);
@@ -1811,23 +1893,23 @@ int vfs_context_fchdir(vfs_context_t *context, int descriptor) {
   return VFS_OK;
 }
 
-int vfs_fd_open(vfs_context_t *context, const char *path, uint32_t flags) {
-  if (context == NULL) {
+static int vfs_fd_reserve(vfs_context_t *context, uint32_t minimum) {
+  if (!context)
     return VFS_ERROR_INVALID;
-  }
   uint32_t descriptor;
-  for (descriptor = 3; descriptor < context->descriptors.capacity;
+  for (descriptor = minimum; descriptor < context->descriptors.capacity;
        descriptor++) {
-    if (context->descriptors.entries[descriptor] == NULL) {
+    if (context->descriptors.entries[descriptor].handle == NULL) {
       break;
     }
   }
   if (descriptor == context->descriptors.capacity) {
-    if (context->descriptors.capacity > UINT_MAX / 2 / sizeof(vfs_handle_t *)) {
+    if (context->descriptors.capacity >
+        UINT_MAX / 2 / sizeof(vfs_descriptor_t)) {
       return VFS_ERROR_TOO_MANY_FILES;
     }
     uint32_t capacity = context->descriptors.capacity * 2;
-    vfs_handle_t **entries =
+    vfs_descriptor_t *entries =
         realloc(context->descriptors.entries, capacity * sizeof(*entries));
     if (entries == NULL) {
       return VFS_ERROR_NO_MEMORY;
@@ -1837,12 +1919,63 @@ int vfs_fd_open(vfs_context_t *context, const char *path, uint32_t flags) {
     context->descriptors.entries = entries;
     context->descriptors.capacity = capacity;
   }
+  return descriptor;
+}
+
+int vfs_fd_pipe(vfs_context_t *context, int descriptors[2], uint32_t flags) {
+  if (flags & ~(VFS_OPEN_NONBLOCK | VFS_OPEN_CLOEXEC))
+    return VFS_ERROR_INVALID;
+  irq_state_t state = irq_save();
+  int read_fd = vfs_fd_reserve(context, 3);
+  vfs_handle_t *reader = read_fd < 0 ? NULL : malloc(sizeof(*reader));
+  if (!reader) {
+    irq_restore(state);
+    return read_fd < 0 ? read_fd : VFS_ERROR_NO_MEMORY;
+  }
+  int write_fd = vfs_fd_reserve(context, read_fd + 1);
+  vfs_handle_t *writer = write_fd < 0 ? NULL : malloc(sizeof(*writer));
+  vfs_pipe_t *pipe = writer ? malloc(sizeof(*pipe)) : NULL;
+  if (!pipe || vfs_identity_sequence == UINT64_MAX) {
+    free(reader);
+    free(writer);
+    free(pipe);
+    irq_restore(state);
+    return write_fd < 0 ? write_fd : VFS_ERROR_NO_MEMORY;
+  }
+  memset(pipe, 0, sizeof(*pipe));
+  pipe->read_open = pipe->write_open = true;
+  pipe->identity = ++vfs_identity_sequence;
+  *reader =
+      (vfs_handle_t){.pipe = pipe,
+                     .references = 1,
+                     .flags = (flags & ~VFS_OPEN_CLOEXEC) | VFS_OPEN_READ};
+  *writer =
+      (vfs_handle_t){.pipe = pipe,
+                     .references = 1,
+                     .flags = (flags & ~VFS_OPEN_CLOEXEC) | VFS_OPEN_WRITE};
+  context->descriptors.entries[read_fd] =
+      (vfs_descriptor_t){reader, !!(flags & VFS_OPEN_CLOEXEC)};
+  context->descriptors.entries[write_fd] =
+      (vfs_descriptor_t){writer, !!(flags & VFS_OPEN_CLOEXEC)};
+  descriptors[0] = read_fd;
+  descriptors[1] = write_fd;
+  irq_restore(state);
+  return 0;
+}
+
+int vfs_fd_open(vfs_context_t *context, const char *path, uint32_t flags) {
   vfs_handle_t *handle = NULL;
   int status = vfs_open(context, path, flags, &handle);
-  if (status < 0) {
+  if (status < 0)
     return status;
-  }
-  context->descriptors.entries[descriptor] = handle;
+  irq_state_t state = irq_save();
+  int descriptor = vfs_fd_reserve(context, 3);
+  if (descriptor < 0)
+    vfs_close(handle);
+  else
+    context->descriptors.entries[descriptor] =
+        (vfs_descriptor_t){handle, !!(flags & VFS_OPEN_CLOEXEC)};
+  irq_restore(state);
   return descriptor;
 }
 
@@ -1851,7 +1984,11 @@ int vfs_fd_close(vfs_context_t *context, int descriptor) {
   if (handle == NULL) {
     return VFS_ERROR_BAD_DESCRIPTOR;
   }
-  context->descriptors.entries[descriptor] = NULL;
+  context->descriptors.entries[descriptor] = (vfs_descriptor_t){0};
+  if (handle->pipe) {
+    io_poll_wake(&handle->pipe->readers);
+    io_poll_wake(&handle->pipe->writers);
+  }
   return vfs_close(handle);
 }
 
@@ -1883,14 +2020,13 @@ int vfs_fd_fcntl(vfs_context_t *context, int descriptor, int command,
       handle->flags |= VFS_OPEN_NONBLOCK;
     return VFS_OK;
   case F_GETFD:
-    return (handle->flags & VFS_OPEN_CLOEXEC) != 0 ? FD_CLOEXEC : 0;
+    return context->descriptors.entries[descriptor].close_on_exec ? FD_CLOEXEC
+                                                                  : 0;
   case F_SETFD:
     if (argument & ~((uintptr_t)FD_CLOEXEC))
       return VFS_ERROR_INVALID;
-    if (argument & FD_CLOEXEC)
-      handle->flags |= VFS_OPEN_CLOEXEC;
-    else
-      handle->flags &= ~VFS_OPEN_CLOEXEC;
+    context->descriptors.entries[descriptor].close_on_exec =
+        (argument & FD_CLOEXEC) != 0;
     return VFS_OK;
   case F_GETLK:
   case F_SETLK:
@@ -1901,11 +2037,74 @@ int vfs_fd_fcntl(vfs_context_t *context, int descriptor, int command,
   }
 }
 
+short vfs_fd_poll(vfs_context_t *context, int descriptor, short events,
+                  io_poll_watch_t *watch) {
+  if (descriptor == 1 || descriptor == 2)
+    return events & POLLOUT;
+  if (descriptor == 0)
+    return POLLERR; /* Console input has no pollable byte-stream ABI yet. */
+  vfs_handle_t *handle = vfs_fd_get(context, descriptor);
+  if (!handle)
+    return POLLNVAL;
+  if (!handle->pipe)
+    return events & (POLLIN | POLLOUT);
+  vfs_pipe_t *pipe = handle->pipe;
+  if (handle->flags & VFS_OPEN_READ) {
+    io_poll_watch(&pipe->readers, watch);
+    return (pipe->used ? events & POLLIN : 0) |
+           (!pipe->write_open ? POLLHUP : 0);
+  }
+  io_poll_watch(&pipe->writers, watch);
+  return (VFS_PIPE_CAPACITY - pipe->used >= VFS_PIPE_ATOMIC ? events & POLLOUT
+                                                            : 0) |
+         (!pipe->read_open ? POLLERR : 0);
+}
+
+int vfs_fd_available(vfs_context_t *context, int descriptor) {
+  vfs_handle_t *handle = vfs_fd_get(context, descriptor);
+  if (!handle)
+    return VFS_ERROR_BAD_DESCRIPTOR;
+  if (handle->pipe)
+    return handle->pipe->used;
+  return VFS_ERROR_NOT_SUPPORTED;
+}
+
+static int vfs_fd_io(vfs_context_t *context, int descriptor, void *buffer,
+                     uint32_t length, bool write) {
+  irq_state_t state = irq_save();
+  int result;
+  uint64_t identity = 0;
+  for (;;) {
+    vfs_handle_t *handle = vfs_fd_get(context, descriptor);
+    if (!handle ||
+        (identity && (!handle->pipe || identity != handle->pipe->identity))) {
+      result = VFS_ERROR_BAD_DESCRIPTOR;
+      break;
+    }
+    if (handle->pipe && length &&
+        !(write ? user_vm_readable((uintptr_t)buffer, length)
+                : user_vm_prepare_write((uintptr_t)buffer, length))) {
+      result = -14;
+      break;
+    }
+    result = write ? vfs_write(handle, buffer, length)
+                   : vfs_read(handle, buffer, length);
+    if (!handle->pipe || result != VFS_ERROR_AGAIN ||
+        (handle->flags & VFS_OPEN_NONBLOCK))
+      break;
+    identity = handle->pipe->identity;
+    result =
+        io_poll_wait(write ? &handle->pipe->writers : &handle->pipe->readers);
+    if (result < 0)
+      break;
+  }
+  irq_restore(state);
+  return result;
+}
+
 int vfs_fd_read(vfs_context_t *context, int descriptor, void *buffer,
                 uint32_t length) {
-  vfs_handle_t *handle = vfs_fd_get(context, descriptor);
-  return handle == NULL ? VFS_ERROR_BAD_DESCRIPTOR
-                        : vfs_read(handle, buffer, length);
+  return vfs_fd_io(context, descriptor, buffer, length, false);
 }
 
 int vfs_fd_pread(vfs_context_t *context, int descriptor, void *buffer,
@@ -1917,9 +2116,7 @@ int vfs_fd_pread(vfs_context_t *context, int descriptor, void *buffer,
 
 int vfs_fd_write(vfs_context_t *context, int descriptor, const void *buffer,
                  uint32_t length) {
-  vfs_handle_t *handle = vfs_fd_get(context, descriptor);
-  return handle == NULL ? VFS_ERROR_BAD_DESCRIPTOR
-                        : vfs_write(handle, buffer, length);
+  return vfs_fd_io(context, descriptor, (void *)buffer, length, true);
 }
 
 int vfs_fd_seek(vfs_context_t *context, int descriptor, int32_t offset,
@@ -1945,6 +2142,10 @@ int vfs_fd_truncate(vfs_context_t *context, int descriptor, uint32_t length) {
   if (!handle || !(handle->flags & VFS_OPEN_WRITE)) {
     irq_restore(state);
     return VFS_ERROR_BAD_DESCRIPTOR;
+  }
+  if (handle->pipe) {
+    irq_restore(state);
+    return VFS_ERROR_NOT_SUPPORTED;
   }
   vfs_handle_retain(handle);
   irq_restore(state);
@@ -1979,6 +2180,10 @@ int vfs_mapping_create(vfs_context_t *context, int descriptor, uint64_t offset,
   if (!handle || !(handle->flags & VFS_OPEN_READ)) {
     irq_restore(state);
     return VFS_ERROR_BAD_DESCRIPTOR;
+  }
+  if (handle->pipe) {
+    irq_restore(state);
+    return VFS_ERROR_NOT_SUPPORTED;
   }
   vfs_handle_retain(handle);
   irq_restore(state);

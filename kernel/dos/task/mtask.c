@@ -3,6 +3,7 @@
 #include <dos.h>
 #include <futex.h>
 #include <input_device.h>
+#include <io_poll.h>
 #include <irq.h>
 #include <limits.h>
 #include <platform.h>
@@ -659,6 +660,7 @@ static void task_clear_external_refs(mtask *task) {
   timer_cancel_for_task(task);
   lock_cancel_task(task);
   futex_cancel_task(task);
+  io_poll_cancel_task(task);
 #if defined(KERNEL_ARCH_I386)
   high_text_cursor_task_exited(task);
 #endif

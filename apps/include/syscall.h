@@ -60,12 +60,20 @@ enum vfs_syscall_operation {
   VFS_SYSCALL_PREAD,
   VFS_SYSCALL_FCHDIR,
   VFS_SYSCALL_FCNTL,
+  VFS_SYSCALL_PIPE,
+  VFS_SYSCALL_POLL,
+  VFS_SYSCALL_AVAILABLE,
   VFS_SYSCALL_COUNT,
 };
 
 typedef struct {
   uint32_t size;
   union {
+    struct {
+      uintptr_t fds;
+      uint32_t count;
+      int32_t timeout;
+    } poll;
     struct {
       uintptr_t path;
       uint32_t flags;

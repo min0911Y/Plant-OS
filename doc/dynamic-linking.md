@@ -62,11 +62,15 @@ Plant OS 的 ELF 动态链接器是独立程序 `/lib/ld.so`，源文件位于
   校验基于实际 LOAD 页面，不能误拒绝 GNU ld 生成的这种合法布局。
 
 当前仅接收 PIE 动态主程序，普通固定地址 `ET_EXEC` 主程序仍采用静态链接。
-支持按路径装载无 TLS 的新对象、`dlopen(NULL)`、`RTLD_DEFAULT`、`dlsym`、
-`dladdr` 和对应的 `dlerror`/`dlclose`；句柄查找使用全局符号范围，动态对象
-不会卸载。带 `PT_TLS` 的对象必须在初始线程建立前预加载。IFUNC、RELR、
+支持按路径装载新对象、`dlopen(NULL)`、`RTLD_DEFAULT`、`RTLD_NEXT`、`dlsym`、
+`dladdr` 和对应的 `dlerror`/`dlclose`。每个对象有独立句柄和引用计数，句柄查询
+按该对象及其依赖的广度优先顺序查找，避免混用不同 JNI 库的 `JNI_OnLoad`。
+`RTLD_LOCAL` 对象不进入全局搜索范围；`RTLD_GLOBAL` 可提升整个依赖图，
+`RTLD_NOLOAD` 只取得已加载对象。加载失败回滚新增映射、元数据和 TLS 模块号，
+通过 `dlerror` 报错；启动阶段的无效 ELF 仍退出 127。关闭句柄减少引用但不卸载
+映射，确保仍被 TLS 析构及回调引用的代码有效。IFUNC、RELR、
 `LD_PRELOAD` 和 `LD_LIBRARY_PATH` 尚未实现。不支持的 ELF 元数据会明确失败，
-不会假装已完成链接。用户态装载错误打印 `ld.so:` 诊断并退出 `127`；
+不会假装已完成链接。启动阶段的装载错误打印 `ld.so:` 诊断并退出 `127`；
 内核无法打开解释器或解析启动 ELF 时返回 `-1`。
 
 ## 构建与使用
@@ -193,20 +197,27 @@ EOF 边界、msync/fsync、部分取消映射、close/exec/unlink 生命周期�
 
 ## TLS、线程与运行库生命周期
 
-TLS 使用 x86 ELF variant II：模块存储位于 TCB 前方，TCB 包含自身指针、模块
+启动 TLS 使用 x86 ELF variant II：模块存储位于 TCB 前方，TCB 包含自身指针、模块
 地址表和原生线程运行时。x86_64 经 FS base 访问，i386 使用每 CPU 的 GS 描述符。
 内核在线程切换和用户返回路径中保存、恢复线程指针；`__tls_get_addr` 从当前
-TCB 查找模块。带 TLS 的依赖在进入 main 前装载；晚加载对象必须没有 `PT_TLS`，
-因此不需要预留固定大小的动态 TLS 余量。
+TCB 查找模块。运行时加载的 general/local-dynamic TLS 按线程首次访问时分配，
+保留模板、零初始化和对齐；已有线程与新线程均可使用，线程析构完成后释放。
+不预留固定大小的 TLS 余量；要求固定 TP 偏移的 initial-exec TLS 库须通过
+`DT_NEEDED` 在启动时加载，晚加载会报错。JVM 使用通用动态加载路径，无专用预加载。
+
+解释器使用独立的递归 futex 锁串行化装载、查询、TLS 元数据和构造器，允许同线程
+构造器重入；fork 在运行库锁之前取得解释器锁。重复打开已加载对象及失败加载
+回收临时路径内存，不累积临时 arena。
 
 `runtime_linker_t` 统一提供初始化/析构、TLS 分配、符号与地址查询、按路径装载，
-以及可执行文件的规范路径。每个 ELF 对象链接独立的 hidden `__dso_handle`。C++ 全局对象、
+TLS 查询/回收、引用关闭、锁交接以及可执行文件的规范路径。每个 ELF 对象链接
+独立的 hidden `__dso_handle`。C++ 全局对象、
 局部静态对象和 thread_local 析构使用同一套原生运行库。
 
 线程创建、join/detach、栈和 TLS 映射的托管由原生 syscall `0x68` 完成；
 pthread mutex/condvar/rwlock/barrier/once 使用进程私有 futex `0x67`。
 errno、locale、TSS 与浮点环境按线程隔离。fork 协调分配器、环境、退出回调、
-TSS 和 stdio 锁，子进程更新自身线程身份。普通 `exit` 执行回调和析构，
+TSS、解释器和 stdio 锁，子进程更新自身线程身份。普通 `exit` 执行回调和析构，
 `_Exit`/`abort` 终止整个进程组；低层 `_exit` 保留线程退出入口的语义。
 
 `setenv`/`unsetenv` 管理进程内覆盖值，fork 复制覆盖值；普通 exec 当前从系统
@@ -224,7 +235,10 @@ python3 scripts/test-x86_64.py --threads --memory 1024
 python3 scripts/test-x86_64.py --threads --arch i386 --memory 512
 ```
 
-默认完整回归也会运行 `dyntest.bin`。它覆盖跨库调用、两种哈希表、符号覆盖、
+默认完整回归也会运行 `dyntest.bin`。`DYNLOAD PASS` 检查独立 JNI 入口、局部作用域、
+依赖搜索、GLOBAL 提升、NEXT、错误回滚、并发打开/关闭、已有及新线程的动态 TLS
+和 fork 隔离；`IOPOLL PASS` 的范围见 [管道与事件等待](io-poll.md)。
+它还覆盖跨库调用、两种哈希表、符号覆盖、
 弱符号、带空格和空参数的 argv、构造/析构顺序、fork/COW、RELRO、VM 页权限、
 创建线程退出后的映射存活、缺库/未定义符号，以及损坏的 LOAD、动态表、
 重定位长度、ELF machine 和 program header。宿主脚本另行核对串口中的析构

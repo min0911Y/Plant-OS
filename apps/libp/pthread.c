@@ -63,9 +63,12 @@ int *__errno_location(void) {
 
 void *__tls_get_addr(const tls_index_t *index) {
   tls_control_t *tls = tls_current();
-  if (!index->module || index->module > tls->module_count)
+  if (index->module && index->module <= tls->module_count &&
+      tls->modules[index->module])
+    return (char *)tls->modules[index->module] + index->offset;
+  if (!runtime_linker)
     abort();
-  return (char *)tls->modules[index->module] + index->offset;
+  return runtime_linker->tls_address(index);
 }
 #if __SIZEOF_POINTER__ == 4
 __attribute__((regparm(1))) void *___tls_get_addr(const tls_index_t *index) {
@@ -76,7 +79,9 @@ __attribute__((regparm(1))) void *___tls_get_addr(const tls_index_t *index) {
 static tls_control_t *thread_tls_allocate(thread_region_t *region) {
   tls_control_t *tls;
   if (runtime_linker) {
+    runtime_linker->lock(true);
     tls = runtime_linker->tls_allocate(sizeof(thread_runtime_t), region);
+    runtime_linker->lock(false);
   } else {
     size_t size = (sizeof(*tls) + sizeof(thread_runtime_t) + VM_PAGE_SIZE - 1) &
                   ~(size_t)(VM_PAGE_SIZE - 1);
@@ -266,6 +271,8 @@ void _exit(int status) {
     pthread_t self = pthread_self();
     if (!(__atomic_load_n(&self->state, __ATOMIC_RELAXED) & THREAD_MAIN)) {
       runtime_thread_finalize();
+      if (runtime_linker)
+        runtime_linker->tls_release();
       uint32_t previous =
           __atomic_fetch_or(&self->state, THREAD_FINISHED, __ATOMIC_RELEASE);
       if (!(previous & THREAD_EXTERNAL) && (previous & THREAD_DETACHED))
@@ -507,6 +514,8 @@ void runtime_thread_after_fork(void) {
   runtime->handle = &runtime->local;
 }
 int fork(void) {
+  if (runtime_linker)
+    runtime_linker->lock(true);
   pthread_mutex_lock(&runtime_environment_lock);
   pthread_mutex_lock(&keys_lock);
   pthread_mutex_lock(&runtime_exit_lock);
@@ -518,6 +527,8 @@ int fork(void) {
   pthread_mutex_unlock(&runtime_exit_lock);
   pthread_mutex_unlock(&keys_lock);
   pthread_mutex_unlock(&runtime_environment_lock);
+  if (runtime_linker)
+    runtime_linker->lock(false);
   if (child == 0)
     runtime_thread_after_fork();
   return child;

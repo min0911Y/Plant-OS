@@ -121,7 +121,19 @@ $(DYN_OUT)/dynbad.bin: $(DYN_BUILD)/dyntest/empty.o $(DYN_BUILD)/libp/entry.o $(
 $(DYN_OUT)/dynempty.bin: $(DYN_BUILD)/dyntest/empty.o $(DYN_BUILD)/libp/entry.o $(DYN_LIB)/libp.so
 	ld $(DYN_LDFLAGS) -pie --hash-style=gnu -e Main --dynamic-linker /lib/ld.so \
 	  -o $@ $(filter %.o,$^) -L$(DYN_LIB) -lp
-$(DYN_OUT)/dyntest.bin: $(DYN_BUILD)/dyntest/driver.o $(DYN_BUILD)/libp/entry.o $(DYN_LIB)/libp.so
+$(DYN_OUT)/dyntest.bin: $(DYN_BUILD)/dyntest/driver.o $(DYN_BUILD)/dyntest/runtime.o $(DYN_BUILD)/dyntest/io.o $(DYN_BUILD)/libp/entry.o $(DYN_LIB)/libp.so | $(DYN_LIB)/liblatea.so $(DYN_LIB)/liblateb.so
 	ld $(DYN_LDFLAGS) -pie -e Main --dynamic-linker /lib/ld.so -o $@ $^
 
 -include $(patsubst %.o,%.d,$(filter %.o,$(DYN_OBJECTS))) $(wildcard $(DYN_BUILD)/ldso/*.d $(DYN_BUILD)/dyntest/*.d) $(DYN_BUILD)/libp/entry.d
+
+$(DYN_BUILD)/dyntest/latea.o: dyntest/late.c
+	@mkdir -p $(dir $@)
+	gcc $(DYN_CFLAGS) -DFIXTURE_VALUE=101 -c $< -o $@
+$(DYN_BUILD)/dyntest/lateb.o: dyntest/late.c
+	@mkdir -p $(dir $@)
+	gcc $(DYN_CFLAGS) -DFIXTURE_VALUE=202 -c $< -o $@
+$(DYN_LIB)/liblate%.so: $(DYN_BUILD)/dyntest/late%.o $(DYN_LIB)/libp.so
+	ld $(DYN_LDFLAGS) -shared --no-undefined --hash-style=both -soname $(notdir $@) -o $@ $< -L$(DYN_LIB) -lp
+
+$(DYN_LIB)/liblateb.so: $(DYN_BUILD)/dyntest/lateb.o $(DYN_LIB)/liblatea.so $(DYN_LIB)/libp.so
+	ld $(DYN_LDFLAGS) -shared --no-undefined --hash-style=both -soname liblateb.so -o $@ $< -L$(DYN_LIB) -llatea -lp

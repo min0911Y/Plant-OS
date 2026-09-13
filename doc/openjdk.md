@@ -58,3 +58,22 @@ PLANT_OPENJDK_DIR="$jdk_build/images/jdk" \
 `java/` 目录，以 `-cp "C:/missing;C:/java" Startup` 启动，应输出
 `OPENJDK STARTUP PASS`，覆盖路径列表分割、带盘符目录中的类加载和系统属性。
 该程序还核验模块文件存在、盘符根目录为绝对路径，以及文件 URI 往返转换。
+
+## NIO 与动态加载回归
+
+JVM 通过通用 `dlopen` 加载，general-dynamic TLS 支持启动后建立的模块。
+`Nio.java` 先执行 Startup 的路径断言，再检查 Selector 超时、管道读就绪、
+跨线程写入、显式 wakeup、EOF、TCP accept、非阻塞 connect 完成及 socket 数据。
+
+```sh
+python3 scripts/test-openjdk.py \
+  --jdk apps/out/x86_64/openjdk/configure-probe-9/images/jdk \
+  --javac apps/out/host/openjdk/jdk-17.0.2/bin/javac \
+  --accel kvm --out /tmp/plant-openjdk-nio
+```
+
+`--javac` 指向宿主 JDK 17 或更新版本的编译器。脚本编译测试、构建原生应用和
+内核，在输出目录创建独立 ISO/JDK 磁盘，并临时替换后恢复 `init.mst`。
+测试成功须在磁盘写出 `OPENJDK NIO PASS` 且完成 ACPI S5；程序退出码或串口
+命令状态不能替代测试断言。TCG 可选，但 Zero 解释器执行大型 JDK 的耗时显著增加。
+测试日志与磁盘保留在输出目录；文件锁、完整 Java 网络库及 MC 本身不属于此测试。

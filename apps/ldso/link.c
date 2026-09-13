@@ -1,6 +1,8 @@
 #include "ldso.h"
 #include <dlfcn.h>
 #include <fcntl.h>
+#include <futex.h>
+#include <limits.h>
 #include <runtime_args.h>
 
 void abi_alloc_init(void);
@@ -10,6 +12,84 @@ typedef struct {
   const Elf_Sym *symbol;
   uintptr_t address;
 } definition_t;
+
+/* The interpreter owns one recursive lock, independent of libp's allocator and
+ * pthread implementation. Fork takes it before the runtime's other locks. */
+static uint32_t loader_busy;
+static uintptr_t loader_owner;
+static size_t loader_depth;
+
+static void loader_lock(bool acquire) {
+  uintptr_t owner = native_thread_pointer() + 1;
+  if (!acquire) {
+    if (--loader_depth == 0) {
+      __atomic_store_n(&loader_owner, 0, __ATOMIC_RELAXED);
+      __atomic_store_n(&loader_busy, 0, __ATOMIC_RELEASE);
+      os_futex_wake(&loader_busy, 1);
+    }
+    return;
+  }
+  if (__atomic_load_n(&loader_owner, __ATOMIC_ACQUIRE) == owner) {
+    loader_depth++;
+    return;
+  }
+  for (;;) {
+    uint32_t expected = 0;
+    if (__atomic_compare_exchange_n(&loader_busy, &expected, 1, false,
+                                    __ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
+      break;
+    os_futex_wait(&loader_busy, 1, UINT64_MAX);
+  }
+  __atomic_store_n(&loader_owner, owner, __ATOMIC_RELEASE);
+  loader_depth = 1;
+}
+
+static object_t *object_containing(const void *pointer) {
+  uintptr_t address = (uintptr_t)pointer;
+  for (object_t *object = linker.first; object; object = object->next)
+    for (size_t i = 0; i < object->segment_count; i++) {
+      const Elf_Phdr *p = object->segments + i;
+      uintptr_t start = object->bias + p->p_vaddr;
+      if (p->p_type == PT_LOAD && address >= start &&
+          address - start < p->p_memsz)
+        return object;
+    }
+  return NULL;
+}
+
+static void object_scope(object_t *root) {
+  if (root->scope)
+    return;
+  if (linker.count > SIZE_MAX / sizeof(object_t *))
+    fail(root->path, "symbol scope overflow");
+  object_t **scope = allocate(linker.count * sizeof(*scope));
+  size_t count = 1;
+  scope[0] = root;
+  for (size_t i = 0; i < count; i++)
+    for (size_t d = 0; d < scope[i]->dependency_count; d++) {
+      object_t *dependency = scope[i]->dependencies[d];
+      size_t j = 0;
+      while (j < count && scope[j] != dependency)
+        j++;
+      if (j == count)
+        scope[count++] = dependency;
+    }
+  root->scope = scope;
+  root->scope_count = count;
+}
+
+static void symbol_hash(const char *name, uint32_t *sysv, uint32_t *gnu) {
+  *sysv = 0;
+  *gnu = 5381;
+  for (const unsigned char *s = (const void *)name; *s; s++) {
+    *sysv = (*sysv << 4) + *s;
+    uint32_t high = *sysv & 0xf0000000;
+    if (high)
+      *sysv ^= high >> 24;
+    *sysv &= ~high;
+    *gnu = *gnu * 33 + *s;
+  }
+}
 
 static bool symbol_exported(object_t *object, size_t index, const char *name) {
   const Elf_Sym *symbol = object->symbols + index;
@@ -112,21 +192,21 @@ static definition_t symbol_resolve(object_t *requester, size_t index,
        requester->symbolic))
     return symbol_definition(requester, reference);
   const char *name = object_string(requester, reference->st_name);
-  uint32_t sysv = 0, gnu = 5381;
-  for (const unsigned char *s = (const void *)name; *s; s++) {
-    sysv = (sysv << 4) + *s;
-    uint32_t high = sysv & 0xf0000000;
-    if (high)
-      sysv ^= high >> 24;
-    sysv &= ~high;
-    gnu = gnu * 33 + *s;
-  }
+  uint32_t sysv, gnu;
+  symbol_hash(name, &sysv, &gnu);
   for (object_t *object = linker.first; object; object = object->next) {
+    if (!object->global || (copy && object == requester))
+      continue;
+    const Elf_Sym *symbol = object_lookup(object, name, sysv, gnu);
+    if (symbol)
+      return symbol_definition(object, symbol);
+  }
+  object_t *root = requester->scope_owner;
+  for (size_t i = 0; root && i < root->scope_count; i++) {
+    object_t *object = root->scope[i];
     if (copy && object == requester)
       continue;
     const Elf_Sym *symbol = object_lookup(object, name, sysv, gnu);
-    /* ELF runtime lookup binds to the first global-scope definition, including
-     * weak definitions; it does not reproduce the static linker's selection. */
     if (symbol)
       return symbol_definition(object, symbol);
   }
@@ -196,10 +276,16 @@ static void relocate_one(object_t *object, uintptr_t offset, uint64_t info,
         fail(object->path, "TLS relocation without a TLS definition");
 #if __SIZEOF_POINTER__ == 8
       value = type == R_X86_64_DTPMOD64 ? module->tls_module : symbol + addend;
-      if (type == R_X86_64_TPOFF64)
+      if (type == R_X86_64_TPOFF64) {
+        if (!module->tls_offset)
+          fail(object->path, "late initial-exec TLS requires startup loading");
         value -= module->tls_offset;
+      }
 #else
       value = type == R_386_TLS_DTPMOD32 ? module->tls_module : symbol + addend;
+      if ((type == R_386_TLS_TPOFF || type == R_386_TLS_TPOFF32) &&
+          !module->tls_offset)
+        fail(object->path, "late initial-exec TLS requires startup loading");
       if (type == R_386_TLS_TPOFF)
         value -= module->tls_offset;
       if (type == R_386_TLS_TPOFF32)
@@ -421,11 +507,10 @@ static void finalize(void) {
   }
 }
 
-static void prepare_tls(void) {
-  linker.tls_alignment = _Alignof(tls_control_t);
-  for (object_t *object = linker.first; object; object = object->next) {
+static void prepare_tls(object_t *first, bool startup) {
+  for (object_t *object = first; object; object = object->next) {
     const Elf_Phdr *tls = object->tls;
-    if (!tls)
+    if (!tls || object->tls_module)
       continue;
     size_t alignment = tls->p_align ? tls->p_align : 1;
     size_t skew = tls->p_vaddr & (alignment - 1);
@@ -433,13 +518,15 @@ static void prepare_tls(void) {
         linker.tls_size + tls->p_memsz > SIZE_MAX - skew ||
         linker.tls_size + tls->p_memsz + skew > SIZE_MAX - (alignment - 1))
       fail(object->path, "TLS layout overflow");
-    object->tls_offset =
-        ((linker.tls_size + tls->p_memsz + skew + alignment - 1) &
-         ~(alignment - 1)) -
-        skew;
-    linker.tls_size = object->tls_offset;
-    if (alignment > linker.tls_alignment)
-      linker.tls_alignment = alignment;
+    if (startup) {
+      object->tls_offset =
+          ((linker.tls_size + tls->p_memsz + skew + alignment - 1) &
+           ~(alignment - 1)) -
+          skew;
+      linker.tls_size = object->tls_offset;
+      if (alignment > linker.tls_alignment)
+        linker.tls_alignment = alignment;
+    }
     object->tls_module = ++linker.tls_count;
     if (tls->p_filesz) {
       object_at(object, tls->p_vaddr, tls->p_filesz, PF_R);
@@ -464,7 +551,7 @@ static void prepare_tls(void) {
 static tls_control_t *tls_allocate(size_t runtime_size,
                                    thread_region_t *region) {
   size_t alignment = linker.tls_alignment;
-  size_t count = linker.tls_count + 1;
+  size_t count = linker.static_tls_count + 1;
   if (runtime_size > SIZE_MAX - sizeof(tls_control_t) - sizeof(void *) ||
       count > SIZE_MAX / sizeof(void *))
     return NULL;
@@ -486,10 +573,10 @@ static tls_control_t *tls_allocate(size_t runtime_size,
       (void *)(((uintptr_t)memory + linker.tls_size + alignment - 1) &
                ~(uintptr_t)(alignment - 1));
   pointer->self = pointer;
-  pointer->module_count = linker.tls_count;
+  pointer->module_count = linker.static_tls_count;
   pointer->modules = (void **)((char *)pointer + control);
   for (object_t *object = linker.first; object; object = object->next) {
-    if (!object->tls)
+    if (!object->tls_offset)
       continue;
     void *base = (char *)pointer - object->tls_offset;
     pointer->modules[object->tls_module] = base;
@@ -501,26 +588,119 @@ static tls_control_t *tls_allocate(size_t runtime_size,
   return pointer;
 }
 
-static int lookup_symbol(const char *name, void **address) {
-  uint32_t sysv = 0, gnu = 5381;
-  for (const unsigned char *s = (const void *)name; *s; s++) {
-    sysv = (sysv << 4) + *s;
-    uint32_t high = sysv & 0xf0000000;
-    if (high)
-      sysv ^= high >> 24;
-    sysv &= ~high;
-    gnu = gnu * 33 + *s;
+typedef struct tls_allocation {
+  struct tls_allocation *next;
+  size_t size;
+} tls_allocation_t;
+
+static void *tls_address(const tls_index_t *index) {
+  tls_control_t *tls = tls_current();
+  loader_lock(true);
+  object_t *module = linker.first;
+  while (module && module->tls_module != index->module)
+    module = module->next;
+  if (!index->module || !module || index->offset >= module->tls->p_memsz)
+    fail(NULL, "invalid TLS index");
+  if (index->module > tls->module_count) {
+    if (linker.tls_count > SIZE_MAX / sizeof(void *) - 1)
+      fail(NULL, "TLS vector overflow");
+    size_t size = (linker.tls_count + 1) * sizeof(void *);
+    if (size > SIZE_MAX - VM_PAGE_SIZE + 1)
+      fail(NULL, "TLS vector overflow");
+    size = (size + VM_PAGE_SIZE - 1) & ~(size_t)(VM_PAGE_SIZE - 1);
+    void **vector = vm_map(NULL, size);
+    if (!vector)
+      fail(NULL, "cannot allocate TLS vector");
+    memcpy(vector, tls->modules, (tls->module_count + 1) * sizeof(void *));
+    if (tls->dynamic_vector.size)
+      vm_unmap((void *)tls->dynamic_vector.address, tls->dynamic_vector.size);
+    tls->modules = vector;
+    tls->module_count = linker.tls_count;
+    tls->dynamic_vector = (thread_region_t){(uintptr_t)vector, size};
   }
-  for (object_t *object = linker.first; object; object = object->next) {
-    const Elf_Sym *symbol = object_lookup(object, name, sysv, gnu);
-    if (!symbol)
+  if (!tls->modules[index->module]) {
+    size_t alignment = module->tls->p_align ? module->tls->p_align : 1;
+    size_t length = module->tls->p_memsz;
+    if (alignment > SIZE_MAX - sizeof(tls_allocation_t) - VM_PAGE_SIZE ||
+        length > SIZE_MAX - alignment - sizeof(tls_allocation_t) - VM_PAGE_SIZE)
+      fail(NULL, "TLS allocation overflow");
+    size_t size =
+        (sizeof(tls_allocation_t) + alignment + length + VM_PAGE_SIZE - 1) &
+        ~(size_t)(VM_PAGE_SIZE - 1);
+    tls_allocation_t *block = vm_map(NULL, size);
+    if (!block)
+      fail(NULL, "cannot allocate dynamic TLS");
+    uintptr_t skew = module->tls->p_vaddr & (alignment - 1);
+    uintptr_t base = (((uintptr_t)(block + 1) - skew + alignment - 1) &
+                      ~(uintptr_t)(alignment - 1)) +
+                     skew;
+    memcpy((void *)base, (const void *)(module->bias + module->tls->p_vaddr),
+           module->tls->p_filesz);
+    *block = (tls_allocation_t){tls->dynamic_blocks, size};
+    tls->dynamic_blocks = block;
+    tls->modules[index->module] = (void *)base;
+  }
+  void *result = (char *)tls->modules[index->module] + index->offset;
+  loader_lock(false);
+  return result;
+}
+
+static void tls_release(void) {
+  tls_control_t *tls = tls_current();
+  while (tls->dynamic_blocks) {
+    tls_allocation_t *block = tls->dynamic_blocks;
+    tls->dynamic_blocks = block->next;
+    vm_unmap(block, block->size);
+  }
+  if (tls->dynamic_vector.size) {
+    vm_unmap((void *)tls->dynamic_vector.address, tls->dynamic_vector.size);
+    tls->dynamic_vector = (thread_region_t){0};
+  }
+}
+
+static int lookup_symbol(void *handle, const char *name, const void *caller,
+                         void **address) {
+  uint32_t sysv, gnu;
+  symbol_hash(name, &sysv, &gnu);
+  bool scoped = handle && handle != (void *)1 && handle != RTLD_NEXT;
+  object_t *origin = object_containing(caller);
+  object_t *root = handle == (void *)1 || !origin ? NULL : origin->scope_owner;
+  if (scoped) {
+    for (root = linker.first; root && root != handle; root = root->next) {
+    }
+    if (!root || !root->references)
+      return -1;
+    object_scope(root);
+  }
+  bool past_caller = handle != RTLD_NEXT;
+  if (!past_caller && !origin)
+    return -1;
+  for (unsigned phase = 0; phase < 2; phase++) {
+    if ((!phase && scoped) || (phase && !root))
       continue;
-    definition_t definition = symbol_definition(object, symbol);
-    *address = ELF32_ST_TYPE(symbol->st_info) == STT_TLS
-                   ? (char *)tls_current()->modules[object->tls_module] +
-                         definition.address
-                   : (void *)definition.address;
-    return 0;
+    size_t i = 0;
+    object_t *object = phase ? NULL : linker.first;
+    while (phase ? i < root->scope_count : object != NULL) {
+      object_t *candidate = phase ? root->scope[i++] : object;
+      if (!phase)
+        object = object->next;
+      if ((!phase && !candidate->global) ||
+          (phase && !scoped && candidate->global))
+        continue;
+      if (!past_caller) {
+        past_caller = candidate == origin;
+        continue;
+      }
+      const Elf_Sym *symbol = object_lookup(candidate, name, sysv, gnu);
+      if (!symbol)
+        continue;
+      definition_t definition = symbol_definition(candidate, symbol);
+      *address = ELF32_ST_TYPE(symbol->st_info) == STT_TLS
+                     ? tls_address(&(tls_index_t){candidate->tls_module,
+                                                  definition.address})
+                     : (void *)definition.address;
+      return 0;
+    }
   }
   return -1;
 }
@@ -560,7 +740,7 @@ static int address_info(const void *pointer, Dl_info *information) {
 
 static void *lookup_required(const char *name) {
   void *address = NULL;
-  if (lookup_symbol(name, &address))
+  if (lookup_symbol(RTLD_DEFAULT, name, NULL, &address))
     fail(name, "required runtime symbol not found");
   return address;
 }
@@ -583,64 +763,95 @@ static bool uses_runtime_entry(const object_t *object) {
   return runtime_setup;
 }
 
-static void *load_runtime_object(const char *path, int flags) {
-  object_t *parent = linker.first;
-  if (!parent || !path)
-    return NULL;
-  if (flags & RTLD_NOLOAD) {
-    char *absolute = absolute_path(path);
-    for (object_t *object = linker.first; object; object = object->next)
-      if (!strcmp(object->path, absolute))
-        return (void *)1;
-    return NULL;
-  }
-
-  object_t *object = NULL;
-  if (strchr(path, '/') || strchr(path, '\\') || strchr(path, ':')) {
-    object = object_open_path(parent, path);
-  } else {
-    if (!(parent->present & ((uint64_t)1 << DT_RUNPATH))) {
-      for (object_t *source = parent; source && !object;
-           source = source->parent) {
-        if (source->present & ((uint64_t)1 << DT_RPATH))
-          object = object_search_path(
-              parent, object_string(source, source->tags[DT_RPATH]), path);
-      }
-    } else {
-      object = object_search_path(
-          parent, object_string(parent, parent->tags[DT_RUNPATH]), path);
-    }
-    if (!object)
-      object = object_search_path(parent, linker.library_path, path);
-  }
-  if (!object)
-    return NULL;
-  if (object->linked)
+static void *load_runtime_object(const char *path, int flags,
+                                 const void *caller) {
+  if (!path)
     return (void *)1;
-  if (object->tls)
-    fail(object->path, "late TLS loading is not supported");
-
-  object_resolve_dependencies(object);
-  for (object_t *cursor = object; cursor; cursor = cursor->next) {
-    if (cursor->tls)
-      fail(cursor->path, "late TLS loading is not supported");
-    object_relocate(cursor, false);
-    object_relocate(cursor, true);
-    object_protect(cursor);
-    cursor->linked = true;
+  object_t *parent = object_containing(caller);
+  if (!parent)
+    parent = linker.first;
+  /* Snapshot the arena and list before publishing any new object. Failed ELF
+   * validation/relocation rolls back mappings, metadata and module IDs. */
+  linker_t saved = linker;
+  jmp_buf recovery;
+  linker.recovery = &recovery;
+  linker.loading_fd = -1;
+  linker.cwd = NULL;
+  if (setjmp(recovery)) {
+    const char *error = linker.error;
+    if (linker.loading_fd >= 0)
+      close(linker.loading_fd);
+    for (object_t *o = saved.last->next; o; o = o->next)
+      if (o->mapping.address)
+        vm_unmap((void *)o->mapping.address, o->mapping.size);
+    saved.last->next = NULL;
+    arena_restore(&saved);
+    linker = saved;
+    tls_current()->loader_error = error;
+    return NULL;
   }
-  if (linker.count > linker.initialized_capacity) {
-    if (linker.count > SIZE_MAX / sizeof(*linker.initialized))
-      fail(NULL, "dependency graph size overflow");
-    object_t **replacement =
-        allocate(linker.count * sizeof(*linker.initialized));
-    memcpy(replacement, linker.initialized,
-           linker.initialized_count * sizeof(*linker.initialized));
-    linker.initialized = replacement;
-    linker.initialized_capacity = linker.count;
+  object_t *object = NULL;
+  bool named = !strchr(path, '/') && !strchr(path, '\\') && !strchr(path, ':');
+  char *absolute = named ? NULL : absolute_path(path);
+  for (object_t *o = linker.first; o; o = o->next)
+    if (named ? o->soname && !strcmp(o->soname, path)
+              : !strcmp(o->path, absolute)) {
+      object = o;
+      break;
+    }
+  if (!object && !(flags & RTLD_NOLOAD))
+    object = named ? object_dependency(parent, path)
+                   : object_open_path(parent, path);
+  if (!object)
+    fail(path, "shared object not found");
+  if (object->linked) {
+    /* Path resolution for an already loaded object is temporary. Repeated
+     * dlopen/NOLOAD calls must not grow the interpreter's metadata arena. */
+    arena_restore(&saved);
+  } else {
+    object_resolve_dependencies(object);
+    object_scope(object);
+    for (object_t *o = saved.last->next; o; o = o->next)
+      o->scope_owner = object;
+    prepare_tls(saved.last->next, false);
+    for (object_t *o = saved.last->next; o; o = o->next)
+      object_relocate(o, false);
+    for (object_t *o = saved.last->next; o; o = o->next) {
+      object_relocate(o, true);
+      object_protect(o);
+      o->linked = true;
+    }
+    if (linker.count > linker.initialized_capacity) {
+      if (linker.count > SIZE_MAX / sizeof(*linker.initialized))
+        fail(NULL, "dependency graph size overflow");
+      object_t **replacement = allocate(linker.count * sizeof(*replacement));
+      memcpy(replacement, linker.initialized,
+             linker.initialized_count * sizeof(*replacement));
+      linker.initialized = replacement;
+      linker.initialized_capacity = linker.count;
+    }
   }
+  object_scope(object);
+  if (flags & RTLD_GLOBAL)
+    for (size_t i = 0; i < object->scope_count; i++)
+      object->scope[i]->global = true;
+  object->references++;
+  linker.recovery = saved.recovery;
   initialize_object_tree(object);
-  return (void *)1;
+  return object;
+}
+
+static int close_runtime_object(void *handle) {
+  if (handle == (void *)1)
+    return 0;
+  for (object_t *object = linker.first; object; object = object->next)
+    if (object == handle && object->references) {
+      object->references--;
+      /* Keep mappings until process exit: TLS destructors and native callbacks
+       * may still refer to code after the application closes its handle. */
+      return 0;
+    }
+  return -1;
 }
 
 static void normalize_program_argument(runtime_arguments_t *arguments,
@@ -692,17 +903,15 @@ void Main(const loader_start_t *start) {
   object_load(start->executable_fd, absolute_path(start->executable_path),
               NULL);
   bool runtime_entry = uses_runtime_entry(linker.first);
-  /* OpenJDK loads libjvm with dlopen; preloading it includes its PT_TLS in the
-   * initial thread block. Other standard ELF programs simply skip these paths. */
-  if (!runtime_entry)
-    (void)object_search_path(
-        linker.first,
-        "$ORIGIN/../lib/server:$ORIGIN/../lib/zero:$ORIGIN/../lib/client",
-        "libjvm.so");
-  /* Appending objects while iterating gives breadth-first global symbol scope.
-   * Register each object before its dependencies to break dependency cycles. */
   object_resolve_dependencies(linker.first);
-  prepare_tls();
+  object_scope(linker.first);
+  for (object_t *object = linker.first; object; object = object->next) {
+    object->global = true;
+    object->scope_owner = linker.first;
+  }
+  linker.tls_alignment = _Alignof(tls_control_t);
+  prepare_tls(linker.first, true);
+  linker.static_tls_count = linker.tls_count;
   for (object_t *object = linker.first; object; object = object->next)
     object_relocate(object, false);
   for (object_t *object = linker.first; object; object = object->next)
@@ -730,6 +939,10 @@ void Main(const loader_start_t *start) {
       .address_info = address_info,
       .executable_path = linker.first->path,
       .load = load_runtime_object,
+      .close = close_runtime_object,
+      .tls_address = tls_address,
+      .tls_release = tls_release,
+      .lock = loader_lock,
   };
   if (runtime_entry) {
     ((void (*)(const runtime_linker_t *))linker.first->entry)(&hooks);
