@@ -4,7 +4,15 @@
 #include <ctypes.h>
 
 enum { SYSCALL_VM = 0x66, VM_PAGE_SIZE = 4096 };
-enum { VM_MAP, VM_PROTECT, VM_UNMAP, VM_DISCARD, VM_SYNC, VM_OPERATION_COUNT };
+enum {
+  VM_MAP,
+  VM_PROTECT,
+  VM_UNMAP,
+  VM_DISCARD,
+  VM_SYNC,
+  VM_ALIAS,
+  VM_OPERATION_COUNT
+};
 enum { VM_REPLACE = 1, VM_FILE = 2, VM_SHARED = 4 };
 enum { VM_READ = 1, VM_WRITE = 2, VM_EXEC = 4 };
 
@@ -40,6 +48,7 @@ _Static_assert(sizeof(vm_request_t) == 3 * sizeof(uintptr_t) + 24,
  * vm_map          reserve RW anonymous memory, independent of the heap.
  * vm_map_aligned  as above with explicit protection, alignment and VM_REPLACE.
  * vm_map_file     back the range with an open descriptor at a page offset.
+ * vm_map_alias    map a private RW alias into an empty or PROT_NONE range.
  * vm_protect      change access rights without disturbing contents.
  * vm_discard      drop contents, keeping the address and its protection.
  * vm_sync         write shared file contents, and their metadata, to the disk.
@@ -49,6 +58,7 @@ void *vm_map_aligned(void *address, size_t length, size_t alignment,
                      unsigned protection, unsigned flags);
 void *vm_map_file(void *address, size_t length, unsigned protection,
                   unsigned flags, int descriptor, uint64_t offset);
+void *vm_map_alias(void *source, void *address, size_t length);
 int vm_sync(void *address, size_t length);
 int vm_discard(void *address, size_t length);
 int vm_protect(void *address, size_t length, unsigned protection);

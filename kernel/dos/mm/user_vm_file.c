@@ -312,6 +312,10 @@ done:
 intptr_t user_vm_apply(unsigned operation, uintptr_t address,
                        const vm_request_t *request) {
   size_t length = request->length;
+  if (operation == VM_ALIAS)
+    return arch_user_alias(request->offset, address, length)
+               ? 0
+               : VM_ERROR_NOMEM;
   if (operation == VM_DISCARD) {
     /* Discard keeps the current protection, so every page must still be
      * readable before any of them is dropped. */

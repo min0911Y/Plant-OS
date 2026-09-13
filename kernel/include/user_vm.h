@@ -22,6 +22,7 @@ intptr_t user_vm_apply(unsigned operation, uintptr_t address,
                        const vm_request_t *request);
 bool arch_user_map_pages(uintptr_t address, size_t size, unsigned protection,
                          bool replace, void *const *backing, bool shared);
+bool arch_user_alias(uintptr_t source, uintptr_t target, size_t size);
 enum { VM_MAPPED = 8 };
 bool arch_user_map(uintptr_t address, size_t size, unsigned protection,
                    bool replace);

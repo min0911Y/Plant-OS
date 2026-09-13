@@ -1,6 +1,8 @@
+#include <errno.h>
 #include <futex.h>
 #include <ipc.h>
 #include <limits.h>
+#include <semaphore.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -192,6 +194,43 @@ static void wake_and_isolation(void) {
     stop_thread(&threads[i]);
 }
 
+static void semaphore_worker(uintptr_t argument) {
+  sem_t *semaphore = (sem_t *)argument;
+  int result;
+  do {
+    result = sem_wait(semaphore);
+  } while (result && errno == EINTR);
+  finish_worker(result);
+}
+
+static void semaphore_burst(void) {
+  for (unsigned round = 0; round < 8; round++) {
+    sem_t semaphore;
+    check(sem_init(&semaphore, 0, 0) == 0, "initialize semaphore");
+    test_thread_t threads[WORKERS] = {0};
+    unsigned started = 0;
+    for (; started < WORKERS; started++) {
+      if (!start_thread(&threads[started], semaphore_worker,
+                        (uintptr_t)&semaphore) ||
+          !await_waiting(threads[started].tid))
+        break;
+    }
+    if (started == WORKERS) {
+      for (unsigned i = 0; i < WORKERS; i++)
+        check(sem_post(&semaphore) == 0, "post semaphore burst");
+      for (unsigned i = 0; i < WORKERS; i++)
+        check(receive_result(threads[i].tid, 0), "every semaphore waiter wakes");
+      int remaining = -1;
+      check(sem_getvalue(&semaphore, &remaining) == 0 && remaining == 0 &&
+                sem_trywait(&semaphore) == -1 && errno == EAGAIN,
+            "semaphore consumes each posted token once");
+    }
+    for (unsigned i = 0; i < WORKERS; i++)
+      stop_thread(&threads[i]);
+    check(sem_destroy(&semaphore) == 0, "destroy semaphore");
+  }
+}
+
 static int exchange_wait(exchange_t *exchange, uint32_t turn) {
   for (;;) {
     uint32_t value = __atomic_load_n(&exchange->turn, __ATOMIC_ACQUIRE);
@@ -301,6 +340,7 @@ int main(void) {
   validate_arguments();
   timeout_and_messages();
   wake_and_isolation();
+  semaphore_burst();
   exchange_race();
   cancel_waiters();
   concurrent_allocations();

@@ -17,6 +17,8 @@ enum { PAGE_BYTES = 4096, TABLE_ENTRIES = 512 };
 #define PTE_SHARED 1024ull
 #define PTE_DEVICE 2048ull
 #define PTE_NX (1ull << 63)
+/* Use a software bit, not bit 8 (the hardware global-translation flag). */
+#define PTE_ALIAS (1ull << 52)
 
 typedef struct {
   uint32_t references, owner;
@@ -329,12 +331,15 @@ static uint64_t table_clone(uint64_t physical, unsigned level) {
       }
       target[i] = child | PTE_PRESENT | PTE_WRITE | PTE_USER;
     } else {
+      /* fork gives each view independent COW semantics. An alias marker must
+       * not let a later mprotect bypass isolation from the other process. */
+      entry &= ~PTE_ALIAS;
       if (!(entry & PTE_DEVICE))
         page_retain(entry & PTE_ADDRESS);
       if ((entry & PTE_WRITE) && !(entry & (PTE_SHARED | PTE_DEVICE))) {
         entry = (entry & ~PTE_WRITE) | PTE_COW;
-        source[i] = entry;
       }
+      source[i] = entry;
       target[i] = entry;
     }
   }
@@ -513,6 +518,78 @@ bool arch_user_map(uintptr_t address, size_t size, unsigned protection,
   return arch_user_map_pages(address, size, protection, replace, NULL, false);
 }
 
+bool arch_user_alias(uintptr_t source, uintptr_t target, size_t size) {
+  if (!size || ((source | target | size) & (PAGE_BYTES - 1)) ||
+      source < USER_SPACE_START || source >= USER_HEAP_END ||
+      size > USER_HEAP_END - source || target < USER_SPACE_START ||
+      target >= USER_HEAP_END || size > USER_HEAP_END - target ||
+      (source < target + size && target < source + size))
+    return false;
+
+  arch_address_space_t root = arch_address_space_current();
+  for (size_t offset = 0; offset < size; offset += PAGE_BYTES) {
+    uint64_t *src = page_entry(root, source + offset, false);
+    uint64_t *dst = page_entry(root, target + offset, true);
+    if (!src || !dst || (*src & (PTE_PRESENT | PTE_USER)) !=
+                          (PTE_PRESENT | PTE_USER) ||
+        (*src & (PTE_DEVICE | PTE_SHARED | PTE_ALIAS)) ||
+        (*dst && (!(*dst & PTE_USER) ||
+                  (*dst & (PTE_PRESENT | PTE_DEVICE | PTE_SHARED | PTE_ALIAS)))) ||
+        user_vm_file_page(source + offset) || user_vm_file_page(target + offset)) {
+      for (size_t cleanup = 0; cleanup <= offset; cleanup += PAGE_BYTES)
+        user_table_prune(root, target + cleanup);
+      return false;
+    }
+  }
+
+  /* A writable alias must never retain the shared zero page or a page shared
+   * by fork. Materialize the source first so both virtual addresses see the
+   * same private physical page after the alias is installed. */
+  for (size_t offset = 0; offset < size; offset += PAGE_BYTES) {
+    uint64_t *src = page_entry(root, source + offset, false);
+    if (*src & PTE_COW) {
+      if (arch_page_fault_resolve(source + offset, 3) !=
+          PAGE_FAULT_RESOLVED)
+        goto failed;
+      src = page_entry(root, source + offset, false);
+    }
+    uint64_t physical = *src & PTE_ADDRESS;
+    size_t index = physical / PAGE_BYTES;
+    if (physical == zero_page || index >= page_count ||
+        pages[index].references > 1) {
+      void *copy = user_page_allocate();
+      if (!copy)
+        goto failed;
+      memcpy(copy, x64_physical_pointer(physical), PAGE_BYTES);
+      uint64_t previous = *src;
+      *src = (previous & ~PTE_ADDRESS) | x64_virtual_physical(copy);
+      x64_tlb_invalidate(root, source + offset, PAGE_BYTES);
+      page_release(physical);
+    }
+  }
+
+  for (size_t offset = 0; offset < size; offset += PAGE_BYTES) {
+    uint64_t *src = page_entry(root, source + offset, false);
+    uint64_t physical = *src & PTE_ADDRESS;
+    page_retain(physical);
+    *src |= PTE_ALIAS;
+    uint64_t *dst = page_entry(root, target + offset, false);
+    uint64_t previous = *dst;
+    *dst = physical | PTE_PRESENT | PTE_USER | PTE_WRITE | PTE_NX | PTE_ALIAS;
+    if (previous && (previous & PTE_ADDRESS) != zero_page) {
+      x64_tlb_invalidate(root, target + offset, PAGE_BYTES);
+      mapping_release(previous);
+    }
+  }
+  x64_tlb_invalidate(root, target, size);
+  return true;
+
+failed:
+  for (size_t cleanup = 0; cleanup < size; cleanup += PAGE_BYTES)
+    user_table_prune(root, target + cleanup);
+  return false;
+}
+
 bool arch_user_map_zero(uintptr_t address) {
   return address >= USER_SPACE_START && address < USER_HEAP_END &&
          !(address & (PAGE_BYTES - 1)) &&
@@ -600,7 +677,7 @@ static bool user_pages_change(uintptr_t address, size_t size,
     if (operation == VM_DISCARD) {
       uint64_t previous = *entry;
       page_retain(zero_page);
-      *entry = (*entry & ~(PTE_ADDRESS | PTE_WRITE)) | zero_page |
+      *entry = (*entry & ~(PTE_ADDRESS | PTE_WRITE | PTE_ALIAS)) | zero_page |
                (previous & PTE_WRITE ? PTE_COW : 0);
       x64_tlb_invalidate(root, address + offset, PAGE_BYTES);
       mapping_release(previous);
@@ -612,9 +689,10 @@ static bool user_pages_change(uintptr_t address, size_t size,
     if (protection & VM_WRITE) {
       bool shared = *entry & PTE_SHARED;
       bool copied = !shared && user_vm_file_page(address + offset);
+      bool aliased = (*entry & PTE_ALIAS) != 0;
       copied |= (*entry & PTE_ADDRESS) == zero_page ||
                 pages[(*entry & PTE_ADDRESS) / PAGE_BYTES].references > 1;
-      *entry |= shared ? PTE_WRITE : copied ? PTE_COW : PTE_WRITE;
+      *entry |= shared || aliased ? PTE_WRITE : copied ? PTE_COW : PTE_WRITE;
     }
   }
   if (size)

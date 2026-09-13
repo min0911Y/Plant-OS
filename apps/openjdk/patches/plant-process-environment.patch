@@ -1,0 +1,20 @@
+--- a/src/java.base/unix/native/libjava/ProcessEnvironment_md.c
++++ b/src/java.base/unix/native/libjava/ProcessEnvironment_md.c
+@@ -59,7 +59,7 @@
+     jclass byteArrCls = (*env)->FindClass(env, "[B");
+     CHECK_NULL_RETURN(byteArrCls, NULL);
+ 
+-    for (i = 0; environ[i]; i++) {
++    for (i = 0; environ != NULL && environ[i]; i++) {
+         /* Ignore corrupted environment variables */
+         if (strchr(environ[i], '=') != NULL)
+             count++;
+@@ -68,7 +68,7 @@
+     result = (*env)->NewObjectArray(env, 2*count, byteArrCls, 0);
+     CHECK_NULL_RETURN(result, NULL);
+ 
+-    for (i = 0, j = 0; environ[i]; i++) {
++    for (i = 0, j = 0; environ != NULL && environ[i]; i++) {
+         const char * varEnd = strchr(environ[i], '=');
+         /* Ignore corrupted environment variables */
+         if (varEnd != NULL) {

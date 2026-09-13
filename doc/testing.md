@@ -27,7 +27,8 @@ python3 scripts/test-x86_64.py --arch i386 --dynamic --memory 512
 | GUI、输入、SDL、工具 | `--mouse`、`--console`、`--editor`、`--sdl`、x86_64 `--glfw`、`--terminal-load COUNT`、`--desktop-app`（`lite` 或 `nk`）、`--tools` |
 | 动态链接与全部应用装载 | `--dynamic`、`--all-apps`，见 [动态链接验证](dynamic-linking.md#验证) |
 | 管道与事件等待 | 两架构 `--dynamic` 中的 `IOPOLL PASS`，见 [管道与事件等待](io-poll.md) |
-| OpenJDK 启动与路径 | x86_64 附加 JDK 磁盘，验证 `java -version`、无参数启动、`Startup.java` 和 `Nio.java`，见 [OpenJDK](openjdk.md) |
+| OpenJDK 启动与运行库 | x86_64 附加 JDK 磁盘，`test-openjdk.py` 验证源码启动、客户机 javac/class、路径、NIO、异常、反射、线程与 GC，见 [OpenJDK](openjdk.md) |
+| OpenJDK JIT | `test-openjdk.py --jit c1` / `--jit c2` 核验计算、nmethod 和入口失效；`--accel tcg --repeat 4` 覆盖多线程 TCG 热修补，见 [JIT 验收](openjdk.md#x86_64-server-vm-与-jit-验收) |
 | USB、PCI、AHCI | `--usb`、`--usb-hubs`、`--usb-irq`、`--usb-root-bus`、`--ahci --machine q35`；故障与模式组合见对应专题文档 |
 | APIC、SIMD 与 TLB 后端 | `--apic`、`--cpu`、`--simd`、`--tlb`，见 [多架构说明](multiarch.md) |
 

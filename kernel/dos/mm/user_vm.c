@@ -65,6 +65,13 @@ static bool vm_request_supported(unsigned operation,
       (request->protection & ~(VM_READ | VM_WRITE | VM_EXEC)) ||
       ((request->protection & (VM_WRITE | VM_EXEC)) == (VM_WRITE | VM_EXEC)))
     return false;
+  if (operation == VM_ALIAS)
+    return !(request->flags | request->alignment | request->descriptor) &&
+           request->offset >= USER_SPACE_START &&
+           request->offset < USER_HEAP_END &&
+           !(request->offset & (VM_PAGE_SIZE - 1)) &&
+           request->length <= USER_HEAP_END - request->offset &&
+           request->protection == (VM_READ | VM_WRITE);
   if (operation != VM_MAP)
     return !(request->flags | request->alignment | request->offset |
              request->descriptor) &&
@@ -83,6 +90,8 @@ intptr_t user_vm_operation(unsigned operation, const vm_request_t *request) {
   uintptr_t address = request->address;
   size_t length = request->length;
   size_t alignment = request->alignment;
+  if (operation == VM_ALIAS)
+    alignment = VM_PAGE_SIZE;
   if (!task->alloc_size || !vm_request_supported(operation, request) ||
       ((address | length) & (VM_PAGE_SIZE - 1)) ||
       (operation == VM_MAP &&
@@ -95,7 +104,7 @@ intptr_t user_vm_operation(unsigned operation, const vm_request_t *request) {
   if (lower < task->alloc_addr || lower >= USER_HEAP_END ||
       length > USER_HEAP_END - lower)
     return VM_ERROR_NOMEM;
-  if (!address && operation == VM_MAP) {
+  if (!address && (operation == VM_MAP || operation == VM_ALIAS)) {
     /* Search downward above the heap. Page tables are the allocation registry;
      * fork and task teardown therefore need no second list of mappings. */
     uintptr_t upper = owner->vm_hint > lower ? owner->vm_hint : USER_HEAP_END;
@@ -111,8 +120,9 @@ intptr_t user_vm_operation(unsigned operation, const vm_request_t *request) {
       length > USER_HEAP_END - address)
     return VM_ERROR_INVALID;
 
-  if (operation == VM_MAP) {
-    if (!(request->flags & VM_REPLACE) && !user_vm_range_free(address, length))
+  if (operation == VM_MAP || operation == VM_ALIAS) {
+    if (operation == VM_MAP && !(request->flags & VM_REPLACE) &&
+        !user_vm_range_free(address, length))
       return VM_ERROR_EXISTS;
     intptr_t result = user_vm_apply(operation, address, request);
     if (result < 0)

@@ -27,6 +27,14 @@ void *vm_map_aligned(void *address, size_t length, size_t alignment,
 void *vm_map(void *address, size_t length) {
   return vm_map_aligned(address, length, VM_PAGE_SIZE, VM_READ | VM_WRITE, 0);
 }
+void *vm_map_alias(void *source, void *address, size_t length) {
+  intptr_t result =
+      vm_invoke(VM_ALIAS, (vm_request_t){.address = (uintptr_t)address,
+                                         .length = length,
+                                         .offset = (uintptr_t)source,
+                                         .protection = VM_READ | VM_WRITE});
+  return result == -1 ? NULL : (void *)result;
+}
 int vm_protect(void *address, size_t length, unsigned protection) {
   return vm_invoke(VM_PROTECT, (vm_request_t){.address = (uintptr_t)address,
                                               .length = length,

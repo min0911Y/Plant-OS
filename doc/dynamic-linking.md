@@ -125,6 +125,11 @@ PLANT_OPENJDK_DIR=apps/out/x86_64/openjdk/configure-probe-9/images/jdk \
 上述示例中的 JDK 盘通常分配为 `C:`，可用
 `C:/java/bin/java` 启动。
 
+上述 `images/jdk` 是 Zero 解释器镜像；Server VM 的 C1/C2 镜像由
+`scripts/build-openjdk-jit.py` 单独生成到 `images/jdk-jit`，两者都通过同一
+`ld.so`、`libp.so` 和 JDK 磁盘装载路径运行。JIT 回归还验证代码缓存的 RW/RX
+生命周期和 `vm_map_alias` 写别名，入口见 [OpenJDK](openjdk.md#x86_64-server-vm-与-jit-验收)。
+
 OpenJDK 的模块化目录布局、带盘符的 Java 路径列表和已有移植构建的更新步骤见
 [OpenJDK](openjdk.md)。
 
@@ -138,7 +143,7 @@ TCC 自身已动态链接，其现有代码生成器仍按原来的
 
 ## 虚拟内存 ABI
 
-`apps/include/vm.h` 提供 `vm_map`、`vm_map_aligned`、`vm_map_file`、
+`apps/include/vm.h` 提供 `vm_map`、`vm_map_aligned`、`vm_map_file`、`vm_map_alias`、
 `vm_protect`、`vm_discard`、`vm_sync` 和 `vm_unmap`，统一经过
 `SYSCALL_VM` (`0x66`)。请求包含地址、长度、对齐、权限、标志、文件偏移和
 descriptor，i386 为 36 字节，x86_64 为 48 字节，两侧共用声明和大小断言。
@@ -161,7 +166,13 @@ HotSpot 平台层可按以下生命周期使用：
 - 撤销提交：用匿名 `MAP_FIXED | PROT_NONE` 原位替换，保留地址并释放内容。
   `madvise(..., MADV_DONTNEED)` 则保留每页当前权限，丢弃内容；再次读取为零。
   不可读的页没有可保留的权限语义，因此拒绝而不是静默改变权限。
-- 代码缓存：RW 写入后改成 RX，再发布入口；修改前解除执行权限。
+- 代码缓存：RW 写入后改成 RX，再发布入口；修改前通过 `vm_map_alias` 使用同一
+  物理页的 RW 别名，执行地址保持 RX。x86_64 的
+  `vm_map_alias(source, address, length)` 允许自动选址或填入指定的空闲/PROT_NONE
+  匿名范围；请求的 `offset` 携带源地址，权限固定 RW。拒绝重叠、文件、设备、
+  共享页和已有别名作为源；提交前物化源页，别名扩容可保持连续地址。
+  fork 后各视图独立 COW，不保留跨视图写入联动，权限恢复仍保持进程隔离。
+  别名标记使用 PTE 软件位，不能占用硬件 global 位而绕过进程切换时的 TLB 失效。
 - 释放：`munmap` 接受部分范围和空洞，释放预留地址及其内容。
 
 VM 自上向下查找满足对齐的空闲区，同一进程线程共享查找游标；heap 自下向上

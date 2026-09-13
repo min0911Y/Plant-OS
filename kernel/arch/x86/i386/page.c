@@ -877,6 +877,13 @@ bool arch_user_map(uintptr_t address, size_t size, unsigned protection,
   return arch_user_map_pages(address, size, protection, replace, NULL, false);
 }
 
+bool arch_user_alias(uintptr_t source, uintptr_t target, size_t size) {
+  (void)source;
+  (void)target;
+  (void)size;
+  return false;
+}
+
 bool arch_user_map_zero(uintptr_t address) {
   return address >= USER_SPACE_START && address < USER_HEAP_END &&
          !(address & (PAGE_SIZE_BYTES - 1)) &&

@@ -8,8 +8,13 @@ static int sem_take(sem_t *semaphore) {
   uint32_t value = __atomic_load_n(&semaphore->value, __ATOMIC_RELAXED);
   while (value) {
     if (__atomic_compare_exchange_n(&semaphore->value, &value, value - 1,
-                                    1, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
+                                    1, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
+      /* A burst of posts wakes one waiter on the zero-to-one transition.
+       * Pass the wakeup on while tokens remain, including for trywait. */
+      if (value > 1)
+        os_futex_wake(&semaphore->value, 1);
       return 1;
+    }
   }
   return 0;
 }

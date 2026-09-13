@@ -209,6 +209,81 @@ static int reserved_memory(void) {
   return failures;
 }
 
+static int code_aliases(void) {
+#ifdef __x86_64__
+  const size_t page = VM_PAGE_SIZE, length = 3 * page;
+  unsigned char *code = vm_map(NULL, length);
+  unsigned char *alias = vm_map_aligned(NULL, length, page, 0, 0);
+  int failures = check(code && alias, "code alias reservation");
+  if (failures)
+    goto done;
+  failures += check(vm_map_alias(code, code, length) == NULL &&
+                        vm_map_alias(code, code + page, page) == NULL &&
+                        vm_map_alias(code + 1, alias, page) == NULL &&
+                        vm_map_alias(code, alias, length + 1) == NULL,
+                    "alias rejects overlap, occupied and unaligned ranges");
+  if (vm_map_alias(code, alias, page) != alias ||
+      vm_map_alias(code + page, alias + page, 2 * page) != alias + page ||
+      vm_protect(code, length, VM_READ | VM_EXEC)) {
+    failures += check(0, "commit contiguous alias in separate extents");
+    goto done;
+  }
+  const unsigned char instruction[] = {0xb8, 42, 0, 0, 0, 0xc3};
+  memcpy(alias + page - 3, instruction, sizeof(instruction));
+  int (*entry)(void) = (int (*)(void))(code + page - 3);
+  failures += check(entry() == 42, "execute instruction spanning alias commits");
+  alias[page - 2] = 73;
+  failures += check(entry() == 73, "patch executable code through write alias");
+  failures += check(vm_protect(code, length, VM_READ | VM_WRITE) == 0,
+                    "recycle aliased code pages");
+  code[2 * page] = 91;
+  failures += check(alias[2 * page] == 91, "protection keeps aliases coherent");
+  failures += check(vm_protect(code, length, VM_READ | VM_EXEC) == 0,
+                    "republish executable pages");
+  if (vm_discard(code, page) || vm_protect(code, page, VM_READ | VM_WRITE)) {
+    failures += check(0, "discard and recommit aliased page");
+    goto done;
+  }
+  code[0] = 37;
+  unsigned char *zero = vm_map(NULL, page);
+  failures += check(alias[0] == 0 && zero && zero[0] == 0,
+                    "discard detaches alias without changing shared zero page");
+  if (zero)
+    failures += check(vm_unmap(zero, page) == 0, "release zero page probe");
+  failures += check(vm_protect(code, page, VM_READ | VM_EXEC) == 0,
+                    "republish detached page");
+  int child = fork();
+  if (!child) {
+    *(volatile unsigned char *)code = 0;
+    _exit(0);
+  }
+  failures += check(child > 0 && waittid(child) != 0,
+                    "write alias does not make execution address writable");
+  child = fork();
+  if (!child) {
+    if (vm_protect(code, length, VM_READ | VM_WRITE) ||
+        vm_protect(alias, length, VM_READ | VM_WRITE))
+      _exit(1);
+    code[2 * page] = 7;
+    alias[2 * page] = 9;
+    _exit(code[2 * page] != 7 || alias[2 * page] != 9);
+  }
+  failures += check(child > 0 && waittid(child) == 0 &&
+                        code[2 * page] == 91 && alias[2 * page] == 91,
+                    "fork and mprotect keep alias views private");
+done:
+  if (alias)
+    failures += check(vm_unmap(alias, length) == 0, "release code write alias");
+  if (code)
+    failures += check(vm_unmap(code, length) == 0, "release aliased code");
+  if (!failures)
+    logk("DYNTEST ALIAS PASS\n");
+  return failures;
+#else
+  return 0;
+#endif
+}
+
 static int file_mappings(void) {
   const size_t page = VM_PAGE_SIZE, length = 67 * VM_PAGE_SIZE + 17;
   const size_t rounded = (length + page - 1) / page * page;
@@ -526,6 +601,7 @@ int io_poll_tests(void);
 
 int main(int argc, char **argv) {
   int failures = cached_translations() + reserved_memory() + file_mappings();
+  failures += code_aliases();
 
   failures += concurrent_mappings();
   failures += runtime_loading();
