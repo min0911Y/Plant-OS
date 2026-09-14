@@ -16,6 +16,7 @@
 - x86_64 OpenGL 使用同一 Mesa 构建中的 llvmpipe 和原生 EGL，SDL 复用上游 EGL 上下文接口。GL dispatch/TLS 保持单一实现，当前 EGL 对象须保留至解绑；EGL 窗口每帧重新获取绘图平面，通过 `window_present_frame` 同步交接完整客户区，遵循 GUI owner 与缓冲所有权规则。经典 glxgears 仅替换窗口层，不引入 X11/GLX 兼容层；接口与验证见 [OpenGL](opengl.md)。
 
 - x86_64 GLFW 使用 `apps/glfw/` 的上游核心和原生 GUI/EGL 后端；窗口创建显式传入标志，状态查询读取一致的共享快照。GUI 通知目标只允许同一 task group 中经过 TID/generation 校验的线程；GLFW 通过专用通知线程和私有 futex 等待，不消费应用线程的 IPC。功能边界与回归见 [GLFW](glfw.md)。
+- x86_64 LWJGL 3 复用同一 `libglfw.so`、Mesa EGL/GL 和 Plant ELF/JNI 装载器；Java callback closure 由 libffi 的 RW/RX 别名分配器提供，窗口与 swap 仍在所属 Java 线程执行。只交付 core、GLFW、OpenGL、STB，显式 native 目录是标准部署方式，支持矩阵与回归见 [LWJGL](lwjgl.md)。
 
 - RenderTM 的 `rendertm.bin` 保留原版终端行为；独立 SDL3 前端为 `renderhd.bin`，两者共用渲染、控制及 C++ modules，不复制渲染实现。并行像素阶段之间须完成同步，窗口缓冲在同步呈现完成后才能复用。终端应用的指针位置经当前 TTY 的受校验 RPC 查询，不接管 GUI 输入 owner。构建与验证见 [RenderTM](rendertm.md)。
 

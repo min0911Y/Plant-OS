@@ -101,6 +101,7 @@ $(eval $(call application,cxxcheck,,cxxcheck/cxxcheck.cpp))
 ifeq ($(ARCH),x86_64)
 include mesa/build.mk
 include glfw/build.mk
+include lwjgl/build.mk
 endif
 $(BUILD)/sdltest/%.o: CFLAGS += $(SDL_CFLAGS)
 $(eval $(call application,sdltest,$(addprefix $(LIBS)/,sdl3.a sdl3_ttf.a sdl3_image.a libft.a libpng.a libjpg.a libz.a),sdltest/sdltest.c))

@@ -22,6 +22,7 @@ make -C kernel ARCH=x86_64 livecd
 - 应用统一使用 `apps/build.mk`、`apps/native-apps.mk` 和 `apps/dynamic.mk`；新增应用通过 `application` 宏注册，子目录 Makefile 只设置 `NATIVE_TARGETS` 并包含 `../native.mk`。两种架构共用源码清单，第三方对象不写回源目录。
 - 两种架构的 LiveCD 均将完整 FAT initramfs 压缩为 `initramfs.img.gz`，由 Limine 的 `$` 路径前缀透明解压后交付内核；ISO 不包含未压缩副本，运行时仍为可写 FAT RAM 盘。
 - x86_64 LiveCD 设置 `PLANT_OPENJDK_DIR` 时，会额外生成同名 `-jdk.img` FAT32 磁盘；可用 `PLANT_OPENJDK_DISK` 指定路径。JDK 不进入 initramfs，启动后由内核挂载附加盘并以 `C:/java/bin/java` 访问。
+- x86_64 LWJGL 调试 LiveCD 使用 `make -C kernel ARCH=x86_64 lwjgl-livecd`；该目标将 LWJGL 的 class、JAR、native 和 Lua 启动脚本自动放入同一附加 JDK 盘，`lwjgl-run` 直接以 GTK 窗口启动 QEMU。
 - LiveCD 按构建图生成的 `applications.list` 收录应用，不能扫描残留 `.bin` 或手写第二份应用清单；i386 TCC SDK 只按构建图生成的 `sdk-libraries.list` 收录静态自举库，不能扫描残留归档或混入应用私有 PIC 库；磁盘镜像仍由 `kernel/Makefile` 的显式 `mcopy`/`mmd` 控制。改名或新增资源时同步打包规则。
 - i386 LiveCD 保留 FAT/PFS 引导模板和 `DOSLDR.bin` 安装资源。`setup.mst` 从已填充镜像生成，使用 `mshortname` 得到真实 FAT 别名，覆盖全部目录和文件，`DOSLDR.bin` 为首个文件；安装器继续支持 FAT/PFS。布局见 [LiveCD](livecd.md)，应用清单以当前脚本为准。
 - 日常交付保持默认 `USB_DEBUG=0`，诊断时显式启用 `USB_DEBUG=1`。`KASAN=1`、`PERF=1` 仅支持 i386；`BENCH=1` 才启用启动计时基准，`MEMTEST=0` 必须同时指定 `MEMSIZE_MB`。这些选项及 `VT100` 必须纳入构建配置指纹。

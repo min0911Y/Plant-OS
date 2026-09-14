@@ -1,0 +1,20 @@
+diff --git a/modules/lwjgl/glfw/src/generated/java/org/lwjgl/glfw/GLFW.java b/modules/lwjgl/glfw/src/generated/java/org/lwjgl/glfw/GLFW.java
+--- a/modules/lwjgl/glfw/src/generated/java/org/lwjgl/glfw/GLFW.java
++++ b/modules/lwjgl/glfw/src/generated/java/org/lwjgl/glfw/GLFW.java
+@@ -124,4 +124,4 @@
+-            GetPreeditCursorRectangle     = apiGetFunctionAddress(GLFW, "glfwGetPreeditCursorRectangle"),
+-            SetPreeditCursorRectangle     = apiGetFunctionAddress(GLFW, "glfwSetPreeditCursorRectangle"),
+-            ResetPreeditText              = apiGetFunctionAddress(GLFW, "glfwResetPreeditText"),
+-            GetPreeditCandidate           = apiGetFunctionAddress(GLFW, "glfwGetPreeditCandidate"),
++            GetPreeditCursorRectangle     = apiGetFunctionAddressOptional(GLFW, "glfwGetPreeditCursorRectangle"),
++            SetPreeditCursorRectangle     = apiGetFunctionAddressOptional(GLFW, "glfwSetPreeditCursorRectangle"),
++            ResetPreeditText              = apiGetFunctionAddressOptional(GLFW, "glfwResetPreeditText"),
++            GetPreeditCandidate           = apiGetFunctionAddressOptional(GLFW, "glfwGetPreeditCandidate"),
+@@ -130,4 +130,4 @@
+            SetCharModsCallback           = apiGetFunctionAddress(GLFW, "glfwSetCharModsCallback"),
+-            SetPreeditCallback            = apiGetFunctionAddress(GLFW, "glfwSetPreeditCallback"),
+-            SetIMEStatusCallback          = apiGetFunctionAddress(GLFW, "glfwSetIMEStatusCallback"),
+-            SetPreeditCandidateCallback   = apiGetFunctionAddress(GLFW, "glfwSetPreeditCandidateCallback"),
++            SetPreeditCallback            = apiGetFunctionAddressOptional(GLFW, "glfwSetPreeditCallback"),
++            SetIMEStatusCallback          = apiGetFunctionAddressOptional(GLFW, "glfwSetIMEStatusCallback"),
++            SetPreeditCandidateCallback   = apiGetFunctionAddressOptional(GLFW, "glfwSetPreeditCandidateCallback"),

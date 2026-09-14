@@ -8,12 +8,21 @@
 #include <syscall.h>
 #include <time.h>
 
-// The ELF interpreter loads these DT_NEEDED dependencies before main.  Module
-// handles only query that existing symbol scope; this is not a dlopen loader.
+// LWJGL loads libglfw with a local handle, so its DT_NEEDED dependencies are
+// not visible through the process-wide lookup scope.  Reopen the exact system
+// module and expose its symbols to GLFW's per-module lookups.
 void *_glfwPlatformLoadModule(const char *path) {
   if (strcmp(path, "libEGL.so") && strcmp(path, "libGL.so"))
     return NULL;
-  return dlopen(NULL, RTLD_NOW);
+  const char prefix[] = "/lib/";
+  size_t prefix_length = sizeof(prefix) - 1;
+  size_t path_length = strlen(path);
+  if (path_length >= PATH_MAX - prefix_length)
+    return NULL;
+  char module_path[PATH_MAX];
+  memcpy(module_path, prefix, prefix_length);
+  memcpy(module_path + prefix_length, path, path_length + 1);
+  return dlopen(module_path, RTLD_NOW | RTLD_GLOBAL);
 }
 
 void _glfwPlatformFreeModule(void *module) { dlclose(module); }

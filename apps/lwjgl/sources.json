@@ -1,0 +1,20 @@
+{
+  "lwjgl": {
+    "version": "3.3.6",
+    "url": "https://github.com/LWJGL/lwjgl3/archive/refs/tags/3.3.6.tar.gz",
+    "sha256": "be7e38712236908aa7ff0bf84af034c241a0624a7387414c7ed3aa742a5a44b3",
+    "directory": "lwjgl3-3.3.6"
+  },
+  "libffi": {
+    "version": "3.4.4",
+    "url": "https://github.com/libffi/libffi/releases/download/v3.4.4/libffi-3.4.4.tar.gz",
+    "sha256": "d66c56ad259a82cf2a9dfc408b32bf5da52371500b84745f7fb8b645712df676",
+    "directory": "libffi-3.4.4"
+  },
+  "jspecify": {
+    "version": "1.0.0",
+    "url": "https://repo.maven.apache.org/maven2/org/jspecify/jspecify/1.0.0/jspecify-1.0.0.jar",
+    "sha256": "1fad6e6be7557781e4d33729d49ae1cdc8fdda6fe477bb0cc68ce351eafdfbab",
+    "filename": "jspecify-1.0.0.jar"
+  }
+}

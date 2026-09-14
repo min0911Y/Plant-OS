@@ -1,0 +1,194 @@
+diff --git a/modules/lwjgl/core/src/main/c/common_tools.h b/modules/lwjgl/core/src/main/c/common_tools.h
+--- a/modules/lwjgl/core/src/main/c/common_tools.h
++++ b/modules/lwjgl/core/src/main/c/common_tools.h
+@@ -5,6 +5,8 @@
+ #pragma once
+
+-#ifdef LWJGL_FREEBSD
++#ifdef LWJGL_PLANTOS
++    #include "PlantOSConfig.h"
++#elif defined(LWJGL_FREEBSD)
+     #include "FreeBSDConfig.h"
+ #endif
+ #ifdef LWJGL_LINUX
+diff --git a/modules/lwjgl/core/src/main/c/org_lwjgl_system_SharedLibraryUtil.c b/modules/lwjgl/core/src/main/c/org_lwjgl_system_SharedLibraryUtil.c
+--- a/modules/lwjgl/core/src/main/c/org_lwjgl_system_SharedLibraryUtil.c
++++ b/modules/lwjgl/core/src/main/c/org_lwjgl_system_SharedLibraryUtil.c
+@@ -134,5 +134,23 @@
+ #include <dlfcn.h>
+
++#if defined(LWJGL_PLANTOS)
++
++EXTERN_C_ENTER
++
++JNIEXPORT int JNICALL Java_org_lwjgl_system_SharedLibraryUtil_getLibraryPath(
++    JNIEnv *env, jclass clazz, jlong pLibAddress, jlong sOutAddress,
++    jint bufSize) {
++  UNUSED_PARAMS(env, clazz)
++  UNUSED_PARAM(pLibAddress)
++  UNUSED_PARAM(sOutAddress)
++  UNUSED_PARAM(bufSize)
++  return 0;
++}
++
++EXTERN_C_EXIT
++
++#else
++
+
+ /* for dlopen-based dlGetLibraryPath impls below, prefer RTLD_NOLOAD that
+  * merely checks lib names */
+@@ -347,2 +360,4 @@
+
+ #endif
++
++#endif
+diff --git a/modules/lwjgl/core/src/main/java/org/lwjgl/system/APIUtil.java b/modules/lwjgl/core/src/main/java/org/lwjgl/system/APIUtil.java
+--- a/modules/lwjgl/core/src/main/java/org/lwjgl/system/APIUtil.java
++++ b/modules/lwjgl/core/src/main/java/org/lwjgl/system/APIUtil.java
+@@ -126,6 +126,8 @@
+                 return new FreeBSDLibrary(name);
+             case LINUX:
+                 return new LinuxLibrary(name);
++            case PLANTOS:
++                return new org.lwjgl.system.plantos.PlantOSLibrary(name);
+             case MACOSX:
+                 return MacOSXLibrary.create(name);
+             case WINDOWS:
+diff --git a/modules/lwjgl/core/src/main/java/org/lwjgl/system/Configuration.java b/modules/lwjgl/core/src/main/java/org/lwjgl/system/Configuration.java
+--- a/modules/lwjgl/core/src/main/java/org/lwjgl/system/Configuration.java
++++ b/modules/lwjgl/core/src/main/java/org/lwjgl/system/Configuration.java
+@@ -445,4 +445,6 @@
+             case FREEBSD:
+             case LINUX:
+                 return new String[] {"libEGL.so.1"};
++            case PLANTOS:
++                return new String[] {"libEGL.so"};
+             case MACOSX:
+@@ -596,4 +598,6 @@
+             case FREEBSD:
+             case LINUX:
+                 return new String[] {"libGLX.so.0", "libGL.so.1", "libGL.so"};
++            case PLANTOS:
++                return new String[] {"libGL.so"};
+             case MACOSX:
+@@ -613,4 +617,6 @@
+             case FREEBSD:
+             case LINUX:
+                 return new String[] {"libOSMesa.so.8", "libOSMesa.so.6", "libOSMesa.so"};
++            case PLANTOS:
++                return new String[] {"libOSMesa.so"};
+             case MACOSX:
+@@ -688,4 +694,6 @@
+             case FREEBSD:
+             case LINUX:
+                 return new String[] {"libGLESv2.so.2"};
++            case PLANTOS:
++                return new String[] {"libGLESv2.so"};
+             case MACOSX:
+diff --git a/modules/lwjgl/core/src/main/java/org/lwjgl/system/Platform.java b/modules/lwjgl/core/src/main/java/org/lwjgl/system/Platform.java
+--- a/modules/lwjgl/core/src/main/java/org/lwjgl/system/Platform.java
++++ b/modules/lwjgl/core/src/main/java/org/lwjgl/system/Platform.java
+@@ -38,5 +38,17 @@
+             return System.mapLibraryName(name);
+         }
+     },
++    PLANTOS("Plant OS", "plantos") {
++        private final Pattern SO = Pattern.compile("(?:^|/)lib\\w+[.]so(?:[.]\\d+)*$");
++
++        @Override
++        String mapLibraryName(String name) {
++            if (SO.matcher(name).find()) {
++                return name;
++            }
++
++            return "lib" + name + ".so";
++        }
++    },
+     // TODO: Rename to MACOS in LWJGL 4
+     MACOSX("macOS", "macos") {
+@@ -110,7 +110,9 @@
+         if (osName.startsWith("Windows")) {
+             current = WINDOWS;
+         } else if (osName.startsWith("FreeBSD")) {
+             current = FREEBSD;
++        } else if (osName.startsWith("Plant OS") || osName.startsWith("PlantOS")) {
++            current = PLANTOS;
+         } else if (osName.startsWith("Linux") || osName.startsWith("SunOS") || osName.startsWith("Unix")) {
+             current = LINUX;
+         } else if (osName.startsWith("Mac OS X") || osName.startsWith("Darwin")) {
+diff --git a/modules/lwjgl/core/src/main/java/org/lwjgl/system/plantos/PlantOSLibrary.java b/modules/lwjgl/core/src/main/java/org/lwjgl/system/plantos/PlantOSLibrary.java
+new file mode 100644
+--- /dev/null
++++ b/modules/lwjgl/core/src/main/java/org/lwjgl/system/plantos/PlantOSLibrary.java
+@@ -0,0 +1,64 @@
++/*
++ * Copyright LWJGL. All rights reserved.
++ * License terms: https://www.lwjgl.org/license
++ */
++package org.lwjgl.system.plantos;
++
++import org.jspecify.annotations.*;
++import org.lwjgl.system.*;
++
++import java.nio.*;
++
++import static org.lwjgl.system.MemoryStack.*;
++import static org.lwjgl.system.MemoryUtil.*;
++
++/** Implements a {@link SharedLibrary} using the Plant OS ELF loader. */
++public final class PlantOSLibrary extends SharedLibrary.Default {
++
++    private static final int RTLD_LAZY = 1;
++    private static final int RTLD_LOCAL = 0;
++
++    public PlantOSLibrary(String name) {
++        this(name, loadLibrary(name));
++    }
++
++    public PlantOSLibrary(String name, long handle) {
++        super(name, handle);
++    }
++
++    private static long loadLibrary(String name) {
++        long handle;
++        try (MemoryStack stack = stackPush()) {
++            handle = ndlopen(memAddress(stack.UTF8(name)), RTLD_LAZY | RTLD_LOCAL);
++        }
++        if (handle == NULL) {
++            long error = ndlerror();
++            throw new UnsatisfiedLinkError(
++                "Failed to dynamically load library: " + name +
++                (error == NULL ? "" : " (error = " + memUTF8Safe(error) + ")")
++            );
++        }
++        return handle;
++    }
++
++    @Override
++    public @Nullable String getPath() {
++        return SharedLibraryUtil.getLibraryPath(address());
++    }
++
++    @Override
++    public long getFunctionAddress(ByteBuffer functionName) {
++        return ndlsym(address(), memAddress(functionName));
++    }
++
++    @Override
++    public void free() {
++        ndlclose(address());
++    }
++
++    private static native long ndlopen(long filename, int mode);
++    private static native long ndlerror();
++    private static native long ndlsym(long handle, long name);
++    private static native int ndlclose(long handle);
++
++}
+diff --git a/modules/lwjgl/core/src/main/c/common_tools.c b/modules/lwjgl/core/src/main/c/common_tools.c
+--- a/modules/lwjgl/core/src/main/c/common_tools.c
++++ b/modules/lwjgl/core/src/main/c/common_tools.c
+@@ -184,1 +184,1 @@
+-    inline EnvData* tlsGetEnvData(void) {
++    static inline EnvData* tlsGetEnvData(void) {

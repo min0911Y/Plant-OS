@@ -124,7 +124,7 @@ $(BUILD)/sdk-libraries.list: $(SDK_LIBRARIES) build.mk
 	printf '%s\n' $(notdir $(SDK_LIBRARIES)) > $@
 libtcc1: $(LIBS)/libtcc1.a
 default all: sdk
-UNSUPPORTED_PROGRAMS := archtest simdtest cpptest llvmtest lvptest vkcube lavapipe llvmpipe glxgears glfw glfwtest
+UNSUPPORTED_PROGRAMS := archtest simdtest cpptest llvmtest lvptest vkcube lavapipe llvmpipe glxgears glfw glfwtest lwjgl
 else
 UNSUPPORTED_PROGRAMS := tcc tccinst setup1 fputest
 endif

@@ -2,7 +2,7 @@
 
 Plant OS x86_64 提供 GLFW 3.4 的 `libglfw.so` 和 `glfwtest.bin`。
 上游版本、校验和及修改清单见 [UPSTREAM.md](../apps/glfw/UPSTREAM.md)。
-本阶段建立原生 GLFW 窗口与 OpenGL 路径；尚不能据此运行 LWJGL 或 Minecraft。
+本阶段建立原生 GLFW 窗口与 OpenGL 路径，并作为 [LWJGL 3](lwjgl.md) 的窗口后端；Minecraft 仍不在交付范围内。
 
 ## 构建与运行
 
@@ -40,9 +40,9 @@ i386 不构建 GLFW，显式请求 `glfw` 或 `glfwtest` 会报不支持架构�
 - `glfwSwapInterval(0)` 可用；其他值报功能不可用，没有伪造垂直同步。
 
 `libglfw.so` 的 `DT_NEEDED` 显式包含原生 `libp.so`、`libEGL.so` 和 `libGL.so`。
-GLFW 的 module hooks 仅为这两个已装载图形库取得主符号作用域，入口来自现有
-ELF 解释器的 `dlsym`。运行时按路径加载及 TLS 使用现有 [动态链接器](dynamic-linking.md)，不装载 Linux 库。
-LWJGL 的 Java 平台适配和 JNI 原生库仍需独立移植。
+GLFW 的 Plant module hooks 按 `/lib/libEGL.so`、`/lib/libGL.so` 取得真实模块句柄
+和符号作用域，入口来自现有 ELF 解释器的 `dlopen/dlsym`；不装载 Linux 库。
+LWJGL 的 Java 平台适配、JNI native 库和联合回归见 [LWJGL 3](lwjgl.md)。
 
 ## 窗口和输入
 
@@ -88,7 +88,8 @@ GUI 现有分离按下/松开队列及鼠标协议的能力边界仍然存在。
 `GLFW_CURSOR_DISABLED` 请求失败后仍保持 `GLFW_CURSOR_NORMAL`。
 GUI 标题栏的原有隐藏按钮表现为窗口隐藏，不宣称独立的最小化状态。
 
-运行 Minecraft 所需的相对鼠标捕获、LWJGL/JNI 原生库及 JVM 不在本阶段交付中。
+运行 Minecraft 所需的相对鼠标捕获、全屏和其他窗口能力不在本阶段交付中；LWJGL
+Java/JNI 链路的实际支持范围见 [LWJGL 3](lwjgl.md)。
 没有执行完整 GLFW 一致性测试，也未宣称所有 GLFW 平台功能可用。
 
 ## 回归

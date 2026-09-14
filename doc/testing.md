@@ -24,6 +24,7 @@ python3 scripts/test-x86_64.py --arch i386 --dynamic --memory 512
 | 用户态线程、TLS、运行库 | `--threads`、`--futex`，覆盖同步、分配、C/C++、stdio、浮点环境和动态链接/VM |
 | LLVM、Vulkan 与 WSI | x86_64 `--llvm`、`--lavapipe --memory 3072 --timeout 600` 验证着色器、窗口像素与输入；`--compute-bench` 比较多个 worker 数并逐块核验结果，性能数据须固定宿主与 QEMU 配置 |
 | OpenGL、EGL 与 llvmpipe | x86_64 `--opengl --memory 3072 --timeout 600`，覆盖离屏、GLSL、上下文共享、并发场景及 glxgears 两帧像素和键盘事件；`--gears-workers N` 选择光栅线程，性能另用 `--gears-bench`，固定宿主与 QEMU 配置 |
+| LWJGL 3 core、GLFW、OpenGL、STB | 自动回归使用 x86_64 `python3 scripts/test-lwjgl.py --jdk <Plant-JDK> --firmware bios --accel tcg`；手动窗口调试使用 `make -C kernel ARCH=x86_64 lwjgl-run`，进入 `psh` 后执行 `lua.bin C:/java/lwjgl/run-lwjgl.lua`；见 [LWJGL](lwjgl.md) |
 | GUI、输入、SDL、工具 | `--mouse`、`--console`、`--editor`、`--sdl`、x86_64 `--glfw`、`--terminal-load COUNT`、`--desktop-app`（`lite` 或 `nk`）、`--tools` |
 | 动态链接与全部应用装载 | `--dynamic`、`--all-apps`，见 [动态链接验证](dynamic-linking.md#验证) |
 | 管道与事件等待 | 两架构 `--dynamic` 中的 `IOPOLL PASS`，见 [管道与事件等待](io-poll.md) |

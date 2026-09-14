@@ -34,8 +34,12 @@ OBJECTS := $(patsubst %.c,$(BUILD)/%.o,$(SOURCES)) \
 	$(BUILD)/std/libcpp.o $(patsubst %.asm,$(BUILD)/%.obj,$(wildcard $(ARCH_DIR)/*.asm))
 ALLOCATOR := dos/mm/third_party/liballoc/liballoc-x86_64.a
 ALLOCATOR_PRIVATE := $(BUILD)/liballoc-kernel.a
+PLANT_OPENJDK_DIR ?= ../apps/out/x86_64/openjdk/configure-probe-9/images/jdk-jit
+PLANT_OPENJDK_DISK ?= plant-os-x86_64-jdk.img
+PLANT_LWJGL_DIR ?= ../apps/out/x86_64/lwjgl
+LWJGL_ISO ?= plant-os-x86_64.iso
 
-.PHONY: default all livecd livecd_run full
+.PHONY: default all livecd livecd_run full lwjgl-livecd lwjgl-run
 default all: $(BUILD)/kernel.bin $(BUILD)/hello.mod
 
 $(BUILD)/%.o: %.c $(KERNEL_CONFIG_STAMP) cflags.def $(ARCH_DIR)/build.mk
@@ -70,9 +74,29 @@ full: default
 livecd: full
 	../scripts/build-livecd.sh $(abspath plant-os-x86_64.iso) x86_64
 
+# Build a runnable x86_64 image with the Plant JDK and the LWJGL deployment
+# tree on the attached FAT disk.  The ordinary livecd target intentionally
+# remains JDK-free.
+lwjgl-livecd: full
+	$(MAKE) -C ../apps ARCH=x86_64 lwjgl
+	PLANT_OPENJDK_DIR=$(abspath $(PLANT_OPENJDK_DIR)) \
+	PLANT_OPENJDK_DISK=$(abspath $(PLANT_OPENJDK_DISK)) \
+	PLANT_LWJGL_DIR=$(abspath $(PLANT_LWJGL_DIR)) \
+	../scripts/build-livecd.sh $(abspath $(LWJGL_ISO)) x86_64
+
 QEMU_CPUS ?= 4
 livecd_run: livecd
 	qemu-system-x86_64 -smp $(QEMU_CPUS) -m 1024 -serial stdio \
 		-cdrom plant-os-x86_64.iso -boot d -netdev user,id=net0 -device pcnet,netdev=net0
+
+LWJGL_QEMU_ACCEL ?= tcg
+LWJGL_QEMU_CPU ?= $(if $(filter kvm,$(LWJGL_QEMU_ACCEL)),host,max,-xgetbv1)
+LWJGL_QEMU_MEMORY ?= 4096
+lwjgl-run: lwjgl-livecd
+	qemu-system-x86_64 -accel $(LWJGL_QEMU_ACCEL) -cpu $(LWJGL_QEMU_CPU) \
+		-smp $(QEMU_CPUS) -m $(LWJGL_QEMU_MEMORY) -display gtk \
+		-serial stdio -monitor none -no-reboot \
+		-cdrom $(abspath $(LWJGL_ISO)) -boot d \
+		-drive file=$(abspath $(PLANT_OPENJDK_DISK)),format=raw,if=ide,index=0
 
 -include $(patsubst %.o,%.d,$(filter %.o,$(OBJECTS)))

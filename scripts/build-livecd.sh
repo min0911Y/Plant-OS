@@ -34,6 +34,24 @@ openjdk_disk=
 if [ -n "${PLANT_OPENJDK_DIR:-}" ]; then
   openjdk_disk=${PLANT_OPENJDK_DISK:-${output%.iso}-jdk.img}
 fi
+lwjgl_dir=${PLANT_LWJGL_DIR:-}
+if [ -n "$lwjgl_dir" ]; then
+  if [ "$architecture" != x86_64 ] || [ -z "$openjdk_disk" ]; then
+    echo "build-livecd: PLANT_LWJGL_DIR requires an x86_64 OpenJDK disk" >&2
+    exit 1
+  fi
+  for artifact in \
+      classes/LwjglSmoke.class run-lwjgl.lua \
+      jar/lwjgl-3.3.6.jar jar/lwjgl-glfw-3.3.6.jar \
+      jar/lwjgl-opengl-3.3.6.jar jar/lwjgl-stb-3.3.6.jar \
+      jar/jspecify-1.0.0.jar native/liblwjgl.so \
+      native/liblwjgl_opengl.so native/liblwjgl_stb.so; do
+    if [ ! -f "$lwjgl_dir/$artifact" ]; then
+      echo "build-livecd: missing LWJGL deployment artifact: $lwjgl_dir/$artifact" >&2
+      exit 1
+    fi
+  done
+fi
 
 fat_short_path() {
   image=$1
@@ -157,6 +175,13 @@ if [ -n "${PLANT_OPENJDK_DIR:-}" ]; then
   fi
   mkdir -p "$openjdk_payload_dir/java"
   cp -RL "$PLANT_OPENJDK_DIR"/. "$openjdk_payload_dir/java/"
+  if [ -n "$lwjgl_dir" ]; then
+    for directory in classes jar native; do
+      mkdir -p "$openjdk_payload_dir/java/lwjgl/$directory"
+      cp -RL "$lwjgl_dir/$directory"/. "$openjdk_payload_dir/java/lwjgl/$directory/"
+    done
+    cp "$lwjgl_dir/run-lwjgl.lua" "$openjdk_payload_dir/java/lwjgl/"
+  fi
   mkdir -p "$openjdk_payload_dir/java/lib"
   for library in libp.so libcpp.so libm.so.6 libz.so.1; do
     if [ ! -f "$payload_dir/lib/$library" ]; then
