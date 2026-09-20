@@ -236,6 +236,8 @@ int vfs_fd_open(vfs_context_t *context, const char *path, uint32_t flags);
 int vfs_fd_close(vfs_context_t *context, int descriptor);
 int vfs_fd_fcntl(vfs_context_t *context, int descriptor, int command,
                  uintptr_t argument);
+void vfs_record_lock_cancel_task(mtask *task);
+void vfs_record_lock_task_cleanup(uint32_t owner);
 int vfs_fd_read(vfs_context_t *context, int descriptor, void *buffer,
                 uint32_t length);
 int vfs_fd_pread(vfs_context_t *context, int descriptor, void *buffer,

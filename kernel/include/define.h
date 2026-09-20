@@ -36,6 +36,7 @@ extern int gmx, gmy;
 extern unsigned char *font, *ascfont, *hzkfont;
 extern struct TIMERCTL timerctl;
 extern uintptr_t memsize;
+extern uintptr_t physical_memory_limit;
 extern uint32_t running_mode;
 
 #define MAX_TIMER 500

@@ -37,6 +37,7 @@
 #define PAGE_PRESENT_RW_FLAGS (PG_P | PG_RWW)
 #define PAGE_USER_PRESENT_FLAGS (PG_P | PG_USU)
 #define PAGE_USER_RW_FLAGS (PG_P | PG_USU | PG_RWW)
+#define PAGE_RESERVED_OWNER UINT_MAX
 
 struct PAGE_INFO {
   uint32_t task_id;
@@ -211,6 +212,9 @@ static void page_ref_dec_idx(unsigned idx) {
   if (pages[idx].count == 0) {
     page_ref_panic("underflow", idx);
   }
+  if (pages[idx].task_id == PAGE_RESERVED_OWNER) {
+    page_ref_panic("release reserved page", idx);
+  }
   if (pages[idx].count > 1 && pages[idx].task_id != 0) {
     page_ref_panic("shared page has owner", idx);
   }
@@ -257,7 +261,7 @@ size_t page_used_count(uintptr_t physical_size) {
 
   unsigned used = 0;
   for (unsigned idx = 0; idx < limit; idx++) {
-    if (page_refcount_idx(idx) != 0) {
+    if (pages[idx].count != 0 && pages[idx].task_id != PAGE_RESERVED_OWNER) {
       used++;
     }
   }
@@ -444,7 +448,7 @@ static void init_page_manager(const boot_info_t *boot_info) {
   }
 
   for (unsigned index = 0; index < PAGE_TOTAL_COUNT; index++) {
-    pages[index].count = 1;
+    pages[index] = (struct PAGE_INFO){PAGE_RESERVED_OWNER, 1};
   }
   for (uint32_t index = 0; index < boot_info->memory_range_count; index++) {
     const boot_memory_range_t *range = &boot_info->memory_ranges[index];
@@ -467,7 +471,7 @@ static void init_page_manager(const boot_info_t *boot_info) {
     for (uint64_t address = start; address < end;
          address += PAGE_SIZE_BYTES) {
       unsigned page = (unsigned)(address / PAGE_SIZE_BYTES);
-      pages[page].count = 0;
+      pages[page] = (struct PAGE_INFO){0, 0};
       page_bitmap_mark_free(page);
     }
   }
@@ -1101,6 +1105,9 @@ void *page_malloc_one() {
 }
 void gc(unsigned tid) {
   for (unsigned i = 0; i < PAGE_TOTAL_COUNT; i++) {
+    if (pages[i].task_id == PAGE_RESERVED_OWNER) {
+      continue;
+    }
     unsigned count = page_refcount_idx(i);
     if ((count == 0 && pages[i].task_id != 0) ||
         (count > 1 && pages[i].task_id != 0)) {

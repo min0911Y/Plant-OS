@@ -2,8 +2,7 @@
 
 [开发指南](development.md) · [动态链接](dynamic-linking.md)
 
-当前 x86_64 移植使用 OpenJDK 17 的 BSD 平台层和 Plant 原生运行库，提供经过
-验证的 Zero 解释器镜像以及带 C1/C2 的 Server VM 镜像；不能用宿主 Linux JDK
+当前 x86_64 移植使用 OpenJDK 17 的 BSD 平台层和 Plant 原生运行库，只维护带 C1/C2 的 Server VM 镜像；不能用宿主 Linux JDK
 的本地库替换。源码、配置目录和 JDK 镜像位于 `apps/out/`，长期维护的补丁位于
 `apps/openjdk/patches/`。
 
@@ -29,48 +28,31 @@ NIO 使用统一的根路径长度处理盘符、文件名、父目录、拼接�
 URI 转换沿用同平台的 `java.io.File` 规则，带空格和非 ASCII 字符的路径也须
 保持文件身份。跨盘符相对化应拒绝，不能把盘符当作普通目录名。
 
-## 更新已有移植构建
+## 从固定源码构建
 
-Zero 的代码缓存保存解释器元数据，应以 RW 映射；只有生成机器码的 JVM 才
-需要可执行代码缓存。不能为运行 Zero 放宽 Plant 的 W^X 约束。
-BSD Zero 使用编译器的 `__builtin_frame_address(0)` 获取当前栈帧，不能返回
-局部变量地址；后者可被编译器优化为 NULL，触发错误的栈溢出检查。
-
-以下命令面向已经完成 Plant 配置及其他移植适配的 OpenJDK 17 源码树，不是
-从上游源码开始的完整构建流程。新源码树先应用这些补丁，已应用的补丁
-无需重复执行：
+根目录 `./init.py openjdk` 下载并校验 OpenJDK 17.0.19+10 与宿主 Boot JDK，
+将 `apps/openjdk/patches/openjdk/plant.patch` 应用到唯一的上游源码缓存。
+补丁包含构建平台、BSD 系统接口、Java 路径、NIO 以及 HotSpot JIT 的完整移植；
+不要直接修改 `apps/out/sources/`。
 
 ```sh
-jdk_source=apps/out/sources/openjdk-17-17.0.19+10
-jdk_build=apps/out/x86_64/openjdk/configure-probe-9
-patch -d "$jdk_source" -p1 < apps/openjdk/patches/bsd-modular-java-home.patch
-patch -d "$jdk_source" -p1 < apps/openjdk/patches/plant-path-separator.patch
-patch -d "$jdk_source" -p1 < apps/openjdk/patches/zero-code-cache.patch
-patch -d "$jdk_source" -p1 < apps/openjdk/patches/bsd-zero-stack-pointer.patch
-patch -d "$jdk_source" -p1 < apps/openjdk/patches/plant-java-file-paths.patch
-patch -d "$jdk_source" -p1 < apps/openjdk/patches/plant-x86-hotspot.patch
-patch -d "$jdk_source" -p1 < apps/openjdk/patches/plant-launcher-execname.patch
-patch -d "$jdk_source" -p1 < apps/openjdk/patches/plant-process-environment.patch
-patch -d "$jdk_source" -p1 < apps/openjdk/patches/plant-nio-paths.patch
-make -C "$jdk_build" hotspot-zero java.base-libs java.base-java-only JOBS=8
-make -C "$jdk_build" java.base-jmod-only JOBS=8
-make -C "$jdk_build" jdk-image-only JOBS=8
-PLANT_OPENJDK_DIR="$jdk_build/images/jdk" \
-  scripts/build-livecd.sh kernel/plant-os-x86_64.iso x86_64
+./init.py openjdk
+make -C kernel ARCH=x86_64 openjdk OPENJDK_JOBS=2
 ```
 
-打包会更新 ISO 与 `kernel/plant-os-x86_64-jdk.img`，启动时需要同时挂载两者。
-JDK 盘不携带 `libp.so`、`libcpp.so`、`libm.so.6`、`libz.so.1`；它们统一从
-启动盘的 `/lib` 加载，与 `ld.so` 一起更新。打包时会移除镜像中这些库的副本，
-避免 RPATH 优先命中旧 ABI 或宿主库。旧布局的 JDK 盘需要重新打包。
-验证通过临时 `kernel/res/init.mst` 执行 `C:/java/bin/java -version`、无参数
-启动器和带 classpath 的 Java 程序；程序输出在图形控制台，串口中的 init
-命令退出状态不能单独证明 JVM 初始化成功。测试后恢复 init 脚本与正常镜像。
+构建目录为 `apps/out/x86_64/openjdk/`，唯一运行镜像为该目录的
+`images/jdk/`。构建脚本自动生成配置、构建原生运行库和宿主构建工具，
+不依赖历史 probe 目录或已有 JDK 目标镜像。宿主 Boot JDK 仅供构建工具使用，
+不打包进客户机。需要 GNU make、GCC/G++、autoconf、zip、unzip，
+以及 [构建指南](build.md) 中的原生 C++ 工具链。
 
-`apps/openjdk/Startup.java` 是启动回归程序，用宿主 JDK 17 编译后放入测试盘的
-`java/` 目录，以 `-cp "C:/missing;C:/java" Startup` 启动，应输出
-`OPENJDK STARTUP PASS`，覆盖路径列表分割、带盘符目录中的类加载和系统属性。
-该程序还核验模块文件存在、盘符根目录为绝对路径，以及文件 URI 往返转换。
+通过 `PLANT_OPENJDK_DIR` 向 LiveCD 打包脚本提供这一目录后，JDK 位于附加
+FAT32 磁盘，以 `C:/java/bin/java` 访问。JDK 盘不携带 `libp.so`、`libcpp.so`、
+`libm.so.6`、`libz.so.1` 的私有副本；它们统一从系统盘的 `/lib` 加载，
+与 `ld.so` 一起更新。
+
+`apps/openjdk/Startup.java` 验证启动、路径分隔符、盘符路径、类加载与文件 URI。
+测试必须检查客户机写出的结果，不能仅凭 init 命令的退出码判断成功。
 
 ## NIO 与动态加载回归
 
@@ -80,7 +62,7 @@ JVM 通过通用 `dlopen` 加载，general-dynamic TLS 支持启动后建立的�
 
 ```sh
 python3 scripts/test-openjdk.py \
-  --jdk apps/out/x86_64/openjdk/configure-probe-9/images/jdk \
+  --jdk apps/out/x86_64/openjdk/images/jdk \
   --javac apps/out/host/openjdk/jdk-17.0.2/bin/javac \
   --accel kvm --out /tmp/plant-openjdk-nio
 ```
@@ -102,7 +84,7 @@ Plant 当前没有将内核配置及 `getenv` 的惰性缓存导出为 POSIX `en
 Java 环境枚举在该表为 NULL 时返回空映射，不能解引用空表。完整环境继承仍
 不属于此移植的已支持范围。
 测试成功须在磁盘写出 `OPENJDK NIO PASS` 且完成 ACPI S5；程序退出码或串口
-命令状态不能替代测试断言。TCG 可选，但 Zero 解释器执行大型 JDK 的耗时显著增加。
+命令状态不能替代测试断言。KVM 适合日常回归；TCG 可验证模拟执行后端。
 测试日志与磁盘保留在输出目录；文件锁、完整 Java 网络库及 MC 本身不属于此测试。
 QEMU 使用 `-no-shutdown`，宿主确认其进入 shutdown 状态后保存 `console.ppm`
 并退出 QEMU；超时也尽可能保存控制台，以保留未写到串口的 JVM 初始化错误。
@@ -111,22 +93,10 @@ QEMU 使用 `-no-shutdown`，宿主确认其进入 shutdown 状态后保存 `con
 
 ## x86_64 Server VM 与 JIT 验收
 
-`scripts/build-openjdk-jit.py` 使用已有的 Plant OpenJDK 17 配置、源码树及基础
-JDK 镜像，构建 `compiler1 compiler2 serialgc` 及 `java.base` 本地库。这仍不是
-从干净上游源码开始的完整移植流程。脚本应用或检查 `plant-x86-hotspot.patch`、
-`plant-launcher-execname.patch`、`plant-process-environment.patch` 和
-`plant-nio-paths.patch`，更新 `java.base` 模块及镜像，保留原配置，
-将 Server VM 库输出到 `hotspot/variant-server/libjvm/`，生成独立的 JDK 镜像：
-
-```sh
-python3 scripts/build-openjdk-jit.py \
-  --build apps/out/x86_64/openjdk/configure-probe-9
-```
-
-默认镜像位于该构建目录的 `images/jdk-jit/`，可用 `--out` 指定其他目录；
-重复执行会更新输出镜像。不能指向基础 `images/jdk/` 或其父子目录。
-Zero 和 Server 在上游默认都会把库命名为 `server/libjvm.so`，因此必须隔离
-库输出目录，不能仅凭目录名判断 JVM 类型。
+Server 构建包含 `compiler1 compiler2 management nmt jfr jvmti services serialgc`，
+禁用未支持的 Serviceability Agent，原生 C++ 使用 `-fno-exceptions -fno-rtti`。
+`make -C kernel ARCH=x86_64 openjdk` 可从源码完成整个构建；配置和工具链指纹
+变化时自动重新配置。源码缓存、构建目录与宿主工具互相分离。
 
 补丁接入 Plant 的 x86_64 `ucontext_t`、`pthread_getattr_np` /
 `pthread_attr_getstack` 和字节交换操作，将 DSO 析构身份移到两个 VM 共用的
@@ -139,6 +109,8 @@ Server VM 的代码缓存遵循 Plant 的 W^X：提交页先以 RW 写入，代�
 互不连续的别名，否则跨提交边界复制机器码会破坏重定位。CodeBlob 的头部、元数据与代码
 布局按页边界隔离，代码复制、relocation、内联缓存和解释器 codelet 初始化均
 经过同一写路径，C1 延迟修补以及 GC 更新内嵌 oop 也必须使用写别名。
+常量区对齐补零通过写别名完成，但仍须按填充长度推进执行视图的 `end`，
+并同步更新 CodeSection；写地址转换不能改变原有的常量对齐和位置语义。
 入口及调用点热修补沿用 x86 的原子写入、内存屏障和缓存行刷新，不能将
 指令缓存刷新置空；启动期直接执行原生刷新序列，无需先生成刷新 stub。
 C1、C2 和本地方法包装器的 verified entry 统一以五字节 `jmp rel32` 开始，
@@ -158,14 +130,15 @@ JIT 验收入口分别要求 C1 或 C2 编译，并核对计算结果和实际 `
 
 ```sh
 python3 scripts/test-openjdk.py \
-  --jdk apps/out/x86_64/openjdk/configure-probe-9/images/jdk-jit \
+  --jdk apps/out/x86_64/openjdk/images/jdk \
   --javac apps/out/host/openjdk/jdk-17.0.2/bin/javac \
   --jit c1 --out /tmp/plant-openjdk-c1
 # 将 --jit 改为 c2，输出目录改为 /tmp/plant-openjdk-c2，单独验收 C2。
 ```
 
-`Jit.java` 对正负输入验证循环运算的闭式结果。宿主要求磁盘上的工作负载结果
-通过，且 `LogCompilation` 中存在对应编译器生成的 `Jit.kernel` nmethod；
+`Jit.java` 对正负输入验证循环运算的闭式结果，以及混合 float/double 常量的
+浮点运算。宿主要求磁盘上的工作负载结果通过，且 `LogCompilation` 中存在
+对应编译器生成的 `Jit.kernel` 和 `Jit.constants` nmethod；
 仅输出 VM 名称或解释执行得到正确结果都不能通过 JIT 验收。源码启动和综合
 运行库测试始终使用默认分层编译；`--jit` 只限制最后的专用编译器验收程序。
 
@@ -177,3 +150,22 @@ Server VM 回归使用四个客户机 CPU，TCG 默认 `thread=multi`；
 `make_not_entrant`，确认真正执行过入口失效。仅通过专用 JIT 运算不够。
 热修补改动应分别用 `--accel tcg --repeat 4 --jit c1` / `--jit c2`
 做重复回归，再检查 KVM；保留默认分层编译、线程与 GC。
+
+## 原版 Minecraft 服务端
+
+使用包含 C2 的 Plant Server JDK 和未经修改的 Minecraft 1.20.1 服务端 JAR：
+
+```sh
+python3 scripts/test-minecraft-server.py \
+  --jdk apps/out/x86_64/openjdk/images/jdk \
+  --server /path/to/server.jar --out /tmp/plant-minecraft-default --accel kvm
+```
+
+脚本校验 JAR 的 SHA-256 和内层签名文件，创建独立镜像与默认地形的新世界，
+使用四核、4 GiB 客户机内存及默认分层编译。首次解包依赖也计入测试时间；
+可通过 `--timeout` 调整超时。`--jvm-mode c2` 关闭分层编译，单独验证 C2。
+不要用平坦世界、解释模式或编译排除列表代替默认世界验收。
+
+验收须完成出生区生成、并发状态查询、RCON 保存、JFR 录制、所有维度保存及
+正常关机。仅进度超过 40% 或出现 `Done` 不够；完整结果、服务端日志与镜像
+校验值保留在输出目录。复测新世界须使用新的空输出目录，避免已有区块掩盖问题。

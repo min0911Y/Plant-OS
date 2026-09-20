@@ -10,6 +10,11 @@ public final class Jit {
         return result;
     }
 
+    private static double constants(float value) {
+        // Mix four- and eight-byte constants in the same compiled code buffer.
+        return Math.abs(value * -1.25f) + 2.5d / (value + 0.5d);
+    }
+
     public static void main(String[] args) throws Exception {
         Path result = Path.of(args[0]);
         try {
@@ -18,6 +23,12 @@ public final class Jit {
                 long actual = kernel(seed);
                 if (actual != expected) {
                     throw new AssertionError("kernel(" + seed + "): " + actual + " != " + expected);
+                }
+                double floatingExpected = Math.abs(seed * 5.0 / 4.0) + 5.0 / (2 * seed + 1);
+                double floatingActual = constants(seed);
+                if (floatingActual != floatingExpected) {
+                    throw new AssertionError("constants(" + seed + "): " + floatingActual
+                            + " != " + floatingExpected);
                 }
             }
             Files.writeString(result, "OPENJDK JIT WORKLOAD PASS\n");

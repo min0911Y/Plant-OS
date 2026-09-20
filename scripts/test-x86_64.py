@@ -652,6 +652,8 @@ def main():
     gui_mode.add_argument("--desktop-app", choices=("lite", "nk"), help="capture and close an SDL desktop application")
     gui_mode.add_argument("--tools", action="store_true", help="run C4 pointer/VM, NASM object and JavaScript regressions")
     gui_mode.add_argument("--lfn", action="store_true", help="validate FAT and initramfs long filenames")
+    gui_mode.add_argument("--record-lock", action="store_true",
+                          help="validate process-owned POSIX record locks")
     gui_mode.add_argument("--dynamic", action="store_true", help="run user ELF interpreter, shared libraries and page protection regressions")
     gui_mode.add_argument("--sched-fair", action="store_true", help="measure yielding worker fairness (use --cpus 1)")
     gui_mode.add_argument("--sched-balance", action="store_true", help="benchmark long/short runnable jobs and idle load balancing")
@@ -716,6 +718,9 @@ def main():
                 "TIMETEST PASS", "THRDTEST PASS", "LIBCTEST PASS", "CXXCHECK PASS", "FUTEXTEST PASS", "EXCEPTION_TEST done checks=5 fails=0", "GUITEST THREAD PASS", "GMOUSE ID =",
                 "RPCTEST done checks=23 fails=0", "DKTEST PASS", "DYNTEST PASS", "DYNTEST TLB PASS",
                 "GUISTRESS PASS" if args.capacity else "GUITEST PASS"]
+    if args.record_lock:
+        commands = ["dktest.bin"]
+        expected = ["RECORD_LOCK PASS", "DKTEST PASS"]
     if args.simd:
         if not native:
             parser.error("--simd requires x86_64")
@@ -912,7 +917,8 @@ def main():
     original_config = config.read_bytes() if args.usb else None
     def mst_quote(text):
         return '"' + text.replace('\\', '\\\\').replace('"', '\\"') + '"'
-    shutdown_after = args.dynamic or args.all_apps or args.signals or args.simd or args.threads
+    shutdown_after = (args.dynamic or args.all_apps or args.signals or args.simd or
+                      args.threads or args.record_lock)
     final_command = "psh.bin -c shutdown" if shutdown_after else "psh.bin"
     actions = [f'  {{"action" = "run" "command_line" = {mst_quote(command)}}}'
                for command in commands + [final_command]]

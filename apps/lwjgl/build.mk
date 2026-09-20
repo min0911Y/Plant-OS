@@ -2,10 +2,10 @@ LWJGL_OUTPUT := $(DYN_OUT)/lwjgl
 LWJGL_STAMP := $(LWJGL_OUTPUT)/.plant-build
 LWJGL_SCRIPT := ../scripts/build-lwjgl.py
 LWJGL_INPUTS := $(wildcard lwjgl/sources.json lwjgl/UPSTREAM.md \
-  lwjgl/include/* lwjgl/patches/*.patch) \
+  lwjgl/include/* lwjgl/patches/lwjgl/*.patch) \
   lwjgl/LwjglSmoke.java lwjgl/run-lwjgl.lua \
   lwjgl/plantos_closures.c lwjgl/plantos_dynamic_loader.c lwjgl/plantos_ffi.c \
-  $(LWJGL_SCRIPT)
+  $(LWJGL_SCRIPT) ../scripts/sources.py
 LWJGL_LAUNCHER := $(BUILD)/lwjgl-launcher.bin
 
 $(eval $(call application,lwjgl-launcher,,lwjgl/lwjgl-launcher.c))

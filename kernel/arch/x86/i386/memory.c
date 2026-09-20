@@ -2,6 +2,8 @@
 #include <arch/x86/i386/control.h>
 #include <dos.h>
 #include <irq.h>
+#include <limits.h>
+#include <stdint.h>
 
 /* 写入 pattern、两次取反回读，最后恢复原值；返回该 dword 是否为真实内存。 */
 static bool memory_probe_dword(volatile uint32_t *probe,
@@ -93,4 +95,27 @@ uintptr_t arch_memory_detect(const boot_info_t *boot_info) {
   }
   irq_restore(state);
   return limit;
+}
+
+uintptr_t arch_memory_available(const boot_info_t *boot_info) {
+  if (boot_info != NULL && boot_info->memory_range_count != 0) {
+    uint64_t total = 0;
+    for (uint32_t index = 0; index < boot_info->memory_range_count; index++) {
+      const boot_memory_range_t *range = &boot_info->memory_ranges[index];
+      if (range->type != BOOT_MEMORY_USABLE || range->base >= 0xc0000000u)
+        continue;
+      uint64_t end = range->base + range->length;
+      if (end < range->base || end > 0xc0000000u)
+        end = 0xc0000000u;
+      uint64_t start = range->base;
+      if (end <= start)
+        continue;
+      uint64_t length = end - start;
+      if (total > UINTPTR_MAX - length)
+        return UINTPTR_MAX;
+      total += length;
+    }
+    return (uintptr_t)total;
+  }
+  return arch_memory_detect(boot_info);
 }

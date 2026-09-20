@@ -7,6 +7,7 @@
 // struct TASK *sr1, *sr2;
 // struct TASK normal;
 uintptr_t memsize;
+uintptr_t physical_memory_limit;
 
 #ifdef KERNEL_DISABLE_MEMTEST
 #define KERNEL_MEMSIZE_BYTES ((unsigned int)KERNEL_MEMSIZE_MB * 1024U * 1024U)
@@ -150,17 +151,21 @@ void sysinit(void) {
   printk("Welcome to Plant OS Kernel!!!!!!\n");
 #ifndef KERNEL_DISABLE_MEMTEST
   logk("sysinit: memtest start\n");
-  memsize = arch_memory_detect(boot_info);
-  logk("sysinit: memtest done memsize=%zx\n", memsize);
+  physical_memory_limit = arch_memory_detect(boot_info);
+  memsize = arch_memory_available(boot_info);
+  logk("sysinit: memtest done memsize=%zx physical_limit=%zx\n", memsize,
+       physical_memory_limit);
 #else
   memsize = KERNEL_MEMSIZE_BYTES;
+  physical_memory_limit = memsize;
   printk("memtest disabled, assume %u MiB RAM\n", KERNEL_MEMSIZE_MB);
   logk("sysinit: memtest disabled memsize=%zx memsize_mb=%u\n", memsize,
        KERNEL_MEMSIZE_MB);
 #endif
 
-  if (has_initramfs && (initramfs_physical >= memsize ||
-                        initramfs.size > memsize - initramfs_physical)) {
+  if (has_initramfs &&
+      (initramfs_physical >= physical_memory_limit ||
+       initramfs.size > physical_memory_limit - initramfs_physical)) {
     Panic_K("initramfs lies outside detected memory");
     return;
   }
@@ -199,9 +204,10 @@ void sysinit(void) {
   logk("sysinit: reg_pfs start\n");
   reg_pfs();
   logk("sysinit: reg_pfs done\n");
-  printk("pf set up to %zx\n", memsize);
-  logk("sysinit: pf_set start memsize=%zx\n", memsize);
-  pf_set(memsize);
+  printk("pf set up to %zx\n", physical_memory_limit);
+  logk("sysinit: pf_set start memsize=%zx physical_limit=%zx\n", memsize,
+       physical_memory_limit);
+  pf_set(physical_memory_limit);
   logk("sysinit: pf_set done\n");
   printk("acpi\n");
   printk("smp cpus=%d bsp apic=%d ctl=%s\n", smp_cpu_count(),

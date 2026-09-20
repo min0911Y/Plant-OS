@@ -1,0 +1,15 @@
+{
+  "llvm-target": "x86_64-unknown-none-elf",
+  "data-layout": "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128",
+  "arch": "x86_64",
+  "cpu": "x86-64",
+  "target-pointer-width": 64,
+  "os": "none",
+  "linker-flavor": "gnu-lld",
+  "linker": "rust-lld",
+  "panic-strategy": "abort",
+  "disable-redzone": true,
+  "code-model": "small",
+  "features": "-mmx,+sse,+sse2",
+  "max-atomic-width": 64
+}

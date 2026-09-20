@@ -23,6 +23,7 @@ enum { PAGE_BYTES = 4096, TABLE_ENTRIES = 512 };
 typedef struct {
   uint32_t references, owner;
 } physical_page_t;
+#define PHYSICAL_PAGE_RESERVED_OWNER UINT_MAX
 static physical_page_t *pages;
 static size_t page_count, allocation_hint, user_hint;
 static uint64_t zero_page;
@@ -161,8 +162,11 @@ size_t page_used_count(uintptr_t physical_size) {
   if (count > page_count)
     count = page_count;
   size_t used = 0;
-  for (size_t i = 0; i < count; i++)
-    used += pages[i].references != 0;
+  for (size_t i = 0; i < count; i++) {
+    /* Address-space holes are outside the reported RAM capacity. */
+    used += pages[i].owner != PHYSICAL_PAGE_RESERVED_OWNER &&
+            pages[i].references != 0;
+  }
   return used;
 }
 
@@ -907,7 +911,7 @@ void init_page(const boot_info_t *info) {
   if (!pages)
     page_panic();
   for (size_t i = 0; i < page_count; i++)
-    pages[i] = (physical_page_t){UINT_MAX, 0};
+    pages[i] = (physical_page_t){UINT_MAX, PHYSICAL_PAGE_RESERVED_OWNER};
   for (size_t i = 0; i < info->memory_range_count; i++) {
     const boot_memory_range_t *range = &info->memory_ranges[i];
     if (range->type != BOOT_MEMORY_USABLE)
@@ -915,7 +919,7 @@ void init_page(const boot_info_t *info) {
     size_t first = (range->base + 4095) / PAGE_BYTES;
     size_t end = (range->base + range->length) / PAGE_BYTES;
     for (size_t j = first; j < end; j++)
-      pages[j].references = 0;
+      pages[j] = (physical_page_t){0, 0};
   }
   uint64_t old_cr3 = arch_address_space_current();
   uint64_t *root = page_malloc_one_no_mark();

@@ -32,19 +32,25 @@ global arch_task_interrupt_return
   push r14
   push r15
   sub rsp, SIMD_SIZE
-  ; Reserved FXSAVE bytes are sanitized only when exporting a signal frame.
-  fxsave64 [rsp]
-  mov qword [rsp + YMM_INUSE], 0
+  ; FXSAVE clears the AVX XINUSE bit. Read it first when the CPU exposes
+  ; XGETBV(1), otherwise an interrupted YMM value would be silently lost.
+  xor r11d, r11d
   test dword [rel x64_xstate_mask], 4
-  jz %%saved
+  jz %%save_legacy
   cmp dword [rel x64_xgetbv1], 0
-  je %%save_ymm
+  je %%mark_ymm
   mov ecx, 1
   xgetbv
   test eax, 4
-  jz %%saved
-%%save_ymm:
-  mov qword [rsp + YMM_INUSE], 1
+  jz %%save_legacy
+%%mark_ymm:
+  mov r11d, 1
+%%save_legacy:
+  ; Reserved FXSAVE bytes are sanitized only when exporting a signal frame.
+  fxsave64 [rsp]
+  mov qword [rsp + YMM_INUSE], r11
+  cmp qword [rsp + YMM_INUSE], 0
+  je %%saved
 %assign reg 0
 %rep 16
   vextractf128 [rsp + 512 + reg * 16], ymm%+reg, 1

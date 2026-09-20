@@ -1,0 +1,2798 @@
+--- a/src/java.desktop/unix/native/common/awt/utility/rect.h
++++ b/src/java.desktop/unix/native/common/awt/utility/rect.h
+@@ -28,7 +28,7 @@
+ #ifndef _AWT_RECT_H
+ #define _AWT_RECT_H
+ 
+-#ifndef MACOSX
++#if !defined(MACOSX) && !defined(__plantos__) && !defined(HEADLESS)
+ #include <X11/Xlib.h>
+ typedef XRectangle RECT_T;
+ #else
+--- a/src/hotspot/os/posix/os_posix.cpp
++++ b/src/hotspot/os/posix/os_posix.cpp
+@@ -555,11 +555,15 @@
+   st->print_cr("egid : %u", id);
+   st->cr();
+ 
++#ifdef __plantos__
++  st->print_cr("umask: unavailable");
++#else
+   mode_t umsk = ::umask(0);
+   ::umask(umsk);
+   st->print("umask: %04o (", (unsigned) umsk);
+   print_umask(st, umsk);
+   st->print_cr(")");
++#endif
+   st->cr();
+ }
+ 
+@@ -1193,7 +1197,7 @@
+                       "enabled executable stack (see man page execstack(8))");
+ 
+   } else {
+-#if !defined(AIX) && !defined(__APPLE__)
++#if defined(LINUX)
+     // bsd and aix don't have this
+ 
+     // Accessing stack address below sp may cause SEGV if current
+@@ -1957,14 +1961,20 @@
+   }
+ }
+ 
++// Plant OS stores environment entries in the kernel rather than exposing a
++// process-wide environ vector. fork/exec is disabled on this platform.
++#if defined(__plantos__)
++char** os::get_environ() { return NULL; }
++#elif defined(__APPLE__)
+ // Darwin has no "environ" in a dynamic library.
+-#ifdef __APPLE__
+   #define environ (*_NSGetEnviron())
+ #else
+   extern char** environ;
+ #endif
+ 
++#if !defined(__plantos__)
+ char** os::get_environ() { return environ; }
++#endif
+ 
+ // Run the specified command in a separate process. Return its exit value,
+ // or -1 on failure (e.g. can't fork a new process).
+@@ -1973,6 +1983,10 @@
+ //        -this function is unsafe to use in non-error situations, mainly
+ //         because the child process will inherit all parent descriptors.
+ int os::fork_and_exec(const char* cmd, bool prefer_vfork) {
++#ifdef __plantos__
++  errno = ENOTSUP;
++  return -1;
++#else
+   const char * argv[4] = {"sh", "-c", cmd, NULL};
+ 
+   pid_t pid ;
+@@ -2031,6 +2045,7 @@
+       return status;
+     }
+   }
++#endif
+ }
+ 
+ bool os::message_box(const char* title, const char* message) {
+--- a/src/hotspot/os/posix/os_posix.hpp
++++ b/src/hotspot/os/posix/os_posix.hpp
+@@ -37,7 +37,13 @@
+ // File conventions
+ static const char* file_separator() { return "/"; }
+ static const char* line_separator() { return "\n"; }
+-static const char* path_separator() { return ":"; }
++static const char* path_separator() {
++#ifdef __plantos__
++  return ";";
++#else
++  return ":";
++#endif
++}
+ 
+ class Posix {
+   friend class os;
+--- a/src/hotspot/os/bsd/osThread_bsd.cpp
++++ b/src/hotspot/os/bsd/osThread_bsd.cpp
+@@ -31,11 +31,7 @@
+ 
+ void OSThread::pd_initialize() {
+   assert(this != NULL, "check");
+-#ifdef __APPLE__
+   _thread_id        = 0;
+-#else
+-  _thread_id        = NULL;
+-#endif
+   _unique_thread_id = 0;
+   _pthread_id       = NULL;
+   _siginfo          = NULL;
+--- a/src/hotspot/os/bsd/os_bsd.cpp
++++ b/src/hotspot/os/bsd/os_bsd.cpp
+@@ -74,7 +74,6 @@
+ # include <errno.h>
+ # include <fcntl.h>
+ # include <inttypes.h>
+-# include <poll.h>
+ # include <pthread.h>
+ # include <pwd.h>
+ # include <signal.h>
+@@ -95,12 +94,17 @@
+ # include <time.h>
+ # include <unistd.h>
+ 
+-#if defined(__FreeBSD__) || defined(__NetBSD__)
++#if defined(__FreeBSD__) || defined(__NetBSD__) || defined(__plantos__)
+   #include <elf.h>
+ #endif
+ 
+ #ifdef __APPLE__
+   #include <mach-o/dyld.h>
++#endif
++
++#if defined(__plantos__)
++extern "C" __attribute__((visibility("hidden"))) void *__dso_handle =
++    &__dso_handle;
+ #endif
+ 
+ #ifndef MAP_ANONYMOUS
+@@ -328,7 +332,11 @@
+   //        7: The default directories, normally /lib and /usr/lib.
+ #ifndef DEFAULT_LIBPATH
+   #ifndef OVERRIDE_LIBPATH
+-    #define DEFAULT_LIBPATH "/lib:/usr/lib"
++    #ifdef __plantos__
++      #define DEFAULT_LIBPATH "/lib;/usr/lib"
++    #else
++      #define DEFAULT_LIBPATH "/lib:/usr/lib"
++    #endif
+   #else
+     #define DEFAULT_LIBPATH OVERRIDE_LIBPATH
+   #endif
+@@ -354,7 +362,7 @@
+     os::jvm_path(buf, bufsize);
+ 
+     // Found the full path to libjvm.so.
+-    // Now cut the path to <java_home>/jre if we can.
++    // Modular images install libjvm at <java_home>/lib/<variant>/libjvm.so.
+     *(strrchr(buf, '/')) = '\0'; // Get rid of /libjvm.so.
+     pslash = strrchr(buf, '/');
+     if (pslash != NULL) {
+@@ -365,15 +373,11 @@
+     if (pslash != NULL) {
+       pslash = strrchr(buf, '/');
+       if (pslash != NULL) {
+-        *pslash = '\0';          // Get rid of /<arch>.
+-        pslash = strrchr(buf, '/');
+-        if (pslash != NULL) {
+-          *pslash = '\0';        // Get rid of /lib.
+-        }
++        *pslash = '\0';          // Get rid of /lib.
+       }
+     }
+     Arguments::set_java_home(buf);
+-    if (!set_boot_path('/', ':')) {
++    if (!set_boot_path(file_separator()[0], path_separator()[0])) {
+       vm_exit_during_initialization("Failed setting boot class path.", NULL);
+     }
+   }
+@@ -393,19 +397,19 @@
+     // should always exist (until the legacy problem cited above is
+     // addressed).
+     const char *v = ::getenv("LD_LIBRARY_PATH");
+-    const char *v_colon = ":";
++    const char *v_colon = path_separator();
+     if (v == NULL) { v = ""; v_colon = ""; }
+     // That's +1 for the colon and +1 for the trailing '\0'.
+     const size_t ld_library_path_size = strlen(v) + 1 + sizeof(SYS_EXT_DIR) +
+             sizeof("/lib/") + strlen(cpu_arch) + sizeof(DEFAULT_LIBPATH) + 1;
+     char *ld_library_path = NEW_C_HEAP_ARRAY(char, ld_library_path_size, mtInternal);
+-    os::snprintf_checked(ld_library_path, ld_library_path_size, "%s%s" SYS_EXT_DIR "/lib/%s:" DEFAULT_LIBPATH, v, v_colon, cpu_arch);
++    os::snprintf_checked(ld_library_path, ld_library_path_size, "%s%s" SYS_EXT_DIR "/lib/%s%s" DEFAULT_LIBPATH, v, v_colon, cpu_arch, path_separator());
+     Arguments::set_library_path(ld_library_path);
+     FREE_C_HEAP_ARRAY(char, ld_library_path);
+   }
+ 
+   // Extensions directories.
+-  os::snprintf_checked(buf, bufsize, "%s" EXTENSIONS_DIR ":" SYS_EXT_DIR EXTENSIONS_DIR, Arguments::get_java_home());
++  os::snprintf_checked(buf, bufsize, "%s" EXTENSIONS_DIR "%s" SYS_EXT_DIR EXTENSIONS_DIR, Arguments::get_java_home(), path_separator());
+   Arguments::set_ext_dirs(buf);
+ 
+   FREE_C_HEAP_ARRAY(char, buf);
+@@ -1087,7 +1091,7 @@
+ 
+   Elf32_Ehdr elf_head;
+ 
+-  const char* const error_report = ::dlerror();
++  const char* error_report = ::dlerror();
+   if (error_report == NULL) {
+     error_report = "dlerror returned no error description";
+   }
+@@ -1173,9 +1177,9 @@
+     {EM_68K,         EM_68K,     ELFCLASS32, ELFDATA2MSB, (char*)"M68k"}
+   };
+ 
+-  #if  (defined IA32)
++  #if  defined(IA32) || defined(PLANT_ARCH_I386)
+   static  Elf32_Half running_arch_code=EM_386;
+-  #elif   (defined AMD64)
++  #elif defined(AMD64) || defined(PLANT_ARCH_X86_64)
+   static  Elf32_Half running_arch_code=EM_X86_64;
+   #elif  (defined IA64)
+   static  Elf32_Half running_arch_code=EM_IA_64;
+@@ -1605,7 +1609,11 @@
+ //       left at the time of mmap(). This could be a potential
+ //       problem.
+ bool os::pd_commit_memory(char* addr, size_t size, bool exec) {
++#if defined(__plantos__)
++  int prot = PROT_READ|PROT_WRITE;
++#else
+   int prot = exec ? PROT_READ|PROT_WRITE|PROT_EXEC : PROT_READ|PROT_WRITE;
++#endif
+ #if defined(__OpenBSD__)
+   // XXX: Work-around mmap/MAP_FIXED bug temporarily on OpenBSD
+   Events::log_memprotect(NULL, "Protecting memory [" INTPTR_FORMAT "," INTPTR_FORMAT "] with protection modes %x", p2i(addr), p2i(addr+size), prot);
+@@ -1792,6 +1800,7 @@
+   case MEM_PROT_NONE: p = PROT_NONE; break;
+   case MEM_PROT_READ: p = PROT_READ; break;
+   case MEM_PROT_RW:   p = PROT_READ|PROT_WRITE; break;
++  case MEM_PROT_RX:   p = PROT_READ|PROT_EXEC; break;
+   case MEM_PROT_RWX:  p = PROT_READ|PROT_WRITE|PROT_EXEC; break;
+   default:
+     ShouldNotReachHere();
+@@ -2459,6 +2468,8 @@
+ jlong os::current_thread_cpu_time() {
+ #ifdef __APPLE__
+   return os::thread_cpu_time(Thread::current(), true /* user + sys */);
++#elif defined(__plantos__)
++  return 0;
+ #else
+   Unimplemented();
+   return 0;
+@@ -2468,6 +2479,9 @@
+ jlong os::thread_cpu_time(Thread* thread) {
+ #ifdef __APPLE__
+   return os::thread_cpu_time(thread, true /* user + sys */);
++#elif defined(__plantos__)
++  (void)thread;
++  return 0;
+ #else
+   Unimplemented();
+   return 0;
+@@ -2477,6 +2491,9 @@
+ jlong os::current_thread_cpu_time(bool user_sys_cpu_time) {
+ #ifdef __APPLE__
+   return os::thread_cpu_time(Thread::current(), user_sys_cpu_time);
++#elif defined(__plantos__)
++  (void)user_sys_cpu_time;
++  return 0;
+ #else
+   Unimplemented();
+   return 0;
+@@ -2504,6 +2521,10 @@
+   } else {
+     return ((jlong)tinfo.user_time.seconds * 1000000000) + ((jlong)tinfo.user_time.microseconds * (jlong)1000);
+   }
++#elif defined(__plantos__)
++  (void)thread;
++  (void)user_sys_cpu_time;
++  return 0;
+ #else
+   Unimplemented();
+   return 0;
+@@ -2553,7 +2574,7 @@
+     struct stat buf;
+     ::close(fd);
+     while (::stat(filename, &buf) == 0) {
+-      (void)::poll(NULL, 0, 100);
++      os::naked_short_sleep(100);
+     }
+   } else {
+     jio_fprintf(stderr,
+--- a/src/hotspot/os/bsd/os_perf_bsd.cpp
++++ b/src/hotspot/os/bsd/os_perf_bsd.cpp
+@@ -419,6 +419,9 @@
+ }
+ 
+ int NetworkPerformanceInterface::NetworkPerformance::network_utilization(NetworkInterface** network_interfaces) const {
++#ifdef __plantos__
++  return FUNCTIONALITY_NOT_IMPLEMENTED;
++#else
+   size_t len;
+   int mib[] = {CTL_NET, PF_ROUTE, /* protocol number */ 0, /* address family */ 0, NET_RT_IFLIST2, /* NET_RT_FLAGS mask*/ 0};
+   if (sysctl(mib, sizeof(mib) / sizeof(mib[0]), NULL, &len, NULL, 0) != 0) {
+@@ -458,6 +461,7 @@
+   *network_interfaces = ret;
+ 
+   return OS_OK;
++#endif
+ }
+ 
+ NetworkPerformanceInterface::NetworkPerformanceInterface() {
+--- a/src/hotspot/share/asm/assembler.cpp
++++ b/src/hotspot/share/asm/assembler.cpp
+@@ -92,7 +92,8 @@
+     end = cs->end();  // refresh pointer
+   }
+   if (pad > 0) {
+-    while (--pad >= 0) { *end++ = 0; }
++    memset(code_cache_write_address(end), 0, pad);
++    end += pad;
+     cs->set_end(end);
+   }
+   set_code_section(cs);
+@@ -193,7 +194,7 @@
+     address branch = cb->locator_address(branch_loc);
+     if (branch_sect == CodeBuffer::SECT_CONSTS) {
+       // The thing to patch is a constant word.
+-      *(address*)branch = target;
++      *(address*)code_cache_write_address(branch) = target;
+       continue;
+     }
+ 
+--- a/src/hotspot/share/asm/codeBuffer.cpp
++++ b/src/hotspot/share/asm/codeBuffer.cpp
+@@ -647,10 +647,10 @@
+       if (buf_offset % HeapWordSize == 0) {
+         // Use wordwise copies if possible:
+         Copy::disjoint_words((HeapWord*)lstart,
+-                             (HeapWord*)(buf+buf_offset),
++                             (HeapWord*)code_cache_write_address(buf+buf_offset),
+                              (lsize + HeapWordSize-1) / HeapWordSize);
+       } else {
+-        Copy::conjoint_jbytes(lstart, buf+buf_offset, lsize);
++        Copy::conjoint_jbytes(lstart, code_cache_write_address(buf+buf_offset), lsize);
+       }
+     }
+     buf_offset += lsize;
+@@ -661,7 +661,7 @@
+     if (buf != NULL) {
+       relocInfo padding = relocInfo(relocInfo::none, 0);
+       assert(buf_offset + (csize_t)sizeof(padding) <= buf_limit, "padding in bounds");
+-      *(relocInfo*)(buf+buf_offset) = padding;
++      *(relocInfo*)code_cache_write_address(buf+buf_offset) = padding;
+     }
+     buf_offset += sizeof(relocInfo);
+   }
+@@ -735,13 +735,13 @@
+     // Copy the code as aligned machine words.
+     // This may also include an uninitialized partial word at the end.
+     Copy::disjoint_words((HeapWord*)cs->start(),
+-                         (HeapWord*)dest_cs->start(),
++                         (HeapWord*)code_cache_write_address(dest_cs->start()),
+                          wsize / HeapWordSize);
+ 
+     if (dest->blob() == NULL) {
+       // Destination is a final resting place, not just another buffer.
+       // Normalize uninitialized bytes in the final padding.
+-      Copy::fill_to_bytes(dest_cs->end(), dest_cs->remaining(),
++      Copy::fill_to_bytes(code_cache_write_address(dest_cs->end()), dest_cs->remaining(),
+                           Assembler::code_fill_byte());
+     }
+     // Keep track of the highest filled address
+@@ -775,7 +775,7 @@
+   if (dest->blob() == NULL && dest_filled != NULL) {
+     // Destination is a final resting place, not just another buffer.
+     // Normalize uninitialized bytes in the final padding.
+-    Copy::fill_to_bytes(dest_filled, dest_end - dest_filled,
++    Copy::fill_to_bytes(code_cache_write_address(dest_filled), dest_end - dest_filled,
+                         Assembler::code_fill_byte());
+ 
+   }
+@@ -905,7 +905,7 @@
+   cb.set_blob(NULL);
+ 
+   // Zap the old code buffer contents, to avoid mistakenly using them.
+-  debug_only(Copy::fill_to_bytes(bxp->_total_start, bxp->_total_size,
++  debug_only(Copy::fill_to_bytes(code_cache_write_address(bxp->_total_start), bxp->_total_size,
+                                  badCodeHeapFreeVal);)
+ 
+   // Make certain that the new sections are all snugly inside the new blob.
+--- a/src/hotspot/share/asm/codeBuffer.hpp
++++ b/src/hotspot/share/asm/codeBuffer.hpp
+@@ -26,6 +26,7 @@
+ #define SHARE_ASM_CODEBUFFER_HPP
+ 
+ #include "code/oopRecorder.hpp"
++#include "code/codeCacheWrite.hpp"
+ #include "code/relocInfo.hpp"
+ #include "utilities/align.hpp"
+ #include "utilities/debug.hpp"
+@@ -201,45 +202,48 @@
+   // Code emission
+   void emit_int8(int8_t x1) {
+     address curr = end();
+-    *((int8_t*)  curr++) = x1;
++    *((int8_t*) code_cache_write_address(curr++)) = x1;
+     set_end(curr);
+   }
+ 
+-  void emit_int16(int16_t x) { *((int16_t*) end()) = x; set_end(end() + sizeof(int16_t)); }
++  void emit_int16(int16_t x) { *((int16_t*) code_cache_write_address(end())) = x; set_end(end() + sizeof(int16_t)); }
+   void emit_int16(int8_t x1, int8_t x2) {
+     address curr = end();
+-    *((int8_t*)  curr++) = x1;
+-    *((int8_t*)  curr++) = x2;
+-    set_end(curr);
++    address writable = code_cache_write_address(curr);
++    *((int8_t*) writable++) = x1;
++    *((int8_t*) writable++) = x2;
++    set_end(curr + 2);
+   }
+ 
+   void emit_int24(int8_t x1, int8_t x2, int8_t x3)  {
+     address curr = end();
+-    *((int8_t*)  curr++) = x1;
+-    *((int8_t*)  curr++) = x2;
+-    *((int8_t*)  curr++) = x3;
+-    set_end(curr);
++    address writable = code_cache_write_address(curr);
++    *((int8_t*) writable++) = x1;
++    *((int8_t*) writable++) = x2;
++    *((int8_t*) writable++) = x3;
++    set_end(curr + 3);
+   }
+ 
+   void emit_int32(int32_t x) {
+     address curr = end();
+-    *((int32_t*) curr) = x;
++    *((int32_t*) code_cache_write_address(curr)) = x;
+     set_end(curr + sizeof(int32_t));
+   }
+   void emit_int32(int8_t x1, int8_t x2, int8_t x3, int8_t x4)  {
+     address curr = end();
+-    *((int8_t*)  curr++) = x1;
+-    *((int8_t*)  curr++) = x2;
+-    *((int8_t*)  curr++) = x3;
+-    *((int8_t*)  curr++) = x4;
+-    set_end(curr);
+-  }
+-
+-  void emit_int64( int64_t x)  { *((int64_t*) end()) = x; set_end(end() + sizeof(int64_t)); }
+-
+-  void emit_float( jfloat  x)  { *((jfloat*)  end()) = x; set_end(end() + sizeof(jfloat)); }
+-  void emit_double(jdouble x)  { *((jdouble*) end()) = x; set_end(end() + sizeof(jdouble)); }
+-  void emit_address(address x) { *((address*) end()) = x; set_end(end() + sizeof(address)); }
++    address writable = code_cache_write_address(curr);
++    *((int8_t*) writable++) = x1;
++    *((int8_t*) writable++) = x2;
++    *((int8_t*) writable++) = x3;
++    *((int8_t*) writable++) = x4;
++    set_end(curr + 4);
++  }
++
++  void emit_int64( int64_t x)  { *((int64_t*) code_cache_write_address(end())) = x; set_end(end() + sizeof(int64_t)); }
++
++  void emit_float( jfloat  x)  { *((jfloat*)  code_cache_write_address(end())) = x; set_end(end() + sizeof(jfloat)); }
++  void emit_double(jdouble x)  { *((jdouble*) code_cache_write_address(end())) = x; set_end(end() + sizeof(jdouble)); }
++  void emit_address(address x) { *((address*) code_cache_write_address(end())) = x; set_end(end() + sizeof(address)); }
+ 
+   // Share a scratch buffer for relocinfo.  (Hacky; saves a resource allocation.)
+   void initialize_shared_locs(relocInfo* buf, int length);
+--- a/src/hotspot/share/runtime/os.cpp
++++ b/src/hotspot/share/runtime/os.cpp
+@@ -74,6 +74,7 @@
+ 
+ # include <signal.h>
+ # include <errno.h>
++# include <alloca.h>
+ 
+ OSThread*         os::_starting_thread    = NULL;
+ address           os::_polling_page       = NULL;
+--- a/src/hotspot/share/runtime/os.hpp
++++ b/src/hotspot/share/runtime/os.hpp
+@@ -387,7 +387,7 @@
+   // are passed.
+   static void   pretouch_memory(void* start, void* end, size_t page_size = vm_page_size());
+ 
+-  enum ProtType { MEM_PROT_NONE, MEM_PROT_READ, MEM_PROT_RW, MEM_PROT_RWX };
++  enum ProtType { MEM_PROT_NONE, MEM_PROT_READ, MEM_PROT_RW, MEM_PROT_RX, MEM_PROT_RWX };
+   static bool   protect_memory(char* addr, size_t bytes, ProtType prot,
+                                bool is_committed = true);
+ 
+--- a/src/hotspot/share/runtime/icache.cpp
++++ b/src/hotspot/share/runtime/icache.cpp
+@@ -32,6 +32,9 @@
+ AbstractICache::flush_icache_stub_t AbstractICache::_flush_icache_stub = NULL;
+ 
+ void AbstractICache::initialize() {
++#ifdef __plantos__
++  return;
++#else
+   // Making this stub must be FIRST use of assembler
+   ResourceMark rm;
+ 
+@@ -50,9 +53,24 @@
+   // which will in turn call the flush stub.  Thus we don't need an
+   // explicit call to invalidate_range here.  This assumption is
+   // checked in invalidate_range.
++#endif
+ }
+ 
+ void AbstractICache::call_flush_stub(address start, int lines) {
++#ifdef __plantos__
++#ifdef AMD64
++  // Match the x86 flush stub without requiring executable code during startup.
++  __asm__ volatile("mfence" ::: "memory");
++  for (int line = 0; line < lines; ++line) {
++    __asm__ volatile("clflush (%0)" :: "r"(start) : "memory");
++    start += ICache::line_size;
++  }
++  __asm__ volatile("mfence" ::: "memory");
++#else
++  (void)start;
++  (void)lines;
++#endif
++#else
+   // The business with the magic number is just a little security.
+   // We cannot call the flush stub when generating the flush stub
+   // because it isn't there yet.  So, the stub also returns its third
+@@ -63,9 +81,13 @@
+   int r = (*_flush_icache_stub)(start, lines, auto_magic);
+   guarantee(r == auto_magic, "flush stub routine did not execute");
+   ++magic;
++#endif
+ }
+ 
+ void AbstractICache::invalidate_word(address addr) {
++#ifdef __plantos__
++  invalidate_range(addr, 4);
++#else
+   // Because this is called for instruction patching on the fly, long after
+   // bootstrapping, we execute the stub directly.  Account for a 4-byte word
+   // spanning two cache lines by computing a start line address by rounding
+@@ -81,9 +103,11 @@
+   intptr_t end_line   = ((intptr_t)addr + word_size_in_bytes - 1)
+                                              & ~(ICache::line_size - 1);
+   (*_flush_icache_stub)((address)start_line, start_line == end_line ? 1 : 2, 0);
++#endif
+ }
+ 
+ void AbstractICache::invalidate_range(address start, int nbytes) {
++#ifndef __plantos__
+   static bool firstTime = true;
+   if (firstTime) {
+     guarantee(start == CAST_FROM_FN_PTR(address, _flush_icache_stub),
+@@ -91,6 +115,7 @@
+     firstTime = false;
+     return;
+   }
++#endif
+   if (nbytes == 0) {
+     return;
+   }
+--- a/src/hotspot/share/utilities/decoder_elf.cpp
++++ b/src/hotspot/share/utilities/decoder_elf.cpp
+@@ -27,6 +27,22 @@
+ #if !defined(_WINDOWS) && !defined(__APPLE__)
+ #include "decoder_elf.hpp"
+ #include "memory/allocation.inline.hpp"
++
++#if defined(__plantos__)
++#include <cxxabi.h>
++
++// Plant OS links the ELF decoder through the BSD platform sources, while
++// OpenJDK normally supplies this implementation from its Linux backend.
++bool ElfDecoder::demangle(const char* symbol, char *buf, int buflen) {
++  int status;
++  char* result = abi::__cxa_demangle(symbol, NULL, NULL, &status);
++  if (result == NULL)
++    return false;
++  ::snprintf(buf, buflen, "%s", result);
++  ::free(result);
++  return true;
++}
++#endif
+ 
+ ElfDecoder::~ElfDecoder() {
+   if (_opened_elf_files != NULL) {
+--- a/src/hotspot/share/memory/heap.cpp
++++ b/src/hotspot/share/memory/heap.cpp
+@@ -24,6 +24,10 @@
+ 
+ #include "precompiled.hpp"
+ #include "memory/heap.hpp"
++#include "code/codeCacheWrite.hpp"
++#ifdef __plantos__
++#include <vm.h>
++#endif
+ #include "oops/oop.inline.hpp"
+ #include "runtime/os.hpp"
+ #include "runtime/mutexLocker.hpp"
+@@ -51,6 +55,9 @@
+   _adapter_count                = 0;
+   _full_count                   = 0;
+   _fragmentation_count          = 0;
++#ifdef __plantos__
++  _write_base                   = NULL;
++#endif
+ }
+ 
+ // Dummy initialization of template array.
+@@ -190,12 +197,56 @@
+ 
+ 
+ void CodeHeap::on_code_mapping(char* base, size_t size) {
++#ifdef __plantos__
++  if (_write_base == NULL) {
++    _write_base = (address)os::reserve_memory(_memory.reserved_size());
++    guarantee(_write_base != NULL, "cannot reserve code cache write alias");
++  }
++  // Reserve once per heap so instructions and bulk copies may cross commits.
++  guarantee(vm_map_alias(base, write_address((address)base), size) != NULL,
++            "cannot commit code cache write alias");
++#endif
+ #ifdef LINUX
+   extern void linux_wrap_code(char* base, size_t size);
+   linux_wrap_code(base, size);
+ #endif
+ }
+ 
++bool CodeHeap::make_executable(CodeBlob* blob) {
++#if defined(__plantos__)
++  if (blob == NULL || !contains_blob(blob)) {
++    return false;
++  }
++  char* begin = (char*)blob->content_begin();
++  char* end = (char*)blob->content_end();
++  if (begin >= end) {
++    return true;
++  }
++  const size_t page_size = (size_t)os::vm_page_size();
++  assert(((uintptr_t)begin & (page_size - 1)) == 0,
++         "code content must start at a page boundary");
++  assert(((uintptr_t)end & (page_size - 1)) == 0,
++         "code content must end at a page boundary");
++  return os::protect_memory(begin, end - begin, os::MEM_PROT_RX);
++#else
++  (void)blob;
++  return true;
++#endif
++}
++
++bool CodeHeap::make_writable(void* p) {
++#if defined(__plantos__)
++  HeapBlock* block = (HeapBlock*)find_block_for(p);
++  if (block == NULL || block->free()) {
++    return false;
++  }
++  return os::protect_memory((char*)block, segments_to_size(block->length()),
++                            os::MEM_PROT_RW);
++#else
++  (void)p;
++  return true;
++#endif
++}
+ 
+ bool CodeHeap::reserve(ReservedSpace rs, size_t committed_size, size_t segment_size) {
+   assert(rs.size() >= committed_size, "reserved < committed");
+@@ -281,6 +332,10 @@
+   assert_locked_or_safepoint(CodeCache_lock);
+ 
+   // First check if we can satisfy request from freelist
++#ifdef __plantos__
++  const size_t page_segments = (size_t)os::vm_page_size() >> _log2_segment_size;
++  number_of_segments = align_up(number_of_segments, page_segments);
++#endif
+   NOT_PRODUCT(verify());
+   HeapBlock* block = search_freelist(number_of_segments);
+   NOT_PRODUCT(verify());
+@@ -298,6 +353,9 @@
+ 
+   // Ensure minimum size for allocation to the heap.
+   number_of_segments = MAX2((int)CodeCacheMinBlockLength, (int)number_of_segments);
++#ifdef __plantos__
++  number_of_segments = align_up(number_of_segments, page_segments);
++#endif
+ 
+   if (_next_segment + number_of_segments <= _number_of_committed_segments) {
+     mark_segmap_as_used(_next_segment, _next_segment + number_of_segments, false);
+@@ -351,9 +409,22 @@
+ 
+   size_t actual_number_of_segments = b->length();
+   size_t used_number_of_segments   = size_to_segments(used_size + header_size());
++#ifdef __plantos__
++  const size_t page_segments = (size_t)os::vm_page_size() >> _log2_segment_size;
++  used_number_of_segments = align_up(used_number_of_segments, page_segments);
++#endif
+   size_t unused_number_of_segments = actual_number_of_segments - used_number_of_segments;
+   guarantee(used_number_of_segments <= actual_number_of_segments, "Must be!");
+ 
++#ifdef __plantos__
++  if (unused_number_of_segments != 0) {
++    char* tail = (char*)block_at(segment_for(b) + used_number_of_segments);
++    guarantee(os::protect_memory(tail,
++                                 segments_to_size(unused_number_of_segments),
++                                 os::MEM_PROT_RW),
++              "cannot make freed code cache tail writable");
++  }
++#endif
+   HeapBlock* f = split_block(b, used_number_of_segments);
+   add_to_freelist(f);
+   NOT_PRODUCT(verify());
+@@ -365,6 +436,9 @@
+ 
+   // Find start of HeapBlock
+   HeapBlock* b = (((HeapBlock *)p) - 1);
++#ifdef __plantos__
++  guarantee(make_writable(b), "cannot make code cache block writable");
++#endif
+   assert(b->allocated_space() == p, "sanity check");
+   guarantee((char*) b >= _memory.low_boundary() && (char*) b < _memory.high(),
+             "The block to be deallocated " INTPTR_FORMAT " is not within the heap "
+--- a/src/hotspot/share/memory/heap.hpp
++++ b/src/hotspot/share/memory/heap.hpp
+@@ -80,8 +80,12 @@
+ 
+ class CodeHeap : public CHeapObj<mtCode> {
+   friend class VMStructs;
++  friend class CodeCache;
+  protected:
+   VirtualSpace _memory;                          // the memory holding the blocks
++#ifdef __plantos__
++  address      _write_base;                      // contiguous alias of the reserved code heap
++#endif
+   VirtualSpace _segmap;                          // the memory holding the segment map
+ 
+   size_t       _number_of_committed_segments;
+@@ -143,9 +147,16 @@
+ 
+   // to perform additional actions on creation of executable code
+   void on_code_mapping(char* base, size_t size);
++  bool make_executable(CodeBlob* blob);
++  bool make_writable(void* p);
+ 
+  public:
+   CodeHeap(const char* name, const int code_blob_type);
++#ifdef __plantos__
++  address write_address(address source) const {
++    return _write_base + (source - (address)_memory.low_boundary());
++  }
++#endif
+ 
+   // Heap extents
+   bool  reserve(ReservedSpace rs, size_t committed_size, size_t segment_size);
+--- a/src/hotspot/share/memory/virtualspace.cpp
++++ b/src/hotspot/share/memory/virtualspace.cpp
+@@ -636,12 +636,12 @@
+   return MemRegion((HeapWord*)base(), (HeapWord*)end());
+ }
+ 
+-// Reserve space for code segment.  Same as Java heap only we mark this as
+-// executable.
++// Zero stores interpreter metadata here, not executable machine code.
+ ReservedCodeSpace::ReservedCodeSpace(size_t r_size,
+                                      size_t rs_align,
+                                      size_t rs_page_size) : ReservedSpace() {
+-  initialize(r_size, rs_align, rs_page_size, /*requested address*/ NULL, /*executable*/ true);
++  initialize(r_size, rs_align, rs_page_size, /*requested address*/ NULL,
++             /*executable*/ NOT_ZERO(true) ZERO_ONLY(false));
+   MemTracker::record_virtual_memory_type((address)base(), mtCode);
+ }
+ 
+--- a/src/hotspot/share/opto/constantTable.cpp
++++ b/src/hotspot/share/opto/constantTable.cpp
+@@ -263,7 +263,8 @@
+   for (uint i = 0; i < n->outcnt(); i++) {
+     address* constant_addr = &jump_table_base[i];
+     assert(*constant_addr == (((address) n) + i), "all jump-table entries must contain adjusted node pointer: " INTPTR_FORMAT " == " INTPTR_FORMAT, p2i(*constant_addr), p2i(((address) n) + i));
+-    *constant_addr = cb.consts()->target(*labels.at(i), (address) constant_addr);
++    *(address*)code_cache_write_address((address)constant_addr) =
++      cb.consts()->target(*labels.at(i), (address)constant_addr);
+     cb.consts()->relocate((address) constant_addr, relocInfo::internal_word_type);
+   }
+ }
+--- a/src/hotspot/share/code/codeCache.cpp
++++ b/src/hotspot/share/code/codeCache.cpp
+@@ -26,6 +26,7 @@
+ #include "jvm_io.h"
+ #include "code/codeBlob.hpp"
+ #include "code/codeCache.hpp"
++#include "code/codeCacheWrite.hpp"
+ #include "code/codeHeapState.hpp"
+ #include "code/compiledIC.hpp"
+ #include "code/dependencies.hpp"
+@@ -167,6 +168,12 @@
+ int CodeCache::_number_of_nmethods_with_dependencies = 0;
+ ExceptionCache* volatile CodeCache::_exception_cache_purge_list = NULL;
+ 
++#ifdef __plantos__
++address code_cache_write_address(address source) {
++  CodeHeap* heap = CodeCache::get_code_heap_containing(source);
++  return heap != NULL ? heap->write_address(source) : source;
++}
++#endif
+ // Initialize arrays of CodeHeap subsets
+ GrowableArray<CodeHeap*>* CodeCache::_heaps = new(ResourceObj::C_HEAP, mtCode) GrowableArray<CodeHeap*> (CodeBlobType::All, mtCode);
+ GrowableArray<CodeHeap*>* CodeCache::_compiled_heaps = new(ResourceObj::C_HEAP, mtCode) GrowableArray<CodeHeap*> (CodeBlobType::All, mtCode);
+@@ -584,8 +591,29 @@
+   return cb;
+ }
+ 
++void CodeCache::make_executable(CodeBlob* cb) {
++#if defined(__plantos__)
++  CodeHeap* heap = get_code_heap(cb);
++  guarantee(heap != NULL && heap->make_executable(cb),
++            "cannot make code cache content executable");
++#else
++  (void)cb;
++#endif
++}
++
++void CodeCache::make_writable(CodeBlob* cb) {
++#if defined(__plantos__)
++  CodeHeap* heap = get_code_heap(cb);
++  guarantee(heap != NULL && heap->make_writable(cb),
++            "cannot make code cache block writable");
++#else
++  (void)cb;
++#endif
++}
++
+ void CodeCache::free(CodeBlob* cb) {
+   assert_locked_or_safepoint(CodeCache_lock);
++  make_writable(cb);
+   CodeHeap* heap = get_code_heap(cb);
+   print_trace("free", cb);
+   if (cb->is_nmethod()) {
+--- a/src/hotspot/share/code/icBuffer.hpp
++++ b/src/hotspot/share/code/icBuffer.hpp
+@@ -26,6 +26,7 @@
+ #define SHARE_CODE_ICBUFFER_HPP
+ 
+ #include "asm/codeBuffer.hpp"
++#include "code/codeCacheWrite.hpp"
+ #include "code/stubs.hpp"
+ #include "interpreter/bytecodes.hpp"
+ #include "memory/allocation.hpp"
+@@ -56,7 +57,11 @@
+  protected:
+   friend class ICStubInterface;
+   // This will be called only by ICStubInterface
+-  void    initialize(int size)                   { _size = size; _ic_site = NULL; }
++  void    initialize(int size) {
++    ICStub* writable = (ICStub*)code_cache_write_address((address)this);
++    writable->_size = size;
++    writable->_ic_site = NULL;
++  }
+   void    finalize(); // called when a method is removed
+ 
+   // General info
+--- a/src/hotspot/share/code/codeBlob.cpp
++++ b/src/hotspot/share/code/codeBlob.cpp
+@@ -44,6 +44,7 @@
+ #include "runtime/javaFrameAnchor.hpp"
+ #include "runtime/jniHandles.hpp"
+ #include "runtime/mutexLocker.hpp"
++#include "runtime/os.hpp"
+ #include "runtime/safepoint.hpp"
+ #include "runtime/sharedRuntime.hpp"
+ #include "runtime/stubCodeGenerator.hpp"
+@@ -60,9 +61,13 @@
+ }
+ 
+ unsigned int CodeBlob::align_code_offset(int offset) {
+-  // align the size to CodeEntryAlignment
++#if defined(__plantos__)
++  const int alignment = os::vm_page_size();
++#else
++  const int alignment = CodeEntryAlignment;
++#endif
+   int header_size = (int)CodeHeap::header_size();
+-  return align_up(offset + header_size, CodeEntryAlignment) - header_size;
++  return align_up(offset + header_size, alignment) - header_size;
+ }
+ 
+ 
+@@ -73,6 +78,9 @@
+   // align the size to CodeEntryAlignment
+   size = align_code_offset(size);
+   size += align_up(cb->total_content_size(), oopSize);
++#if defined(__plantos__)
++  size = align_code_offset(size);
++#endif
+   size += align_up(cb->total_oop_size(), oopSize);
+   size += align_up(cb->total_metadata_size(), oopSize);
+   return size;
+@@ -182,6 +190,7 @@
+   assert(!CodeCache_lock->owned_by_self(), "release CodeCache before registering the stub");
+ 
+   if (stub != NULL) {
++    CodeCache::make_executable(stub);
+     char stub_id[256];
+     assert(strlen(name1) + strlen(name2) < sizeof(stub_id), "");
+     jio_snprintf(stub_id, sizeof(stub_id), "%s%s", name1, name2);
+@@ -242,6 +251,7 @@
+   {
+     MutexLocker mu(CodeCache_lock, Mutex::_no_safepoint_check_flag);
+     blob = new (size) BufferBlob(name, size);
++    if (blob != NULL) CodeCache::make_executable(blob);
+   }
+   // Track memory usage statistic after releasing CodeCache_lock
+   MemoryService::track_code_cache_memory_usage();
+@@ -263,6 +273,7 @@
+   {
+     MutexLocker mu(CodeCache_lock, Mutex::_no_safepoint_check_flag);
+     blob = new (size) BufferBlob(name, size, cb);
++    if (blob != NULL) CodeCache::make_executable(blob);
+   }
+   // Track memory usage statistic after releasing CodeCache_lock
+   MemoryService::track_code_cache_memory_usage();
+@@ -303,6 +314,7 @@
+   {
+     MutexLocker mu(CodeCache_lock, Mutex::_no_safepoint_check_flag);
+     blob = new (size) AdapterBlob(size, cb);
++    if (blob != NULL) CodeCache::make_executable(blob);
+   }
+   // Track memory usage statistic after releasing CodeCache_lock
+   MemoryService::track_code_cache_memory_usage();
+@@ -348,6 +360,7 @@
+       return NULL;
+     }
+     blob = new (size) VtableBlob(name, size);
++    if (blob != NULL) CodeCache::make_executable(blob);
+     CodeCache_lock->unlock();
+   }
+   // Track memory usage statistic after releasing CodeCache_lock
+@@ -370,6 +383,7 @@
+   {
+     MutexLocker mu(CodeCache_lock, Mutex::_no_safepoint_check_flag);
+     blob = new (size) MethodHandlesAdapterBlob(size);
++    if (blob != NULL) CodeCache::make_executable(blob);
+     if (blob == NULL) {
+       vm_exit_out_of_memory(size, OOM_MALLOC_ERROR, "CodeCache: no room for method handle adapter blob");
+     }
+@@ -739,6 +753,7 @@
+   {
+     MutexLocker mu(CodeCache_lock, Mutex::_no_safepoint_check_flag);
+     blob = new (size) OptimizedEntryBlob(name, size, cb, exception_handler_offset, receiver, frame_data_offset);
++    if (blob != NULL) CodeCache::make_executable(blob);
+   }
+   // Track memory usage statistic after releasing CodeCache_lock
+   MemoryService::track_code_cache_memory_usage();
+--- a/src/hotspot/share/code/relocInfo.cpp
++++ b/src/hotspot/share/code/relocInfo.cpp
+@@ -27,6 +27,7 @@
+ #include "code/compiledIC.hpp"
+ #include "code/nmethod.hpp"
+ #include "code/relocInfo.hpp"
++#include "code/codeCacheWrite.hpp"
+ #include "memory/resourceArea.hpp"
+ #include "memory/universe.hpp"
+ #include "oops/compressedOops.inline.hpp"
+@@ -278,10 +279,10 @@
+ void Relocation::const_set_data_value(address x) {
+ #ifdef _LP64
+   if (format() == relocInfo::narrow_oop_in_const) {
+-    *(narrowOop*)addr() = CompressedOops::encode(cast_to_oop(x));
++    *(narrowOop*)code_cache_write_address(addr()) = CompressedOops::encode(cast_to_oop(x));
+   } else {
+ #endif
+-    *(address*)addr() = x;
++    *(address*)code_cache_write_address(addr()) = x;
+ #ifdef _LP64
+   }
+ #endif
+--- a/src/hotspot/share/code/icBuffer.cpp
++++ b/src/hotspot/share/code/icBuffer.cpp
+@@ -106,7 +106,8 @@
+   // We cannot store a pointer to the 'ic' object, since it is resource allocated. Instead we
+   // store the location of the inline cache. Then we have enough information recreate the CompiledIC
+   // object when we need to remove the stub.
+-  _ic_site = ic->instruction_address();
++  ((ICStub*)code_cache_write_address((address)this))->_ic_site =
++      ic->instruction_address();
+ 
+   // Assemble new stub
+   InlineCacheBuffer::assemble_ic_buffer_code(code_begin(), cached_val, dest_addr);
+@@ -119,7 +120,7 @@
+   if (CompiledIC::is_icholder_entry(destination())) {
+     InlineCacheBuffer::queue_for_release((CompiledICHolder*)cached_value());
+   }
+-  _ic_site = NULL;
++  ((ICStub*)code_cache_write_address((address)this))->_ic_site = NULL;
+ }
+ 
+ 
+--- a/src/hotspot/share/code/nmethod.cpp
++++ b/src/hotspot/share/code/nmethod.cpp
+@@ -704,6 +704,7 @@
+     debug_only(Universe::heap()->verify_nmethod(this));
+ 
+     CodeCache::commit(this);
++    CodeCache::make_executable(this);
+   }
+ 
+   if (PrintNativeNMethods || PrintDebugInfo || PrintRelocations || PrintDependencies) {
+@@ -899,6 +900,8 @@
+       memcpy(speculations_begin(), speculations, speculations_len);
+     }
+ #endif
++
++    CodeCache::make_executable(this);
+ 
+     // we use the information of entry points to find out if a method is
+     // static or non static
+@@ -1914,7 +1917,7 @@
+                (r->oop_addr() >= oops_begin() && r->oop_addr() < oops_end()),
+                "oop must be found in exactly one place");
+         if (r->oop_is_immediate() && r->oop_value() != NULL) {
+-          f->do_oop(r->oop_addr());
++          f->do_oop((oop*)code_cache_write_address((address)r->oop_addr()));
+         }
+       }
+     }
+--- a/src/hotspot/share/code/codeCache.hpp
++++ b/src/hotspot/share/code/codeCache.hpp
+@@ -78,6 +78,7 @@
+ class ShenandoahParallelCodeHeapIterator;
+ 
+ class CodeCache : AllStatic {
++  friend address code_cache_write_address(address source);
+   friend class VMStructs;
+   friend class JVMCIVMStructs;
+   template <class T, class Filter> friend class CodeBlobIterator;
+@@ -138,6 +139,8 @@
+   // Allocation/administration
+   static CodeBlob* allocate(int size, int code_blob_type, bool handle_alloc_failure = true, int orig_code_blob_type = CodeBlobType::All); // allocates a new CodeBlob
+   static void commit(CodeBlob* cb);                        // called when the allocated CodeBlob has been filled
++  static void make_executable(CodeBlob* cb);
++  static void make_writable(CodeBlob* cb);
+   static int  alignment_unit();                            // guaranteed alignment of all CodeBlobs
+   static int  alignment_offset();                          // guaranteed offset of first CodeBlob byte within alignment unit (i.e., allocation header)
+   static void free(CodeBlob* cb);                          // frees a CodeBlob
+--- a/src/hotspot/share/code/vtableStubs.hpp
++++ b/src/hotspot/share/code/vtableStubs.hpp
+@@ -26,6 +26,7 @@
+ #define SHARE_CODE_VTABLESTUBS_HPP
+ 
+ #include "asm/macroAssembler.hpp"
++#include "code/codeCacheWrite.hpp"
+ #include "code/vmreg.hpp"
+ #include "memory/allocation.hpp"
+ 
+@@ -122,7 +123,7 @@
+   static VMReg   _receiver_location; // Where to find receiver
+ 
+   VtableStub*    _next;              // Pointer to next entry in hash table
+-  const short    _index;             // vtable index
++  short          _index;             // vtable index
+   short          _ame_offset;        // Where an AbstractMethodError might occur
+   short          _npe_offset;        // Where a NullPointerException might occur
+   bool           _is_vtable_stub;    // True if vtable stub, false, is itable stub
+@@ -130,13 +131,21 @@
+ 
+   void* operator new(size_t size, int code_size) throw();
+ 
+-  VtableStub(bool is_vtable_stub, int index)
+-        : _next(NULL), _index(index), _ame_offset(-1), _npe_offset(-1),
+-          _is_vtable_stub(is_vtable_stub) {}
++  VtableStub(bool is_vtable_stub, int index) {
++    VtableStub* writable =
++        (VtableStub*)code_cache_write_address((address)this);
++    writable->_next = NULL;
++    writable->_index = (short)index;
++    writable->_ame_offset = -1;
++    writable->_npe_offset = -1;
++    writable->_is_vtable_stub = is_vtable_stub;
++  }
+   VtableStub* next() const                       { return _next; }
+   int index() const                              { return _index; }
+   static VMReg receiver_location()               { return _receiver_location; }
+-  void set_next(VtableStub* n)                   { _next = n; }
++  void set_next(VtableStub* n) {
++    ((VtableStub*)code_cache_write_address((address)this))->_next = n;
++  }
+ 
+  public:
+   address code_begin() const                     { return (address)(this + 1); }
+@@ -151,8 +160,10 @@
+ 
+  private:
+   void set_exception_points(address npe_addr, address ame_addr) {
+-    _npe_offset = npe_addr - code_begin();
+-    _ame_offset = ame_addr - code_begin();
++    VtableStub* writable =
++        (VtableStub*)code_cache_write_address((address)this);
++    writable->_npe_offset = npe_addr - code_begin();
++    writable->_ame_offset = ame_addr - code_begin();
+     assert(is_abstract_method_error(ame_addr),   "offset must be correct");
+     assert(is_null_pointer_exception(npe_addr),  "offset must be correct");
+     assert(!is_abstract_method_error(npe_addr),  "offset must be correct");
+--- a/src/hotspot/share/code/codeBlob.hpp
++++ b/src/hotspot/share/code/codeBlob.hpp
+@@ -318,7 +318,11 @@
+     _relocation_size(align_up(cb->total_relocation_size(), oopSize)),
+     _content_offset(CodeBlob::align_code_offset(_header_size + _relocation_size)),
+     _code_offset(_content_offset + cb->total_offset_of(cb->insts())),
++#if defined(__plantos__)
++    _data_offset(CodeBlob::align_code_offset(_content_offset + align_up(cb->total_content_size(), oopSize)))
++#else
+     _data_offset(_content_offset + align_up(cb->total_content_size(), oopSize))
++#endif
+   {
+     assert(is_aligned(_relocation_size, oopSize), "unaligned size");
+ 
+--- a/src/hotspot/share/interpreter/interpreter.hpp
++++ b/src/hotspot/share/interpreter/interpreter.hpp
+@@ -26,6 +26,7 @@
+ #define SHARE_INTERPRETER_INTERPRETER_HPP
+ 
+ #include "code/stubs.hpp"
++#include "code/codeCacheWrite.hpp"
+ #include "interpreter/interp_masm.hpp"
+ #include "interpreter/templateInterpreter.hpp"
+ #include "interpreter/zero/zeroInterpreter.hpp"
+@@ -54,7 +55,11 @@
+ 
+  public:
+   // Initialization/finalization
+-  void    initialize(int size)                   { _size = size; }
++  void    initialize(int size) {
++    InterpreterCodelet* writable =
++        (InterpreterCodelet*)code_cache_write_address((address)this);
++    writable->_size = size;
++  }
+   void    finalize()                             { ShouldNotCallThis(); }
+ 
+   // General info/converters
+@@ -83,8 +88,12 @@
+     // nor are they ever finalized (see above).
+     ShouldNotCallThis();
+   }
+-  void use_remarks(AsmRemarks &remarks) { _asm_remarks.share(remarks); }
+-  void use_strings(DbgStrings &strings) { _dbg_strings.share(strings); }
++  void use_remarks(AsmRemarks &remarks) {
++    ((InterpreterCodelet*)code_cache_write_address((address)this))->_asm_remarks.share(remarks);
++  }
++  void use_strings(DbgStrings &strings) {
++    ((InterpreterCodelet*)code_cache_write_address((address)this))->_dbg_strings.share(strings);
++  }
+ #endif
+ };
+ 
+--- a/src/hotspot/share/interpreter/interpreter.cpp
++++ b/src/hotspot/share/interpreter/interpreter.cpp
+@@ -51,13 +51,15 @@
+ // Implementation of InterpreterCodelet
+ 
+ void InterpreterCodelet::initialize(const char* description, Bytecodes::Code bytecode) {
+-  _description = description;
+-  _bytecode    = bytecode;
++  InterpreterCodelet* writable =
++      (InterpreterCodelet*)code_cache_write_address((address)this);
++  writable->_description = description;
++  writable->_bytecode    = bytecode;
+ #ifndef PRODUCT
+-  AsmRemarks* arp = new(&_asm_remarks) AsmRemarks();
+-  DbgStrings* dsp = new(&_dbg_strings) DbgStrings();
+-  postcond(arp == &_asm_remarks);
+-  postcond(dsp == &_dbg_strings);
++  AsmRemarks* arp = new(&writable->_asm_remarks) AsmRemarks();
++  DbgStrings* dsp = new(&writable->_dbg_strings) DbgStrings();
++  postcond(arp == &writable->_asm_remarks);
++  postcond(dsp == &writable->_dbg_strings);
+ #endif
+ }
+ 
+--- a/src/hotspot/share/interpreter/interpreterRuntime.cpp
++++ b/src/hotspot/share/interpreter/interpreterRuntime.cpp
+@@ -1299,7 +1299,7 @@
+     handler = set_handler_blob();
+   }
+   if (handler != NULL) {
+-    memcpy(handler, buffer->insts_begin(), insts_size);
++    memcpy(code_cache_write_address(handler), buffer->insts_begin(), insts_size);
+     pd_set_handler(handler);
+     ICache::invalidate_range(handler, insts_size);
+     _handler = handler + insts_size;
+--- a/src/hotspot/share/c1/c1_Runtime1.cpp
++++ b/src/hotspot/share/c1/c1_Runtime1.cpp
+@@ -1201,7 +1201,7 @@
+             address ptr = copy_buff + i;
+             int a_byte = (*ptr) & 0xFF;
+             address dst = instr_pc + i;
+-            *(unsigned char*)dst = (unsigned char) a_byte;
++            *code_cache_write_address(dst) = (unsigned char) a_byte;
+           }
+           ICache::invalidate_range(instr_pc, *byte_count);
+           NativeGeneralJump::replace_mt_safe(instr_pc, copy_buff);
+--- a/src/hotspot/os_cpu/bsd_x86/os_bsd_x86.cpp
++++ b/src/hotspot/os_cpu/bsd_x86/os_bsd_x86.cpp
+@@ -63,6 +63,9 @@
+ # include <stdio.h>
+ # include <unistd.h>
+ # include <sys/resource.h>
++#ifdef __plantos__
++# include <sys/sysctl.h>
++#endif
+ # include <sys/stat.h>
+ # include <sys/time.h>
+ # include <sys/utsname.h>
+@@ -74,7 +77,7 @@
+ # include <ucontext.h>
+ #endif
+ 
+-#if !defined(__APPLE__) && !defined(__NetBSD__)
++#if !defined(__APPLE__) && !defined(__NetBSD__) && !defined(__plantos__)
+ # include <pthread_np.h>
+ #endif
+ 
+@@ -94,6 +97,32 @@
+ #define SPELL_REG_SP "esp"
+ #define SPELL_REG_FP "ebp"
+ #endif // AMD64
++
++#ifdef __plantos__
++# define context_rip uc_mcontext.rip
++# define context_rsp uc_mcontext.rsp
++# define context_rbp uc_mcontext.rbp
++# define context_rax uc_mcontext.rax
++# define context_rbx uc_mcontext.rbx
++# define context_rcx uc_mcontext.rcx
++# define context_rdx uc_mcontext.rdx
++# define context_rsi uc_mcontext.rsi
++# define context_rdi uc_mcontext.rdi
++# define context_r8 uc_mcontext.r8
++# define context_r9 uc_mcontext.r9
++# define context_r10 uc_mcontext.r10
++# define context_r11 uc_mcontext.r11
++# define context_r12 uc_mcontext.r12
++# define context_r13 uc_mcontext.r13
++# define context_r14 uc_mcontext.r14
++# define context_r15 uc_mcontext.r15
++# define context_pc context_rip
++# define context_sp context_rsp
++# define context_fp context_rbp
++# define context_flags uc_mcontext.rflags
++# define context_err uc_mcontext.error
++# define context_trapno uc_mcontext.vector
++#endif
+ 
+ #ifdef __FreeBSD__
+ # define context_trapno uc_mcontext.mc_trapno
+@@ -763,13 +792,21 @@
+   if (rslt != 0)
+     fatal("pthread_attr_init failed with error = %d", rslt);
+ 
++#ifdef __plantos__
++  rslt = pthread_getattr_np(pthread_self(), &attr);
++#else
+   rslt = pthread_attr_get_np(pthread_self(), &attr);
++#endif
+ 
+   if (rslt != 0)
+     fatal("pthread_attr_get_np failed with error = %d", rslt);
+ 
++#ifdef __plantos__
++  if (pthread_attr_getstack(&attr, (void **)bottom, size) != 0) {
++#else
+   if (pthread_attr_getstackaddr(&attr, (void **)bottom) != 0 ||
+     pthread_attr_getstacksize(&attr, size) != 0) {
++#endif
+     fatal("Can not locate current stack attributes!");
+   }
+ 
+--- a/src/hotspot/os_cpu/bsd_x86/bytes_bsd_x86.hpp
++++ b/src/hotspot/os_cpu/bsd_x86/bytes_bsd_x86.hpp
+@@ -34,6 +34,10 @@
+ #    define bswap_16(x) OSSwapInt16(x)
+ #    define bswap_32(x) OSSwapInt32(x)
+ #    define bswap_64(x) OSSwapInt64(x)
++#  elif defined(__plantos__)
++#    define bswap_16(x) __builtin_bswap16(x)
++#    define bswap_32(x) __builtin_bswap32(x)
++#    define bswap_64(x) __builtin_bswap64(x)
+ #  elif defined(__OpenBSD__)
+ #    define bswap_16(x) swap16(x)
+ #    define bswap_32(x) swap32(x)
+--- a/src/hotspot/cpu/x86/macroAssembler_x86.hpp
++++ b/src/hotspot/cpu/x86/macroAssembler_x86.hpp
+@@ -26,6 +26,7 @@
+ #define CPU_X86_MACROASSEMBLER_X86_HPP
+ 
+ #include "asm/assembler.hpp"
++#include "code/codeCacheWrite.hpp"
+ #include "code/vmreg.inline.hpp"
+ #include "compiler/oopMap.hpp"
+ #include "utilities/macros.hpp"
+@@ -115,14 +116,15 @@
+ 
+     if (op == 0xEB || (op & 0xF0) == 0x70) {
+       // short offset operators (jmp and jcc)
+-      char* disp = (char*) &branch[1];
+-      int imm8 = target - (address) &disp[1];
++      char* disp = (char*) code_cache_write_address(&branch[1]);
++      int imm8 = target - (address) &branch[2];
+       guarantee(this->is8bit(imm8), "Short forward jump exceeds 8-bit offset at %s:%d",
+                 file == NULL ? "<NULL>" : file, line);
+       *disp = imm8;
+     } else {
+-      int* disp = (int*) &branch[(op == 0x0F || op == 0xC7)? 2: 1];
+-      int imm32 = target - (address) &disp[1];
++      int offset = (op == 0x0F || op == 0xC7) ? 2 : 1;
++      int* disp = (int*) code_cache_write_address(&branch[offset]);
++      int imm32 = target - (address) &branch[offset + 4];
+       *disp = imm32;
+     }
+   }
+--- a/src/hotspot/cpu/x86/c1_CodeStubs_x86.cpp
++++ b/src/hotspot/cpu/x86/c1_CodeStubs_x86.cpp
+@@ -370,7 +370,7 @@
+       address ptr = (address)(_pc_start + i);
+       int a_byte = (*ptr) & 0xFF;
+       __ emit_int8(a_byte);
+-      *ptr = 0x90; // make the site look like a nop
++      *code_cache_write_address(ptr) = 0x90; // make the site look like a nop
+     }
+   }
+ 
+--- a/src/hotspot/cpu/x86/nativeInst_x86.hpp
++++ b/src/hotspot/cpu/x86/nativeInst_x86.hpp
+@@ -26,6 +26,7 @@
+ #define CPU_X86_NATIVEINST_X86_HPP
+ 
+ #include "asm/assembler.hpp"
++#include "code/codeCacheWrite.hpp"
+ #include "runtime/icache.hpp"
+ #include "runtime/safepointMechanism.hpp"
+ 
+@@ -82,10 +83,10 @@
+   oop  oop_at (int offset) const       { return *(oop*) addr_at(offset); }
+ 
+ 
+-  void set_char_at(int offset, char c)        { *addr_at(offset) = (u_char)c; wrote(offset); }
+-  void set_int_at(int offset, jint  i)        { *(jint*)addr_at(offset) = i;  wrote(offset); }
+-  void set_ptr_at (int offset, intptr_t  ptr) { *(intptr_t*) addr_at(offset) = ptr;  wrote(offset); }
+-  void set_oop_at (int offset, oop  o)        { *(oop*) addr_at(offset) = o;  wrote(offset); }
++  void set_char_at(int offset, char c)        { *code_cache_write_address(addr_at(offset)) = (u_char)c; wrote(offset); }
++  void set_int_at(int offset, jint  i)        { *(jint*)code_cache_write_address(addr_at(offset)) = i;  wrote(offset); }
++  void set_ptr_at (int offset, intptr_t  ptr) { *(intptr_t*) code_cache_write_address(addr_at(offset)) = ptr;  wrote(offset); }
++  void set_oop_at (int offset, oop  o)        { *(oop*) code_cache_write_address(addr_at(offset)) = o;  wrote(offset); }
+ 
+   // This doesn't really do anything on Intel, but it is the place where
+   // cache invalidation belongs, generically:
+@@ -459,7 +460,7 @@
+   address next_instruction_address() const { return return_address(); }
+   intptr_t data() const;
+   void set_data(intptr_t data) {
+-    intptr_t *addr = (intptr_t *) got_address();
++    intptr_t *addr = (intptr_t *) code_cache_write_address(got_address());
+     *addr = data;
+   }
+ 
+@@ -611,7 +612,7 @@
+ 
+   address destination() const;
+   void set_jump_destination(address dest)  {
+-    address *got_entry = (address *) got_address();
++    address *got_entry = (address *) code_cache_write_address(got_address());
+     *got_entry = dest;
+   }
+ 
+--- a/src/hotspot/cpu/x86/sharedRuntime_x86_64.cpp
++++ b/src/hotspot/cpu/x86/sharedRuntime_x86_64.cpp
+@@ -1557,6 +1557,9 @@
+     vmIntrinsics::ID iid = method->intrinsic_id();
+     intptr_t start = (intptr_t)__ pc();
+     int vep_offset = ((intptr_t)__ pc()) - start;
++#ifdef __plantos__
++    __ fat_nop();
++#endif
+     gen_special_dispatch(masm,
+                          method,
+                          in_sig_bt,
+@@ -1778,6 +1781,9 @@
+   __ bind(hit);
+ 
+   int vep_offset = ((intptr_t)__ pc()) - start;
++#ifdef __plantos__
++  __ fat_nop();
++#endif
+ 
+   if (VM_Version::supports_fast_class_init_checks() && method->needs_clinit_barrier()) {
+     Label L_skip_barrier;
+--- a/src/hotspot/cpu/x86/nativeInst_x86.cpp
++++ b/src/hotspot/cpu/x86/nativeInst_x86.cpp
+@@ -127,7 +127,7 @@
+ void NativePltCall::set_destination_mt_safe(address dest) {
+   // rewriting the value in the GOT, it should always be aligned
+   NativeGotJump* jump = nativeGotJump_at(plt_jump());
+-  address* got = (address *) jump->got_address();
++  address* got = (address *) code_cache_write_address(jump->got_address());
+   *got = dest;
+ }
+ 
+@@ -208,8 +208,9 @@
+ #ifdef AMD64
+   guarantee(disp == (intptr_t)(jint)disp, "must be 32-bit offset");
+ #endif // AMD64
+-  *code_pos = instruction_code;
+-  *((int32_t *)(code_pos+1)) = (int32_t) disp;
++  address writable = code_cache_write_address(code_pos);
++  *writable = instruction_code;
++  *((int32_t *)(writable + 1)) = (int32_t) disp;
+   ICache::invalidate_range(code_pos, instruction_size);
+ }
+ 
+@@ -224,6 +225,7 @@
+ 
+   NativeCall* n_call =  nativeCall_at (instr_addr); // checking that it is a call
+   guarantee((intptr_t)instr_addr % BytesPerWord == 0, "must be aligned");
++  address writable = code_cache_write_address(instr_addr);
+ 
+   // First patch dummy jmp in place
+   unsigned char patch[4];
+@@ -234,18 +236,18 @@
+   patch[3] = 0xFE;
+ 
+   // First patch dummy jmp in place
+-  *(jint*)instr_addr = *(jint *)patch;
++  *(jint*)writable = *(jint *)patch;
+ 
+   // Invalidate.  Opteron requires a flush after every write.
+   n_call->wrote(0);
+ 
+   // Patch 4th byte
+-  instr_addr[4] = code_buffer[4];
++  writable[4] = code_buffer[4];
+ 
+   n_call->wrote(4);
+ 
+   // Patch bytes 0-3
+-  *(jint*)instr_addr = *(jint *)code_buffer;
++  *(jint*)writable = *(jint *)code_buffer;
+ 
+   n_call->wrote(0);
+ 
+@@ -468,8 +470,9 @@
+   guarantee(disp == (intptr_t)(int32_t)disp, "must be 32-bit offset");
+ #endif // AMD64
+ 
+-  *code_pos = instruction_code;
+-  *((int32_t*)(code_pos + 1)) = (int32_t)disp;
++  address writable = code_cache_write_address(code_pos);
++  *writable = instruction_code;
++  *((int32_t*)(writable + 1)) = (int32_t)disp;
+ 
+   ICache::invalidate_range(code_pos, instruction_size);
+ }
+@@ -509,6 +512,9 @@
+ // In JVMCI, the restriction is enforced by HotSpotFrameContext.enter(...)
+ //
+ void NativeJump::patch_verified_entry(address entry, address verified_entry, address dest) {
++#ifdef __plantos__
++  guarantee(*verified_entry == instruction_code, "verified entry must retain its jump opcode");
++#endif
+   // complete jump instruction (to be inserted) is in code_buffer;
+ #ifdef _LP64
+   union {
+@@ -524,7 +530,7 @@
+   u.code_buffer[0] = instruction_code;
+   *(int32_t*)(u.code_buffer + 1) = (int32_t)disp;
+ 
+-  Atomic::store((jlong *) verified_entry, u.cb_long);
++  Atomic::store((jlong *) code_cache_write_address(verified_entry), u.cb_long);
+   ICache::invalidate_range(verified_entry, 8);
+ 
+ #else
+@@ -537,6 +543,7 @@
+ 
+   // Can't call nativeJump_at() because it's asserts jump exists
+   NativeJump* n_jump = (NativeJump*) verified_entry;
++  address writable = code_cache_write_address(verified_entry);
+ 
+   //First patch dummy jmp in place
+ 
+@@ -548,17 +555,17 @@
+   patch[3] = 0xFE;
+ 
+   // First patch dummy jmp in place
+-  *(int32_t*)verified_entry = *(int32_t *)patch;
++  *(int32_t*)writable = *(int32_t *)patch;
+ 
+   n_jump->wrote(0);
+ 
+   // Patch 5th byte (from jump instruction)
+-  verified_entry[4] = code_buffer[4];
++  writable[4] = code_buffer[4];
+ 
+   n_jump->wrote(4);
+ 
+   // Patch bytes 0-3 (from jump instruction)
+-  *(int32_t*)verified_entry = *(int32_t *)code_buffer;
++  *(int32_t*)writable = *(int32_t *)code_buffer;
+   // Invalidate.  Opteron requires a flush after every write.
+   n_jump->wrote(0);
+ #endif // _LP64
+@@ -582,14 +589,14 @@
+ void NativePopReg::insert(address code_pos, Register reg) {
+   assert(reg->encoding() < 8, "no space for REX");
+   assert(NativePopReg::instruction_size == sizeof(char), "right address unit for update");
+-  *code_pos = (u_char)(instruction_code | reg->encoding());
++  *code_cache_write_address(code_pos) = (u_char)(instruction_code | reg->encoding());
+   ICache::invalidate_range(code_pos, instruction_size);
+ }
+ 
+ 
+ void NativeIllegalInstruction::insert(address code_pos) {
+   assert(NativeIllegalInstruction::instruction_size == sizeof(short), "right address unit for update");
+-  *(short *)code_pos = instruction_code;
++  *(short *)code_cache_write_address(code_pos) = instruction_code;
+   ICache::invalidate_range(code_pos, instruction_size);
+ }
+ 
+@@ -605,8 +612,9 @@
+   guarantee(disp == (intptr_t)(int32_t)disp, "must be 32-bit offset");
+ #endif // AMD64
+ 
+-  *code_pos = unconditional_long_jump;
+-  *((int32_t *)(code_pos+1)) = (int32_t) disp;
++  address writable = code_cache_write_address(code_pos);
++  *writable = unconditional_long_jump;
++  *((int32_t *)(writable + 1)) = (int32_t) disp;
+   ICache::invalidate_range(code_pos, instruction_size);
+ }
+ 
+@@ -618,6 +626,7 @@
+ void NativeGeneralJump::replace_mt_safe(address instr_addr, address code_buffer) {
+    assert (instr_addr != NULL, "illegal address for code patching (4)");
+    NativeGeneralJump* n_jump =  nativeGeneralJump_at (instr_addr); // checking that it is a jump
++   address writable = code_cache_write_address(instr_addr);
+ 
+    // Temporary code
+    unsigned char patch[4];
+@@ -628,16 +637,16 @@
+    patch[3] = 0xFE;
+ 
+    // First patch dummy jmp in place
+-   *(int32_t*)instr_addr = *(int32_t *)patch;
++   *(int32_t*)writable = *(int32_t *)patch;
+     n_jump->wrote(0);
+ 
+    // Patch 4th byte
+-   instr_addr[4] = code_buffer[4];
++   writable[4] = code_buffer[4];
+ 
+     n_jump->wrote(4);
+ 
+    // Patch bytes 0-3
+-   *(jint*)instr_addr = *(jint *)code_buffer;
++   *(jint*)writable = *(jint *)code_buffer;
+ 
+     n_jump->wrote(0);
+ 
+--- a/src/hotspot/cpu/x86/assembler_x86.cpp
++++ b/src/hotspot/cpu/x86/assembler_x86.cpp
+@@ -10756,7 +10756,7 @@
+   assert(src != NULL, "code to copy must have been pre-computed");
+   assert(code_section->limit() - code_section->end() > src_len, "code buffer not large enough");
+   address end = code_section->end();
+-  memcpy(end, src, src_len);
++  memcpy(code_cache_write_address(end), src, src_len);
+   code_section->set_end(end + src_len);
+ }
+ 
+--- a/src/hotspot/cpu/x86/x86_64.ad
++++ b/src/hotspot/cpu/x86/x86_64.ad
+@@ -885,6 +885,9 @@
+   int framesize = C->output()->frame_size_in_bytes();
+   int bangsize = C->output()->bang_size_in_bytes();
+ 
++#ifdef __plantos__
++  __ fat_nop();
++#endif
+   if (C->clinit_barrier_on_entry()) {
+     assert(VM_Version::supports_fast_class_init_checks(), "sanity");
+     assert(!C->method()->holder()->is_not_initialized(), "initialization should have been started");
+--- a/src/hotspot/cpu/x86/c1_MacroAssembler_x86.cpp
++++ b/src/hotspot/cpu/x86/c1_MacroAssembler_x86.cpp
+@@ -355,6 +355,9 @@
+ 
+ 
+ void C1_MacroAssembler::verified_entry(bool breakAtEntry) {
++#ifdef __plantos__
++  fat_nop();
++#else
+   if (breakAtEntry || VerifyFPU) {
+     // Verified Entry first instruction should be 5 bytes long for correct
+     // patching by patch_verified_entry().
+@@ -365,6 +368,7 @@
+     // For all these cases generate long instruction first.
+     fat_nop();
+   }
++#endif
+   if (breakAtEntry) int3();
+   // build frame
+   IA32_ONLY( verify_FPU(0, "method_entry"); )
+--- a/src/hotspot/cpu/x86/relocInfo_x86.cpp
++++ b/src/hotspot/cpu/x86/relocInfo_x86.cpp
+@@ -46,7 +46,7 @@
+     if (verify_only) {
+       guarantee(*pd_address_in_code() == x, "instructions must match");
+     } else {
+-      *pd_address_in_code() = x;
++      *(address*)code_cache_write_address((address)pd_address_in_code()) = x;
+     }
+   } else if (which == Assembler::narrow_oop_operand) {
+     address disp = Assembler::locate_operand(addr(), which);
+@@ -56,13 +56,13 @@
+       if (verify_only) {
+         guarantee(*(uint32_t*) disp == encoded, "instructions must match");
+       } else {
+-        *(int32_t*) disp = encoded;
++        *(int32_t*) code_cache_write_address(disp) = encoded;
+       }
+     } else {
+       if (verify_only) {
+         guarantee(*(uint32_t*) disp == CompressedKlassPointers::encode((Klass*)x), "instructions must match");
+       } else {
+-        *(int32_t*) disp = CompressedKlassPointers::encode((Klass*)x);
++        *(int32_t*) code_cache_write_address(disp) = CompressedKlassPointers::encode((Klass*)x);
+       }
+     }
+   } else {
+@@ -73,14 +73,14 @@
+     if (verify_only) {
+       guarantee(*(int32_t*) disp == (x - next_ip), "instructions must match");
+     } else {
+-      *(int32_t*) disp = x - next_ip;
++      *(int32_t*) code_cache_write_address(disp) = x - next_ip;
+     }
+   }
+ #else
+   if (verify_only) {
+     guarantee(*pd_address_in_code() == (x + o), "instructions must match");
+   } else {
+-    *pd_address_in_code() = x + o;
++    *(address*)code_cache_write_address((address)pd_address_in_code()) = x + o;
+   }
+ #endif // AMD64
+ }
+@@ -130,7 +130,7 @@
+     // %%%% kludge this, for now, until we get a jump_destination method
+     address old_dest = nativeGeneralJump_at(addr())->jump_destination();
+     address disp = Assembler::locate_operand(addr(), Assembler::call32_operand);
+-    *(jint*)disp += (x - old_dest);
++    *(jint*)code_cache_write_address(disp) += (x - old_dest);
+   } else if (ni->is_mov_literal64()) {
+     ((NativeMovConstReg*)ni)->set_data((intptr_t)x);
+   } else {
+--- a/src/hotspot/cpu/x86/macroAssembler_x86.cpp
++++ b/src/hotspot/cpu/x86/macroAssembler_x86.cpp
+@@ -2172,6 +2172,13 @@
+ 
+ // A 5 byte nop that is safe for patching (see patch_verified_entry)
+ void MacroAssembler::fat_nop() {
++#ifdef __plantos__
++  // A jump to the next instruction keeps the opcode and instruction length
++  // stable when the entry is later redirected. Concurrent decoders must not
++  // combine the old stack-bang opcode with a newly patched displacement.
++  emit_int8(0xe9);
++  emit_int32(0);
++#else
+   if (UseAddressNop) {
+     addr_nop_5();
+   } else {
+@@ -2181,6 +2188,7 @@
+     emit_int8(0x65); // gs:
+     emit_int8((unsigned char)0x90);
+   }
++#endif
+ }
+ 
+ #ifndef _LP64
+--- a/src/java.base/share/native/libjli/jli_util.h
++++ b/src/java.base/share/native/libjli/jli_util.h
+@@ -104,6 +104,9 @@
+ #define _LARGFILE64_SOURCE
+ #define JLI_Lseek                       lseek64
+ #endif
++#ifdef _ALLBSD_SOURCE
++#define JLI_Lseek                       lseek
++#endif
+ #ifdef MACOSX
+ #define JLI_Lseek                       lseek
+ #endif
+--- a/src/java.base/unix/classes/sun/nio/fs/UnixFileSystem.java
++++ b/src/java.base/unix/classes/sun/nio/fs/UnixFileSystem.java
+@@ -48,8 +48,9 @@
+     // package-private
+     UnixFileSystem(UnixFileSystemProvider provider, String dir) {
+         this.provider = provider;
+-        this.defaultDirectory = Util.toBytes(UnixPath.normalizeAndCheck(dir));
+-        if (this.defaultDirectory[0] != '/') {
++        UnixPath defaultPath = new UnixPath(this, dir);
++        this.defaultDirectory = defaultPath.asByteArray();
++        if (!defaultPath.isAbsolute()) {
+             throw new RuntimeException("default directory must be absolute");
+         }
+ 
+--- a/src/java.base/unix/classes/sun/nio/fs/UnixUriUtils.java
++++ b/src/java.base/unix/classes/sun/nio/fs/UnixUriUtils.java
+@@ -58,7 +58,7 @@
+             throw new IllegalArgumentException("URI has a query component");
+ 
+         // compatibility with java.io.File
+-        if (!uri.toString().startsWith("file:///"))
++        if (File.pathSeparatorChar == ';' || !uri.toString().startsWith("file:///"))
+             return new File(uri).toPath();
+ 
+         // transformation use raw path
+@@ -104,6 +104,8 @@
+      * Converts Path to URI
+      */
+     static URI toUri(UnixPath up) {
++        if (File.pathSeparatorChar == ';')
++            return up.toFile().toURI();
+         byte[] path = up.toAbsolutePath().asByteArray();
+         StringBuilder sb = new StringBuilder("file:///");
+         assert path[0] == '/';
+--- a/src/java.base/unix/classes/sun/nio/fs/UnixPath.java
++++ b/src/java.base/unix/classes/sun/nio/fs/UnixPath.java
+@@ -60,7 +60,20 @@
+ 
+     UnixPath(UnixFileSystem fs, byte[] path) {
+         this.fs = fs;
+-        this.path = path;
++        this.path = hasDrivePrefix(path) && path.length == 2
++                ? new byte[] { path[0], ':', '/' } : path;
++    }
++
++    private static boolean hasDrivePrefix(byte[] path) {
++        return File.pathSeparatorChar == ';' && path.length >= 2 &&
++                path[1] == ':' && (path.length == 2 || path[2] == '/') &&
++                ((path[0] >= 'A' && path[0] <= 'Z') ||
++                 (path[0] >= 'a' && path[0] <= 'z'));
++    }
++
++    private static int rootLength(byte[] path) {
++        return hasDrivePrefix(path) ? Math.min(3, path.length)
++                : path.length > 0 && path[0] == '/' ? 1 : 0;
+     }
+ 
+     UnixPath(UnixFileSystem fs, String input) {
+@@ -175,7 +188,7 @@
+ 
+             // count names
+             count = 0;
+-            index = 0;
++            index = rootLength(path);
+             if (isEmpty()) {
+                 // empty path has one name
+                 count = 1;
+@@ -193,7 +206,7 @@
+             // populate offsets
+             int[] result = new int[count];
+             count = 0;
+-            index = 0;
++            index = rootLength(path);
+             while (index < path.length) {
+                 byte c = path[index];
+                 if (c == '/') {
+@@ -243,6 +256,9 @@
+ 
+     @Override
+     public UnixPath getRoot() {
++        if (hasDrivePrefix(path)) {
++            return new UnixPath(getFileSystem(), Arrays.copyOf(path, rootLength(path)));
++        }
+         if (path.length > 0 && path[0] == '/') {
+             return getFileSystem().rootDirectory();
+         } else {
+@@ -261,7 +277,7 @@
+             return null;
+ 
+         // one name element and no root component
+-        if (count == 1 && path.length > 0 && path[0] != '/')
++        if (count == 1 && path.length > 0 && !isAbsolute())
+             return this;
+ 
+         int lastOffset = offsets[count-1];
+@@ -281,7 +297,7 @@
+             return null;
+         }
+         int len = offsets[count-1] - 1;
+-        if (len <= 0) {
++        if (len <= rootLength(path)) {
+             // parent is root only (may be null)
+             return getRoot();
+         }
+@@ -349,7 +365,7 @@
+ 
+     @Override
+     public boolean isAbsolute() {
+-        return (path.length > 0 && path[0] == '/');
++        return rootLength(path) != 0;
+     }
+ 
+     // Resolve child against given base
+@@ -358,13 +374,13 @@
+         int childLength = child.length;
+         if (childLength == 0)
+             return base;
+-        if (baseLength == 0 || child[0] == '/')
++        if (baseLength == 0 || rootLength(child) != 0)
+             return child;
+         byte[] result;
+-        if (baseLength == 1 && base[0] == '/') {
+-            result = new byte[childLength + 1];
+-            result[0] = '/';
+-            System.arraycopy(child, 0, result, 1, childLength);
++        if (base[baseLength - 1] == '/') {
++            result = new byte[baseLength + childLength];
++            System.arraycopy(base, 0, result, 0, baseLength);
++            System.arraycopy(child, 0, result, baseLength, childLength);
+         } else {
+             result = new byte[baseLength + 1 + childLength];
+             System.arraycopy(base, 0, result, 0, baseLength);
+@@ -377,7 +393,7 @@
+     @Override
+     public UnixPath resolve(Path obj) {
+         byte[] other = toUnixPath(obj).path;
+-        if (other.length > 0 && other[0] == '/')
++        if (rootLength(other) != 0)
+             return ((UnixPath)obj);
+         byte[] result = resolve(path, other);
+         return new UnixPath(getFileSystem(), result);
+@@ -394,7 +410,7 @@
+             return emptyPath();
+ 
+         // can only relativize paths of the same type
+-        if (this.isAbsolute() != child.isAbsolute())
++        if (!Objects.equals(getRoot(), child.getRoot()))
+             throw new IllegalArgumentException("'other' is different type of Path");
+ 
+         // this path is the empty path
+@@ -570,13 +586,12 @@
+ 
+         // corner case - all names removed
+         if (remaining == 0) {
+-            return isAbsolute ? getFileSystem().rootDirectory() : emptyPath();
++            return isAbsolute ? getRoot() : emptyPath();
+         }
+ 
+         // compute length of result
+         int len = remaining - 1;
+-        if (isAbsolute)
+-            len++;
++        len += rootLength(path);
+ 
+         for (int i=0; i<count; i++) {
+             if (!ignore[i])
+@@ -585,9 +600,8 @@
+         byte[] result = new byte[len];
+ 
+         // copy names into result
+-        int pos = 0;
+-        if (isAbsolute)
+-            result[pos++] = '/';
++        int pos = rootLength(path);
++        System.arraycopy(path, 0, result, 0, pos);
+         for (int i=0; i<count; i++) {
+             if (!ignore[i]) {
+                 System.arraycopy(path, offsets[i], result, pos, size[i]);
+@@ -606,6 +620,9 @@
+             return false;
+         UnixPath that = (UnixPath)other;
+ 
++        if (!Objects.equals(getRoot(), that.getRoot()))
++            return false;
++
+         // other path is longer
+         if (that.path.length > path.length)
+             return false;
+@@ -669,7 +686,7 @@
+             return false;
+ 
+         // other path is absolute so this path must be absolute
+-        if (that.isAbsolute() && !this.isAbsolute())
++        if (that.isAbsolute() && !Objects.equals(getRoot(), that.getRoot()))
+             return false;
+ 
+         int thisOffsetCount = getNameCount();
+@@ -685,7 +702,7 @@
+                     return true;
+                 int expectedLen = thisLen;
+                 if (this.isAbsolute() && !that.isAbsolute())
+-                    expectedLen--;
++                    expectedLen -= rootLength(path);
+                 if (thatLen != expectedLen)
+                     return false;
+             } else {
+@@ -828,7 +845,7 @@
+ 
+         // if not resolving links then eliminate "." and also ".."
+         // where the previous element is not a link.
+-        UnixPath result = fs.rootDirectory();
++        UnixPath result = absolute.getRoot();
+         for (int i=0; i<absolute.getNameCount(); i++) {
+             UnixPath element = absolute.getName(i);
+ 
+@@ -849,7 +866,7 @@
+                 if (!attrs.isSymbolicLink()) {
+                     result = result.getParent();
+                     if (result == null) {
+-                        result = fs.rootDirectory();
++                        result = absolute.getRoot();
+                     }
+                     continue;
+                 }
+--- a/src/java.base/unix/classes/java/io/UnixFileSystem.java
++++ b/src/java.base/unix/classes/java/io/UnixFileSystem.java
+@@ -61,6 +61,14 @@
+         return colon;
+     }
+ 
++    private boolean isDrivePath(String path, int offset) {
++        if (colon != ';' || path.length() < offset + 2 || path.charAt(offset + 1) != ':') {
++            return false;
++        }
++        char drive = path.charAt(offset);
++        return (drive >= 'A' && drive <= 'Z') || (drive >= 'a' && drive <= 'z');
++    }
++
+     /* A normal Unix pathname contains no duplicate slashes and does not end
+        with a slash.  It may be the empty string. */
+ 
+@@ -92,6 +100,10 @@
+        This way we iterate through the whole pathname string only once. */
+     @Override
+     public String normalize(String pathname) {
++        // File URLs encode a drive path as /C:/..., while VFS expects C:/....
++        if (pathname.startsWith("/") && isDrivePath(pathname, 1)) {
++            pathname = pathname.substring(1);
++        }
+         int doubleSlash = pathname.indexOf("//");
+         if (doubleSlash >= 0) {
+             return normalize(pathname, doubleSlash);
+@@ -104,11 +116,13 @@
+ 
+     @Override
+     public int prefixLength(String pathname) {
++        if (isDrivePath(pathname, 0)) return 2;
+         return pathname.startsWith("/") ? 1 : 0;
+     }
+ 
+     @Override
+     public String resolve(String parent, String child) {
++        if (isDrivePath(child, 0)) return child;
+         if (child.isEmpty()) return parent;
+         if (child.charAt(0) == '/') {
+             if (parent.equals("/")) return child;
+--- a/src/java.base/unix/native/libjava/ProcessEnvironment_md.c
++++ b/src/java.base/unix/native/libjava/ProcessEnvironment_md.c
+@@ -55,7 +55,7 @@
+     jclass byteArrCls = (*env)->FindClass(env, "[B");
+     CHECK_NULL_RETURN(byteArrCls, NULL);
+ 
+-    for (i = 0; environ[i]; i++) {
++    for (i = 0; environ != NULL && environ[i]; i++) {
+         /* Ignore corrupted environment variables */
+         if (strchr(environ[i], '=') != NULL)
+             count++;
+@@ -64,7 +64,7 @@
+     result = (*env)->NewObjectArray(env, 2*count, byteArrCls, 0);
+     CHECK_NULL_RETURN(result, NULL);
+ 
+-    for (i = 0, j = 0; environ[i]; i++) {
++    for (i = 0, j = 0; environ != NULL && environ[i]; i++) {
+         const char * varEnd = strchr(environ[i], '=');
+         /* Ignore corrupted environment variables */
+         if (varEnd != NULL) {
+--- a/src/java.base/unix/native/libjava/canonicalize_md.c
++++ b/src/java.base/unix/native/libjava/canonicalize_md.c
+@@ -33,9 +33,7 @@
+ #include <sys/stat.h>
+ #include <errno.h>
+ #include <limits.h>
+-#if !defined(_ALLBSD_SOURCE)
+ #include <alloca.h>
+-#endif
+ 
+ #include "jdk_util.h"
+ 
+--- a/src/java.base/unix/native/libjava/java_props_md.c
++++ b/src/java.base/unix/native/libjava/java_props_md.c
+@@ -512,7 +512,11 @@
+     }
+ 
+     sprops.file_separator = "/";
++#ifdef __plantos__
++    sprops.path_separator = ";";
++#else
+     sprops.path_separator = ":";
++#endif
+     sprops.line_separator = "\n";
+ 
+ #ifdef MACOSX
+--- a/src/java.base/unix/native/libjava/TimeZone_md.c
++++ b/src/java.base/unix/native/libjava/TimeZone_md.c
+@@ -74,7 +74,7 @@
+ static const char *ETC_ENVIRONMENT_FILE = "/etc/environment";
+ #endif
+ 
+-#if defined(__linux__) || defined(MACOSX)
++#if defined(__linux__) || defined(MACOSX) || defined(_ALLBSD_SOURCE)
+ 
+ /*
+  * Returns a pointer to the zone ID portion of the given zoneinfo file
+--- a/src/java.base/unix/native/libnio/ch/FileDispatcherImpl.c
++++ b/src/java.base/unix/native/libnio/ch/FileDispatcherImpl.c
+@@ -318,6 +318,16 @@
+ Java_sun_nio_ch_FileDispatcherImpl_preClose0(JNIEnv *env, jclass clazz, jobject fdo)
+ {
+     jint fd = fdval(env, fdo);
++#ifdef __plantos__
++    /* Plant socket handles live outside the VFS descriptor namespace, so
++     * dup2 cannot replace them. Closing a generation-tagged socket wakes its
++     * blocked waiters and makes subsequent operations observe a stale handle.
++     */
++    if (socket_handle_is_tagged(fd)) {
++        closeFileDescriptor(env, fd);
++        return;
++    }
++#endif
+     if (preCloseFD >= 0) {
+         if (dup2(preCloseFD, fd) < 0)
+             JNU_ThrowIOExceptionWithLastError(env, "dup2 failed");
+--- a/src/java.base/unix/native/libjli/java_md.c
++++ b/src/java.base/unix/native/libjli/java_md.c
+@@ -585,7 +585,14 @@
+ SetExecname(char **argv)
+ {
+     char* exec_path = NULL;
+-#if defined(__linux__)
++#if defined(__plantos__)
++    {
++        const char* self = getexecname();
++        if (self != NULL) {
++            exec_path = JLI_StringDup(self);
++        }
++    }
++#elif defined(__linux__)
+     {
+         const char* self = "/proc/self/exe";
+         char buf[PATH_MAX+1];
+--- a/src/java.base/unix/native/libjli/java_md.h
++++ b/src/java.base/unix/native/libjli/java_md.h
+@@ -37,7 +37,11 @@
+ #include "manifest_info.h"
+ #include "jli_util.h"
+ 
++#ifdef __plantos__
++#define PATH_SEPARATOR       ';'
++#else
+ #define PATH_SEPARATOR       ':'
++#endif
+ #define FILESEP              "/"
+ #define FILE_SEPARATOR       '/'
+ #define IS_FILE_SEPARATOR(c) ((c) == '/')
+--- a/make/hotspot/lib/JvmMapfile.gmk
++++ b/make/hotspot/lib/JvmMapfile.gmk
+@@ -52,7 +52,7 @@
+ # Create a dynamic list of symbols from the built object files. This is highly
+ # platform dependent.
+ 
+-ifeq ($(call isTargetOs, linux), true)
++ifeq ($(call isTargetOs, linux bsd), true)
+   DUMP_SYMBOLS_CMD := $(NM) --defined-only *.o
+   ifneq ($(FILTER_SYMBOLS_PATTERN), )
+     FILTER_SYMBOLS_PATTERN := $(FILTER_SYMBOLS_PATTERN)|
+--- a/make/autoconf/libraries.m4
++++ b/make/autoconf/libraries.m4
+@@ -39,8 +39,15 @@
+ ################################################################################
+ AC_DEFUN_ONCE([LIB_DETERMINE_DEPENDENCIES],
+ [
++  if test "x$OPENJDK_TARGET_OS_ENV" = xplantos; then
++    NEEDS_LIB_CUPS=false
++    NEEDS_LIB_FONTCONFIG=false
++    NEEDS_LIB_FREETYPE=false
++  fi
++
+   # Check if X11 is needed
+-  if test "x$OPENJDK_TARGET_OS" = xwindows || test "x$OPENJDK_TARGET_OS" = xmacosx; then
++  if test "x$NEEDS_LIB_FONTCONFIG" = xfalse ||
++      test "x$OPENJDK_TARGET_OS" = xwindows || test "x$OPENJDK_TARGET_OS" = xmacosx; then
+     # No X11 support on windows or macosx
+     NEEDS_LIB_X11=false
+   elif test "x$ENABLE_HEADLESS_ONLY" = xtrue; then
+@@ -52,7 +59,8 @@
+   fi
+ 
+   # Check if fontconfig is needed
+-  if test "x$OPENJDK_TARGET_OS" = xwindows || test "x$OPENJDK_TARGET_OS" = xmacosx; then
++  if test "x$NEEDS_LIB_FONTCONFIG" = xfalse ||
++      test "x$OPENJDK_TARGET_OS" = xwindows || test "x$OPENJDK_TARGET_OS" = xmacosx; then
+     # No fontconfig support on windows or macosx
+     NEEDS_LIB_FONTCONFIG=false
+   else
+@@ -62,7 +70,7 @@
+   fi
+ 
+   # Check if cups is needed
+-  if test "x$OPENJDK_TARGET_OS" = xwindows; then
++  if test "x$NEEDS_LIB_CUPS" = xfalse || test "x$OPENJDK_TARGET_OS" = xwindows; then
+     # Windows have a separate print system
+     NEEDS_LIB_CUPS=false
+   else
+--- a/make/autoconf/flags-cflags.m4
++++ b/make/autoconf/flags-cflags.m4
+@@ -427,6 +427,7 @@
+   elif test "x$OPENJDK_TARGET_OS" = xaix; then
+     CFLAGS_OS_DEF_JVM="-DAIX"
+   elif test "x$OPENJDK_TARGET_OS" = xbsd; then
++    CFLAGS_OS_DEF_JVM="-D_ALLBSD_SOURCE -DBSD"
+     CFLAGS_OS_DEF_JDK="-D_ALLBSD_SOURCE"
+   elif test "x$OPENJDK_TARGET_OS" = xwindows; then
+     CFLAGS_OS_DEF_JVM="-D_WINDOWS -DWIN32 -D_JNI_IMPLEMENTATION_"
+--- a/make/autoconf/buildjdk-spec.gmk.in
++++ b/make/autoconf/buildjdk-spec.gmk.in
+@@ -82,6 +82,14 @@
+ JVM_ASFLAGS := @OPENJDK_BUILD_JVM_ASFLAGS@
+ JVM_LIBS := @OPENJDK_BUILD_JVM_LIBS@
+ 
++# The build JDK runs on the build host. When cross compiling from Linux to
++# Plant OS, discard the target BSD selector before compiling host HotSpot.
++CFLAGS_JDKLIB := $(filter-out -D_ALLBSD_SOURCE -DBSD,$(CFLAGS_JDKLIB)) -DLINUX -D_GNU_SOURCE
++CXXFLAGS_JDKLIB := $(filter-out -D_ALLBSD_SOURCE -DBSD,$(CXXFLAGS_JDKLIB)) -DLINUX -D_GNU_SOURCE
++CFLAGS_JDKEXE := $(filter-out -D_ALLBSD_SOURCE -DBSD,$(CFLAGS_JDKEXE)) -DLINUX -D_GNU_SOURCE
++CXXFLAGS_JDKEXE := $(filter-out -D_ALLBSD_SOURCE -DBSD,$(CXXFLAGS_JDKEXE)) -DLINUX -D_GNU_SOURCE
++JVM_CFLAGS := $(filter-out -D_ALLBSD_SOURCE -DBSD,$(JVM_CFLAGS)) -DLINUX -D_GNU_SOURCE
++
+ FDLIBM_CFLAGS := @OPENJDK_BUILD_FDLIBM_CFLAGS@
+ 
+ INTERIM_LANGTOOLS_ARGS := $(subst $(OUTPUTDIR),$(BUILDJDK_OUTPUTDIR),$(INTERIM_LANGTOOLS_ARGS))
+--- a/make/autoconf/build-aux/config.guess
++++ b/make/autoconf/build-aux/config.guess
+@@ -91,7 +91,7 @@
+ 
+ # Test and fix wsl
+ echo $OUT | grep unknown-linux-gnu > /dev/null 2> /dev/null
+-if test $? = 0; then
++if test $? = 0 && test "x$PLANT_OPENJDK_BUILD_OS" != xlinux; then
+   uname -r | grep -i microsoft > /dev/null 2> /dev/null
+   if test $? = 0; then
+     OUT=`echo $OUT | sed -e 's/unknown-linux-gnu/pc-wsl/'`
+--- a/make/autoconf/build-aux/config.sub
++++ b/make/autoconf/build-aux/config.sub
+@@ -28,6 +28,11 @@
+ # wrap it and fix the broken property, if needed.
+ 
+ DIR=`dirname $0`
++
++if echo $* | grep -- '-plantos' >/dev/null ; then
++    echo $*
++    exit
++fi
+ 
+ if echo $* | grep linux-musl >/dev/null ; then
+     echo $*
+--- a/make/autoconf/platform.m4
++++ b/make/autoconf/platform.m4
+@@ -192,6 +192,11 @@
+ AC_DEFUN([PLATFORM_EXTRACT_VARS_FROM_OS],
+ [
+   case "$1" in
++    *plantos*)
++      VAR_OS=bsd
++      VAR_OS_TYPE=unix
++      VAR_OS_ENV=plantos
++      ;;
+     *linux*)
+       VAR_OS=linux
+       VAR_OS_TYPE=unix
+--- a/make/autoconf/jdk-options.m4
++++ b/make/autoconf/jdk-options.m4
+@@ -194,6 +194,9 @@
+   # Should we build the serviceability agent (SA)?
+   INCLUDE_SA=true
+   if HOTSPOT_CHECK_JVM_VARIANT(zero); then
++    INCLUDE_SA=false
++  fi
++  if test "x$OPENJDK_TARGET_OS_ENV" = xplantos ; then
+     INCLUDE_SA=false
+   fi
+   if test "x$OPENJDK_TARGET_OS" = xaix ; then
+--- a/make/common/modules/LauncherCommon.gmk
++++ b/make/common/modules/LauncherCommon.gmk
+@@ -157,11 +157,14 @@
+           $$($1_LDFLAGS), \
+       LDFLAGS_linux := $$(call SET_EXECUTABLE_ORIGIN,/../lib) \
+           -L$(call FindLibDirForModule, java.base), \
++      LDFLAGS_bsd := $$(call SET_EXECUTABLE_ORIGIN,/../lib) \
++          -L$(call FindLibDirForModule, java.base), \
+       LDFLAGS_macosx := $$(call SET_EXECUTABLE_ORIGIN,/../lib) \
+           -L$(call FindLibDirForModule, java.base), \
+       LDFLAGS_aix := -L$(SUPPORT_OUTPUTDIR)/native/java.base, \
+       LIBS := $(JDKEXE_LIBS) $$($1_LIBS), \
+       LIBS_linux := -ljli -lpthread $(LIBDL), \
++      LIBS_bsd := -ljli -lpthread $(LIBDL), \
+       LIBS_macosx := -ljli -framework Cocoa -framework Security \
+           -framework ApplicationServices, \
+       LIBS_aix := -ljli_static, \
+--- a/make/modules/jdk.attach/Lib.gmk
++++ b/make/modules/jdk.attach/Lib.gmk
+@@ -27,6 +27,8 @@
+ 
+ ################################################################################
+ 
++ifneq ($(call isTargetOs, bsd), true)
++
+ ifeq ($(call isTargetOs, windows), true)
+   # In (at least) VS2013 and later, -DPSAPI_VERSION=1 is needed to generate
+   # a binary that is compatible with windows versions older than 7/2008R2.
+@@ -49,4 +51,6 @@
+ 
+ TARGETS += $(BUILD_LIBATTACH)
+ 
++endif
++
+ ################################################################################
+--- a/make/modules/java.desktop/Gensrc.gmk
++++ b/make/modules/java.desktop/Gensrc.gmk
+@@ -32,7 +32,7 @@
+   include gensrc/GensrcIcons.gmk
+ endif
+ 
+-ifeq ($(call isTargetOs, linux aix), true)
++ifeq ($(call isTargetOs, linux aix bsd), true)
+   include gensrc/GensrcX11Wrappers.gmk
+ endif
+ 
+--- a/make/modules/java.desktop/lib/Awt2dLibraries.gmk
++++ b/make/modules/java.desktop/lib/Awt2dLibraries.gmk
+@@ -77,7 +77,7 @@
+       #
+ endif
+ 
+-ifeq ($(call isTargetOs, linux macosx aix), true)
++ifeq ($(call isTargetOs, linux macosx aix bsd), true)
+   LIBAWT_EXFILES += awt_Font.c CUPSfuncs.c fontpath.c X11Color.c
+ endif
+ 
+@@ -110,6 +110,10 @@
+ LIBAWT_CFLAGS += -D__MEDIALIB_OLD_NAMES -D__USE_J2D_NAMES $(X_CFLAGS)
+ 
+ LIBAWT_CFLAGS += -DMLIB_NO_LIBSUNMATH
++
++ifeq ($(call isTargetOs, bsd), true)
++  LIBAWT_CFLAGS += -DHEADLESS
++endif
+ 
+ ifeq ($(call isTargetOs, windows), true)
+   LIBAWT_CFLAGS += -EHsc -DUNICODE -D_UNICODE
+@@ -328,6 +332,7 @@
+ # volatile to prevent the optimization. However, this approach does not
+ # work because we have to declare all variables as volatile in result.
+ 
++ifneq ($(call isTargetOs, bsd), true)
+ ifeq ($(USE_EXTERNAL_LIBJPEG), true)
+   LIBJPEG_LIBS := -ljpeg
+   BUILD_LIBJAVAJPEG_INCLUDE_FILES := \
+@@ -358,6 +363,8 @@
+ 
+ TARGETS += $(BUILD_LIBJAVAJPEG)
+ 
++endif
++
+ ################################################################################
+ 
+ # Mac and Windows only use the native AWT lib, do not build libawt_headless
+@@ -370,6 +377,10 @@
+       #
+ 
+   LIBAWT_HEADLESS_EXCLUDES := medialib
++
++  ifeq ($(call isTargetOs, bsd), true)
++    LIBAWT_HEADLESS_EXCLUDES += common/java2d/opengl
++  endif
+ 
+   LIBAWT_HEADLESS_EXTRA_HEADER_DIRS := \
+       $(LIBAWT_DEFAULT_HEADER_DIRS) \
+@@ -385,6 +396,7 @@
+       NAME := awt_headless, \
+       EXTRA_SRC := $(LIBAWT_HEADLESS_EXTRA_SRC), \
+       EXCLUDES := $(LIBAWT_HEADLESS_EXCLUDES), \
++      EXCLUDE_FILES := $(if $(call isTargetOs, bsd),awt_Font.c CUPSfuncs.c fontpath.c X11Color.c GLXGraphicsConfig.c GLXSurfaceData.c OGLBlitLoops.c OGLBufImgOps.c OGLContext.c OGLFuncs.c OGLMaskBlit.c OGLMaskFill.c OGLPaints.c OGLRenderQueue.c OGLRenderer.c OGLSurfaceData.c OGLTextRenderer.c OGLVertexCache.c X11FontScaler_md.c X11PMBlitLoops.c X11Renderer.c X11SurfaceData.c X11TextRenderer_md.c,), \
+       OPTIMIZATION := LOW, \
+       CFLAGS := $(CFLAGS_JDKLIB) \
+           $(LIBAWT_HEADLESS_CFLAGS), \
+@@ -621,6 +633,8 @@
+ 
+ else # not windows
+ 
++ifneq ($(call isTargetOs, bsd), true)
++
+   ifeq ($(call isTargetOs, macosx), true)
+     # libjawt on macosx do not use the unix code
+     LIBJAWT_EXCLUDE_SRC_PATTERNS := /unix/
+@@ -671,7 +685,11 @@
+ 
+ endif
+ 
++endif
++
++ifneq ($(call isTargetOs, bsd), true)
+ TARGETS += $(BUILD_LIBJAWT)
++endif
+ 
+ ################################################################################
+ 
+--- a/make/modules/java.desktop/Java.gmk
++++ b/make/modules/java.desktop/Java.gmk
+@@ -124,7 +124,10 @@
+       sun/awt/X11/XWindowChanges.java \
+       sun/awt/X11/XdbeSwapInfo.java \
+       sun/awt/X11/XmbTextItem.java \
+-      sun/awt/X11/XwcTextItem.java
++      sun/awt/X11/XwcTextItem.java \
++      sun/font/X11GB2312.java \
++      sun/font/X11GBK.java \
++      sun/font/X11KSC5601.java
+ endif
+ 
+ ifeq ($(call isTargetOs, windows), true)
+--- a/make/modules/java.desktop/Lib.gmk
++++ b/make/modules/java.desktop/Lib.gmk
+@@ -40,6 +40,7 @@
+ ################################################################################
+ # Create the libjsound library
+ 
++ifneq ($(call isTargetOs, bsd), true)
+ ifeq ($(call isTargetOs, aix), false)
+ 
+   LIBJSOUND_CFLAGS := \
+@@ -78,6 +79,7 @@
+ 
+   TARGETS += $(BUILD_LIBJSOUND)
+ 
++endif
+ endif
+ 
+ ################################################################################
+--- a/make/modules/java.base/gensrc/GensrcMisc.gmk
++++ b/make/modules/java.base/gensrc/GensrcMisc.gmk
+@@ -57,7 +57,7 @@
+ ifneq ($(filter $(TOOLCHAIN_TYPE), gcc clang), )
+   # Need to specify language since the template file has a non standard
+   # extension.
+-  CPP_FLAGS += -x c
++  CPP_FLAGS += -x c -DPLANT_OPENJDK_CONSTANTS
+ else ifeq ($(TOOLCHAIN_TYPE), microsoft)
+   CPP_FLAGS += -nologo
+ 
+--- a/make/modules/java.instrument/Lib.gmk
++++ b/make/modules/java.instrument/Lib.gmk
+@@ -48,7 +48,7 @@
+     LDFLAGS_macosx := -L$(call FindLibDirForModule, java.base), \
+     LDFLAGS_aix := -L$(SUPPORT_OUTPUTDIR)/native/java.base, \
+     LIBS := $(JDKLIB_LIBS), \
+-    LIBS_unix := -ljava -ljvm $(LIBZ_LIBS), \
++    LIBS_unix := -ljava -ljvm -ljli $(LIBZ_LIBS), \
+     LIBS_linux := -ljli $(LIBDL), \
+     LIBS_aix := -liconv -ljli_static $(LIBDL), \
+     LIBS_macosx := -ljli -liconv -framework Cocoa -framework Security \
+--- a/make/modules/jdk.sctp/Lib.gmk
++++ b/make/modules/jdk.sctp/Lib.gmk
+@@ -29,7 +29,7 @@
+ 
+ ifeq ($(call isTargetOsType, unix), true)
+ 
+-  ifeq ($(call isTargetOs, macosx aix), false)
++  ifeq ($(call isTargetOs, macosx aix bsd), false)
+     $(eval $(call SetupJdkLibrary, BUILD_LIBSCTP, \
+         NAME := sctp, \
+         OPTIMIZATION := LOW, \
+--- a/make/modules/java.prefs/Lib.gmk
++++ b/make/modules/java.prefs/Lib.gmk
+@@ -39,7 +39,7 @@
+     CFLAGS := $(CFLAGS_JDKLIB), \
+     LDFLAGS := $(LDFLAGS_JDKLIB) \
+         $(call SET_SHARED_LIBRARY_ORIGIN), \
+-    LIBS_unix := -ljvm, \
++    LIBS_unix := -ljvm -ljava, \
+     LIBS_linux := -ljava, \
+     LIBS_aix := -ljava, \
+     LIBS_macosx := -framework CoreFoundation -framework Foundation, \
+--- /dev/null
++++ b/src/jdk.attach/bsd/classes/sun/tools/attach/AttachProviderImpl.java
+@@ -0,0 +1,30 @@
++package sun.tools.attach;
++
++import com.sun.tools.attach.AttachNotSupportedException;
++import com.sun.tools.attach.VirtualMachine;
++import com.sun.tools.attach.spi.AttachProvider;
++
++import java.io.IOException;
++
++/** Attach provider placeholder until Plant OS exposes a VM attach transport. */
++public final class AttachProviderImpl extends HotSpotAttachProvider {
++    public AttachProviderImpl() {
++    }
++
++    @Override
++    public String name() {
++        return "plant";
++    }
++
++    @Override
++    public String type() {
++        return "unsupported";
++    }
++
++    @Override
++    public VirtualMachine attachVirtualMachine(String id)
++            throws AttachNotSupportedException, IOException {
++        throw new AttachNotSupportedException(
++                "The attach mechanism is not supported on Plant OS");
++    }
++}
+--- /dev/null
++++ b/src/java.base/bsd/classes/sun/nio/fs/DefaultFileSystemProvider.java
+@@ -0,0 +1,22 @@
++/*
++ * Plant OS BSD-compatible default file system provider.
++ */
++
++package sun.nio.fs;
++
++import java.nio.file.FileSystem;
++
++public class DefaultFileSystemProvider {
++    private static final BsdFileSystemProvider INSTANCE =
++        new BsdFileSystemProvider();
++
++    private DefaultFileSystemProvider() { }
++
++    public static BsdFileSystemProvider instance() {
++        return INSTANCE;
++    }
++
++    public static FileSystem theFileSystem() {
++        return INSTANCE.theFileSystem();
++    }
++}
+--- /dev/null
++++ b/src/java.base/bsd/classes/sun/nio/fs/BsdFileSystemProvider.java
+@@ -0,0 +1,24 @@
++/*
++ * Plant OS BSD-compatible file system provider.
++ */
++
++package sun.nio.fs;
++
++import java.io.IOException;
++import java.nio.file.FileStore;
++
++class BsdFileSystemProvider extends UnixFileSystemProvider {
++    BsdFileSystemProvider() {
++        super();
++    }
++
++    @Override
++    BsdFileSystem newFileSystem(String dir) {
++        return new BsdFileSystem(this, dir);
++    }
++
++    @Override
++    FileStore getFileStore(UnixPath path) throws IOException {
++        throw new IOException("file store queries are not supported");
++    }
++}
+--- /dev/null
++++ b/src/java.base/bsd/classes/sun/nio/fs/BsdFileSystem.java
+@@ -0,0 +1,38 @@
++/*
++ * Plant OS BSD-compatible file system.
++ */
++
++package sun.nio.fs;
++
++import java.io.IOException;
++import java.nio.file.FileStore;
++import java.nio.file.WatchService;
++import java.util.Collections;
++import java.util.HashSet;
++import java.util.Set;
++
++class BsdFileSystem extends UnixFileSystem {
++    BsdFileSystem(UnixFileSystemProvider provider, String dir) {
++        super(provider, dir);
++    }
++
++    @Override
++    public WatchService newWatchService() throws IOException {
++        return new PollingWatchService();
++    }
++
++    @Override
++    public Set<String> supportedFileAttributeViews() {
++        return Collections.unmodifiableSet(new HashSet<>(standardFileAttributeViews()));
++    }
++
++    @Override
++    Iterable<UnixMountEntry> getMountEntries() {
++        return Collections.emptyList();
++    }
++
++    @Override
++    FileStore getFileStore(UnixMountEntry entry) throws IOException {
++        throw new IOException("file store queries are not supported");
++    }
++}
+--- /dev/null
++++ b/src/java.base/bsd/classes/sun/nio/ch/DefaultAsynchronousChannelProvider.java
+@@ -0,0 +1,52 @@
++/*
++ * Plant OS does not yet expose an asynchronous channel backend.
++ */
++
++package sun.nio.ch;
++
++import java.io.IOException;
++import java.nio.channels.AsynchronousChannelGroup;
++import java.nio.channels.AsynchronousServerSocketChannel;
++import java.nio.channels.AsynchronousSocketChannel;
++import java.nio.channels.spi.AsynchronousChannelProvider;
++import java.util.concurrent.ExecutorService;
++import java.util.concurrent.ThreadFactory;
++
++public class DefaultAsynchronousChannelProvider {
++    private DefaultAsynchronousChannelProvider() { }
++
++    public static AsynchronousChannelProvider create() {
++        return new UnsupportedProvider();
++    }
++
++    private static final class UnsupportedProvider extends AsynchronousChannelProvider {
++        private UnsupportedOperationException unsupported() {
++            return new UnsupportedOperationException(
++                "asynchronous channels are not supported on Plant OS");
++        }
++
++        @Override
++        public AsynchronousChannelGroup openAsynchronousChannelGroup(
++                int nThreads, ThreadFactory threadFactory) throws IOException {
++            throw unsupported();
++        }
++
++        @Override
++        public AsynchronousChannelGroup openAsynchronousChannelGroup(
++                ExecutorService executor, int initialSize) throws IOException {
++            throw unsupported();
++        }
++
++        @Override
++        public AsynchronousServerSocketChannel openAsynchronousServerSocketChannel(
++                AsynchronousChannelGroup group) throws IOException {
++            throw unsupported();
++        }
++
++        @Override
++        public AsynchronousSocketChannel openAsynchronousSocketChannel(
++                AsynchronousChannelGroup group) throws IOException {
++            throw unsupported();
++        }
++    }
++}
+--- /dev/null
++++ b/src/java.base/bsd/classes/sun/nio/ch/DefaultSelectorProvider.java
+@@ -0,0 +1,24 @@
++/*
++ * Plant OS uses the portable Unix poll selector implementation.
++ */
++
++package sun.nio.ch;
++
++import java.security.AccessController;
++import java.security.PrivilegedAction;
++
++@SuppressWarnings("removal")
++public class DefaultSelectorProvider {
++    private static final SelectorProviderImpl INSTANCE;
++
++    static {
++        PrivilegedAction<SelectorProviderImpl> action = PollSelectorProvider::new;
++        INSTANCE = AccessController.doPrivileged(action);
++    }
++
++    private DefaultSelectorProvider() { }
++
++    public static SelectorProviderImpl get() {
++        return INSTANCE;
++    }
++}
+--- /dev/null
++++ b/src/java.base/bsd/native/libjava/ProcessHandleImpl_bsd.c
+@@ -0,0 +1,49 @@
++#include "jni.h"
++#include "ProcessHandleImpl_unix.h"
++
++#if defined(__plantos__)
++
++#include <unistd.h>
++
++void os_initNative(JNIEnv *env, jclass clazz) {
++  (void)env;
++  (void)clazz;
++}
++
++jint os_getChildren(JNIEnv *env, jlong jpid, jlongArray jarray,
++                    jlongArray jparentArray, jlongArray jstimesArray) {
++  (void)env;
++  (void)jpid;
++  (void)jarray;
++  (void)jparentArray;
++  (void)jstimesArray;
++  return 0;
++}
++
++pid_t os_getParentPidAndTimings(JNIEnv *env, pid_t pid, jlong *totalTime,
++                                jlong *startTime) {
++  (void)env;
++  if (pid != getpid()) {
++    return -1;
++  }
++  if (totalTime != NULL) {
++    *totalTime = 0;
++  }
++  if (startTime != NULL) {
++    *startTime = 0;
++  }
++  return getppid();
++}
++
++void os_getCmdlineAndUserInfo(JNIEnv *env, jobject jinfo, pid_t pid) {
++  (void)env;
++  (void)jinfo;
++  (void)pid;
++}
++
++#else
++
++/* The build JDK runs on Linux even when the target is Plant OS. */
++#include "../../../linux/native/libjava/ProcessHandleImpl_linux.c"
++
++#endif
+--- /dev/null
++++ b/src/java.base/bsd/native/libnet/bsd_close.c
+@@ -0,0 +1,111 @@
++#if defined(__plantos__)
++
++#include <errno.h>
++#include <poll.h>
++#include <socket.h>
++
++#include "jni.h"
++#include "net_util_md.h"
++
++static int plant_socket_result(int result) {
++  if (result >= 0) {
++    return result;
++  }
++  switch (result) {
++  case SOCKET_ERR_INVAL:
++    errno = EINVAL;
++    break;
++  case SOCKET_ERR_NOMEM:
++    errno = ENOMEM;
++    break;
++  case SOCKET_ERR_NOENT:
++    errno = EBADF;
++    break;
++  case SOCKET_ERR_AGAIN:
++    errno = EAGAIN;
++    break;
++  case SOCKET_ERR_NOTCONN:
++    errno = ENOTCONN;
++    break;
++  case SOCKET_ERR_TIMEDOUT:
++    errno = ETIMEDOUT;
++    break;
++  case SOCKET_ERR_NETDOWN:
++    errno = ENETDOWN;
++    break;
++  case SOCKET_ERR_ADDRINUSE:
++    errno = EADDRINUSE;
++    break;
++  case SOCKET_ERR_BUSY:
++    errno = EBUSY;
++    break;
++  case SOCKET_ERR_PROTOCOL:
++    errno = EPROTONOSUPPORT;
++    break;
++  default:
++    errno = EIO;
++    break;
++  }
++  return -1;
++}
++
++int NET_Dup2(int oldfd, int newfd) {
++  (void)oldfd;
++  (void)newfd;
++  errno = ENOSYS;
++  return -1;
++}
++
++int NET_SocketClose(int fd) { return plant_socket_result(socket_close(fd)); }
++
++int NET_Read(int fd, void *buffer, size_t length) {
++  return plant_socket_result(recv(fd, buffer, (uint32_t)length, 0));
++}
++
++int NET_NonBlockingRead(int fd, void *buffer, size_t length) {
++  return plant_socket_result(
++      recv(fd, buffer, (uint32_t)length, MSG_DONTWAIT));
++}
++
++int NET_RecvFrom(int fd, void *buffer, int length, unsigned int flags,
++                 struct sockaddr *from, socklen_t *fromlen) {
++  return plant_socket_result(
++      recvfrom(fd, buffer, (uint32_t)length, flags, from, fromlen));
++}
++
++int NET_Send(int fd, void *message, int length, unsigned int flags) {
++  return plant_socket_result(send(fd, message, (uint32_t)length, flags));
++}
++
++int NET_SendTo(int fd, const void *message, int length, unsigned int flags,
++               const struct sockaddr *to, int tolen) {
++  return plant_socket_result(sendto(fd, message, (uint32_t)length, flags, to,
++                                    (socklen_t)tolen));
++}
++
++int NET_Connect(int fd, struct sockaddr *address, int address_length) {
++  return plant_socket_result(
++      connect(fd, address, (socklen_t)address_length));
++}
++
++int NET_Accept(int fd, struct sockaddr *address, socklen_t *address_length) {
++  return plant_socket_result(accept(fd, address, address_length));
++}
++
++int NET_Poll(struct pollfd *fds, unsigned int nfds, int timeout) {
++  return poll(fds, (nfds_t)nfds, timeout);
++}
++
++int NET_Timeout(JNIEnv *env, int fd, long timeout, jlong nano_time_stamp) {
++  (void)env;
++  (void)nano_time_stamp;
++  struct pollfd descriptor = {fd, POLLIN | POLLERR, 0};
++  return poll(&descriptor, 1, (int)timeout);
++}
++
++#else
++
++/* The build JDK runs on Linux even when the target is Plant OS. */
++#include "../../../linux/native/libnet/linux_close.c"
++
++#endif
+--- /dev/null
++++ b/src/hotspot/share/code/codeCacheWrite.hpp
+@@ -0,0 +1,22 @@
++/*
++ * Copyright (c) 2026, Plant OS contributors. All rights reserved.
++ *
++ * This code is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License version 2 only, as
++ * published by the Free Software Foundation.
++ */
++
++#ifndef SHARE_CODE_CODECACHEWRITE_HPP
++#define SHARE_CODE_CODECACHEWRITE_HPP
++
++#include "utilities/globalDefinitions.hpp"
++
++#ifdef __plantos__
++address code_cache_write_address(address source);
++#else
++inline address code_cache_write_address(address source) {
++  return source;
++}
++#endif
++
++#endif // SHARE_CODE_CODECACHEWRITE_HPP

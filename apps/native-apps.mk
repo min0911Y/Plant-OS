@@ -3,17 +3,13 @@ SDL_ROOT := sdl3
 include sdl3/sources.mk
 SDL_RUNTIME := $(if $(filter x86_64,$(ARCH)),$(addprefix $(DYN_LIB)/,liblvp.so libEGL.so))
 
-OS_TERMINAL_DIR ?= $(HOME)/os-terminal
-OS_TERMINAL_LIB := $(OS_TERMINAL_DIR)/libos_terminal_$(if $(filter i386,$(ARCH)),x86,x64).a
-$(BUILD)/term/%.o: CFLAGS += -I$(OS_TERMINAL_DIR)
+OS_TERMINAL_LIB := $(BUILD)/terminal/libos_terminal.a
+$(BUILD)/term/%.o: CFLAGS += -Iterm -DTERMINAL_EMBEDDED_FONT
 $(BUILD)/term/arch/i386/float.o: CFLAGS += -mno-fp-ret-in-387 -fvisibility=hidden
 $(eval $(call application,term,$(OS_TERMINAL_LIB),term/term.c $(if $(filter i386,$(ARCH)),term/arch/i386/float.c)))
-$(BUILD)/term/term.o: $(BUILD)/term/.config $(OS_TERMINAL_DIR)/os_terminal.h
-.PHONY: FORCE_TERM_CONFIG
-$(BUILD)/term/.config: FORCE_TERM_CONFIG
-	@mkdir -p $(dir $@)
-	@printf '%s\n' '$(abspath $(OS_TERMINAL_DIR))' > $@.tmp
-	@if cmp -s $@.tmp $@; then rm $@.tmp; else mv $@.tmp $@; fi
+.PHONY: FORCE_TERMINAL
+$(OS_TERMINAL_LIB): FORCE_TERMINAL ../scripts/build-terminal.py ../scripts/sources.py term/sources.json term/$(ARCH)-plantos.json $(wildcard term/patches/terminal/*.patch)
+	python3 ../scripts/build-terminal.py --arch $(ARCH) --jobs $(MESA_JOBS)
 
 define library
 LIBRARY_OBJECTS += $(call objects,$(2))

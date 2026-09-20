@@ -22,6 +22,8 @@ def main():
                         help="TCG host threading (default: multi)")
     parser.add_argument("--jit", choices=("c1", "c2"),
                         help="also require a correct workload and a compiled HotSpot nmethod")
+    parser.add_argument("--server-features", action="store_true",
+                        help="require Management, PID, file locks and a readable JFR recording")
     parser.add_argument("--repeat", type=int, default=1,
                         help="repeat source/class, runtime, NIO and JIT commands in the same boot")
     args = parser.parse_args()
@@ -36,7 +38,8 @@ def main():
                     str(repo / "apps/openjdk/Startup.java"),
                     str(repo / "apps/openjdk/Nio.java"),
                     str(repo / "apps/openjdk/RuntimeChecks.java"),
-                    str(repo / "apps/openjdk/Jit.java")], check=True)
+                    str(repo / "apps/openjdk/Jit.java"),
+                    str(repo / "apps/openjdk/PlatformChecks.java")], check=True)
     launcher = output / "launcher.lua"
     launcher.write_text('local times = {}\n'
                         'for i = 1, 3 do\n'
@@ -68,6 +71,10 @@ def main():
                 'C:/java/bin/java -Xms16m -Xmx128m -XX:ErrorFile=C:/java/hs_err.log -Djava.net.preferIPv4Stack=true -cp C:/missing;C:/java Nio C:/java/nio-result.txt',
                 'C:/java/bin/java -Xms16m -Xmx32m -XX:ErrorFile=C:/java/runtime-hs_err.log -cp C:/java RuntimeChecks C:/java/runtime-result.txt',
             ]
+            if args.server_features:
+                commands.append(
+                    'C:/java/bin/java -Xms32m -Xmx128m -XX:ErrorFile=C:/java/platform-hs_err.log '
+                    '-cp C:/java PlatformChecks C:/java/platform-result.txt C:/java/platform.jfr')
             if args.jit:
                 commands[1] = commands[1].replace(
                     ' -XX:ErrorFile=', ' -XX:+UnlockDiagnosticVMOptions -XX:+LogCompilation '
@@ -78,6 +85,7 @@ def main():
                     'C:/java/bin/java -Xms16m -Xmx128m -XX:ErrorFile=C:/java/hs_err.log -Xbatch -XX:CompileThreshold=100 '
                     '-XX:+UnlockDiagnosticVMOptions -XX:+LogCompilation -XX:LogFile=C:/java/jit.xml '
                     '-XX:CompileCommand=compileonly,Jit::kernel '
+                    '-XX:CompileCommand=compileonly,Jit::constants '
                     f'{compiler} -cp C:/java Jit C:/java/jit-result.txt')
             commands = commands[:1] + commands[1:] * args.repeat + ['psh.bin -c shutdown']
             def quote(value):
@@ -98,7 +106,8 @@ def main():
     for name in ("Hello.class", "hello-result.txt", "relative-result.txt", "class-result.txt",
                  "javac-hs_err.log", "class-hs_err.log", "runtime-result.txt", "runtime-hs_err.log",
                  "nio-result.txt", "startup-times.txt", "jit-result.txt", "jit.xml",
-                 "source-jit.xml", "hs_err.log"):
+                 "source-jit.xml", "hs_err.log", "platform-result.txt",
+                 "platform-hs_err.log", "platform.jfr", "platform-lock.bin"):
         subprocess.run(["mdel", "-i", str(disk), f"::/java/{name}"],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
     serial = output / "serial.log"
@@ -167,6 +176,25 @@ def main():
     if len(seconds) != 3 or any(value <= 0 for value in seconds):
         raise RuntimeError(f"Invalid startup timings: {timings!r}")
     print(f"Java startup seconds (cold, warm, warm): {seconds}")
+    if args.server_features:
+        result = subprocess.check_output(
+            ["mtype", "-i", str(disk), "::/java/platform-result.txt"], text=True)
+        (output / "platform-result.txt").write_text(result)
+        if result != "OPENJDK PLATFORM PASS\n":
+            raise RuntimeError(f"OpenJDK platform features failed: {result.strip()}; see {output}")
+        recording = output / "platform.jfr"
+        subprocess.run(["mcopy", "-o", "-i", str(disk), "::/java/platform.jfr",
+                        str(recording)], check=True)
+        jfr = Path(args.javac).resolve().with_name("jfr")
+        summary = subprocess.check_output([str(jfr), "summary", str(recording)], text=True)
+        events = subprocess.check_output(
+            [str(jfr), "print", "--events", "plant.PlatformProbe", str(recording)],
+            text=True)
+        (output / "platform-jfr-summary.txt").write_text(summary)
+        (output / "platform-jfr-events.txt").write_text(events)
+        if "plant.PlatformProbe" not in summary or "minecraft-server-plan" not in events:
+            raise RuntimeError(f"OpenJDK JFR recording is missing the platform event; see {output}")
+        print(f"OPENJDK MANAGEMENT, PID, FILE LOCK AND JFR PASS: {output}")
     if args.jit:
         source_log = subprocess.check_output(
             ["mtype", "-i", str(disk), "::/java/source-jit.xml"], text=True)
@@ -184,11 +212,11 @@ def main():
             ["mtype", "-i", str(disk), "::/java/jit.xml"], text=True)
         (output / "jit-result.txt").write_text(workload)
         (output / "jit.xml").write_text(compilation)
-        methods = ET.fromstring(compilation).iter("nmethod")
+        methods = {method.get("method") for method in ET.fromstring(compilation).iter("nmethod")
+                   if method.get("compiler") == args.jit}
         if (workload != "OPENJDK JIT WORKLOAD PASS\n" or
                 "Jit C:/java/jit-result.txt status=0" not in text or
-                not any(method.get("compiler") == args.jit and
-                        method.get("method") == "Jit kernel (I)J" for method in methods)):
+                not {"Jit kernel (I)J", "Jit constants (F)D"} <= methods):
             raise RuntimeError(f"{args.jit} did not compile and execute the JIT workload; see {output}")
         print(f"OPENJDK {args.jit.upper()} JIT PASS: {output}")
 

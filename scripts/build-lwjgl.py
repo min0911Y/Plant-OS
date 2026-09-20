@@ -1,129 +1,17 @@
 #!/usr/bin/env python3
 """Build the pinned LWJGL modules against the Plant OS ABI."""
 import argparse
-import fcntl
-import hashlib
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
-import sys
-import tarfile
-import tempfile
-import urllib.request
+from sources import ROOT, Sources, digest, publish
 
 
-ROOT = Path(__file__).resolve().parents[1]
 APPS = ROOT / "apps"
 PORT = APPS / "lwjgl"
-SOURCES = APPS / "out/sources"
 
-
-def digest(path):
-    hasher = hashlib.sha256()
-    with path.open("rb") as source:
-        for block in iter(lambda: source.read(1024 * 1024), b""):
-            hasher.update(block)
-    return hasher.hexdigest()
-
-
-def publish(path, contents):
-    if path.exists() and path.read_text() == contents:
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + ".tmp")
-    temporary.write_text(contents)
-    temporary.replace(path)
-
-
-def checked_download(spec):
-    SOURCES.mkdir(parents=True, exist_ok=True)
-    destination = SOURCES / spec["filename"]
-    if not destination.exists() or digest(destination) != spec["sha256"]:
-        temporary = destination.with_name(destination.name + ".part")
-        print(f"Downloading {spec['filename']}", flush=True)
-        try:
-            with urllib.request.urlopen(spec["url"], timeout=120) as response, temporary.open("wb") as output:
-                shutil.copyfileobj(response, output)
-            if digest(temporary) != spec["sha256"]:
-                raise RuntimeError(f"checksum mismatch: {destination.name}")
-            temporary.replace(destination)
-        finally:
-            temporary.unlink(missing_ok=True)
-    return destination
-
-
-def patched_source(name, spec, patches):
-    archive = checked_download({**spec, "filename": spec["url"].rsplit("/", 1)[1]})
-    directory = SOURCES / spec["directory"]
-    patch_hash = hashlib.sha256(
-        b"".join(path.read_bytes() for path in patches)
-    ).hexdigest()
-    changed_files = set()
-    for patch in patches:
-        for line in patch.read_text().splitlines():
-            if line.startswith(("--- a/", "+++ b/")):
-                relative = line[6:].split("\t", 1)[0]
-                path = Path(relative)
-                if path.is_absolute() or ".." in path.parts:
-                    raise RuntimeError(f"invalid patch path: {relative}")
-                changed_files.add(relative)
-
-    state = {"archive": spec["sha256"], "patch": patch_hash,
-             "files": sorted(changed_files)}
-    marker = directory / ".plant-source-sha256"
-    previous = None
-    if marker.exists():
-        try:
-            previous = json.loads(marker.read_text())
-        except json.JSONDecodeError:
-            previous = None
-    if previous == state:
-        return directory
-
-    with (SOURCES / ".lock").open("w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        if not directory.exists():
-            with tempfile.TemporaryDirectory(prefix="lwjgl-extract-", dir=SOURCES) as temporary:
-                with tarfile.open(archive) as package:
-                    package.extractall(temporary, filter="data")
-                extracted = Path(temporary) / spec["directory"]
-                if not extracted.is_dir():
-                    raise RuntimeError(f"archive has no {spec['directory']} root")
-                extracted.replace(directory)
-
-        if patches:
-            files = changed_files | set(previous.get("files", []) if previous else [])
-            with tempfile.TemporaryDirectory(prefix="lwjgl-patch-", dir=SOURCES) as temporary:
-                staging = Path(temporary)
-                for relative in files:
-                    destination = staging / relative
-                    destination.parent.mkdir(parents=True, exist_ok=True)
-                    member_name = spec["directory"] + "/" + relative
-                    with tarfile.open(archive, "r|*") as package:
-                        for member in package:
-                            if member.name == member_name:
-                                if not member.isfile():
-                                    raise RuntimeError(f"patch target is not a regular file: {relative}")
-                                extracted = package.extractfile(member)
-                                destination.write_bytes(extracted.read())
-                                destination.chmod(member.mode & 0o777)
-                                break
-                for patch in patches:
-                    subprocess.run(["patch", "--batch", "-p1", "-i", str(patch)],
-                                   cwd=staging, check=True)
-                for relative in files:
-                    staged = staging / relative
-                    destination = directory / relative
-                    if staged.exists():
-                        if not destination.exists() or staged.read_bytes() != destination.read_bytes():
-                            destination.parent.mkdir(parents=True, exist_ok=True)
-                            shutil.copyfile(staged, destination)
-                    elif destination.exists():
-                        destination.unlink()
-        publish(marker, json.dumps(state, sort_keys=True) + "\n")
-    return directory
 
 
 def find_tool(name, candidates=()):
@@ -139,8 +27,7 @@ def find_tool(name, candidates=()):
 def target_jni_include():
     candidates = [
         os.environ.get("PLANT_OPENJDK_INCLUDE"),
-        APPS / "out/x86_64/openjdk/configure-probe-9/images/jdk/include",
-        APPS / "out/x86_64/openjdk/configure-probe-9/images/jdk-jit/include",
+        APPS / "out/x86_64/openjdk/images/jdk/include",
         APPS / "out/sources/openjdk-17-17.0.19+10/src/java.base/share/native/include",
     ]
     for candidate in candidates:
@@ -280,10 +167,10 @@ def build(arch, output, jobs):
         raise RuntimeError("LWJGL currently supports x86_64 only")
     output.mkdir(parents=True, exist_ok=True)
 
-    specs = json.loads((PORT / "sources.json").read_text())
-    lwjgl = patched_source("lwjgl", specs["lwjgl"], sorted((PORT / "patches").glob("*.patch")))
-    ffi = patched_source("libffi", specs["libffi"], [])
-    jspecify = checked_download({**specs["jspecify"], "filename": specs["jspecify"]["filename"]})
+    dependencies = Sources(PORT)
+    lwjgl = dependencies["lwjgl"].prepare()
+    ffi = dependencies["libffi"].prepare()
+    jspecify = dependencies["jspecify"].prepare()
     jni = target_jni_include()
     runtime = output.parent
     required_runtime = [runtime / "lib/libp.so", runtime / "lib/libglfw.so",
@@ -302,8 +189,7 @@ def build(arch, output, jobs):
     state = {
         "arch": arch,
         "lwjgl": (lwjgl / ".plant-source-sha256").read_text(),
-        "libffi": digest(checked_download({**specs["libffi"],
-                                            "filename": specs["libffi"]["url"].rsplit("/", 1)[1]})),
+        "libffi": digest(ffi / ".plant-source-sha256"),
         "jspecify": digest(jspecify),
         "jni": {str(path): digest(path / name) for path, name in
                 [(jni[0], "jni.h"), (jni[-1], "jni_md.h")]},
@@ -312,7 +198,7 @@ def build(arch, output, jobs):
                   for path in [PORT / "sources.json", PORT / "include/PlantOSConfig.h",
                                PORT / "include/fficonfig.h", PORT / "plantos_closures.c",
                                PORT / "plantos_dynamic_loader.c", PORT / "plantos_ffi.c",
-                               *sorted((PORT / "patches").glob("*.patch"))]},
+                               *sorted((PORT / "patches/lwjgl").glob("*.patch"))]},
         "smoke": {str(path.relative_to(ROOT)): digest(path)
                   for path in [PORT / "LwjglSmoke.java", PORT / "run-lwjgl.lua"]},
         "artifacts": artifact_paths,

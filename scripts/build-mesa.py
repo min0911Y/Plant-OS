@@ -2,7 +2,6 @@
 """Build native graphics dependencies with host generators kept separate."""
 import argparse
 import fcntl
-import hashlib
 import json
 import os
 import re
@@ -12,116 +11,20 @@ import sys
 from pathlib import Path
 import shutil
 import subprocess
-import tarfile
-import tempfile
-import urllib.request
+from sources import ROOT, Sources, digest, publish
 
-ROOT = Path(__file__).resolve().parent.parent
 APPS = ROOT / "apps"
 PORT = APPS / "mesa"
-SOURCES = APPS / "out/sources"
 
 
-def digest(path):
-    with path.open("rb") as source:
-        return hashlib.file_digest(source, "sha256").hexdigest()
-
-
-def publish(path, text):
-    if path.exists() and path.read_text() == text:
-        return
-    temporary = path.with_name(path.name + ".tmp")
-    temporary.write_text(text)
-    temporary.replace(path)
-
-
-def source(name):
-    spec = json.loads((PORT / "sources.json").read_text())[name]
-    patches = sorted((PORT / "patches" / name).glob("*.patch"))
-    patch_hash = hashlib.sha256(b"".join(patch.read_bytes() for patch in patches)).hexdigest()
-    changed_files = set()
-    for patch in patches:
-        for line in patch.read_text().splitlines():
-            if line.startswith(("--- a/", "+++ b/")):
-                relative = line[6:].split("\t", 1)[0]
-                if Path(relative).is_absolute() or ".." in Path(relative).parts:
-                    raise RuntimeError(f"invalid patch path: {relative}")
-                changed_files.add(relative)
-    state = {"archive": spec["sha256"], "patch": patch_hash, "files": sorted(changed_files)}
-    SOURCES.mkdir(parents=True, exist_ok=True)
-    with (SOURCES / ".lock").open("w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        archive = SOURCES / spec["url"].rsplit("/", 1)[1]
-        directory = SOURCES / spec["directory"]
-        marker = directory / ".plant-source-sha256"
-        previous = None
-        if marker.exists() and marker.read_text().lstrip().startswith("{"):
-            previous = json.loads(marker.read_text())
-        if previous == state:
-            return directory
-        if not archive.exists():
-            temporary = archive.with_name(archive.name + ".part")
-            print(f"Downloading {name} {spec['version']}", flush=True)
-            try:
-                with urllib.request.urlopen(spec["url"], timeout=60) as response, temporary.open("wb") as output:
-                    shutil.copyfileobj(response, output)
-                if digest(temporary) != spec["sha256"]:
-                    raise RuntimeError(f"checksum mismatch: {archive.name}")
-                temporary.replace(archive)
-            finally:
-                temporary.unlink(missing_ok=True)
-        if digest(archive) != spec["sha256"]:
-            raise RuntimeError(f"checksum mismatch: {archive}")
-        if not directory.exists():
-            with tempfile.TemporaryDirectory(prefix="extract-", dir=SOURCES) as temporary:
-                with tarfile.open(archive) as package:
-                    package.extractall(temporary, filter="data")
-                (Path(temporary) / spec["directory"]).replace(directory)
-        if changed_files or (previous and previous["files"]):
-            files = changed_files | set(previous["files"] if previous else [])
-            with tempfile.TemporaryDirectory(prefix="patch-", dir=SOURCES) as temporary:
-                staging = Path(temporary)
-                for relative in files:
-                    if Path(relative).is_absolute() or ".." in Path(relative).parts:
-                        raise RuntimeError(f"invalid cached patch path: {relative}")
-                prefix = spec["directory"] + "/"
-                # Stream once: random extraction repeatedly decompresses a large
-                # LLVM tar.xz when patches touch files in different directories.
-                with tarfile.open(archive, "r|*") as package:
-                    for member in package:
-                        relative = member.name.removeprefix(prefix)
-                        if not member.name.startswith(prefix) or relative not in files:
-                            continue
-                        if not member.isfile():
-                            raise RuntimeError(f"patch target is not a regular file: {relative}")
-                        destination = staging / relative
-                        destination.parent.mkdir(parents=True, exist_ok=True)
-                        destination.write_bytes(package.extractfile(member).read())
-                        destination.chmod(member.mode & 0o777)
-                for patch in patches:
-                    subprocess.run(["patch", "--batch", "-p1", "-i", str(patch)], cwd=staging, check=True)
-                for relative in files:
-                    staged, destination = staging / relative, directory / relative
-                    if not staged.exists():
-                        destination.unlink(missing_ok=True)
-                    elif not destination.exists() or destination.read_bytes() != staged.read_bytes():
-                        destination.parent.mkdir(parents=True, exist_ok=True)
-                        staged.replace(destination)
-        publish(marker, json.dumps(state, sort_keys=True) + "\n")
-        return directory
+DEPENDENCIES = Sources(PORT)
 
 
 def host_tool(name):
-    candidates = [shutil.which(name), APPS / f"out/host/venv/bin/{name}",
-                  APPS / f"out/host/debian/root/usr/bin/{name}"]
-    if name == "cmake":
-        candidates.append(APPS / "out/host/python/cmake/data/bin/cmake")
-    else:
-        candidates.append(APPS / f"out/host/python/bin/{name}")
-    for candidate in candidates:
-        if candidate and Path(candidate).is_file():
-            return str(Path(candidate).resolve())
-    raise RuntimeError(f"missing host tool {name}; install the graphics build dependencies described in doc/lavapipe.md")
+    tool = shutil.which(name)
+    if not tool:
+        raise RuntimeError(f"missing host tool {name}; see doc/lavapipe.md")
+    return tool
 
 
 def run(arguments):
@@ -129,7 +32,7 @@ def run(arguments):
 
 
 def build_libcxx(arch, output, jobs):
-    llvm = source("llvm")
+    llvm = DEPENDENCIES["llvm"].prepare()
     build = output / "mesa/libcxx"
     build.mkdir(parents=True, exist_ok=True)
     cmake = host_tool("cmake")
@@ -175,18 +78,23 @@ def build_llvm(arch, output, jobs):
     for name in ("libp.so", "libcpp.so"):
         if not (output / "lib" / name).exists():
             raise RuntimeError(f"build the native runtime before LLVM: missing {name}")
-    llvm = source("llvm")
+    llvm = DEPENDENCIES["llvm"].prepare()
     build = output / "mesa/llvm"
     build.mkdir(parents=True, exist_ok=True)
     cmake, ninja = host_tool("cmake"), host_tool("ninja")
     clang = host_tool("clang")
-    tablegen = shutil.which("llvm-tblgen") or str(Path(clang).resolve().parent / "llvm-tblgen")
-    if not Path(tablegen).is_file():
-        raise RuntimeError("a host llvm-tblgen matching the pinned LLVM version is required")
-    version = json.loads((PORT / "sources.json").read_text())["llvm"]["version"]
+    version = DEPENDENCIES.specs["llvm"]["version"]
+    tablegen = shutil.which("llvm-tblgen")
+    if not tablegen or not re.search(r"\bversion\s+" + re.escape(version) + r"\b",
+                                    subprocess.check_output([tablegen, "--version"], text=True)):
+        host = APPS / "out/host/llvm"
+        run([cmake, "-G", "Ninja", "-S", llvm / "llvm", "-B", host,
+             "-DCMAKE_BUILD_TYPE=Release", "-DLLVM_TARGETS_TO_BUILD=X86",
+             "-DLLVM_INCLUDE_TESTS=OFF", "-DLLVM_INCLUDE_BENCHMARKS=OFF",
+             "-DLLVM_INCLUDE_EXAMPLES=OFF", "-DLLVM_ENABLE_ZLIB=OFF", "-DLLVM_ENABLE_ZSTD=OFF"])
+        run([cmake, "--build", host, "--target", "llvm-tblgen", "-j", jobs])
+        tablegen = str(host / "bin/llvm-tblgen")
     tablegen_version = subprocess.check_output([tablegen, "--version"], text=True)
-    if not re.search(r"\bversion\s+" + re.escape(version) + r"\b", tablegen_version):
-        raise RuntimeError(f"host llvm-tblgen must match LLVM {version}: {tablegen}")
     options = [
         f"-DCMAKE_TOOLCHAIN_FILE={PORT / 'toolchain.cmake'}", f"-DCMAKE_MAKE_PROGRAM={ninja}",
         f"-DPLOS_ARCH={arch}", "-DPLOS_USE_LIBCXX=ON", "-DCMAKE_BUILD_TYPE=Release",
@@ -234,7 +142,7 @@ def build_llvm(arch, output, jobs):
             publish(output / "mesa/llvm.stamp", digest(archive) + "\n")
         return
     temporary = archive.with_suffix(".tmp.a")
-    archiver = str(Path(clang).resolve().parent / "llvm-ar")
+    archiver = host_tool("llvm-ar")
     script = f"create {temporary}\n" + "".join(f"addlib {build / name}\n" for name in archives) + "save\nend\n"
     subprocess.run([archiver, "-M"], input=script, text=True, check=True)
     temporary.replace(archive)
@@ -245,7 +153,7 @@ def build_llvm(arch, output, jobs):
 def configure_mesa(arch, output):
     if arch != "x86_64":
         raise RuntimeError("native Mesa currently requires x86_64")
-    mesa = source("mesa")
+    mesa = DEPENDENCIES["mesa"].prepare()
     build = output / "mesa/driver"
     sysroot = output / "mesa/sysroot"
     (sysroot / "lib/pkgconfig").mkdir(parents=True, exist_ok=True)
@@ -267,7 +175,7 @@ def configure_mesa(arch, output):
         "binaries": {
             "c": [clang, f"--target={arch}-unknown-none-elf", "--sysroot=" + str(sysroot)],
             "cpp": [clangxx, f"--target={arch}-unknown-none-elf", "--sysroot=" + str(sysroot)],
-            "ar": str(Path(clang).resolve().parent / "llvm-ar"),
+            "ar": host_tool("llvm-ar"),
             "strip": "strip", "pkg-config": "pkg-config",
             "llvm-config": [sys.executable, str(PORT / "llvm-config.py"), str(output)],
         },
@@ -300,7 +208,6 @@ def configure_mesa(arch, output):
         "-Dtools=[]", "-Dplantos-port=" + str(PORT / "mesa"),
     ]
     environment = os.environ.copy()
-    environment["PYTHONPATH"] = str(APPS / "out/host/python")
     environment["PATH"] = str(Path(host_tool("ninja")).parent) + os.pathsep + environment["PATH"]
     environment["PATH"] = str(Path(host_tool("glslangValidator")).parent) + os.pathsep + environment["PATH"]
     for generator in ("bison", "flex", "m4"):
@@ -356,7 +263,7 @@ def build_mesa(arch, output, jobs):
         temporary = destination.with_suffix(".tmp")
         shutil.copyfile(build / target, temporary)
         temporary.replace(destination)
-    mesa = source("mesa")
+    mesa = DEPENDENCIES["mesa"].prepare()
     header_state = {}
     for headers in ("EGL", "GL", "KHR"):
         for header in sorted((mesa / "include" / headers).glob("*.h")):

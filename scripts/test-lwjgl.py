@@ -17,6 +17,9 @@ APPS = ROOT / "apps"
 LWJGL = APPS / "out/x86_64/lwjgl"
 RESULT_GUEST = "::/java/lwjgl/lwjgl-result.txt"
 FAILURE_GUEST = "::/java/lwjgl/lwjgl-failure.txt"
+GUEST_COMMAND = "lua.bin C:/java/lwjgl/run-lwjgl.lua"
+
+
 def count_color(pixels, predicate):
     return sum(predicate(pixels[index:index + 3])
                for index in range(0, len(pixels), 3))
@@ -157,8 +160,7 @@ def run_guest(iso, disk, output, args):
                if stage not in stages]
     if (missing or not checked_initial or not checked_final or
             "acpi: entering S5" not in text or
-            not any("C:/java/bin/java" in line and "status=0" in line
-                    for line in text.splitlines())):
+            f"init: command {GUEST_COMMAND} status=0" not in text):
         raise RuntimeError(f"LWJGL regression failed; missing={missing}; "
                            f"stages={sorted(stages)}; see {serial}")
     if (output / "lwjgl-frame-0.rgb").read_bytes() == (output / "lwjgl-frame-1.rgb").read_bytes():
@@ -194,10 +196,9 @@ def main():
     disk = output / "test-jdk.img"
     init = ROOT / "kernel/res/init.mst"
     original = init.read_bytes()
-    command = "lua.bin C:/java/lwjgl/run-lwjgl.lua"
     init.write_text('"todo" = [\n' +
                     '{"action" = "run" "command_line" = "' +
-                    command.replace('"', '\\"') + '"},\n' +
+                    GUEST_COMMAND.replace('"', '\\"') + '"},\n' +
                     '{"action" = "run" "command_line" = "psh.bin -c shutdown"}\n]\n')
     try:
         with build_log.open("w") as log:

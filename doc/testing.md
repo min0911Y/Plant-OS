@@ -30,6 +30,7 @@ python3 scripts/test-x86_64.py --arch i386 --dynamic --memory 512
 | 管道与事件等待 | 两架构 `--dynamic` 中的 `IOPOLL PASS`，见 [管道与事件等待](io-poll.md) |
 | OpenJDK 启动与运行库 | x86_64 附加 JDK 磁盘，`test-openjdk.py` 验证源码启动、客户机 javac/class、路径、NIO、异常、反射、线程与 GC，见 [OpenJDK](openjdk.md) |
 | OpenJDK JIT | `test-openjdk.py --jit c1` / `--jit c2` 核验计算、nmethod 和入口失效；`--accel tcg --repeat 4` 覆盖多线程 TCG 热修补，见 [JIT 验收](openjdk.md#x86_64-server-vm-与-jit-验收) |
+| Minecraft 服务端 | `test-minecraft-server.py --jdk <Plant-Server-JDK> --server <server.jar> --out <空目录> --accel kvm` 验证原版 1.20.1 默认新世界、网络查询、保存、JFR 和正常停服；默认启用 C1/C2，`--jvm-mode c2` 单独覆盖 C2；见 [OpenJDK](openjdk.md#原版-minecraft-服务端) |
 | USB、PCI、AHCI | `--usb`、`--usb-hubs`、`--usb-irq`、`--usb-root-bus`、`--ahci --machine q35`；故障与模式组合见对应专题文档 |
 | APIC、SIMD 与 TLB 后端 | `--apic`、`--cpu`、`--simd`、`--tlb`，见 [多架构说明](multiarch.md) |
 

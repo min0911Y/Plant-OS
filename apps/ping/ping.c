@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <socket.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,7 +42,8 @@ static int ping_wait_for_network(void) {
     }
     sleep(100);
   }
-  return SOCKET_ERR_AGAIN;
+  errno = EAGAIN;
+  return -1;
 }
 
 static int ping_parse_count(const char *text, unsigned *count) {

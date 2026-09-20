@@ -119,8 +119,11 @@ long sysconf(int name) {
     return cpu_count();
   case _SC_PHYS_PAGES:
     return mem_total() / VM_PAGE_SIZE;
-  case _SC_AVPHYS_PAGES:
-    return mem_total() / VM_PAGE_SIZE - mem_used();
+  case _SC_AVPHYS_PAGES: {
+    size_t total = mem_total() / VM_PAGE_SIZE;
+    size_t used = mem_used();
+    return used < total ? (long)(total - used) : 0;
+  }
   case _SC_OPEN_MAX:
     return __INT_MAX__;
   case _SC_GETPW_R_SIZE_MAX:
@@ -274,7 +277,6 @@ int fcntl(int descriptor, int command, ...) {
       return -1;
     }
     if (result < 0) {
-      errno = socket_error_number(result);
       return -1;
     }
     return result;
@@ -294,7 +296,6 @@ int close(int descriptor) {
   if (socket_handle_is_tagged(descriptor)) {
     int result = socket_close(descriptor);
     if (result < 0) {
-      errno = socket_error_number(result);
       return -1;
     }
     return 0;
@@ -319,7 +320,6 @@ ssize_t write(int descriptor, const void *buffer, size_t count) {
   if (socket_handle_is_tagged(descriptor)) {
     int result = send(descriptor, buffer, (uint32_t)count, 0);
     if (result < 0) {
-      errno = socket_error_number(result);
       return -1;
     }
     return result;
@@ -346,7 +346,6 @@ ssize_t read(int descriptor, void *buffer, size_t count) {
   if (socket_handle_is_tagged(descriptor)) {
     int result = recv(descriptor, buffer, (uint32_t)count, 0);
     if (result < 0) {
-      errno = socket_error_number(result);
       return -1;
     }
     return result;
@@ -804,15 +803,21 @@ int Copy(char *source, char *destination) {
   if (input < 0) {
     return -1;
   }
-  int output = open(destination, O_WRONLY | O_CREAT | O_TRUNC, 0);
-  if (output < 0) {
+  const size_t capacity = 128 * 1024;
+  unsigned char *buffer = malloc(capacity);
+  if (buffer == NULL) {
     close(input);
     return -1;
   }
-  unsigned char buffer[4096];
+  int output = open(destination, O_WRONLY | O_CREAT | O_TRUNC, 0);
+  if (output < 0) {
+    close(input);
+    free(buffer);
+    return -1;
+  }
   int result = 0;
   for (;;) {
-    ssize_t count = read(input, buffer, sizeof(buffer));
+    ssize_t count = read(input, buffer, capacity);
     if (count < 0) {
       result = -1;
       break;
@@ -833,8 +838,13 @@ int Copy(char *source, char *destination) {
       break;
     }
   }
-  if (close(input) != 0 || close(output) != 0) {
+  if (result == 0 && fsync(output) != 0) {
     result = -1;
   }
+  int input_status = close(input);
+  if (close(output) != 0 || input_status != 0) {
+    result = -1;
+  }
+  free(buffer);
   return result;
 }

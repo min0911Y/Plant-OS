@@ -114,7 +114,7 @@ FAT 路径，包括 `/games/doom.bin` 与长文件名别名，供逐项装载验
 x86_64 LiveCD 可将 OpenJDK 放入独立 FAT32 磁盘，避免扩大 initramfs：
 
 ```sh
-PLANT_OPENJDK_DIR=apps/out/x86_64/openjdk/configure-probe-9/images/jdk \
+PLANT_OPENJDK_DIR=apps/out/x86_64/openjdk/images/jdk \
   scripts/build-livecd.sh kernel/plant-os-x86_64.iso x86_64
 ```
 
@@ -125,8 +125,7 @@ PLANT_OPENJDK_DIR=apps/out/x86_64/openjdk/configure-probe-9/images/jdk \
 上述示例中的 JDK 盘通常分配为 `C:`，可用
 `C:/java/bin/java` 启动。
 
-上述 `images/jdk` 是 Zero 解释器镜像；Server VM 的 C1/C2 镜像由
-`scripts/build-openjdk-jit.py` 单独生成到 `images/jdk-jit`，两者都通过同一
+上述 `images/jdk` 是唯一维护的 C1/C2 Server VM 镜像，通过
 `ld.so`、`libp.so` 和 JDK 磁盘装载路径运行。JIT 回归还验证代码缓存的 RW/RX
 生命周期和 `vm_map_alias` 写别名，入口见 [OpenJDK](openjdk.md#x86_64-server-vm-与-jit-验收)。
 

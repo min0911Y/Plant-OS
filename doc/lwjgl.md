@@ -27,7 +27,7 @@ make -C kernel ARCH=x86_64 lwjgl-livecd -j8
 ```
 
 该目标默认使用
-`apps/out/x86_64/openjdk/configure-probe-9/images/jdk-jit`，也可通过
+`apps/out/x86_64/openjdk/images/jdk`，也可通过
 `PLANT_OPENJDK_DIR`、`PLANT_OPENJDK_DISK` 和 `PLANT_LWJGL_DIR` 覆盖。普通的
 `livecd` 目标仍不会携带 JDK。
 
@@ -85,10 +85,10 @@ LWJGL 的 `PLANTOS` 平台通过现有 ELF `dlopen/dlsym/dlclose` 装载库和�
 
 ## 自动回归
 
-`test-lwjgl.py` 会临时写入 `kernel/res/init.mst`，构建 x86_64 apps、内核和 LiveCD，把 JAR/native 放到附加 FAT JDK 盘，测试结束后恢复 init 文件。`--jdk` 必须指向只包含 JDK 的目录，例如 `images/jdk-jit`；不要把 `test-openjdk.py` 的输出目录直接当作 JDK 输入，否则旧 ISO/JDK 盘会被再次打包并耗尽空间。
+`test-lwjgl.py` 会临时写入 `kernel/res/init.mst`，构建 x86_64 apps、内核和 LiveCD，把 JAR/native 放到附加 FAT JDK 盘，测试结束后恢复 init 文件。`--jdk` 必须指向只包含 JDK 的目录，例如 `images/jdk`；不要把 `test-openjdk.py` 的输出目录直接当作 JDK 输入，否则旧 ISO/JDK 盘会被再次打包并耗尽空间。
 
 ```sh
-jdk=apps/out/x86_64/openjdk/configure-probe-9/images/jdk-jit
+jdk=apps/out/x86_64/openjdk/images/jdk
 python3 scripts/test-lwjgl.py --jdk "$jdk" --firmware bios --accel tcg --out /tmp/plant-lwjgl-bios
 python3 scripts/test-lwjgl.py --jdk "$jdk" --firmware uefi --accel tcg --out /tmp/plant-lwjgl-uefi
 ```

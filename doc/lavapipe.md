@@ -31,10 +31,11 @@ x86_64 优先使用 `vulkan`；显式指定 `"vulkan"` 可以禁止回退。
 ## 构建
 
 除仓库的 GCC/G++、binutils、NASM、mtools、QEMU、ISO 工具和 os-terminal
-依赖外，还需要宿主 Clang、CMake、Ninja、Meson、`patch`、`glslangValidator`、
+依赖外，还需要宿主 Clang、`llvm-ar`、CMake、Ninja、Meson、`patch`、`glslangValidator`、
 `bison`、`flex`、`m4`，
 以及 Python `mako`、`yaml`、`packaging` 模块。LLVM TableGen 必须来自与固定
-源码匹配的 LLVM 21.1.8。宿主工具运行在构建机，生成的库全部使用 Plant OS ABI。
+源码匹配的 LLVM 21.1.8；没有匹配的宿主工具时，构建脚本从同一份源码构建
+`apps/out/host/llvm/bin/llvm-tblgen`。宿主工具运行在构建机，生成的库全部使用 Plant OS ABI。
 
 Python 构建工具可以装在隔离目录并加入 PATH，例如：
 
@@ -52,7 +53,8 @@ make -C apps/llvmtest ARCH=x86_64
 make -C apps/lvptest ARCH=x86_64
 ```
 
-x86_64 默认构建包含渲染器。首次构建下载并编译 LLVM，后续复用缓存；
+根目录 `./init.py mesa` 可预先下载并校验 LLVM/Mesa，下载及补丁逻辑与构建
+脚本共用 `scripts/sources.py`。x86_64 默认构建包含渲染器，首次编译 LLVM，后续复用缓存；
 `scripts/build-mesa.py` 默认给 LLVM/Mesa 使用两个编译任务。
 可通过 `MESA_JOBS=N` 调整依赖构建并行度。运行时工作线程数由 `LP_NUM_THREADS` 控制，两者无关。
 所有归档、生成头文件、交叉配置和日志留在 `apps/out/`。

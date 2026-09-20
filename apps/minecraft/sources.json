@@ -1,0 +1,8 @@
+{
+  "server": {
+    "version": "1.20.1",
+    "url": "https://piston-data.mojang.com/v1/objects/84194a2f286ef7c14ed7ce0090dba59902951553/server.jar",
+    "filename": "minecraft-server-1.20.1.jar",
+    "sha256": "3af73a9dc5a102e38147946360dd27d4d70bae7055bf91cf2151cd5d121b79e0"
+  }
+}

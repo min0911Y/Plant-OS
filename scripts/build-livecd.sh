@@ -34,6 +34,18 @@ openjdk_disk=
 if [ -n "${PLANT_OPENJDK_DIR:-}" ]; then
   openjdk_disk=${PLANT_OPENJDK_DISK:-${output%.iso}-jdk.img}
 fi
+openjdk_disk_min_mib=${PLANT_OPENJDK_DISK_MIN_MIB:-0}
+case "$openjdk_disk_min_mib" in
+  ''|*[!0-9]*)
+    echo "build-livecd: PLANT_OPENJDK_DISK_MIN_MIB must be a non-negative integer" >&2
+    exit 1
+    ;;
+esac
+minecraft_dir=${PLANT_MINECRAFT_DIR:-}
+if [ -n "$minecraft_dir" ] && { [ "$architecture" != x86_64 ] || [ -z "$openjdk_disk" ]; }; then
+  echo "build-livecd: PLANT_MINECRAFT_DIR requires an x86_64 OpenJDK disk" >&2
+  exit 1
+fi
 lwjgl_dir=${PLANT_LWJGL_DIR:-}
 if [ -n "$lwjgl_dir" ]; then
   if [ "$architecture" != x86_64 ] || [ -z "$openjdk_disk" ]; then
@@ -153,7 +165,8 @@ if [ "$architecture" = i386 ]; then
   cp "$object_dir/kernel.bin" "$payload_dir/kernel.bin"
 else
   cp "$object_dir"/*.mod "$payload_dir/"
-  cp "$kernel_dir/res/init.mst" "$kernel_dir/res/env.cfg" "$kernel_dir/res/sys.cfg" "$payload_dir/"
+  cp "${PLANT_INIT_SCRIPT:-$kernel_dir/res/init.mst}" "$payload_dir/init.mst"
+  cp "$kernel_dir/res/env.cfg" "$kernel_dir/res/sys.cfg" "$payload_dir/"
   cp "$repo_dir/font/font.bin" "$repo_dir/font/HZK16" "$kernel_dir/res/font.ttf" "$payload_dir/"
 fi
 
@@ -175,6 +188,10 @@ if [ -n "${PLANT_OPENJDK_DIR:-}" ]; then
   fi
   mkdir -p "$openjdk_payload_dir/java"
   cp -RL "$PLANT_OPENJDK_DIR"/. "$openjdk_payload_dir/java/"
+  if [ -n "$minecraft_dir" ]; then
+    mkdir -p "$openjdk_payload_dir/java/mc"
+    cp -R "$minecraft_dir"/. "$openjdk_payload_dir/java/mc/"
+  fi
   if [ -n "$lwjgl_dir" ]; then
     for directory in classes jar native; do
       mkdir -p "$openjdk_payload_dir/java/lwjgl/$directory"
@@ -235,6 +252,9 @@ if [ -n "$openjdk_disk" ]; then
   openjdk_image_mib=$(((openjdk_payload_kib + openjdk_payload_kib / 4 + 2048 + 1023) / 1024))
   if [ "$openjdk_image_mib" -lt 16 ]; then
     openjdk_image_mib=16
+  fi
+  if [ "$openjdk_image_mib" -lt "$openjdk_disk_min_mib" ]; then
+    openjdk_image_mib=$openjdk_disk_min_mib
   fi
   openjdk_image_sectors=$((openjdk_image_mib * 2048))
   mkdir -p "$(dirname "$openjdk_disk")"

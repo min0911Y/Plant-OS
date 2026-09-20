@@ -15,4 +15,4 @@ $(GLFW_LIBRARY): $(GLFW_OBJECTS) $(DYN_DSO) $(DYN_LIB)/libp.so $(DYN_LIB)/libEGL
 glfw: $(GLFW_LIBRARY)
 $(BUILD)/glfwtest/%.o: CFLAGS += -Iglfw/include -I$(MESA_INCLUDE)
 $(BUILD)/glfwtest/glfwtest.o: $(MESA_HEADERS) glfw/build.mk
-$(eval $(call application,glfwtest,$(GLFW_LIBRARY) $(DYN_LIB)/libGL.so,glfwtest/glfwtest.c))
+$(eval $(call application,glfwtest,$(GLFW_LIBRARY) $(DYN_LIB)/libGL.so $(DYN_LIB)/libEGL.so,glfwtest/glfwtest.c))

@@ -28,6 +28,7 @@
 #define ATA_IDENT_CAPABILITIES 98u
 #define ATA_IDENT_MAX_LBA 120u
 #define ATA_IDENT_COMMANDSETS 164u
+#define ATA_IDENT_ENABLED 170u
 #define ATA_IDENT_MAX_LBA_EXT 200u
 
 #define IDE_ATA 0u
@@ -92,6 +93,7 @@ typedef struct {
   uint8_t channel;
   uint8_t drive;
   uint8_t type;
+  uint8_t flush_command;
   uint16_t capabilities;
   uint32_t command_sets;
   uint32_t sectors;
@@ -248,6 +250,17 @@ static int ide_identify_device(uint8_t channel, uint8_t drive,
       *(uint16_t *)(void *)(identify + ATA_IDENT_CAPABILITIES);
   device->command_sets =
       *(uint32_t *)(void *)(identify + ATA_IDENT_COMMANDSETS);
+  bool commands_valid = (device->command_sets & 0xc0000000u) == 0x40000000u;
+  device->flush_command =
+      commands_valid && (device->command_sets & (1u << 29))
+          ? ATA_CMD_CACHE_FLUSH_EXT
+          : commands_valid && (device->command_sets & (1u << 28))
+                ? ATA_CMD_CACHE_FLUSH : 0;
+  if (!atapi && !device->flush_command &&
+      (*(uint16_t *)(void *)(identify + ATA_IDENT_ENABLED) & (1u << 5))) {
+    logk("ide: write cache enabled without flush support\n");
+    return 0;
+  }
   uint32_t lba28 = *(uint32_t *)(void *)(identify + ATA_IDENT_MAX_LBA);
   uint32_t lba48 = *(uint32_t *)(void *)(identify + ATA_IDENT_MAX_LBA_EXT);
   device->sectors =
@@ -437,16 +450,6 @@ static uint8_t ide_dma_transfer(uint8_t direction, uint8_t drive, uint32_t lba,
   if (direction == ATA_READ) {
     dma_sync_for_cpu(channel->dma_buffer, bytes);
     memcpy(buffer, channel->dma_buffer, bytes);
-  } else if (device->type == IDE_ATA) {
-    ide_register_write(device->channel, ATA_REG_CONTROL, 2);
-    ide_register_write(device->channel, ATA_REG_COMMAND,
-                       lba_mode == 2 ? ATA_CMD_CACHE_FLUSH_EXT
-                                     : ATA_CMD_CACHE_FLUSH);
-    bool flushed = ide_wait(device->channel, false, true);
-    ide_register_write(device->channel, ATA_REG_CONTROL, 0);
-    if (!flushed) {
-      return 2;
-    }
   }
   return 0;
 }
@@ -487,6 +490,42 @@ static bool ide_vdisk_read(char drive, unsigned char *buffer,
 static bool ide_vdisk_write(char drive, unsigned char *buffer,
                             unsigned int sectors, unsigned int lba) {
   return ide_transfer(drive, ATA_WRITE, buffer, sectors, lba);
+}
+
+static bool ide_vdisk_sync(char drive) {
+  unsigned index = (unsigned)(drive - 'C');
+  if (index >= 4 || !ide_devices[index].present) {
+    return false;
+  }
+  ide_device_t *device = &ide_devices[index];
+  if (device->type != IDE_ATA || !device->flush_command) {
+    return true;
+  }
+  lock(&ide_controller_lock);
+  uint8_t channel = device->channel;
+  uint8_t control = ide_channels[channel].interrupt_disable;
+  ide_register_write(channel, ATA_REG_CONTROL, 2);
+  ide_register_write(channel, ATA_REG_HDDEVSEL, 0xe0u | (device->drive << 4));
+  ide_delay_400ns(channel);
+  bool success = ide_wait(channel, false, true);
+  if (success) {
+    success = false;
+    ide_register_write(channel, ATA_REG_COMMAND, device->flush_command);
+    ide_delay_400ns(channel);
+    uint64_t started = monotonic_time_ns();
+    do {
+      uint8_t status = ide_register_read(channel, ATA_REG_STATUS);
+      if (!(status & ATA_SR_BSY)) {
+        success = !(status & (ATA_SR_ERR | ATA_SR_DF | ATA_SR_DRQ));
+        break;
+      }
+      sleep(1);
+    } while (monotonic_time_ns() - started < 30000000000ull);
+  }
+  ide_register_write(channel, ATA_REG_CONTROL, control);
+  unlock(&ide_controller_lock);
+  ide_report_error(index, success ? 0 : 2);
+  return success;
 }
 
 bool ide_irq(unsigned irq) {
@@ -570,6 +609,7 @@ void ide_initialize(void) {
     vdisk disk = {0};
     disk.Read = ide_vdisk_read;
     disk.Write = ide_vdisk_write;
+    disk.Sync = ide_vdisk_sync;
     disk.flag = device->type == IDE_ATAPI ? VDISK_TYPE_OPTICAL
                                           : VDISK_TYPE_BLOCK;
     disk.size = (uint64_t)device->sectors * IDE_ATA_SECTOR_BYTES;

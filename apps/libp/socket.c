@@ -3,11 +3,28 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 extern int socket_syscall(unsigned operation, socket_syscall_request_t *request);
 
 static int socket_call(unsigned operation, socket_syscall_request_t *request) {
   return socket_syscall(operation, request);
+}
+
+static int socket_result(int result) {
+  if (result < 0) {
+    errno = socket_error_number(result);
+    return -1;
+  }
+  return result;
+}
+
+static int socket_connect_result(int result) {
+  if (result == SOCKET_ERR_NOENT) {
+    errno = ENOENT;
+    return -1;
+  }
+  return socket_result(result);
 }
 
 static void socket_request_init(socket_syscall_request_t *request) {
@@ -20,31 +37,52 @@ socket_t socket(int domain, int type, int protocol) {
   request.domain = domain;
   request.type = type;
   request.protocol = protocol;
-  return socket_call(SOCKET_SYSCALL_CREATE, &request);
+  return socket_result(socket_call(SOCKET_SYSCALL_CREATE, &request));
 }
 
 int socket_close(socket_t socket) {
   socket_syscall_request_t request;
   socket_request_init(&request);
   request.socket = socket;
-  return socket_call(SOCKET_SYSCALL_CLOSE, &request);
+  return socket_result(socket_call(SOCKET_SYSCALL_CLOSE, &request));
+}
+
+int getpeereid(int descriptor, uid_t *euid, gid_t *egid) {
+  if (euid == NULL || egid == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (!socket_handle_is_tagged(descriptor)) {
+    errno = EBADF;
+    return -1;
+  }
+  struct sockaddr_storage peer;
+  socklen_t length = sizeof(peer);
+  if (getpeername(descriptor, (struct sockaddr *)&peer, &length) < 0) {
+    return -1;
+  }
+  *euid = geteuid();
+  *egid = getegid();
+  return 0;
 }
 
 int bind(socket_t socket, const struct sockaddr *address, socklen_t length) {
   if (address == NULL) {
-    return SOCKET_ERR_INVAL;
+    errno = EINVAL;
+    return -1;
   }
   socket_syscall_request_t request;
   socket_request_init(&request);
   request.socket = socket;
   request.address = (uintptr_t)address;
   request.address_length = length;
-  return socket_call(SOCKET_SYSCALL_BIND, &request);
+  return socket_result(socket_call(SOCKET_SYSCALL_BIND, &request));
 }
 
 int connect(socket_t socket, const struct sockaddr *address, socklen_t length) {
   if (address == NULL) {
-    return SOCKET_ERR_INVAL;
+    errno = EINVAL;
+    return -1;
   }
   socket_syscall_request_t request;
   socket_request_init(&request);
@@ -52,11 +90,7 @@ int connect(socket_t socket, const struct sockaddr *address, socklen_t length) {
   request.address = (uintptr_t)address;
   request.address_length = length;
   int result = socket_call(SOCKET_SYSCALL_CONNECT, &request);
-  if (result == SOCKET_ERR_INPROGRESS) {
-    errno = EINPROGRESS;
-    return -1;
-  }
-  return result;
+  return socket_connect_result(result);
 }
 
 int listen(socket_t socket, int backlog) {
@@ -64,12 +98,13 @@ int listen(socket_t socket, int backlog) {
   socket_request_init(&request);
   request.socket = socket;
   request.backlog = backlog;
-  return socket_call(SOCKET_SYSCALL_LISTEN, &request);
+  return socket_result(socket_call(SOCKET_SYSCALL_LISTEN, &request));
 }
 
 socket_t accept(socket_t socket, struct sockaddr *address, socklen_t *length) {
   if ((address == NULL) != (length == NULL)) {
-    return SOCKET_ERR_INVAL;
+    errno = EINVAL;
+    return -1;
   }
   socket_syscall_request_t request;
   socket_request_init(&request);
@@ -81,6 +116,8 @@ socket_t accept(socket_t socket, struct sockaddr *address, socklen_t *length) {
   int result = socket_call(SOCKET_SYSCALL_ACCEPT, &request);
   if (result >= 0 && length != NULL) {
     *length = request.address_length;
+  } else if (result < 0) {
+    return socket_result(result);
   }
   return result;
 }
@@ -88,10 +125,12 @@ socket_t accept(socket_t socket, struct sockaddr *address, socklen_t *length) {
 int sendto(socket_t socket, const void *data, uint32_t length, uint32_t flags,
            const struct sockaddr *address, socklen_t address_length) {
   if (length != 0 && data == NULL) {
-    return SOCKET_ERR_INVAL;
+    errno = EINVAL;
+    return -1;
   }
   if ((address == NULL) != (address_length == 0)) {
-    return SOCKET_ERR_INVAL;
+    errno = EINVAL;
+    return -1;
   }
   socket_syscall_request_t request;
   socket_request_init(&request);
@@ -101,7 +140,7 @@ int sendto(socket_t socket, const void *data, uint32_t length, uint32_t flags,
   request.flags = flags;
   request.address = (uintptr_t)address;
   request.address_length = address_length;
-  return socket_call(SOCKET_SYSCALL_SENDTO, &request);
+  return socket_result(socket_call(SOCKET_SYSCALL_SENDTO, &request));
 }
 
 int send(socket_t socket, const void *data, uint32_t length, uint32_t flags) {
@@ -112,7 +151,8 @@ int recvfrom(socket_t socket, void *data, uint32_t length, uint32_t flags,
              struct sockaddr *address, socklen_t *address_length) {
   if ((address == NULL) != (address_length == NULL) ||
       (length != 0 && data == NULL)) {
-    return SOCKET_ERR_INVAL;
+    errno = EINVAL;
+    return -1;
   }
   socket_syscall_request_t request;
   socket_request_init(&request);
@@ -128,7 +168,7 @@ int recvfrom(socket_t socket, void *data, uint32_t length, uint32_t flags,
   if (result >= 0 && address_length != NULL) {
     *address_length = request.address_length;
   }
-  return result;
+  return socket_result(result);
 }
 
 int recv(socket_t socket, void *data, uint32_t length, uint32_t flags) {
@@ -224,7 +264,6 @@ ssize_t sendmsg(socket_t socket, const struct msghdr *message,
                       message->msg_namelen);
   free(buffer);
   if (result < 0) {
-    errno = socket_error_number(result);
     return -1;
   }
   return result;
@@ -259,7 +298,6 @@ ssize_t recvmsg(socket_t socket, struct msghdr *message, uint32_t flags) {
                         message->msg_name == NULL ? NULL : &address_length);
   if (result < 0) {
     free(buffer);
-    errno = socket_error_number(result);
     return -1;
   }
   if (message->msg_name != NULL) {
@@ -283,21 +321,24 @@ ssize_t recvmsg(socket_t socket, struct msghdr *message, uint32_t flags) {
 }
 
 int socket_bytes_available(socket_t socket, uint32_t *bytes) {
-  if (bytes == NULL)
-    return SOCKET_ERR_INVAL;
+  if (bytes == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
   socket_syscall_request_t request;
   socket_request_init(&request);
   request.socket = socket;
   int result = socket_call(SOCKET_SYSCALL_AVAILABLE, &request);
-  if (!result)
+  if (result >= 0)
     *bytes = request.length;
-  return result;
+  return socket_result(result);
 }
 
 static int socket_getname(socket_t socket, struct sockaddr *address,
                           socklen_t *length, unsigned operation) {
   if (address == NULL || length == NULL) {
-    return SOCKET_ERR_INVAL;
+    errno = EINVAL;
+    return -1;
   }
   socket_syscall_request_t request;
   socket_request_init(&request);
@@ -308,7 +349,7 @@ static int socket_getname(socket_t socket, struct sockaddr *address,
   if (result == 0) {
     *length = request.address_length;
   }
-  return result;
+  return socket_result(result);
 }
 
 int getsockname(socket_t socket, struct sockaddr *address, socklen_t *length) {
@@ -404,9 +445,7 @@ int socket_get_flags(socket_t socket) {
   socket_request_init(&request);
   request.socket = socket;
   int result = socket_call(SOCKET_SYSCALL_GET_FLAGS, &request);
-  if (result < 0) {
-    return result;
-  }
+  if (result < 0) return socket_result(result);
   return (int)request.flags;
 }
 
@@ -415,7 +454,7 @@ int socket_set_flags(socket_t socket, int flags) {
   socket_request_init(&request);
   request.socket = socket;
   request.flags = (uint32_t)flags;
-  return socket_call(SOCKET_SYSCALL_SET_FLAGS, &request);
+  return socket_result(socket_call(SOCKET_SYSCALL_SET_FLAGS, &request));
 }
 
 int inet_pton(int family, const char *text, void *address) {
@@ -611,10 +650,12 @@ void freeaddrinfo(struct addrinfo *result) {
 
 int socket_interface_address(struct in_addr *address) {
   if (address == NULL) {
-    return SOCKET_ERR_INVAL;
+    errno = EINVAL;
+    return -1;
   }
   socket_syscall_request_t request;
   socket_request_init(&request);
   request.address = (uintptr_t)&address->s_addr;
-  return socket_call(SOCKET_SYSCALL_INTERFACE_ADDRESS, &request);
+  return socket_result(
+      socket_call(SOCKET_SYSCALL_INTERFACE_ADDRESS, &request));
 }

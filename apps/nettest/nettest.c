@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <socket.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -108,7 +109,7 @@ static int nettest_local_stream(void) {
   for (unsigned attempt = 0; client >= 0 && attempt < 100; attempt++) {
     connected = connect(client, (const struct sockaddr *)&listener_address,
                         sizeof(listener_address));
-    if (connected == 0 || connected != SOCKET_ERR_NOENT) {
+    if (connected == 0 || (connected < 0 && errno != ENOENT)) {
       break;
     }
     sleep(10);

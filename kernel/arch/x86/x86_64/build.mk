@@ -34,12 +34,12 @@ OBJECTS := $(patsubst %.c,$(BUILD)/%.o,$(SOURCES)) \
 	$(BUILD)/std/libcpp.o $(patsubst %.asm,$(BUILD)/%.obj,$(wildcard $(ARCH_DIR)/*.asm))
 ALLOCATOR := dos/mm/third_party/liballoc/liballoc-x86_64.a
 ALLOCATOR_PRIVATE := $(BUILD)/liballoc-kernel.a
-PLANT_OPENJDK_DIR ?= ../apps/out/x86_64/openjdk/configure-probe-9/images/jdk-jit
+PLANT_OPENJDK_DIR ?= ../apps/out/x86_64/openjdk/images/jdk
 PLANT_OPENJDK_DISK ?= plant-os-x86_64-jdk.img
 PLANT_LWJGL_DIR ?= ../apps/out/x86_64/lwjgl
 LWJGL_ISO ?= plant-os-x86_64.iso
 
-.PHONY: default all livecd livecd_run full lwjgl-livecd lwjgl-run
+.PHONY: default all livecd livecd_run full lwjgl-livecd lwjgl-run openjdk minecraft-image minecraft-run
 default all: $(BUILD)/kernel.bin $(BUILD)/hello.mod
 
 $(BUILD)/%.o: %.c $(KERNEL_CONFIG_STAMP) cflags.def $(ARCH_DIR)/build.mk
@@ -98,5 +98,31 @@ lwjgl-run: lwjgl-livecd
 		-serial stdio -monitor none -no-reboot \
 		-cdrom $(abspath $(LWJGL_ISO)) -boot d \
 		-drive file=$(abspath $(PLANT_OPENJDK_DISK)),format=raw,if=ide,index=0
+
+OPENJDK_JOBS ?= 2
+MINECRAFT_ISO ?= plant-os-x86_64-minecraft.iso
+MINECRAFT_DISK ?= plant-os-x86_64-minecraft.img
+MINECRAFT_DISK_MIB ?= 1536
+MINECRAFT_PORT ?= 25565
+MINECRAFT_MEMORY ?= 4096
+MINECRAFT_ACCEL ?= kvm
+MINECRAFT_CPU ?= $(if $(filter kvm,$(MINECRAFT_ACCEL)),host,max,-xgetbv1)
+openjdk:
+	python3 ../scripts/build-openjdk-jit.py --jobs $(OPENJDK_JOBS)
+
+minecraft-image: full
+	$(MAKE) ARCH=x86_64 openjdk
+	python3 ../scripts/build-minecraft.py --jdk $(abspath $(PLANT_OPENJDK_DIR)) \
+		--iso $(abspath $(MINECRAFT_ISO)) --disk $(abspath $(MINECRAFT_DISK)) \
+		--disk-mib $(MINECRAFT_DISK_MIB)
+
+# Running an existing server must not reformat its world disk.
+minecraft-run:
+	@test -f "$(MINECRAFT_ISO)" -a -f "$(MINECRAFT_DISK)" || $(MAKE) ARCH=x86_64 minecraft-image
+	qemu-system-x86_64 -accel $(MINECRAFT_ACCEL) -cpu $(MINECRAFT_CPU) \
+		-smp $(QEMU_CPUS) -m $(MINECRAFT_MEMORY) -display gtk -serial stdio \
+		-cdrom plant-os-x86_64.iso -boot d \
+		-drive file=$(abspath $(MINECRAFT_DISK)),format=raw,if=ide,index=0 \
+		-netdev user,id=mc,hostfwd=tcp:127.0.0.1:$(MINECRAFT_PORT)-:25565 -device pcnet,netdev=mc
 
 -include $(patsubst %.o,%.d,$(filter %.o,$(OBJECTS)))

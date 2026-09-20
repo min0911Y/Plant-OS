@@ -1,5 +1,7 @@
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.ServerSocket;
+import java.net.SocketException;
 import java.net.StandardProtocolFamily;
 import java.nio.ByteBuffer;
 import java.nio.channels.*;
@@ -18,6 +20,7 @@ public final class Nio {
             Startup.main(new String[0]);
             pipe();
             sockets();
+            blockingSocketClose();
             Files.writeString(result, "OPENJDK NIO PASS\n");
             System.out.println("OPENJDK NIO PASS");
         } catch (Throwable failure) {
@@ -76,6 +79,7 @@ public final class Nio {
             check(selector.select(5000) == 1, "accept readiness");
             try (SocketChannel accepted = server.accept()) {
                 check(accepted != null, "accept connection");
+                check(server.accept() == null, "accept queue drain");
                 if (!connected) {
                     try (Selector connection = Selector.open()) {
                         client.register(connection, SelectionKey.OP_CONNECT);
@@ -93,5 +97,27 @@ public final class Nio {
                 check(client.read(data) == 1 && data.get(0) == 73, "socket data");
             }
         }
+    }
+
+    private static void blockingSocketClose() throws Exception {
+        AtomicReference<Throwable> error = new AtomicReference<>();
+        ServerSocket server = new ServerSocket(0, 1,
+                InetAddress.getByName("127.0.0.1"));
+        Thread acceptor = new Thread(() -> {
+            try {
+                server.accept();
+                error.set(new AssertionError("accept returned after close"));
+            } catch (SocketException expected) {
+            } catch (Throwable failure) {
+                error.set(failure);
+            }
+        });
+        acceptor.setDaemon(true);
+        acceptor.start();
+        Thread.sleep(100);
+        server.close();
+        acceptor.join(5000);
+        check(!acceptor.isAlive(), "close did not wake blocking accept");
+        check(error.get() == null, "blocking accept failed: " + error.get());
     }
 }

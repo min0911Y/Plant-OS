@@ -41,6 +41,19 @@ static int cached_io_test(void) {
   if (pread(fd, readback, length, 0) != (ssize_t)length ||
       memcmp(readback, data, length) || fsync(fd))
     goto done;
+  /* Growth that overlaps EOF must keep its supplied bytes, while a later
+   * write beyond EOF must zero the gap even when clusters are reused. */
+  if (pwrite(fd, data, 31, length - 17) != 31 ||
+      pread(fd, readback, 31, length - 17) != 31 || memcmp(readback, data, 31))
+    goto done;
+  const size_t hole = 8197, end = length + 14;
+  if (pwrite(fd, data, 19, end + hole) != 19 || fsync(fd) ||
+      pread(fd, readback, hole + 19, end) != (ssize_t)(hole + 19) ||
+      memcmp(readback + hole, data, 19))
+    goto done;
+  for (size_t i = 0; i < hole; i++)
+    if (readback[i] != 0)
+      goto done;
   status = 0;
 done:
   if (fd >= 0)
@@ -199,6 +212,196 @@ static int descriptor_semantics_test(const char *path) {
   return 0;
 }
 
+static int record_lock_command(int descriptor, int command, int16_t type,
+                               int64_t start, int64_t length) {
+  struct flock request = {.l_type = type,
+                          .l_whence = SEEK_SET,
+                          .l_start = start,
+                          .l_len = length};
+  return fcntl(descriptor, command, &request);
+}
+
+static int record_lock_conflict(int result) {
+  return result == -1 && (errno == EACCES || errno == EAGAIN);
+}
+
+static int record_lock_test(const char *path) {
+  unlink(path);
+  int descriptor = open(path, O_CREAT | O_TRUNC | O_RDWR, 0600);
+  char contents[128] = {0};
+  if (descriptor < 0 || write(descriptor, contents, sizeof(contents)) !=
+                            (ssize_t)sizeof(contents)) {
+    return 60;
+  }
+
+  int ready[2], acquired[2];
+  if (record_lock_command(descriptor, F_SETLK, F_WRLCK, 0, 0) ||
+      pipe(ready) || pipe(acquired)) {
+    close(descriptor);
+    unlink(path);
+    return 61;
+  }
+  pid_t owner = getpid();
+  int child = fork();
+  if (child < 0) {
+    return 62;
+  }
+  if (child == 0) {
+    close(ready[0]);
+    close(acquired[0]);
+    struct flock query = {.l_type = F_WRLCK,
+                          .l_whence = SEEK_SET,
+                          .l_start = 0,
+                          .l_len = 0};
+    if (fcntl(descriptor, F_GETLK, &query) || query.l_type != F_WRLCK ||
+        query.l_pid != owner) {
+      exit(63);
+    }
+    errno = 0;
+    if (!record_lock_conflict(
+            record_lock_command(descriptor, F_SETLK, F_WRLCK, 0, 0)) ||
+        write(ready[1], "R", 1) != 1) {
+      exit(64);
+    }
+    if (record_lock_command(descriptor, F_SETLKW, F_WRLCK, 0, 0) ||
+        write(acquired[1], "A", 1) != 1 ||
+        record_lock_command(descriptor, F_SETLK, F_UNLCK, 0, 0)) {
+      exit(65);
+    }
+    exit(0);
+  }
+  close(ready[1]);
+  close(acquired[1]);
+  char byte;
+  int stage = 0;
+  if (read(ready[0], &byte, 1) != 1 ||
+      fcntl(acquired[0], F_SETFL, O_NONBLOCK)) {
+    stage = 66;
+  } else {
+    errno = 0;
+    if (read(acquired[0], &byte, 1) != -1 || errno != EAGAIN)
+      stage = 67;
+  }
+  if (record_lock_command(descriptor, F_SETLK, F_UNLCK, 0, 0) ||
+      fcntl(acquired[0], F_SETFL, 0)) {
+    stage = stage ? stage : 68;
+  }
+  if (!stage && read(acquired[0], &byte, 1) != 1)
+    stage = 69;
+  int child_status = waittid((unsigned)child);
+  close(ready[0]);
+  close(acquired[0]);
+  if (!stage && child_status)
+    stage = child_status;
+
+  if (!stage && record_lock_command(descriptor, F_SETLK, F_RDLCK, 0, 0))
+    stage = 70;
+  if (!stage) {
+    child = fork();
+    if (child == 0) {
+      int independent = open(path, O_RDWR);
+      int result = independent < 0 ||
+                   record_lock_command(independent, F_SETLK, F_RDLCK, 0, 0);
+      errno = 0;
+      result |= !record_lock_conflict(
+          record_lock_command(independent, F_SETLK, F_WRLCK, 0, 0));
+      if (independent >= 0)
+        close(independent);
+      exit(result ? 71 : 0);
+    }
+    if (child < 0 || waittid((unsigned)child) != 0)
+      stage = 72;
+    if (record_lock_command(descriptor, F_SETLK, F_UNLCK, 0, 0))
+      stage = stage ? stage : 73;
+  }
+
+  if (!stage &&
+      (record_lock_command(descriptor, F_SETLK, F_WRLCK, 0, 100) ||
+       record_lock_command(descriptor, F_SETLK, F_UNLCK, 20, 30))) {
+    stage = 74;
+  }
+  if (!stage) {
+    child = fork();
+    if (child == 0) {
+      int independent = open(path, O_RDWR);
+      int result = independent < 0 ||
+                   record_lock_command(independent, F_SETLK, F_WRLCK, 20, 30);
+      errno = 0;
+      result |= !record_lock_conflict(
+          record_lock_command(independent, F_SETLK, F_WRLCK, 0, 20));
+      if (independent >= 0)
+        close(independent);
+      exit(result ? 75 : 0);
+    }
+    if (child < 0 || waittid((unsigned)child) != 0)
+      stage = 76;
+    if (record_lock_command(descriptor, F_SETLK, F_UNLCK, 0, 0))
+      stage = stage ? stage : 77;
+  }
+
+  int other = -1;
+  int release[2];
+  if (!stage) {
+    other = open(path, O_RDWR);
+    if (other < 0 || pipe(release) ||
+        record_lock_command(descriptor, F_SETLK, F_WRLCK, 0, 0)) {
+      stage = 78;
+    }
+  }
+  if (!stage) {
+    child = fork();
+    if (child == 0) {
+      close(release[1]);
+      int independent = open(path, O_RDWR);
+      int result = read(release[0], &byte, 1) != 1 || independent < 0 ||
+                   record_lock_command(independent, F_SETLK, F_WRLCK, 0, 0);
+      if (independent >= 0)
+        close(independent);
+      exit(result ? 79 : 0);
+    }
+    close(release[0]);
+    if (child < 0 || close(other) || write(release[1], "C", 1) != 1 ||
+        waittid((unsigned)child) != 0) {
+      stage = 80;
+    }
+    close(release[1]);
+    other = -1;
+  }
+  if (other >= 0)
+    close(other);
+  record_lock_command(descriptor, F_SETLK, F_UNLCK, 0, 0);
+
+  int held[2];
+  if (!stage && pipe(held))
+    stage = 81;
+  if (!stage) {
+    child = fork();
+    if (child == 0) {
+      close(held[0]);
+      int independent = open(path, O_RDWR);
+      int result = independent < 0 ||
+                   record_lock_command(independent, F_SETLK, F_WRLCK, 0, 0) ||
+                   write(held[1], "X", 1) != 1;
+      exit(result ? 82 : 0);
+    }
+    close(held[1]);
+    if (child < 0 || read(held[0], &byte, 1) != 1 ||
+        waittid((unsigned)child) != 0 ||
+        record_lock_command(descriptor, F_SETLK, F_WRLCK, 0, 0)) {
+      stage = 83;
+    }
+    close(held[0]);
+  }
+
+  record_lock_command(descriptor, F_SETLK, F_UNLCK, 0, 0);
+  close(descriptor);
+  if (unlink(path))
+    stage = stage ? stage : 84;
+  if (!stage)
+    logkf("RECORD_LOCK PASS\n");
+  return stage;
+}
+
 static void write_pattern_file(const char *path,
                                const char *tag,
                                int rounds,
@@ -348,11 +551,14 @@ int main(int argc, char **argv) {
   char child_path[64] = "child.log";
   char orphan_path[64] = "orphan.log";
   char descriptor_path[64] = "fdtest.bin";
+  char record_lock_path[64] = "record-lock.bin";
   if (argc == 2) {
     snprintf(parent_path, sizeof(parent_path), "%s/parent.log", argv[1]);
     snprintf(child_path, sizeof(child_path), "%s/child.log", argv[1]);
     snprintf(orphan_path, sizeof(orphan_path), "%s/orphan.log", argv[1]);
     snprintf(descriptor_path, sizeof(descriptor_path), "%s/fdtest.bin",
+             argv[1]);
+    snprintf(record_lock_path, sizeof(record_lock_path), "%s/record-lock.bin",
              argv[1]);
   }
   const int rounds = 64;
@@ -363,6 +569,12 @@ int main(int argc, char **argv) {
     logkf("DKTEST descriptor failure=%d target=%s\n", descriptor_status,
           descriptor_path);
     return descriptor_status;
+  }
+  int record_lock_status = record_lock_test(record_lock_path);
+  if (record_lock_status != 0) {
+    logkf("DKTEST record lock failure=%d errno=%d target=%s\n",
+          record_lock_status, errno, record_lock_path);
+    return record_lock_status;
   }
 
   if (file_size(parent_path) != -1) {

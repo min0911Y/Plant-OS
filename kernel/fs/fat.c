@@ -616,7 +616,8 @@ static void fat_erase_entry(struct FAT_FILEINFO *directory, unsigned slot) {
   }
 }
 
-static bool fat_ensure_clusters(vfs_t *vfs, int start, uint32_t required);
+static bool fat_ensure_clusters(vfs_t *vfs, int start, uint32_t required,
+                                bool clear);
 
 static int fat_reserve_entries(vfs_t *vfs, struct FAT_FILEINFO **parent,
                                unsigned needed) {
@@ -665,7 +666,7 @@ static int fat_reserve_entries(vfs_t *vfs, struct FAT_FILEINFO **parent,
   }
   memcpy(grown, directory, max * 32);
   memset(grown + max, 0, (new_max - max) * 32);
-  if (!fat_ensure_clusters(vfs, cluster, new_max / per_cluster)) {
+  if (!fat_ensure_clusters(vfs, cluster, new_max / per_cluster, true)) {
     free(grown);
     return -1;
   }
@@ -1278,7 +1279,8 @@ static void fat_read_cluster(vfs_t *vfs, int cluster, void *buffer) {
             vfs_mount_disk_number(vfs));
 }
 
-static bool fat_ensure_clusters(vfs_t *vfs, int start, uint32_t required) {
+static bool fat_ensure_clusters(vfs_t *vfs, int start, uint32_t required,
+                                bool clear) {
   int existing;
   if (!fat_chain_length(vfs, start, &existing)) {
     return false;
@@ -1290,13 +1292,21 @@ static bool fat_ensure_clusters(vfs_t *vfs, int start, uint32_t required) {
   if (additional > (uint32_t)INT_MAX / sizeof(int)) {
     return false;
   }
+  int last;
+  if (!fat_chain_last(vfs, start, &last)) {
+    return false;
+  }
   int *allocated = malloc(additional * sizeof(int));
   if (allocated == NULL) {
     return false;
   }
   uint32_t found = 0;
-  for (int cluster = 2;
-       cluster < get_dm(vfs).FatMaxTerms && found < additional; cluster++) {
+  /* Prefer space next to the tail; wrap once to reuse earlier free clusters. */
+  for (int scanned = 0, cluster = last;
+       scanned < get_dm(vfs).FatMaxTerms - 2 && found < additional; scanned++) {
+    if (++cluster >= get_dm(vfs).FatMaxTerms) {
+      cluster = 2;
+    }
     if (get_dm(vfs).fat[cluster] == 0 && fat_data_cluster_valid(vfs, cluster)) {
       allocated[found++] = cluster;
     }
@@ -1305,26 +1315,37 @@ static bool fat_ensure_clusters(vfs_t *vfs, int start, uint32_t required) {
     free(allocated);
     return false;
   }
-  uint8_t *zero = malloc(get_dm(vfs).ClustnoBytes);
-  if (zero == NULL) {
+  uint8_t *zero = clear ? malloc(get_dm(vfs).ClustnoBytes) : NULL;
+  if (clear && zero == NULL) {
     free(allocated);
     return false;
   }
-  memset(zero, 0, get_dm(vfs).ClustnoBytes);
-  int last;
-  if (!fat_chain_last(vfs, start, &last)) {
-    free(zero);
-    free(allocated);
-    return false;
+  if (clear) {
+    memset(zero, 0, get_dm(vfs).ClustnoBytes);
   }
+  int first_changed = last;
+  int changed_count = 1;
   for (uint32_t index = 0; index < additional; index++) {
     get_dm(vfs).fat[last] = allocated[index];
     last = allocated[index];
     get_dm(vfs).fat[last] = fat_eoc_marker(get_dm(vfs).type);
     get_dm(vfs).FatClustnoFlags[last] = true;
-    fat_write_cluster(vfs, last, zero);
+    if (clear) {
+      fat_write_cluster(vfs, last, zero);
+    }
   }
-  file_savefat(get_dm(vfs).fat, 0, get_dm(vfs).FatMaxTerms, vfs);
+  /* Only the old tail and newly allocated entries changed.  Flushing the
+   * entire FAT for each append makes small writes scale with disk capacity. */
+  for (uint32_t index = 0; index < additional; index++) {
+    if (allocated[index] == first_changed + changed_count) {
+      changed_count++;
+    } else {
+      file_savefat(get_dm(vfs).fat, first_changed, changed_count, vfs);
+      first_changed = allocated[index];
+      changed_count = 1;
+    }
+  }
+  file_savefat(get_dm(vfs).fat, first_changed, changed_count, vfs);
   free(zero);
   free(allocated);
   return true;
@@ -1430,7 +1451,10 @@ static int fat_read(vfs_t *vfs, const vfs_node_t *node, uint32_t offset,
              : VFS_ERROR_IO;
 }
 
-static int fat_resize(vfs_t *vfs, vfs_node_t *node, uint32_t size) {
+/* Initialize newly exposed bytes before publishing the new file size. A
+ * growing write supplies [offset, size); truncate zeroes the whole extension. */
+static int fat_resize(vfs_t *vfs, vfs_node_t *node, uint32_t size,
+                       uint32_t offset, const void *data) {
   struct FAT_FILEINFO *parent;
   struct FAT_FILEINFO *entry = fat_node_entry(vfs, node, &parent);
   if (entry == NULL) {
@@ -1450,7 +1474,7 @@ static int fat_resize(vfs_t *vfs, vfs_node_t *node, uint32_t size) {
     }
     get_dm(vfs).fat[start] = fat_eoc_marker(get_dm(vfs).type);
     get_dm(vfs).FatClustnoFlags[start] = true;
-    if (!fat_ensure_clusters(vfs, start, required)) {
+    if (!fat_ensure_clusters(vfs, start, required, false)) {
       get_dm(vfs).fat[start] = 0;
       get_dm(vfs).FatClustnoFlags[start] = false;
       return VFS_ERROR_NO_SPACE;
@@ -1463,7 +1487,7 @@ static int fat_resize(vfs_t *vfs, vfs_node_t *node, uint32_t size) {
     return VFS_ERROR_IO;
   }
   if ((uint32_t)existing < required &&
-      !fat_ensure_clusters(vfs, start, required)) {
+      !fat_ensure_clusters(vfs, start, required, false)) {
     return VFS_ERROR_NO_SPACE;
   }
   if ((uint32_t)existing > required) {
@@ -1485,14 +1509,19 @@ static int fat_resize(vfs_t *vfs, vfs_node_t *node, uint32_t size) {
     }
     file_savefat(get_dm(vfs).fat, 0, get_dm(vfs).FatMaxTerms, vfs);
   }
-  if (size > entry->size &&
-      !fat_transfer(vfs, start, entry->size, NULL, size - entry->size, true,
+  uint32_t zero_end = data ? offset : size;
+  if (zero_end > entry->size &&
+      !fat_transfer(vfs, start, entry->size, NULL, zero_end - entry->size, true,
                     true)) {
     return VFS_ERROR_IO;
   }
   if (size < entry->size && size % cluster_size != 0 &&
       !fat_transfer(vfs, start, size, NULL, cluster_size - size % cluster_size,
                     true, true)) {
+    return VFS_ERROR_IO;
+  }
+  if (data && !fat_transfer(vfs, start, offset, (void *)data, size - offset,
+                            true, false)) {
     return VFS_ERROR_IO;
   }
   entry->size = size;
@@ -1516,24 +1545,22 @@ static int fat_write(vfs_t *vfs, vfs_node_t *node, uint32_t offset,
   uint32_t end = offset + length;
   uint32_t previous = entry->size;
   if (end > previous) {
-    int status = fat_resize(vfs, node, end);
+    int status = fat_resize(vfs, node, end, offset, buffer);
     if (status < 0) {
+      fat_resize(vfs, node, previous, 0, NULL);
       return status;
     }
-    entry = fat_node_entry(vfs, node, NULL);
+    return length;
   }
   int start = get_clustno(entry->clustno_high, entry->clustno_low);
   if (!fat_transfer(vfs, start, offset, (void *)buffer, length, true, false)) {
-    if (end > previous) {
-      fat_resize(vfs, node, previous);
-    }
     return VFS_ERROR_IO;
   }
   return length;
 }
 
 static int fat_truncate(vfs_t *vfs, vfs_node_t *node, uint32_t size) {
-  return fat_resize(vfs, node, size);
+  return fat_resize(vfs, node, size, 0, NULL);
 }
 
 static int fat_create(vfs_t *vfs, const vfs_node_t *directory_node,

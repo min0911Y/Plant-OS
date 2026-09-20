@@ -33,3 +33,10 @@ kernel64/build
 kernel/a.iso
 kernel/cd.iso
 kernel/iso/psh.bin
+
+# Host Python caches and generated image checksums
+__pycache__/
+*.pyc
+kernel/*.sha256
+kernel/serial.txt
+kernel/snapshot.txt

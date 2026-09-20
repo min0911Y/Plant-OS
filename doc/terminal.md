@@ -4,18 +4,19 @@ GUI 启动时和点击工具箱的 `Terminal` 按钮时运行独立的 `term.bin
 
 ## 构建依赖
 
-应用全部使用 C，直接链接已有的 os-terminal 静态库，不构建或修改该库。默认目录为 `~/os-terminal`，可以通过 `OS_TERMINAL_DIR` 覆盖：
-
-| 文件 | 用途 |
-| --- | --- |
-| `os_terminal.h` | C 接口，`terminal_process` 接收指针和字节长度 |
-| `libos_terminal_x86.a` | i386 PIC 静态库 |
-| `libos_terminal_x64.a` | x86_64 PIC 静态库 |
+终端应用使用 C，依赖 `apps/term/sources.json` 固定的 Rust 终端库源码。
+`./init.py term` 下载并校验归档，`make` 自动构建对应架构的 PIC 静态库；
+不依赖用户家目录中的预编译文件。需要 Rust nightly 的 `rust-src` 组件：
 
 ```sh
-make -C apps/term ARCH=i386
-make -C apps/term ARCH=x86_64 OS_TERMINAL_DIR=/path/to/os-terminal
+rustup toolchain install nightly --profile minimal --component rust-src
+./init.py term
+make -C apps/term ARCH=x86_64
 ```
+
+`apps/term/*-plantos.json` 明确两种架构的 ABI：x86_64 使用 SysV SSE2，
+i386 使用软件浮点返回约定。字节流补丁让 `terminal_process` 接收指针和长度，
+保留嵌入 NUL 和分段 UTF-8 输入；行列数查询只借用终端对象，不转移或释放所有权。构建产物位于 `apps/out[/x86_64]/terminal/`。
 
 i386 库的浮点辅助调用通过 C 编写的私有适配层接入 x87；其返回值使用 EAX/EDX，适配层单独使用 `-mno-fp-ret-in-387`，不改变 libp 或其他应用的 ABI。两种架构的 term 都是加载 `/lib/ld.so`、依赖 `libp.so` 的原生 PIE。应用清单自动包含 term，i386 磁盘镜像也显式收录它。
 
@@ -33,9 +34,9 @@ fartty 设置 `native_ansi`，`print` 的批量输出和 `putch` 的单字节输
 
 GUI 窗口队列中的键盘输入保留 Set 1 编码。term 将按下和松开事件交给 `terminal_handle_keyboard()`，分别收集两条队列中的扩展键前缀，避免前缀与另一条队列的事件拼接。库消费终端快捷键；产生 PTY 键盘输出时，term 将对应的原始按键放入应用输入队列，保留 Plant OS 的 `getch` ABI，不把 ANSI 字节作为扫描码传给 fartty。输入队列用于回答 fartty 读取并通过 `tty_notify_input` 唤醒等待者。键盘处理后标记重绘，仍由主循环同步提交窗口。滚轮交给 os-terminal 的历史滚动接口。
 
-当前预编译库支持 `Ctrl+Shift+F1–F8` 切换内置主题，以及 `Ctrl+Shift+↑/↓`、`Ctrl+Shift+PageUp/PageDown` 按行或按页回看历史。左右 Ctrl/Shift 均可使用，快捷键不进入 shell 输入。现有 C 库的键盘历史滚动方向与滚轮相反；term 在交给库时对调上下导航键，应用队列保留原键码。更换外部静态库时须重新验证此行为。
+当前固定版本支持 `Ctrl+Shift+F1–F8` 切换内置主题，以及 `Ctrl+Shift+↑/↓`、`Ctrl+Shift+PageUp/PageDown` 按行或按页回看历史。左右 Ctrl/Shift 均可使用，快捷键不进入 shell 输入。现有 C 库的键盘历史滚动方向与滚轮相反；term 在交给库时对调上下导航键，应用队列保留原键码。更新上游版本时须重新验证此行为。
 
-上游 Rust 文档中的快捷键不等于当前 C 库的全部能力：现有 `terminal_handle_keyboard()` 返回 `void`，字号快捷键没有改变字体或行列数，C 接口也没有字号 setter；复制快捷键没有调用已注册的剪贴板写回调。粘贴路径需要剪贴板读回调和文本输入通道，term 当前没有提供剪贴板，因此字号与复制粘贴仍不可用。这里直接使用预编译库的公开函数，不修改库源码、不访问其内部布局，也不通过重建终端丢弃历史来模拟缩放。
+上游 Rust 文档中的快捷键不等于当前 C 库的全部能力：现有 `terminal_handle_keyboard()` 返回 `void`，字号快捷键没有改变字体或行列数，C 接口也没有字号 setter；复制快捷键没有调用已注册的剪贴板写回调。粘贴路径需要剪贴板读回调和文本输入通道，term 当前没有提供剪贴板，因此字号与复制粘贴仍不可用。应用只使用终端库的公开函数，不访问其内部布局，也不通过重建终端丢弃历史来模拟缩放。
 
 关闭窗口时释放 TTY，终止其 shell 会话和工作线程，再释放线程栈、终端对象和窗口。shell 自然退出也走同一回收路径，GUI 按启动线程的 TID/generation 确認其退出后再释放用户栈，不会误杀复用同一编号的新线程。
 

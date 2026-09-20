@@ -1,0 +1,4 @@
+"todo" = [
+{"action" = "run" "command_line" = "lua.bin C:/java/mc/run-minecraft.lua"},
+{"action" = "run" "command_line" = "psh.bin -c shutdown"}
+]

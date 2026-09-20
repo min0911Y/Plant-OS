@@ -130,8 +130,7 @@ int ioctl(int descriptor, unsigned long request, ...) {
   }
   uint32_t bytes;
   int error = socket_bytes_available(descriptor, &bytes);
-  if (error) {
-    errno = error == SOCKET_ERR_NOENT ? EBADF : EIO;
+  if (error < 0) {
     return -1;
   }
   if (bytes > __INT_MAX__) {

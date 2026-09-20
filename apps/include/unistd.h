@@ -38,6 +38,7 @@ uid_t getuid(void);
 uid_t geteuid(void);
 gid_t getgid(void);
 gid_t getegid(void);
+int getpeereid(int descriptor, uid_t *euid, gid_t *egid);
 int gethostname(char *buffer, size_t size);
 int getgroups(int count, gid_t groups[]);
 const char *getexecname(void);

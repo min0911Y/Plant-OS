@@ -1,0 +1,15 @@
+{
+  "openjdk": {
+    "version": "17.0.19+10",
+    "url": "https://deb.debian.org/debian/pool/main/o/openjdk-17/openjdk-17_17.0.19+10.orig.tar.xz",
+    "sha256": "7a61915b168dfb9b45413140d78e38dc5b5250d99d1d99fef7136bf9fd45a07c",
+    "directory": "openjdk-17-17.0.19+10"
+  },
+  "bootjdk": {
+    "version": "17.0.2",
+    "url": "https://download.java.net/java/GA/jdk17.0.2/dfd4a8d0985749f896bed50d7138ee7f/8/GPL/openjdk-17.0.2_linux-x64_bin.tar.gz",
+    "sha256": "0022753d0cceecacdd3a795dd4cea2bd7ffdf9dc06e22ffd1be98411742fbb44",
+    "directory": "jdk-17.0.2",
+    "destination": "apps/out/host/openjdk"
+  }
+}

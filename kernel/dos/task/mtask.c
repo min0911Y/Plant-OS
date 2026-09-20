@@ -661,6 +661,10 @@ static void task_clear_external_refs(mtask *task) {
   lock_cancel_task(task);
   futex_cancel_task(task);
   io_poll_cancel_task(task);
+  vfs_record_lock_cancel_task(task);
+  if (task->kind == TASK_PROCESS && task->tid == task->tgid) {
+    vfs_record_lock_task_cleanup(task->tgid);
+  }
 #if defined(KERNEL_ARCH_I386)
   high_text_cursor_task_exited(task);
 #endif

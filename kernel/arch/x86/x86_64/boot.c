@@ -127,14 +127,35 @@ void arch_boot_verify(void) {
 
 const boot_info_t *arch_boot_info(void) { return &boot_info; }
 uintptr_t arch_memory_detect(const boot_info_t *info) {
+  if (!info || !info->memory_ranges)
+    return 0;
   uintptr_t end = 0;
   for (size_t i = 0; i < info->memory_range_count; i++) {
     const boot_memory_range_t *range = &info->memory_ranges[i];
-    if ((range->type == BOOT_MEMORY_USABLE ||
-         range->type == BOOT_MEMORY_RESERVED_RAM) &&
-        range->base + range->length > end) {
-      end = range->base + range->length;
+    if (range->type != BOOT_MEMORY_USABLE &&
+        range->type != BOOT_MEMORY_RESERVED_RAM) {
+      continue;
     }
+    if (range->length > UINT64_MAX - range->base)
+      return UINTPTR_MAX;
+    uint64_t range_end = range->base + range->length;
+    if (range_end > end)
+      end = (uintptr_t)range_end;
   }
   return end;
+}
+
+uintptr_t arch_memory_available(const boot_info_t *info) {
+  if (!info || !info->memory_ranges)
+    return 0;
+  uint64_t total = 0;
+  for (size_t i = 0; i < info->memory_range_count; i++) {
+    const boot_memory_range_t *range = &info->memory_ranges[i];
+    if (range->type != BOOT_MEMORY_USABLE)
+      continue;
+    if (total > UINTPTR_MAX - range->length)
+      return UINTPTR_MAX;
+    total += range->length;
+  }
+  return (uintptr_t)total;
 }

@@ -1385,7 +1385,7 @@ static void syscall_memory_info(syscall_context_t *frame) {
     return;
   }
 
-  frame->value = page_used_count(memsize);
+  frame->value = page_used_count(physical_memory_limit);
 }
 
 static void syscall_tty_cursor(syscall_context_t *frame) {

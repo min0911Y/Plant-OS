@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <socket.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -659,8 +660,8 @@ static http_result_t http_send_all(socket_t socket_fd, const void *data,
     uint32_t part = length > 65535u ? 65535u : (uint32_t)length;
     int sent = send(socket_fd, bytes, part, 0);
     if (sent <= 0) {
-      return sent == SOCKET_ERR_TIMEDOUT ? HTTP_RESULT_TIMEOUT
-                                         : HTTP_RESULT_TRANSFER;
+      return sent < 0 && errno == ETIMEDOUT ? HTTP_RESULT_TIMEOUT
+                                            : HTTP_RESULT_TRANSFER;
     }
     bytes += (uint32_t)sent;
     length -= (uint32_t)sent;
@@ -708,8 +709,8 @@ static http_result_t http_connect(const http_url_t *url, socket_t *socket_fd) {
     fprintf(stderr, "curl: could not connect to %s:%u (%d)\n", url->host,
             (unsigned)url->port, result);
     socket_close(connection);
-    return result == SOCKET_ERR_TIMEDOUT ? HTTP_RESULT_TIMEOUT
-                                         : HTTP_RESULT_CONNECT;
+    return result < 0 && errno == ETIMEDOUT ? HTTP_RESULT_TIMEOUT
+                                            : HTTP_RESULT_CONNECT;
   }
   *socket_fd = connection;
   return HTTP_RESULT_OK;
@@ -745,7 +746,7 @@ static http_result_t http_stream_read_line(http_stream_t *stream,
   for (;;) {
     int available = http_stream_fill(stream);
     if (available <= 0) {
-      if (available == SOCKET_ERR_TIMEDOUT) {
+      if (available < 0 && errno == ETIMEDOUT) {
         return HTTP_RESULT_TIMEOUT;
       }
       return available == 0 ? HTTP_RESULT_PROTOCOL : HTTP_RESULT_TRANSFER;
@@ -953,8 +954,7 @@ static http_result_t http_stream_copy(http_stream_t *stream, FILE *output,
       if (available == 0) {
         return until_close ? HTTP_RESULT_OK : HTTP_RESULT_PROTOCOL;
       }
-      return available == SOCKET_ERR_TIMEDOUT ? HTTP_RESULT_TIMEOUT
-                                               : HTTP_RESULT_TRANSFER;
+      return errno == ETIMEDOUT ? HTTP_RESULT_TIMEOUT : HTTP_RESULT_TRANSFER;
     }
     size_t part = (size_t)available;
     if (!until_close && (uint64_t)part > length) {
@@ -1020,7 +1020,7 @@ static http_result_t http_stream_expect_crlf(http_stream_t *stream) {
     int part =
         http_stream_read(stream, ending + received, sizeof(ending) - received);
     if (part <= 0) {
-      if (part == SOCKET_ERR_TIMEDOUT) {
+      if (part < 0 && errno == ETIMEDOUT) {
         return HTTP_RESULT_TIMEOUT;
       }
       return part == 0 ? HTTP_RESULT_PROTOCOL : HTTP_RESULT_TRANSFER;

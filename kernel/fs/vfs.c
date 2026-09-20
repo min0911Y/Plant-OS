@@ -52,6 +52,31 @@ struct vfs_mount {
   vfs_identity_t *identities[VFS_IDENTITY_BUCKETS];
 };
 
+/* Record locks are process-owned and keyed by the stable VFS object identity,
+ * rather than by a pathname or descriptor.  Intervals use an exclusive end;
+ * UINT64_MAX represents the unbounded POSIX EOF range. */
+typedef struct vfs_record_lock {
+  struct vfs_record_lock *next;
+  struct vfs_mount *mount;
+  vfs_node_id_t node;
+  uint32_t owner;
+  int16_t type;
+  uint64_t start, end;
+} vfs_record_lock_t;
+
+typedef struct vfs_record_lock_waiter {
+  struct vfs_record_lock_waiter *next, **previous;
+  struct vfs_mount *mount;
+  vfs_node_id_t node;
+  mtask *task;
+} vfs_record_lock_waiter_t;
+
+static vfs_record_lock_t *vfs_record_locks;
+static vfs_record_lock_waiter_t *vfs_record_lock_waiters;
+
+static void vfs_mount_reference(struct vfs_mount *mount);
+static void vfs_mount_release(struct vfs_mount *mount);
+
 enum { VFS_PIPE_CAPACITY = 65536, VFS_PIPE_ATOMIC = 4096 };
 typedef struct {
   io_poll_queue_t readers, writers;
@@ -140,6 +165,397 @@ static bool vfs_normalize_drive(uint8_t drive, uint8_t *normalized) {
 static bool vfs_node_equal(const vfs_node_id_t *left,
                            const vfs_node_id_t *right) {
   return memcmp(left, right, sizeof(*left)) == 0;
+}
+
+static bool vfs_record_lock_key_equal(const vfs_record_lock_t *record,
+                                      const struct vfs_mount *mount,
+                                      const vfs_node_id_t *node) {
+  return record->mount == mount && vfs_node_equal(&record->node, node);
+}
+
+static bool vfs_record_lock_overlap(uint64_t left_start, uint64_t left_end,
+                                    uint64_t right_start, uint64_t right_end) {
+  return left_start < right_end && right_start < left_end;
+}
+
+static void vfs_record_lock_unlink(vfs_record_lock_t *record) {
+  vfs_record_lock_t **cursor = &vfs_record_locks;
+  while (*cursor != NULL && *cursor != record)
+    cursor = &(*cursor)->next;
+  if (*cursor == record) {
+    *cursor = record->next;
+    free(record);
+  }
+}
+
+static void vfs_record_lock_free_list(vfs_record_lock_t *records) {
+  while (records != NULL) {
+    vfs_record_lock_t *next = records->next;
+    free(records);
+    records = next;
+  }
+}
+
+static void vfs_record_lock_waiter_remove(vfs_record_lock_waiter_t *waiter) {
+  if (waiter->previous == NULL)
+    return;
+  *waiter->previous = waiter->next;
+  if (waiter->next != NULL)
+    waiter->next->previous = waiter->previous;
+  waiter->previous = NULL;
+  waiter->next = NULL;
+  vfs_mount_release(waiter->mount);
+}
+
+static void vfs_record_lock_waiter_add(vfs_record_lock_waiter_t *waiter,
+                                       struct vfs_mount *mount,
+                                       const vfs_node_id_t *node) {
+  waiter->mount = mount;
+  waiter->node = *node;
+  waiter->next = vfs_record_lock_waiters;
+  waiter->previous = &vfs_record_lock_waiters;
+  if (waiter->next != NULL)
+    waiter->next->previous = &waiter->next;
+  vfs_record_lock_waiters = waiter;
+  vfs_mount_reference(mount);
+}
+
+static void vfs_record_lock_wake_key(struct vfs_mount *mount,
+                                     const vfs_node_id_t *node) {
+  for (vfs_record_lock_waiter_t *waiter = vfs_record_lock_waiters;
+       waiter != NULL; waiter = waiter->next) {
+    if (waiter->mount == mount && vfs_node_equal(&waiter->node, node))
+      task_run(waiter->task);
+  }
+}
+
+static void vfs_record_lock_wake_mount(struct vfs_mount *mount) {
+  for (vfs_record_lock_waiter_t *waiter = vfs_record_lock_waiters;
+       waiter != NULL; waiter = waiter->next) {
+    if (waiter->mount == mount)
+      task_run(waiter->task);
+  }
+}
+
+static bool vfs_record_lock_conflicts(const vfs_record_lock_t *record,
+                                      uint32_t owner, int16_t type,
+                                      uint64_t start, uint64_t end) {
+  return record->owner != owner &&
+         vfs_record_lock_overlap(record->start, record->end, start, end) &&
+         (type == F_WRLCK || record->type == F_WRLCK);
+}
+
+static int vfs_record_lock_normalize_range(const vfs_handle_t *handle,
+                                           const struct flock *request,
+                                           uint64_t *start_out,
+                                           uint64_t *end_out) {
+  if (request->l_whence != SEEK_SET && request->l_whence != SEEK_CUR &&
+      request->l_whence != SEEK_END) {
+    return VFS_ERROR_INVALID;
+  }
+  int64_t base = request->l_whence == SEEK_SET
+                     ? 0
+                     : request->l_whence == SEEK_CUR
+                           ? (int64_t)handle->offset
+                           : (int64_t)handle->dentry->node.size;
+  if ((request->l_start < 0 && base < (-INT64_MAX - 1) - request->l_start) ||
+      (request->l_start > 0 && base > INT64_MAX - request->l_start)) {
+    return VFS_ERROR_OVERFLOW;
+  }
+  int64_t signed_start = base + request->l_start;
+  if (signed_start < 0) {
+    return VFS_ERROR_INVALID;
+  }
+  uint64_t start = (uint64_t)signed_start;
+  if (request->l_len == 0) {
+    *start_out = start;
+    *end_out = UINT64_MAX;
+    return VFS_OK;
+  }
+  if (request->l_len > 0) {
+    uint64_t length = (uint64_t)request->l_len;
+    if (length > UINT64_MAX - start) {
+      return VFS_ERROR_OVERFLOW;
+    }
+    uint64_t end = start + length;
+    if (end <= start) {
+      return VFS_ERROR_OVERFLOW;
+    }
+    *start_out = start;
+    *end_out = end;
+    return VFS_OK;
+  }
+
+  /* Avoid negating INT64_MIN directly. */
+  uint64_t length = (uint64_t)(-(request->l_len + 1)) + 1;
+  if (length > start) {
+    return VFS_ERROR_INVALID;
+  }
+  *start_out = start - length;
+  *end_out = start;
+  return *start_out < *end_out ? VFS_OK : VFS_ERROR_INVALID;
+}
+
+static void vfs_record_lock_describe(const vfs_record_lock_t *record,
+                                     struct flock *result) {
+  result->l_type = record->type;
+  result->l_whence = SEEK_SET;
+  result->l_start = (int64_t)record->start;
+  result->l_len = record->end == UINT64_MAX
+                      ? 0
+                      : (record->end - record->start > INT64_MAX
+                             ? INT64_MAX
+                             : (int64_t)(record->end - record->start));
+  result->l_pid = (int32_t)record->owner;
+}
+
+/* Remove this owner's overlap with [start,end), retaining the two sides with
+ * nodes allocated before the update began. */
+static void vfs_record_lock_remove_owner_range(
+    struct vfs_mount *mount, const vfs_node_id_t *node, uint32_t owner,
+    uint64_t start, uint64_t end, vfs_record_lock_t **splits) {
+  vfs_record_lock_t *record = vfs_record_locks;
+  while (record != NULL) {
+    vfs_record_lock_t *next = record->next;
+    if (vfs_record_lock_key_equal(record, mount, node) &&
+        record->owner == owner &&
+        vfs_record_lock_overlap(record->start, record->end, start, end)) {
+      bool split = record->start < start && end < record->end;
+      if (split) {
+        vfs_record_lock_t *right = *splits;
+        if (right == NULL)
+          Panic_K("VFS record lock split allocation mismatch");
+        *splits = right->next;
+        *right = *record;
+        right->start = end;
+        right->next = record->next;
+        record->next = right;
+        record->end = start;
+      } else if (start <= record->start && end >= record->end) {
+        vfs_record_lock_unlink(record);
+      } else if (start <= record->start) {
+        record->start = end;
+      } else {
+        record->end = start;
+      }
+    }
+    record = next;
+  }
+}
+
+static void vfs_record_lock_coalesce(struct vfs_mount *mount,
+                                     const vfs_node_id_t *node,
+                                     uint32_t owner) {
+  for (vfs_record_lock_t *left = vfs_record_locks; left != NULL;
+       left = left->next) {
+    if (!vfs_record_lock_key_equal(left, mount, node) || left->owner != owner)
+      continue;
+    for (vfs_record_lock_t *right = left->next; right != NULL;) {
+      vfs_record_lock_t *next = right->next;
+      if (vfs_record_lock_key_equal(right, mount, node) &&
+          right->owner == owner && right->type == left->type &&
+          (left->end >= right->start && right->end >= left->start)) {
+        if (right->start < left->start)
+          left->start = right->start;
+        if (right->end > left->end)
+          left->end = right->end;
+        vfs_record_lock_unlink(right);
+      }
+      right = next;
+    }
+  }
+}
+
+static int vfs_record_lock_apply(struct vfs_mount *mount,
+                                 const vfs_node_id_t *node, uint32_t owner,
+                                 int16_t type, uint64_t start, uint64_t end) {
+  vfs_record_lock_t *splits = NULL;
+  for (vfs_record_lock_t *record = vfs_record_locks; record != NULL;
+       record = record->next) {
+    if (vfs_record_lock_key_equal(record, mount, node) &&
+        record->owner == owner && record->start < start &&
+        end < record->end) {
+      vfs_record_lock_t *split = malloc(sizeof(*split));
+      if (split == NULL) {
+        vfs_record_lock_free_list(splits);
+        return VFS_ERROR_NO_MEMORY;
+      }
+      split->next = splits;
+      splits = split;
+    }
+  }
+
+  vfs_record_lock_t *replacement = NULL;
+  if (type != F_UNLCK) {
+    replacement = malloc(sizeof(*replacement));
+    if (replacement == NULL) {
+      vfs_record_lock_free_list(splits);
+      return VFS_ERROR_NO_MEMORY;
+    }
+  }
+
+  vfs_record_lock_remove_owner_range(mount, node, owner, start, end, &splits);
+  vfs_record_lock_free_list(splits);
+  if (replacement != NULL) {
+    *replacement = (vfs_record_lock_t){.next = vfs_record_locks,
+                                       .mount = mount,
+                                       .node = *node,
+                                       .owner = owner,
+                                       .type = type,
+                                       .start = start,
+                                       .end = end};
+    vfs_record_locks = replacement;
+    vfs_record_lock_coalesce(mount, node, owner);
+  }
+  vfs_record_lock_wake_key(mount, node);
+  return VFS_OK;
+}
+
+static int vfs_record_lock_operation(vfs_handle_t *handle, int command,
+                                      struct flock *request) {
+  if (handle->pipe || handle->dentry == NULL ||
+      handle->dentry->node.type != VFS_NODE_FILE) {
+    return VFS_ERROR_NOT_SEEKABLE;
+  }
+  if (request->l_type != F_RDLCK && request->l_type != F_WRLCK &&
+      request->l_type != F_UNLCK) {
+    return VFS_ERROR_INVALID;
+  }
+  if (request->l_type == F_RDLCK && !(handle->flags & VFS_OPEN_READ))
+    return VFS_ERROR_ACCESS;
+  if (request->l_type == F_WRLCK && !(handle->flags & VFS_OPEN_WRITE))
+    return VFS_ERROR_ACCESS;
+
+  uint64_t start, end;
+  int status = vfs_record_lock_normalize_range(handle, request, &start, &end);
+  if (status < 0)
+    return status;
+  struct vfs_mount *mount = handle->dentry->mount;
+  const vfs_node_id_t *node = &handle->dentry->node.id;
+  uint32_t owner = current_task()->tgid;
+
+  irq_state_t state = irq_save();
+  vfs_record_lock_waiter_t waiter = {.task = current_task()};
+  for (;;) {
+    if (mount->state == VFS_MOUNT_RETIRED) {
+      status = VFS_ERROR_IO;
+      break;
+    }
+    vfs_record_lock_t *conflict = NULL;
+    if (request->l_type != F_UNLCK) {
+      for (vfs_record_lock_t *record = vfs_record_locks; record != NULL;
+           record = record->next) {
+        if (vfs_record_lock_key_equal(record, mount, node) &&
+            vfs_record_lock_conflicts(record, owner, request->l_type, start,
+                                      end)) {
+          conflict = record;
+          break;
+        }
+      }
+    }
+    if (command == F_GETLK) {
+      if (conflict != NULL)
+        vfs_record_lock_describe(conflict, request);
+      else {
+        request->l_type = F_UNLCK;
+        request->l_whence = SEEK_SET;
+        request->l_start = (int64_t)start;
+        request->l_len = end == UINT64_MAX ? 0 : (int64_t)(end - start);
+        request->l_pid = 0;
+      }
+      status = VFS_OK;
+      break;
+    }
+    if (conflict == NULL) {
+      status = vfs_record_lock_apply(mount, node, owner, request->l_type,
+                                     start, end);
+      break;
+    }
+    if (command == F_SETLK ||
+        (current_task()->signals.pending & ~current_task()->signals.blocked)) {
+      status = command == F_SETLK ? VFS_ERROR_AGAIN : VFS_ERROR_INTERRUPTED;
+      break;
+    }
+    if (waiter.previous == NULL)
+      vfs_record_lock_waiter_add(&waiter, mount, node);
+    task_fall_blocked_reason(WAITING, WAIT_REASON_LOCK);
+    if (waiter.previous != NULL)
+      vfs_record_lock_waiter_remove(&waiter);
+  }
+  if (waiter.previous != NULL)
+    vfs_record_lock_waiter_remove(&waiter);
+  irq_restore(state);
+  return status;
+}
+
+static void vfs_record_lock_close(uint32_t owner, vfs_handle_t *handle) {
+  if (handle == NULL || handle->pipe || handle->dentry == NULL)
+    return;
+  struct vfs_mount *mount = handle->dentry->mount;
+  const vfs_node_id_t *node = &handle->dentry->node.id;
+  irq_state_t state = irq_save();
+  vfs_record_lock_t *record = vfs_record_locks;
+  while (record != NULL) {
+    vfs_record_lock_t *next = record->next;
+    if (vfs_record_lock_key_equal(record, mount, node) &&
+        record->owner == owner)
+      vfs_record_lock_unlink(record);
+    record = next;
+  }
+  vfs_record_lock_wake_key(mount, node);
+  irq_restore(state);
+}
+
+void vfs_record_lock_cancel_task(mtask *task) {
+  if (task == NULL)
+    return;
+  irq_state_t state = irq_save();
+  vfs_record_lock_waiter_t *waiter = vfs_record_lock_waiters;
+  while (waiter != NULL) {
+    vfs_record_lock_waiter_t *next = waiter->next;
+    if (waiter->task == task)
+      vfs_record_lock_waiter_remove(waiter);
+    waiter = next;
+  }
+  irq_restore(state);
+}
+
+void vfs_record_lock_task_cleanup(uint32_t owner) {
+  irq_state_t state = irq_save();
+  vfs_record_lock_t *record = vfs_record_locks;
+  while (record != NULL) {
+    vfs_record_lock_t *next = record->next;
+    if (record->owner == owner) {
+      struct vfs_mount *mount = record->mount;
+      vfs_node_id_t node = record->node;
+      vfs_record_lock_unlink(record);
+      vfs_record_lock_wake_key(mount, &node);
+    }
+    record = next;
+  }
+  vfs_record_lock_waiter_t *waiter = vfs_record_lock_waiters;
+  while (waiter != NULL) {
+    vfs_record_lock_waiter_t *next = waiter->next;
+    if (waiter->task != NULL && waiter->task->tgid == owner) {
+      task_run(waiter->task);
+      vfs_record_lock_waiter_remove(waiter);
+    }
+    waiter = next;
+  }
+  irq_restore(state);
+}
+
+static void vfs_record_lock_mount_cleanup(struct vfs_mount *mount) {
+  irq_state_t state = irq_save();
+  vfs_record_lock_t *record = vfs_record_locks;
+  while (record != NULL) {
+    vfs_record_lock_t *next = record->next;
+    if (record->mount == mount)
+      vfs_record_lock_unlink(record);
+    record = next;
+  }
+  vfs_record_lock_wake_mount(mount);
+  irq_restore(state);
 }
 
 static uint32_t vfs_cache_bucket(struct vfs_mount *mount,
@@ -380,6 +796,7 @@ static struct vfs_cache_page *vfs_cache_load(struct vfs_dentry *dentry,
 
 static void vfs_destroy_mount(struct vfs_mount *mount) {
   uint32_t disk_index = mount->disk_number - 'A';
+  vfs_record_lock_mount_cleanup(mount);
   vfs_cache_invalidate_mount(mount);
   if (mount->filesystem->unmount != NULL) {
     mount->filesystem->unmount(mount);
@@ -732,6 +1149,9 @@ static void vfs_fd_table_destroy(struct vfs_fd_table *table) {
   }
   for (uint32_t descriptor = 3; descriptor < table->capacity; descriptor++) {
     if (table->entries[descriptor].handle != NULL) {
+      mtask *task = current_task();
+      vfs_record_lock_close(task == NULL ? 0 : task->tgid,
+                            table->entries[descriptor].handle);
       vfs_close(table->entries[descriptor].handle);
     }
   }
@@ -792,6 +1212,8 @@ void init_vfs(void) {
   memset(vfs_disks, 0, sizeof(vfs_disks));
   vfs_handles = NULL;
   vfs_contexts = NULL;
+  vfs_record_locks = NULL;
+  vfs_record_lock_waiters = NULL;
   vfs_cache_head = NULL;
   vfs_cache_tail = NULL;
   memset(vfs_cache_hash, 0, sizeof(vfs_cache_hash));
@@ -1926,6 +2348,8 @@ int vfs_fd_close(vfs_context_t *context, int descriptor) {
     return VFS_ERROR_BAD_DESCRIPTOR;
   }
   context->descriptors.entries[descriptor] = (vfs_descriptor_t){0};
+  mtask *task = current_task();
+  vfs_record_lock_close(task == NULL ? 0 : task->tgid, handle);
   if (handle->pipe) {
     io_poll_wake(&handle->pipe->readers);
     io_poll_wake(&handle->pipe->writers);
@@ -1972,7 +2396,18 @@ int vfs_fd_fcntl(vfs_context_t *context, int descriptor, int command,
   case F_GETLK:
   case F_SETLK:
   case F_SETLKW:
-    return VFS_ERROR_NOT_SUPPORTED;
+    if (argument == 0)
+      return VFS_ERROR_INVALID;
+    {
+      struct flock request;
+      if (!user_vm_copy_from(&request, argument, sizeof(request)))
+        return VFS_ERROR_INVALID;
+      int status = vfs_record_lock_operation(handle, command, &request);
+      if (status == VFS_OK && command == F_GETLK &&
+          !user_vm_copy_to(argument, &request, sizeof(request)))
+        return VFS_ERROR_INVALID;
+      return status;
+    }
   default:
     return VFS_ERROR_INVALID;
   }

@@ -72,6 +72,9 @@
 #define LONG_LONG_MAX __LONG_LONG_MAX__
 #define LONG_LONG_MIN (-LONG_LONG_MAX-1)
 #define ULONG_LONG_MAX (2ULL * LONG_LONG_MAX + 1)
+#ifndef SSIZE_MAX
+#define SSIZE_MAX __PTRDIFF_MAX__
+#endif
 /* ISO C9x macro names */
 #define LLONG_MAX LONG_LONG_MAX
 #define LLONG_MIN LONG_LONG_MIN

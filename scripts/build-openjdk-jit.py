@@ -1,68 +1,63 @@
 #!/usr/bin/env python3
-"""Build native x86_64 C1/C2 HotSpot using an existing Plant OpenJDK 17 build."""
+"""Configure and build the native x86_64 C1/C2 OpenJDK from pinned sources."""
 import argparse
+import fcntl
+import json
+import os
 from pathlib import Path
-import re
-import shutil
 import subprocess
+from sources import ROOT, Sources, digest, publish
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--build", type=Path, required=True,
-                        help="configured Plant OpenJDK 17 build directory")
-    parser.add_argument("--out", type=Path,
-                        help="JDK image directory (default: BUILD/images/jdk-jit)")
-    parser.add_argument("--jobs", type=int, default=4)
+    parser.add_argument("--build", type=Path, default=ROOT / "apps/out/x86_64/openjdk")
+    parser.add_argument("--jobs", type=int, default=2)
     args = parser.parse_args()
-    build = args.build.resolve()
-    output = (args.out or build / "images/jdk-jit").resolve()
-    spec = dict(re.findall(r"^([A-Z_]+)[ \t]*:=[ \t]*(.*)$",
-                           (build / "spec.gmk").read_text(), re.MULTILINE))
-    if (spec.get("OPENJDK_TARGET_OS_ENV") != "plantos" or
-            spec.get("OPENJDK_TARGET_CPU") != "x86_64" or
-            spec.get("VERSION_FEATURE") != "17"):
-        parser.error("--build must be configured for Plant OS x86_64 OpenJDK 17")
     if args.jobs < 1:
         parser.error("--jobs must be positive")
-    base_image = build / "images/jdk"
-    if not (base_image / "lib/modules").is_file():
-        parser.error("build the base JDK image first; see doc/openjdk.md")
-    if output.is_relative_to(base_image) or base_image.is_relative_to(output):
-        parser.error("--out must be separate from the base JDK image")
-    if output.exists() and not (output / "lib/modules").is_file():
-        parser.error("--out already exists and is not a JDK image")
-    source = Path(spec["TOPDIR"])
-    patches = Path(__file__).resolve().parents[1] / "apps/openjdk/patches"
-    for name in ("plant-x86-hotspot.patch", "plant-launcher-execname.patch",
-                 "plant-process-environment.patch", "plant-nio-paths.patch"):
-        patch_command = ["patch", "--batch", "-p1", "-d", str(source), "-i", str(patches / name)]
-        applicable = subprocess.run([*patch_command, "--dry-run", "--forward"],
-                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if applicable.returncode == 0:
-            subprocess.run([*patch_command, "--forward"], check=True)
-        else:
-            subprocess.run([*patch_command, "--dry-run", "--reverse"], check=True)
-    library_dir = build / "hotspot/variant-server/libjvm"
-    subprocess.run([
-        "make", "-C", str(build), "hotspot-server", "java.base-libs", "JVM_VARIANTS=server",
-        "JVM_VARIANT_MAIN=server", "JVM_FEATURES_server=compiler1 compiler2 serialgc",
-        "HOTSPOT_TARGET_CPU=x86_64", "HOTSPOT_TARGET_CPU_ARCH=x86",
-        f"JVM_LIB_OUTPUTDIR={library_dir}",
-        f"JOBS={args.jobs}",
-    ], check=True)
-    for target in ("java.base-java-only", "java.base-jmod-only", "jdk-image-only"):
-        subprocess.run(["make", "-C", str(build), target, f"JOBS={args.jobs}"], check=True)
-    output.mkdir(parents=True, exist_ok=True)
-    # JDK legal files include read-only files and relative symlinks. Replace
-    # directory entries when updating, rather than writing through those links.
-    subprocess.run(["cp", "-a", "--remove-destination", str(base_image) + "/.", str(output)],
-                   check=True)
-    (output / "lib/server").mkdir(exist_ok=True)
-    shutil.copy2(library_dir / "libjvm.so", output / "lib/server/libjvm.so")
-    (output / "lib/jvm.cfg").write_text("-server KNOWN\n-client IGNORE\n")
-    print(f"Native C1/C2 JDK image: {output}")
-    print("Build success does not establish JIT runtime support; run the guest regressions.")
+    dependencies = Sources(ROOT / "apps/openjdk")
+    source = dependencies["openjdk"].prepare()
+    boot = dependencies["bootjdk"].prepare()
+    apps = ROOT / "apps"
+    runtime = apps / "out/x86_64"
+    build = args.build.resolve()
+    build.mkdir(parents=True, exist_ok=True)
+    with (build / ".build-lock").open("w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        subprocess.run(["make", "-C", str(apps), "-f", "dynamic.mk", "ARCH=x86_64",
+                        f"MESA_JOBS={args.jobs}", "dynamic", f"-j{args.jobs}"], check=True)
+        flags = subprocess.check_output(["make", "-s", "--no-print-directory", "-C", str(apps),
+                                         "-f", "dynamic.mk", "ARCH=x86_64", "print-runtime-flags"], text=True).strip()
+        include = subprocess.check_output(["gcc", "-print-file-name=include"], text=True).strip()
+        flags += f" -nostdinc -I{apps / 'include'} -isystem {include}"
+        cxx = f"-nostdinc++ -I{runtime / 'mesa/libcxx/include/c++/v1'} " + flags + " -fno-exceptions -fno-rtti"
+        options = [
+            "--openjdk-target=x86_64-unknown-plantos", f"--with-boot-jdk={boot}",
+            "--with-jvm-variants=server",
+            "--with-jvm-features=compiler1,compiler2,serialgc,management,nmt,jfr,services,jvmti,"
+            "-cds,-epsilongc,-g1gc,-jni-check,-jvmci,-parallelgc,-shenandoahgc,-vm-structs",
+            "--enable-headless-only", "--with-freetype=bundled", "--disable-precompiled-headers",
+            "--with-native-debug-symbols=none", "--disable-warnings-as-errors",
+            f"--with-extra-cflags={flags}", f"--with-extra-cxxflags={cxx}",
+            f"--with-extra-ldflags=-nostdlib -L{runtime / 'lib'} -Wl,-rpath-link,{runtime / 'lib'} "
+            "-Wl,--no-as-needed -lp -lcpp",
+        ]
+        state = json.dumps({"options": options, "source": digest(source / ".plant-source-sha256"),
+                            "gcc": subprocess.check_output(["gcc", "--version"], text=True),
+                            "script": digest(Path(__file__))}, sort_keys=True)
+        environment = dict(os.environ, PLANT_OPENJDK_BUILD_OS="linux")
+        # OpenJDK manages its own jobserver via JOBS, not inherited make -j.
+        for variable in ("MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES"):
+            environment.pop(variable, None)
+        if not (build / "spec.gmk").exists() or not (build / ".plant-config").exists() or (build / ".plant-config").read_text() != state:
+            subprocess.run(["bash", str(source / "configure"), *options], cwd=build, env=environment, check=True)
+            publish(build / ".plant-config", state)
+        subprocess.run(["make", "-C", str(build), "jdk-image", f"JOBS={args.jobs}"], env=environment, check=True)
+        image = build / "images/jdk"
+        if not (image / "lib/server/libjvm.so").is_file():
+            raise RuntimeError("Server VM image was not produced")
+        print(f"Native C1/C2 JDK image: {image}")
 
 
 if __name__ == "__main__":

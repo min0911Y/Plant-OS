@@ -1,6 +1,7 @@
 #ifndef __FCNTL__
 #define __FCNTL__
 #include <sys/types.h>
+#include <fcntl_abi.h>
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -39,22 +40,6 @@ extern "C" {
 #define F_RDLCK 0
 #define F_WRLCK 1
 #define F_UNLCK 2
-
-struct flock {
-  short l_type;
-  short l_whence;
-  off_t l_start;
-  off_t l_len;
-  pid_t l_pid;
-};
-
-struct flock64 {
-  short l_type;
-  short l_whence;
-  off_t l_start;
-  off_t l_len;
-  pid_t l_pid;
-};
 
 int open(const char *pathname, int flags, ...);
 int fcntl(int descriptor, int command, ...);

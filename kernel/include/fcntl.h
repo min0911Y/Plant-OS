@@ -3,6 +3,8 @@
 #ifndef _KERNEL_FCNTL_H
 #define _KERNEL_FCNTL_H
 
+#include "../../apps/include/fcntl_abi.h"
+
 int open(const char *pathname, int flags, unsigned int mode);
 int close(int fd);
 unsigned int read (int fd, void *buf, unsigned int count);
@@ -35,6 +37,10 @@ int lseek(int fd, int offset, int whence);
 #define F_SETLKW 7
 #define F_DUPFD_CLOEXEC 17
 #define FD_CLOEXEC 1
+
+#define F_RDLCK 0
+#define F_WRLCK 1
+#define F_UNLCK 2
 
 #define F_GETLK64 F_GETLK
 #define F_SETLK64 F_SETLK
