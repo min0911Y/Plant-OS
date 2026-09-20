@@ -18,23 +18,59 @@ enum gui_window_flag {
   GUI_WINDOW_VISIBLE = 1u,
   GUI_WINDOW_FOCUSED = 2u,
   GUI_WINDOW_HOVERED = 4u,
+  GUI_WINDOW_CAPTURED = 8u,
+  GUI_WINDOW_RESIZABLE = 16u,
 };
 
 typedef struct {
   int32_t x, y;
   int32_t cursor_x, cursor_y;
   uint32_t flags;
+  uint32_t width, height;
+  uint32_t requested_width, requested_height;
+  uint32_t buttons;
 } gui_window_state_t;
 
 #define GUI_EVENT_QUEUE_CAPACITY 64u
 
 enum gui_event {
-  GUI_EVENT_MOUSE_STAY = 1,
-  GUI_EVENT_MOUSE_CLICK_LEFT,
-  GUI_EVENT_MOUSE_CLICK_RIGHT,
+  GUI_EVENT_POINTER = 1,
   GUI_EVENT_CLOSE_WINDOW,
-  GUI_EVENT_MOUSE_WHEEL,
 };
+
+/* One atomic record includes motion, all buttons and signed wheel steps. */
+typedef struct {
+  uint32_t type;
+  int32_t x, y, dx, dy, wheel;
+  uint32_t buttons;
+  uint32_t relative;
+} gui_event_t;
+
+typedef struct {
+  uint32_t read, write;
+  gui_event_t data[GUI_EVENT_QUEUE_CAPACITY];
+} gui_pointer_queue_t;
+
+static inline bool gui_pointer_push(gui_pointer_queue_t *queue,
+                                    const gui_event_t *event) {
+  uint32_t write = queue->write;
+  uint32_t read = __atomic_load_n(&queue->read, __ATOMIC_ACQUIRE);
+  if (write - read >= GUI_EVENT_QUEUE_CAPACITY)
+    return false;
+  queue->data[write % GUI_EVENT_QUEUE_CAPACITY] = *event;
+  __atomic_store_n(&queue->write, write + 1, __ATOMIC_RELEASE);
+  return true;
+}
+
+static inline bool gui_pointer_pop(gui_pointer_queue_t *queue,
+                                   gui_event_t *event) {
+  uint32_t read = queue->read;
+  if (read == __atomic_load_n(&queue->write, __ATOMIC_ACQUIRE))
+    return false;
+  *event = queue->data[read % GUI_EVENT_QUEUE_CAPACITY];
+  __atomic_store_n(&queue->read, read + 1, __ATOMIC_RELEASE);
+  return true;
+}
 
 typedef struct {
   volatile uint32_t read;
@@ -59,7 +95,7 @@ typedef struct {
 typedef struct {
   uint32_t state_sequence;
   gui_window_state_t state;
-  gui_event_queue_t events;
+  gui_pointer_queue_t events;
   gui_event_queue_t key_press;
   gui_event_queue_t key_up;
   gui_damage_t damage;
@@ -156,21 +192,6 @@ static inline int gui_event_queue_push2(gui_event_queue_t *queue,
   return 1;
 }
 
-static inline int gui_event_queue_push3(gui_event_queue_t *queue,
-                                        uint32_t first, uint32_t second,
-                                        uint32_t third) {
-  uint32_t write = queue->write;
-  uint32_t read = __atomic_load_n(&queue->read, __ATOMIC_ACQUIRE);
-  if (write - read > GUI_EVENT_QUEUE_CAPACITY - 3) {
-    return 0;
-  }
-  queue->data[write % GUI_EVENT_QUEUE_CAPACITY] = first;
-  queue->data[(write + 1) % GUI_EVENT_QUEUE_CAPACITY] = second;
-  queue->data[(write + 2) % GUI_EVENT_QUEUE_CAPACITY] = third;
-  __atomic_store_n(&queue->write, write + 3, __ATOMIC_RELEASE);
-  return 1;
-}
-
 static inline int gui_event_queue_pop(gui_event_queue_t *queue) {
   uint32_t read = queue->read;
   uint32_t write = __atomic_load_n(&queue->write, __ATOMIC_ACQUIRE);
@@ -198,6 +219,7 @@ enum gui_rpc_opcode {
   GUI_RPC_EVENT_NOTIFICATIONS,
   GUI_RPC_PRESENT_FRAME,
   GUI_RPC_WINDOW_CONTROL,
+  GUI_RPC_RESIZE_WINDOW,
   GUI_RPC_COUNT,
 };
 
@@ -223,7 +245,8 @@ static inline int gui_window_shared_mapping_size(uint32_t width,
 }
 
 /* Two complete planes: the compositor holds front, the client owns front ^ 1.
- * Only a successful frame RPC transfers ownership; events stay at a fixed VA. */
+ * Only a successful frame RPC transfers ownership; resize replaces the mapping.
+ */
 static inline uint32_t *gui_window_pixels(gui_window_shared_t *shared,
                                            uint32_t width, uint32_t height,
                                            unsigned buffer) {
@@ -275,6 +298,7 @@ typedef struct {
 enum gui_window_create_flag {
   GUI_CREATE_HIDDEN = 1u,
   GUI_CREATE_UNFOCUSED = 2u,
+  GUI_CREATE_RESIZABLE = 4u,
 };
 
 enum gui_window_control {
@@ -282,7 +306,22 @@ enum gui_window_control {
   GUI_WINDOW_SHOW,
   GUI_WINDOW_HIDE,
   GUI_WINDOW_FOCUS,
+  GUI_WINDOW_SET_RESIZABLE,
+  GUI_WINDOW_MOUSE_MODE,
 };
+
+enum gui_mouse_mode {
+  GUI_MOUSE_NORMAL = 0,
+  GUI_MOUSE_CAPTURE = 1u,
+  GUI_MOUSE_RELATIVE = 2u,
+  GUI_MOUSE_HIDDEN = 4u,
+  GUI_MOUSE_CONFINED = 8u,
+};
+
+typedef struct {
+  uint32_t window_id, width, height;
+  uintptr_t client_mapping;
+} gui_rpc_resize_request_t;
 
 typedef struct {
   uint32_t window_id;
@@ -293,14 +332,22 @@ typedef struct {
 #ifdef __cplusplus
 static_assert(sizeof(gui_rpc_create_request_t) == (sizeof(uintptr_t) == 8 ? 32 : 28),
               "GUI create request ABI");
-static_assert(sizeof(gui_window_state_t) == 20, "GUI window state ABI");
+static_assert(sizeof(gui_window_state_t) == 40, "GUI window state ABI");
+static_assert(sizeof(gui_event_t) == 32, "GUI event ABI");
+static_assert(sizeof(gui_rpc_resize_request_t) ==
+                  (sizeof(uintptr_t) == 8 ? 24 : 16),
+              "GUI resize request ABI");
 static_assert(sizeof(gui_rpc_window_control_t) == 16, "GUI window control ABI");
 static_assert(sizeof(gui_rpc_event_notifications_t) == 16,
               "GUI event target ABI");
 #else
 _Static_assert(sizeof(gui_rpc_create_request_t) == (sizeof(uintptr_t) == 8 ? 32 : 28),
                "GUI create request ABI");
-_Static_assert(sizeof(gui_window_state_t) == 20, "GUI window state ABI");
+_Static_assert(sizeof(gui_window_state_t) == 40, "GUI window state ABI");
+_Static_assert(sizeof(gui_event_t) == 32, "GUI event ABI");
+_Static_assert(sizeof(gui_rpc_resize_request_t) ==
+                   (sizeof(uintptr_t) == 8 ? 24 : 16),
+               "GUI resize request ABI");
 _Static_assert(sizeof(gui_rpc_window_control_t) == 16,
                "GUI window control ABI");
 _Static_assert(sizeof(gui_rpc_event_notifications_t) == 16,

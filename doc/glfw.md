@@ -15,6 +15,8 @@ make -C kernel ARCH=x86_64 livecd
 先启动 `gui.bin`，再从终端运行 `glfwtest.bin`。程序显示红底蓝色矩形，
 收到 A 的按下/松开及字符、鼠标移动、左键点击和向上滚轮后切换为绿底。
 Escape 或窗口关闭按钮退出。自动回归使用 `--test`，冷启动时自行启动 GUI。
+游戏鼠标体验执行 `glfwtest.bin --capture`：进入客户区自动隐藏并锁定光标，
+移动鼠标转动场景，Esc 释放，左键重新捕获，Q 退出；详见 [GUI 输入](gui-input.md)。
 
 i386 不构建 GLFW，显式请求 `glfw` 或 `glfwtest` 会报不支持架构。
 库和测试程序分别进入 `apps/out/x86_64/lib/` 与 `apps/out/x86_64/`；
@@ -46,9 +48,10 @@ LWJGL 的 Java 平台适配、JNI native 库和联合回归见 [LWJGL 3](lwjgl.m
 
 ## 窗口和输入
 
-支持多个固定大小的有装饰窗口、标题、位置、显隐、聚焦、关闭请求、客户区及
+支持多个可调整大小的有装饰窗口、标题、位置、显隐、聚焦、关闭请求、客户区及
 framebuffer 尺寸查询。隐藏窗口在创建时不显示、不获取焦点；可见但不聚焦的
-窗口使用 `GLFW_FOCUSED = GLFW_FALSE`。创建后的 `GLFW_RESIZABLE` 属性为 false。
+窗口使用 `GLFW_FOCUSED = GLFW_FALSE`。`GLFW_RESIZABLE` 控制边框拖拽，
+`glfwSetWindowSize` 同步更新客户区及 framebuffer 尺寸。
 
 窗口尺寸受 GUI 的共享映射容量、坐标范围和装饰尺寸约束，创建失败返回错误。
 位置和鼠标坐标在 GLFW 中以客户区为基准。监视器分辨率来自 framebuffer；
@@ -71,24 +74,25 @@ IPC 队列；终止时先关闭窗口，再退出并 join 通知线程。
 
 键盘使用 GUI 统一逻辑扫描码，覆盖常用字母、数字、功能键、方向键、修饰键
 和小键盘；按下、松开、重复及字符回调由 GLFW 核心分派。字符转换目前为
-US 键盘布局，没有 IME。鼠标沿用 GUI 的位置、左/右键和垂直滚轮事件。
-GUI 现有分离按下/松开队列及鼠标协议的能力边界仍然存在。
+US 键盘布局，没有 IME。鼠标通过完整事件记录传递位置、五键和垂直滚轮，
+支持隐式捕获、隐藏、相对输入及客户区限制；生命周期见 [GUI 输入与尺寸](gui-input.md)。
+键盘仍使用分离的按下/松开队列。
 
 ## 尚未支持
 
 后端无法执行的操作会报告 GLFW 错误，不伪造平台状态；尺寸约束等 hints
-仍遵循上游对固定大小窗口的忽略规则。当前缺少：
+尚未实现。当前缺少：
 
-- 窗口调整大小、全屏、最大化、独立的最小化状态、无装饰或置顶窗口。
-- 鼠标隐藏、相对捕获、raw motion、warp、自定义光标及系统剪贴板。
+- 窗口尺寸约束、全屏、最大化、独立的最小化状态、无装饰或置顶窗口。
+- raw motion、warp、自定义光标及系统剪贴板。
 - 游戏手柄、拖放、IME、多显示器模式切换与硬件 gamma。
 - OpenGL ES、OSMesa 和 GLFW 的 Vulkan WSI。
 
-箭头光标可用。`glfwRawMouseMotionSupported()` 返回 false，
-`GLFW_CURSOR_DISABLED` 请求失败后仍保持 `GLFW_CURSOR_NORMAL`。
+箭头光标可用。`glfwRawMouseMotionSupported()` 返回 false；
+`GLFW_CURSOR_DISABLED` 使用原生相对捕获，失焦时释放，重新聚焦时恢复。
 GUI 标题栏的原有隐藏按钮表现为窗口隐藏，不宣称独立的最小化状态。
 
-运行 Minecraft 所需的相对鼠标捕获、全屏和其他窗口能力不在本阶段交付中；LWJGL
+全屏及其他未列明的窗口能力尚未实现；LWJGL
 Java/JNI 链路的实际支持范围见 [LWJGL 3](lwjgl.md)。
 没有执行完整 GLFW 一致性测试，也未宣称所有 GLFW 平台功能可用。
 
@@ -108,7 +112,7 @@ python3 scripts/test-x86_64.py --glfw --firmware uefi --accel kvm --cpu host \
 - 平台和显示枚举、单调计时、超时等待、跨线程唤醒及应用 IPC 消息保留。
 - 窗口与字符串、EGL 配置数组分配失败，连续上下文创建失败后的资源回收。
 - OpenGL 3.3 core context、GL 入口查询、跨线程共享纹理及 context TLS 隔离。
-- 隐藏共享窗口不抢焦点、窗口移动和显隐、拒绝不支持的捕获模式。
+- 隐藏共享窗口不抢焦点、窗口移动和显隐、相对捕获模式及尺寸调整。
 - 两帧 GL 读回校验和；宿主截取实际客户区，逐字节核对像素并检查颜色面积。
 - QMP 投递真实 A 键、左键、移动、滚轮和关闭按钮，确认事件驱动画面变化。
 - 关闭后的 GLFW 重复初始化与终止。

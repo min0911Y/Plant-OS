@@ -175,7 +175,7 @@ flanterm 自己处理 ANSI/VT100，默认 TTY 不再经过内核旧解析器。G
 
 在系统中先运行 `gui.bin`，再从 GUI 终端运行 `lite.bin` 或 `nk.bin`。Doom 与 WAD 位于 `/games`，可在该目录运行 `doom.bin`。SDL 软件 surface 直接写 GUI 提供的共享绘图缓冲，pitch 包含窗口边框；GUI 保留独立的已提交画面用于合成和遮挡恢复。Present 只按行复制 damage，并等刷新 RPC 应答后才复用共享绘图缓冲，避免 nk 清屏或绘制中的半成品帧被显示。SDL 不再额外持有第三份像素缓冲。普通 `window_refresh` 仍可合并异步更新；需要完整帧边界的程序使用 `window_present`。显示尺寸通过 `framebuffer_info()` 查询，SDL 不请求 BIOS 模式切换。每个窗口独立处理键盘前缀和鼠标状态，支持文字、方向键、滚轮、标题更新与关闭。
 
-当前支持软件渲染、字体、图片、键鼠、文件/内存 IOStream 及纳秒性能计时；窗口尺寸固定。x86_64 另提供原生 lavapipe Vulkan renderer 和 GUI swapchain，常规 renderer 应用选择 SDL 默认后端；窗口 surface 默认保留直接共享缓冲路径。Vulkan 的构建、单一 ICD 接口和像素验证见 [lavapipe](lavapipe.md)。x86_64 OpenGL 使用原生 EGL 和 llvmpipe，经典 glxgears 与上下文验证见 [OpenGL](opengl.md)。音频设备、SDL 自身的线程后端和 `SDL_AddTimer` 异步回调尚未实现，Mesa 使用独立的原生 pthread 能力。SDL3 不再使用 `SDL_INIT_TIMER`；`SDL_GetTicks` 返回 64 位毫秒，`SDL_GetTicksNS` 和性能计数器返回纳秒。延时调用转换为内核阻塞 sleep。
+当前支持软件渲染、字体、图片、键鼠、文件/内存 IOStream 及纳秒性能计时；支持可调整窗口尺寸、捕获与相对鼠标输入，接口和生命周期见 [GUI 输入与尺寸](gui-input.md)。x86_64 另提供原生 lavapipe Vulkan renderer 和 GUI swapchain，常规 renderer 应用选择 SDL 默认后端；窗口 surface 默认保留直接共享缓冲路径。Vulkan 的构建、单一 ICD 接口和像素验证见 [lavapipe](lavapipe.md)。x86_64 OpenGL 使用原生 EGL 和 llvmpipe，经典 glxgears 与上下文验证见 [OpenGL](opengl.md)。音频设备、SDL 自身的线程后端和 `SDL_AddTimer` 异步回调尚未实现，Mesa 使用独立的原生 pthread 能力。SDL3 不再使用 `SDL_INIT_TIMER`；`SDL_GetTicks` 返回 64 位毫秒，`SDL_GetTicksNS` 和性能计数器返回纳秒。延时调用转换为内核阻塞 sleep。
 
 SDL3 操作普遍以 `true` 表示成功，窗口事件直接使用 `SDL_EVENT_WINDOW_*`，鼠标坐标为浮点数。文本输入按窗口显式开启，字体接口统一接收 UTF-8；i386 非 ASCII 字面量须显式保留 UTF-8 字节。SDL3 的文本/拖放事件字符串由 SDL 管理，不能保留到下一次事件泵或自行释放。nk 顶点颜色使用浮点 RGBA。初始窗口坐标通过 `SDL_CreateWindowWithProperties` 设置，不依赖创建后移动。
 

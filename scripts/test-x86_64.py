@@ -732,7 +732,7 @@ def main():
             commands += [f"psh.bin -c remount_drive {drive}:", f"dktest.bin --lfn {drive}:"]
         expected = ["DKTEST PASS", "LFNTEST PASS"]
     if args.mouse:
-        expected.append("GUIMOUSE PASS events=15")
+        expected.extend(["GUIMOUSE PASS events=15", "GUIINTERACT PASS"])
     if args.gui_frames:
         commands = ["guitest.bin frames"]
         expected = ["GUIFRAME PASS"]
@@ -822,8 +822,8 @@ def main():
     if args.glfw:
         if not native:
             parser.error("--glfw requires x86_64")
-        commands = ["glfwtest.bin --test"]
-        expected = ["GLFWTEST PASS"]
+        commands = ["glfwtest.bin --test", "glfwtest.bin --capture-test"]
+        expected = ["GLFWTEST PASS", "GAMECAPTURE PASS"]
     if args.opengl:
         if not native:
             parser.error("--opengl requires x86_64")
@@ -1100,6 +1100,7 @@ def main():
                     deadline = time.monotonic() + args.timeout
                     mouse_sent = False
                     frames_checked = set()
+                    interaction_steps = set()
                     app_started = None
                     app_closed = False
                     usb_steps = set()
@@ -1212,6 +1213,24 @@ def main():
                                         qmp.move(focus_x - width // 2, focus_y - height // 2)
                                         qmp.press("btn", button="left")
                                         qmp.move(width // 2 - focus_x, height // 2 - focus_y)
+                                        client_w, client_h = int(width * 0.8), int(height * 0.8)
+                                        left, top = (width - client_w) // 2, (height - client_h) // 2
+                                        edge_x, edge_y = left + client_w + 6, top + client_h + 26
+                                        qmp.move(edge_x - width // 2, edge_y - height // 2)
+                                        for dx, dy in ((-80, -60), (80, 60)):
+                                            qmp.execute("input-send-event", events=[
+                                                {"type": "btn", "data": {"button": "left", "down": True}}])
+                                            time.sleep(0.2)
+                                            qmp.move(dx, dy)
+                                            qmp.execute("input-send-event", events=[
+                                                {"type": "btn", "data": {"button": "left", "down": False}}])
+                                            client_w += dx
+                                            time.sleep(0.5)
+                                            _, _, resized = qmp.screenshot(output / f"lite-resize-{dx}.ppm")
+                                            border = ((top + 40) * width + left + client_w + 7) * 3
+                                            if resized[border:border + 3] != bytes(3):
+                                                raise RuntimeError("Lite did not resize its native window")
+                                        qmp.move(width // 2 - edge_x, height // 2 - edge_y)
                                         qmp.chord("ctrl", "end")
                                         qmp.press("key", key={"type": "qcode", "data": "a"})
                                         qmp.chord("ctrl", "s")
@@ -1401,6 +1420,51 @@ def main():
                                 frames_checked.add(phase)
                             finally:
                                 qmp.close()
+                        if args.glfw and "GAMECAPTURE READY" in text and "game-ready" not in frames_checked:
+                            qmp = QMP(qmp_path)
+                            try:
+                                width, height, _ = qmp.screenshot(output / "game-before.ppm")
+                                qmp.move(-width * 2, -height * 2)
+                                qmp.move(0, 112 + 19)
+                                qmp.execute("input-send-event", events=[
+                                    {"type": "rel", "data": {"axis": "x", "value": 112}}])
+                                frames_checked.add("game-ready")
+                            finally:
+                                qmp.close()
+                        for phase, checksum in re.findall(r"GAMECAPTURE FRAME phase=(\d+) hash=([0-9a-f]+)", text):
+                            if not args.glfw or "game-" + phase in frames_checked:
+                                continue
+                            qmp = QMP(qmp_path)
+                            try:
+                                width, height, pixels = qmp.screenshot(output / f"game-{phase}.ppm")
+                                client = b"".join(pixels[((80 + row) * width + 64) * 3:
+                                                        ((80 + row) * width + 544) * 3]
+                                                  for row in range(320))
+                                actual = 2166136261
+                                for byte in client:
+                                    actual = ((actual ^ byte) * 16777619) & 0xffffffff
+                                if phase != "2" and actual != int(checksum, 16):
+                                    raise RuntimeError("Game capture cursor is visible or framebuffer differs")
+                                if phase == "0":
+                                    (output / "game-initial.rgb").write_bytes(client)
+                                    qmp.move(1400, -900)
+                                elif phase == "1":
+                                    if client == (output / "game-initial.rgb").read_bytes():
+                                        raise RuntimeError("Relative mouse input did not change the view")
+                                    (output / "game-moved.rgb").write_bytes(client)
+                                    qmp.press("key", key={"type": "qcode", "data": "esc"})
+                                else:
+                                    previous = (output / "game-moved.rgb").read_bytes()
+                                    changed = [i // 3 for i in range(0, len(client), 3)
+                                               if client[i:i + 3] != previous[i:i + 3]]
+                                    if not changed or any(not (32 <= i % 480 < 48 and 32 <= i // 480 < 51)
+                                                          for i in changed):
+                                        raise RuntimeError("Escape did not restore the cursor at its locked position")
+                                    qmp.press("key", key={"type": "qcode", "data": "q"})
+                                    print("Game capture PASS: hidden cursor, unbounded relative look, Escape release", flush=True)
+                                frames_checked.add("game-" + phase)
+                            finally:
+                                qmp.close()
                         for phase, left, top, client_width, client_height, checksum in re.findall(
                                 r"GLXGEARS FRAME phase=(\d+) x=(-?\d+) y=(-?\d+) width=(\d+) height=(\d+) hash=([0-9a-f]+)", text):
                             if not args.opengl or phase in frames_checked:
@@ -1525,6 +1589,42 @@ def main():
                             target = tuple(map(int, mouse.group(3, 4)))
                             exercise_mouse(qmp_path, origin, target, output)
                             mouse_sent = True
+                        if args.mouse:
+                            for phase in ("CAPTURE", "RELATIVE", "RESIZE", "PIXELS"):
+                                if f"GUIINTERACT {phase} READY" not in text or phase in interaction_steps:
+                                    continue
+                                qmp = QMP(qmp_path)
+                                try:
+                                    if phase == "CAPTURE":
+                                        qmp.execute("input-send-event", events=[
+                                            {"type": "btn", "data": {"button": b, "down": True}}
+                                            for b in ("left", "right")])
+                                        time.sleep(0.2)
+                                        qmp.move(300, 180)
+                                        qmp.execute("input-send-event", events=[
+                                            {"type": "btn", "data": {"button": b, "down": False}}
+                                            for b in ("left", "right")])
+                                    elif phase == "RELATIVE":
+                                        qmp.move(1400, -900)
+                                    elif phase == "RESIZE":
+                                        qmp.move(362 - 428, 282 - 308)
+                                        qmp.execute("input-send-event", events=[
+                                            {"type": "btn", "data": {"button": "left", "down": True}}])
+                                        time.sleep(0.2)
+                                        qmp.move(40, 30)
+                                        qmp.execute("input-send-event", events=[
+                                            {"type": "btn", "data": {"button": "left", "down": False}}])
+                                    else:
+                                        width, _, pixels = qmp.screenshot(output / "gui-resized.ppm")
+                                        for y in range(88, 310):
+                                            row = pixels[(y * width + 68) * 3:(y * width + 400) * 3]
+                                            if row != bytes((0x30, 0xa0, 0x60)) * 332:
+                                                raise RuntimeError("resized client pixels do not match")
+                                        qmp.press("key", key={"type": "qcode", "data": "spc"})
+                                        print("GUI resize PASS: full resized client pixels verified", flush=True)
+                                    interaction_steps.add(phase)
+                                finally:
+                                    qmp.close()
                         completed = "init: run psh.bin\n" in text
                         if shutdown_after and "acpi: entering S5" in text:
                             qmp = QMP(qmp_path)

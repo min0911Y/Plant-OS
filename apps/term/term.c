@@ -262,13 +262,12 @@ static void shell_task(uintptr_t unused) {
 static int terminal_run(void) {
   unsigned last_frame = (unsigned)clock() - FRAME_MS;
   while (!__atomic_load_n(&term.shell_finished, __ATOMIC_ACQUIRE)) {
-    int event;
-    while ((event = window_get_event(term.window)) >= 0) {
-      if (event == GUI_EVENT_CLOSE_WINDOW)
+    gui_event_t event;
+    while (window_get_event(term.window, &event) > 0) {
+      if (event.type == GUI_EVENT_CLOSE_WINDOW)
         return 0;
-      uint32_t coordinates = window_get_event(term.window);
-      int x = (int16_t)(coordinates >> 16) - BORDER;
-      int y = (int16_t)coordinates - TITLE_HEIGHT;
+      int x = event.x - BORDER;
+      int y = event.y - TITLE_HEIGHT;
       int width = term.width - 2 * BORDER;
       int height = term.height - TITLE_HEIGHT - BORDER;
       if (x >= 0 && y >= 0 && x < width && y < height) {
@@ -276,9 +275,8 @@ static int terminal_run(void) {
         term.pointer.row = (int64_t)y * term.rows / height + 1;
         term.pointer_valid = true;
       }
-      if (event == GUI_EVENT_MOUSE_WHEEL) {
-        int direction = window_get_event(term.window);
-        terminal_handle_mouse_scroll(term.emulator, direction == 1 ? 1 : -1);
+      if (event.wheel) {
+        terminal_handle_mouse_scroll(term.emulator, event.wheel);
         term.dirty = true;
       }
     }

@@ -211,6 +211,58 @@ static EGLBoolean plant_destroy_context(_EGLDisplay *display,
   return EGL_TRUE;
 }
 
+/* Allocate all attachments before replacing the live framebuffer. Existing
+ * GL references retain their resources until the state tracker revalidates. */
+static bool surface_resize(struct plant_surface *surface, unsigned width,
+                           unsigned height) {
+  if (surface->base.Width == width && surface->base.Height == height &&
+      surface->textures[ST_ATTACHMENT_FRONT_LEFT])
+    return true;
+  if (width > surface->base.Config->MaxPbufferWidth ||
+      height > surface->base.Config->MaxPbufferHeight)
+    return false;
+  struct pipe_resource *textures[ST_ATTACHMENT_COUNT] = {0};
+  struct pipe_screen *screen = surface->drawable.fscreen->screen;
+  struct pipe_resource resource = {.target = PIPE_TEXTURE_2D,
+                                   .width0 = MAX2(width, 1),
+                                   .height0 = MAX2(height, 1),
+                                   .depth0 = 1,
+                                   .array_size = 1};
+  for (unsigned i = 0; i < ST_ATTACHMENT_COUNT; i++) {
+    if (!(surface->visual.buffer_mask & (1u << i)))
+      continue;
+    bool depth = i == ST_ATTACHMENT_DEPTH_STENCIL;
+    resource.format = depth ? surface->visual.depth_stencil_format
+                            : surface->visual.color_format;
+    resource.bind = depth ? PIPE_BIND_DEPTH_STENCIL : PIPE_BIND_RENDER_TARGET;
+    textures[i] = screen->resource_create(screen, &resource);
+    if (!textures[i]) {
+      for (unsigned j = 0; j < ST_ATTACHMENT_COUNT; j++)
+        pipe_resource_reference(&textures[j], NULL);
+      return false;
+    }
+  }
+  for (unsigned i = 0; i < ST_ATTACHMENT_COUNT; i++) {
+    pipe_resource_reference(&surface->textures[i], NULL);
+    surface->textures[i] = textures[i];
+  }
+  surface->base.Width = width;
+  surface->base.Height = height;
+  p_atomic_inc(&surface->drawable.stamp);
+  return true;
+}
+
+static bool surface_sync(_EGLSurface *base) {
+  if (!base || base->Type != EGL_WINDOW_BIT)
+    return true;
+  struct plant_surface *surface = (void *)base;
+  const struct plant_egl_window *window = base->NativeSurface;
+  if (!surface_resize(surface, window->width, window->height))
+    return false;
+  surface->window = *window;
+  return true;
+}
+
 static bool surface_validate(struct st_context *st,
                              struct pipe_frontend_drawable *drawable,
                              const enum st_attachment_type *attachments,
@@ -314,25 +366,8 @@ static _EGLSurface *create_surface(_EGLDisplay *display, _EGLConfig *config,
       .validate = surface_validate,
       .flush_front = surface_flush_front,
   };
-  struct pipe_resource resource = {
-      .target = PIPE_TEXTURE_2D,
-      .width0 = MAX2(base->Width, 1),
-      .height0 = MAX2(base->Height, 1),
-      .depth0 = 1,
-      .array_size = 1,
-  };
-  struct pipe_screen *screen = native->frontend.screen;
-  for (unsigned i = 0; i < ST_ATTACHMENT_COUNT; i++) {
-    if (!(surface->visual.buffer_mask & (1u << i)))
-      continue;
-    bool depth = i == ST_ATTACHMENT_DEPTH_STENCIL;
-    resource.format = depth ? surface->visual.depth_stencil_format
-                            : surface->visual.color_format;
-    resource.bind = depth ? PIPE_BIND_DEPTH_STENCIL : PIPE_BIND_RENDER_TARGET;
-    surface->textures[i] = screen->resource_create(screen, &resource);
-    if (!surface->textures[i])
-      goto fail;
-  }
+  if (!surface_resize(surface, base->Width, base->Height))
+    goto fail;
   p_atomic_inc(&native->references);
   return base;
 fail:
@@ -357,6 +392,8 @@ static _EGLSurface *plant_create_pbuffer(_EGLDisplay *display,
 
 static bool bind_context(_EGLContext *context, _EGLSurface *draw,
                          _EGLSurface *read) {
+  if (!surface_sync(draw) || !surface_sync(read))
+    return false;
   return st_api_make_current(
       context ? ((struct plant_context *)context)->st : NULL,
       draw ? &((struct plant_surface *)draw)->drawable : NULL,
@@ -407,6 +444,11 @@ static EGLBoolean plant_make_current(_EGLDisplay *display, _EGLSurface *draw,
 static EGLBoolean plant_swap_buffers(_EGLDisplay *display, _EGLSurface *base) {
   struct plant_surface *surface = (void *)base;
   struct st_context *st = ((struct plant_context *)base->CurrentContext)->st;
+  int32_t stamp = p_atomic_read(&surface->drawable.stamp);
+  if (!surface_sync(base))
+    return _eglError(EGL_BAD_ALLOC, "EGL resized framebuffer");
+  if (stamp != p_atomic_read(&surface->drawable.stamp))
+    st_context_invalidate_state(st, ST_INVALIDATE_FB_STATE);
   struct pipe_fence_handle *fence = NULL;
   st_context_flush(st, ST_FLUSH_WAIT | ST_FLUSH_END_OF_FRAME, &fence, NULL,
                    NULL);
@@ -435,9 +477,17 @@ static EGLBoolean plant_wait_client(_EGLDisplay *display,
 }
 
 static EGLBoolean plant_wait_native(EGLint engine) {
-  return engine == EGL_CORE_NATIVE_ENGINE
-             ? EGL_TRUE
-             : _eglError(EGL_BAD_PARAMETER, "eglWaitNative");
+  if (engine != EGL_CORE_NATIVE_ENGINE)
+    return _eglError(EGL_BAD_PARAMETER, "eglWaitNative");
+  _EGLContext *context = _eglGetCurrentContext();
+  if (context) {
+    if (!surface_sync(context->DrawSurface) ||
+        !surface_sync(context->ReadSurface))
+      return _eglError(EGL_BAD_ALLOC, "EGL resized framebuffer");
+    st_context_invalidate_state(((struct plant_context *)context)->st,
+                                ST_INVALIDATE_FB_STATE);
+  }
+  return EGL_TRUE;
 }
 
 static EGLBoolean plant_copy_buffers(_EGLDisplay *display, _EGLSurface *surface,

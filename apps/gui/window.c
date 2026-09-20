@@ -51,6 +51,7 @@ void hide_window(window_t *window) {
     return;
   }
   bool focused = window->desktop->focused_window == window;
+  gui_mouse_release(window);
   window->using1 = false;
   sheet_updown(window->sht, -1);
   if (focused) {
@@ -79,45 +80,42 @@ void puts_window(window_t *window, char *s, int x, int y, color_t color) {
   Sputs(window->vram, s, x, y, color, window->xsize);
   sheet_refresh(window->sht, x, y, x + strlen(s) * 8, y + 16);
 }
-extern void (*drop)();
-window_t *backup_w;
-void w_drop() {
-  backup_w->x += mouse_event.x;
-  backup_w->y += mouse_event.y;
-  sheet_slide(backup_w->sht, backup_w->x, backup_w->y);
-  gui_update_window_states(backup_w->desktop);
-}
-void handle_left_window(window_t *window, gmouse_t *gmouse) {
+void handle_left_window(window_t *window, gmouse_t *mouse) {
   if (!window->using1)
     return;
   window_focus(window);
-  if (Collision(window->x + 3, window->y + 3, window->xsize - 37, 20, gmouse->x,
-                gmouse->y)) {
-    // 移动
-    backup_w = window;
-    drop = w_drop;
-    w_drop();
+  int x = mouse->x - window->x, y = mouse->y - window->y;
+  mouse->target = window;
+  mouse->gesture = GUI_GESTURE_CLIENT;
+  mouse->anchor_x = mouse->x;
+  mouse->anchor_y = mouse->y;
+  mouse->initial_width = window->xsize;
+  mouse->initial_height = window->ysize;
+  mouse->resize_axes =
+      (x >= window->xsize - 4 ? 1u : 0u) | (y >= window->ysize - 4 ? 2u : 0u);
+  if (window->resizable && mouse->resize_axes) {
+    mouse->gesture = GUI_GESTURE_RESIZE;
     return;
-  } else if (Collision(window->x + window->xsize - 21, window->y + 5, 16, 19,
-                       gmouse->x, gmouse->y)) {
-    // 关闭
+  }
+  if (Collision(window->x + 3, window->y + 3, window->xsize - 40, 20, mouse->x,
+                mouse->y)) {
+    mouse->gesture = GUI_GESTURE_MOVE;
+    return;
+  }
+  if (Collision(window->x + window->xsize - 21, window->y + 5, 16, 14, mouse->x,
+                mouse->y)) {
+    mouse->target = NULL;
+    mouse->gesture = GUI_GESTURE_NONE;
     window->close(window);
-    // printk("You close a window.\n");
     return;
-  } else if (Collision(window->x + window->xsize - 37, window->y + 5, 16, 19,
-                       gmouse->x, gmouse->y)) {
+  }
+  if (Collision(window->x + window->xsize - 37, window->y + 5, 16, 14, mouse->x,
+                mouse->y)) {
     window->hide(window);
-    // printk("You hide a window.\n");
     return;
   }
-  if (window->super_window != NULL) {
-    if (window->super_window->handle_left != NULL) {
-      window->super_window->handle_left(window, gmouse);
-    }
-  }
-  if (window->handle_client_left) {
-    window->handle_client_left(window, gmouse);
-  }
+  if (window->super_window && window->super_window->handle_left)
+    window->super_window->handle_left(window, mouse);
 }
 
 static void window_draw_title(window_t *window) {
@@ -246,10 +244,6 @@ window_t *create_window(desktop_t *desktop, const char *title, int xsize,
   res->draw = draw_window;
   res->puts = puts_window;
   res->handle_left = handle_left_window;
-  res->handle_client_left = NULL;
-  res->handle_right = NULL;
-  res->handle_stay = NULL;
-  res->handle_mouse_wheel = NULL;
   res->close = close_window;
   res->super_window = NULL;
   res->keyboard_events = false;
@@ -266,19 +260,26 @@ window_t *create_window(desktop_t *desktop, const char *title, int xsize,
 
   sheet_setbuf(res->sht, res->vram, xsize, ysize, -1);
 
-  boxfill(res->vram, xsize, COL_C6C6C6, 0, 0, xsize - 1, 0);
-  boxfill(res->vram, xsize, COL_FFFFFF, 1, 1, xsize - 2, 1);
-  boxfill(res->vram, xsize, COL_C6C6C6, 0, 0, 0, ysize - 1);
-  boxfill(res->vram, xsize, COL_FFFFFF, 1, 1, 1, ysize - 2);
-  boxfill(res->vram, xsize, COL_848484, xsize - 2, 1, xsize - 2, ysize - 2);
-  boxfill(res->vram, xsize, COL_000000, xsize - 1, 0, xsize - 1, ysize - 1);
-  boxfill(res->vram, xsize, COL_C6C6C6, 2, 2, xsize - 3, ysize - 3);
-
-  boxfill(res->vram, xsize, COL_848484, 1, ysize - 2, xsize - 2, ysize - 2);
-  boxfill(res->vram, xsize, COL_000000, 0, ysize - 1, xsize - 1, ysize - 1);
-
-  window_draw_title(res);
+  window_draw_frame(res);
+  res->requested_width = xsize;
+  res->requested_height = ysize;
   return res;
+}
+
+void window_draw_frame(window_t *window) {
+  int xsize = window->xsize, ysize = window->ysize;
+  boxfill(window->vram, xsize, COL_C6C6C6, 0, 0, xsize - 1, 0);
+  boxfill(window->vram, xsize, COL_FFFFFF, 1, 1, xsize - 2, 1);
+  boxfill(window->vram, xsize, COL_C6C6C6, 0, 0, 0, ysize - 1);
+  boxfill(window->vram, xsize, COL_FFFFFF, 1, 1, 1, ysize - 2);
+  boxfill(window->vram, xsize, COL_848484, xsize - 2, 1, xsize - 2, ysize - 2);
+  boxfill(window->vram, xsize, COL_000000, xsize - 1, 0, xsize - 1, ysize - 1);
+  boxfill(window->vram, xsize, COL_C6C6C6, 2, 2, xsize - 3, ysize - 3);
+
+  boxfill(window->vram, xsize, COL_848484, 1, ysize - 2, xsize - 2, ysize - 2);
+  boxfill(window->vram, xsize, COL_000000, 0, ysize - 1, xsize - 1, ysize - 1);
+
+  window_draw_title(window);
 }
 
 void destroy_window(window_t *window) {
@@ -286,10 +287,7 @@ void destroy_window(window_t *window) {
     return;
   }
   bool focused = window->desktop->focused_window == window;
-  if (backup_w == window) {
-    drop = NULL;
-    backup_w = NULL;
-  }
+  gui_mouse_release(window);
   for (List *entry = window->desktop->window_list->next; entry != NULL;
        entry = entry->next) {
     if (entry->val == (uintptr_t)window) {

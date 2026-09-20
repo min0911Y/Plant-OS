@@ -140,6 +140,7 @@ typedef const GLubyte* (APIENTRY * PFNGLGETSTRINGIPROC)(GLenum,GLuint);
 #define EGL_SAMPLES 0x3031
 #define EGL_OPENGL_ES_API 0x30a0
 #define EGL_OPENGL_API 0x30a2
+#define EGL_CORE_NATIVE_ENGINE 0x305b
 #define EGL_NONE 0x3038
 #define EGL_RENDER_BUFFER 0x3086
 #define EGL_SINGLE_BUFFER 0x3085
@@ -207,6 +208,7 @@ typedef EGLBoolean (APIENTRY * PFN_eglDestroyContext)(EGLDisplay,EGLContext);
 typedef EGLSurface (APIENTRY * PFN_eglCreateWindowSurface)(EGLDisplay,EGLConfig,EGLNativeWindowType,const EGLint*);
 typedef EGLBoolean (APIENTRY * PFN_eglMakeCurrent)(EGLDisplay,EGLSurface,EGLSurface,EGLContext);
 typedef EGLBoolean (APIENTRY * PFN_eglSwapBuffers)(EGLDisplay,EGLSurface);
+typedef EGLBoolean (APIENTRY * PFN_eglWaitNative)(EGLint);
 typedef EGLBoolean (APIENTRY * PFN_eglSwapInterval)(EGLDisplay,EGLint);
 typedef const char* (APIENTRY * PFN_eglQueryString)(EGLDisplay,EGLint);
 typedef GLFWglproc (APIENTRY * PFN_eglGetProcAddress)(const char*);
@@ -224,6 +226,7 @@ typedef GLFWglproc (APIENTRY * PFN_eglGetProcAddress)(const char*);
 #define eglMakeCurrent _glfw.egl.MakeCurrent
 #define eglSwapBuffers _glfw.egl.SwapBuffers
 #define eglSwapInterval _glfw.egl.SwapInterval
+#define eglWaitNative _glfw.egl.WaitNative
 #define eglQueryString _glfw.egl.QueryString
 #define eglGetProcAddress _glfw.egl.GetProcAddress
 
@@ -828,6 +831,7 @@ struct _GLFWlibrary
         PFN_eglMakeCurrent          MakeCurrent;
         PFN_eglSwapBuffers          SwapBuffers;
         PFN_eglSwapInterval         SwapInterval;
+        PFN_eglWaitNative           WaitNative;
         PFN_eglQueryString          QueryString;
         PFN_eglGetProcAddress       GetProcAddress;
 

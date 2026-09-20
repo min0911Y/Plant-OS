@@ -10,6 +10,7 @@ struct plant_surface {
   VkIcdSurfaceBase base;
   window_t window;
   VkRect2D client;
+  VkExtent2D margin;
 };
 
 struct plant_image {
@@ -27,15 +28,18 @@ struct plant_swapchain {
   struct plant_image images[];
 };
 
-static bool surface_buffer(const struct plant_surface *surface,
+static bool surface_buffer(struct plant_surface *surface,
                            window_buffer_t *buffer) {
-  const VkRect2D *r = &surface->client;
-  return window_get_buffer(surface->window, buffer) == 0 && r->offset.x >= 0 &&
-         r->offset.y >= 0 && (uint32_t)r->offset.x < buffer->width &&
-         (uint32_t)r->offset.y < buffer->height && r->extent.width &&
-         r->extent.height && r->extent.width <= buffer->width - r->offset.x &&
-         r->extent.height <= buffer->height - r->offset.y &&
-         buffer->width <= INT16_MAX && buffer->height <= INT16_MAX;
+  VkRect2D *r = &surface->client;
+  if (window_get_buffer(surface->window, buffer) != 0 || r->offset.x < 0 ||
+      r->offset.y < 0 || buffer->width > INT16_MAX ||
+      buffer->height > INT16_MAX ||
+      (uint32_t)r->offset.x + surface->margin.width >= buffer->width ||
+      (uint32_t)r->offset.y + surface->margin.height >= buffer->height)
+    return false;
+  r->extent.width = buffer->width - r->offset.x - surface->margin.width;
+  r->extent.height = buffer->height - r->offset.y - surface->margin.height;
+  return true;
 }
 
 VkResult plant_vulkan_create_surface(VkInstance handle, window_t window,
@@ -52,6 +56,16 @@ VkResult plant_vulkan_create_surface(VkInstance handle, window_t window,
       .client = *client,
   };
   window_buffer_t buffer;
+  if (window_get_buffer(window, &buffer) != 0 || client->offset.x < 0 ||
+      client->offset.y < 0 || !client->extent.width || !client->extent.height ||
+      (uint32_t)client->offset.x >= buffer.width ||
+      (uint32_t)client->offset.y >= buffer.height ||
+      client->extent.width > buffer.width - client->offset.x ||
+      client->extent.height > buffer.height - client->offset.y)
+    return VK_ERROR_SURFACE_LOST_KHR;
+  value.margin =
+      (VkExtent2D){buffer.width - client->offset.x - client->extent.width,
+                   buffer.height - client->offset.y - client->extent.height};
   if (!surface_buffer(&value, &buffer))
     return VK_ERROR_SURFACE_LOST_KHR;
   struct plant_surface *surface =
@@ -156,6 +170,9 @@ static VkResult surface_rectangles(VkIcdSurfaceBase *base,
                                    struct wsi_device *wsi, uint32_t *count,
                                    VkRect2D *rectangles) {
   struct plant_surface *surface = (struct plant_surface *)base;
+  window_buffer_t buffer;
+  if (!surface_buffer(surface, &buffer))
+    return VK_ERROR_SURFACE_LOST_KHR;
   VK_OUTARRAY_MAKE_TYPED(VkRect2D, output, rectangles, count);
   vk_outarray_append_typed(VkRect2D, &output, item) {
     *item = (VkRect2D){.extent = surface->client.extent};
@@ -227,9 +244,13 @@ static VkResult swapchain_present(struct wsi_swapchain *base, uint32_t index,
   const VkRect2D *r = &chain->surface.client;
   window_buffer_t buffer;
   mtx_lock(&chain->mutex);
+  VkExtent2D extent = r->extent;
   if (chain->status == VK_SUCCESS) {
     if (!surface_buffer(&chain->surface, &buffer) || !image->cpu_map) {
       chain->status = VK_ERROR_SURFACE_LOST_KHR;
+    } else if (extent.width != r->extent.width ||
+               extent.height != r->extent.height) {
+      chain->status = VK_ERROR_OUT_OF_DATE_KHR;
     } else {
       uint8_t *destination = (uint8_t *)buffer.pixels +
                              r->offset.y * buffer.pitch + r->offset.x * 4;

@@ -1,15 +1,10 @@
 #include "gui.h"
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <syscall.h>
 
-#define MOUSE_ROLL_NONE 0
-#define MOUSE_ROLL_UP 1
-#define MOUSE_ROLL_DOWN 2
-
-mouse_event_t mouse_event;
-void (*drop)();
 static window_t *window_at(gmouse_t *gmouse) {
   for (int height = gmouse->sht->ctl->top; height > 0; height--) {
     struct SHEET *sheet = gmouse->sht->ctl->sheets[height];
@@ -22,13 +17,132 @@ static window_t *window_at(gmouse_t *gmouse) {
   return NULL;
 }
 
+void gui_mouse_release(window_t *window) {
+  gmouse_t *mouse = window->desktop->mouse;
+  if (!mouse)
+    return;
+  if (mouse->target == window) {
+    mouse->target = NULL;
+    mouse->gesture = GUI_GESTURE_NONE;
+  }
+  if (mouse->captured == window) {
+    mouse->captured = NULL;
+    mouse->mode = GUI_MOUSE_NORMAL;
+    sheet_updown(mouse->sht, mouse->sht->ctl->top + 1);
+  }
+  if (window->pointer_buttons && window->shared) {
+    gui_event_t event = {.type = GUI_EVENT_POINTER,
+                         .x = mouse->x - window->x,
+                         .y = mouse->y - window->y};
+    gui_pointer_push(&window->shared->events, &event);
+    gui_wake_window(window);
+  }
+  window->pointer_buttons = 0;
+}
+
+void gui_mouse_sync(gmouse_t *mouse) {
+  if (!mouse)
+    return;
+  window_t *focus = mouse->desktop->focused_window;
+  if (mouse->target && (!mouse->target->using1 || mouse->target != focus))
+    gui_mouse_release(mouse->target);
+  if (mouse->captured && (!mouse->captured->using1 || mouse->captured != focus))
+    gui_mouse_release(mouse->captured);
+  bool hidden = mouse->captured &&
+                (mouse->mode & (GUI_MOUSE_RELATIVE | GUI_MOUSE_HIDDEN));
+  if (hidden != (mouse->sht->height < 0))
+    sheet_updown(mouse->sht, hidden ? -1 : mouse->sht->ctl->top + 1);
+}
+
+static void gui_mouse_dispatch(gmouse_t *mouse, const mouse_event_t *input) {
+  gui_mouse_sync(mouse);
+  bool relative = mouse->captured && (mouse->mode & GUI_MOUSE_RELATIVE);
+  int old_x = mouse->x, old_y = mouse->y;
+  if (!relative) {
+    int min_x = -16, min_y = -19;
+    int max_x = mouse->desktop->xsize, max_y = mouse->desktop->ysize;
+    if (mouse->captured && (mouse->mode & GUI_MOUSE_CONFINED)) {
+      window_t *window = mouse->captured;
+      min_x = window->x + 4;
+      min_y = window->y + 24;
+      max_x = window->x + window->xsize - 5;
+      max_y = window->y + window->ysize - 5;
+    }
+    int64_t x = (int64_t)mouse->x + input->x;
+    int64_t y = (int64_t)mouse->y + input->y;
+    mouse->x = x < min_x ? min_x : x > max_x ? max_x : (int)x;
+    mouse->y = y < min_y ? min_y : y > max_y ? max_y : (int)y;
+  }
+  unsigned previous_buttons = mouse->buttons;
+  mouse->buttons = input->buttons;
+  bool explicit_capture =
+      mouse->captured &&
+      (mouse->mode &
+       (GUI_MOUSE_CAPTURE | GUI_MOUSE_RELATIVE | GUI_MOUSE_CONFINED));
+  window_t *window = explicit_capture ? mouse->captured
+                     : mouse->target  ? mouse->target
+                                      : window_at(mouse);
+  if (window && !previous_buttons && input->buttons && !explicit_capture) {
+    mouse->click_button_last = NULL;
+    mouse->click_textbox_last = NULL;
+    if (input->buttons & 1) {
+      window->handle_left(window, mouse);
+      window = mouse->target;
+    } else {
+      window_focus(window);
+      mouse->target = window;
+      mouse->gesture = GUI_GESTURE_CLIENT;
+    }
+  }
+  if (mouse->target && mouse->gesture == GUI_GESTURE_MOVE) {
+    window = mouse->target;
+    int64_t x = (int64_t)window->x + (previous_buttons ? mouse->x - old_x : 0);
+    int64_t y = (int64_t)window->y + (previous_buttons ? mouse->y - old_y : 0);
+    window->x = x < INT16_MIN ? INT16_MIN : x > INT16_MAX ? INT16_MAX : x;
+    window->y = y < INT16_MIN ? INT16_MIN : y > INT16_MAX ? INT16_MAX : y;
+    sheet_slide(window->sht, window->x, window->y);
+  } else if (mouse->target && mouse->gesture == GUI_GESTURE_RESIZE) {
+    window = mouse->target;
+    int width = mouse->initial_width;
+    int height = mouse->initial_height;
+    if (mouse->resize_axes & 1)
+      width += mouse->x - mouse->anchor_x;
+    if (mouse->resize_axes & 2)
+      height += mouse->y - mouse->anchor_y;
+    window->requested_width = width < 40          ? 40
+                              : width > INT16_MAX ? INT16_MAX
+                                                  : width;
+    window->requested_height = height < 29          ? 29
+                               : height > INT16_MAX ? INT16_MAX
+                                                    : height;
+  } else if (window && window->shared &&
+             (explicit_capture || mouse->target || !input->buttons)) {
+    gui_event_t event = {.type = GUI_EVENT_POINTER,
+                         .x = mouse->x - window->x,
+                         .y = mouse->y - window->y,
+                         .dx = input->x,
+                         .dy = input->y,
+                         .wheel = input->wheel,
+                         .buttons = input->buttons,
+                         .relative = relative};
+    window->pointer_buttons = input->buttons;
+    gui_pointer_push(&window->shared->events, &event);
+    gui_wake_window(window);
+  }
+  if (!input->buttons) {
+    mouse->target = NULL;
+    mouse->gesture = GUI_GESTURE_NONE;
+  }
+  sheet_slide(mouse->sht, mouse->x, mouse->y);
+  gui_update_window_states(mouse->desktop);
+}
+
 void gmouse(gmouse_t *gmouse) {
   if (start_keyboard_message() != 0 || mouse_enable() != 0 ||
       use_keyboard() != 0) {
     logkf("GUI input devices are already owned\n");
     _exit((unsigned)-1);
   }
-  drop = NULL;
   logkf("GMOUSE ID = %d\n", NowTaskID());
   unsigned new = 0;
   unsigned old = 0;
@@ -39,93 +153,9 @@ void gmouse(gmouse_t *gmouse) {
     }
     TaskLock();
     if (mouse_dat_status() != 0) {
-      if (mouse_read(&mouse_event) > 0) {
-        int64_t target_x = (int64_t)gmouse->x + mouse_event.x;
-        int64_t target_y = (int64_t)gmouse->y + mouse_event.y;
-        if (target_x < -16)
-          target_x = -16;
-        if (target_x > gmouse->desktop->xsize)
-          target_x = gmouse->desktop->xsize;
-        if (target_y < -19)
-          target_y = -19;
-        if (target_y > gmouse->desktop->ysize)
-          target_y = gmouse->desktop->ysize;
-        mouse_event.x = (int)target_x - gmouse->x;
-        mouse_event.y = (int)target_y - gmouse->y;
-        unsigned roll = mouse_event.wheel > 0   ? MOUSE_ROLL_UP
-                        : mouse_event.wheel < 0 ? MOUSE_ROLL_DOWN
-                                                : MOUSE_ROLL_NONE;
-        // logkf("%d %d\n",mouse_event.x,mouse_event.y);
-
-        if ((mouse_event.buttons & 0x01) != 0) {
-          gmouse->click_left = NULL;
-          gmouse->click_right = NULL;
-          gmouse->stay = NULL;
-          gmouse->wheel = NULL;
-          gmouse->click_button_last = NULL;
-          gmouse->click_textbox_last = NULL;
-          if (!drop) {
-            window_t *window = window_at(gmouse);
-            gmouse->click_left = window;
-            if (window != NULL && window->handle_left != NULL) {
-              window->handle_left(window, gmouse);
-            }
-            gmouse->click_left = NULL;
-          } else {
-            drop();
-          }
-        } else if ((mouse_event.buttons & 0x02) != 0) {
-          drop = NULL;
-          gmouse->click_left = NULL;
-          gmouse->click_right = NULL;
-          gmouse->stay = NULL;
-          gmouse->wheel = NULL;
-          window_t *window = window_at(gmouse);
-          gmouse->click_right = window;
-          if (window != NULL) {
-            window_focus(window);
-            if (window->handle_right != NULL) {
-              window->handle_right(window, gmouse);
-            }
-          }
-        } else if (roll != MOUSE_ROLL_NONE) {
-          drop = NULL;
-          gmouse->click_left = NULL;
-          gmouse->click_right = NULL;
-          gmouse->stay = NULL;
-          gmouse->wheel = NULL;
-          window_t *window = window_at(gmouse);
-          gmouse->wheel = window;
-          if (window != NULL && window->handle_mouse_wheel != NULL) {
-            window->handle_mouse_wheel(window, gmouse, roll);
-          }
-        } else {
-          drop = NULL;
-          gmouse->click_left = NULL;
-          gmouse->click_right = NULL;
-          gmouse->stay = NULL;
-          gmouse->wheel = NULL;
-          window_t *window = window_at(gmouse);
-          gmouse->stay = window;
-          if (window != NULL && window->handle_stay != NULL) {
-            window->handle_stay(window, gmouse);
-          }
-        }
-        gmouse->x += mouse_event.x;
-        gmouse->y += mouse_event.y;
-        if (gmouse->x > gmouse->desktop->xsize) {
-          gmouse->x = gmouse->desktop->xsize;
-        } else if (gmouse->x < -16) {
-          gmouse->x = -16;
-        }
-        if (gmouse->y > gmouse->desktop->ysize) {
-          gmouse->y = gmouse->desktop->ysize;
-        } else if (gmouse->y < -19) {
-          gmouse->y = -19;
-        }
-        sheet_slide(gmouse->sht, gmouse->x, gmouse->y);
-        gui_update_window_states(gmouse->desktop);
-      }
+      mouse_event_t event;
+      if (mouse_read(&event) > 0)
+        gui_mouse_dispatch(gmouse, &event);
     } else if (key_press_status() != 0) {
 
       window_t *r = gmouse->desktop->focused_window;

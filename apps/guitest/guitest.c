@@ -264,41 +264,151 @@ static int gui_test_mouse(void) {
   unsigned observed = 0;
   unsigned deadline = (unsigned)clock() + 15000;
   while ((int)((unsigned)clock() - deadline) < 0 && observed != 15) {
-    int event = window_get_event(window);
-    if (event == -1) {
+    gui_event_t event;
+    if (window_get_event(window, &event) <= 0) {
       sleep(10);
       continue;
     }
-    if (event != GUI_EVENT_MOUSE_STAY && event != GUI_EVENT_MOUSE_CLICK_LEFT &&
-        event != GUI_EVENT_MOUSE_CLICK_RIGHT &&
-        event != GUI_EVENT_MOUSE_WHEEL) {
+    if (event.type != GUI_EVENT_POINTER)
       break;
-    }
-    int position = window_get_event(window);
-    int x = (position >> 16) & 0xffff;
-    int y = position & 0xffff;
-    int wheel = event == GUI_EVENT_MOUSE_WHEEL ? window_get_event(window) : 0;
-    if (event == GUI_EVENT_MOUSE_STAY && position >= 0 &&
-        (x != 64 || y != 64)) {
+    if (event.x != 64 || event.y != 64)
       continue;
-    }
-    if (position < 0 || x != 64 || y != 64) {
-      logkf("GUIMOUSE FAIL event=%d position=%d,%d\n", event, x, y);
-      break;
-    }
-    if (event == GUI_EVENT_MOUSE_STAY) {
-      observed |= 1;
-    } else if (event == GUI_EVENT_MOUSE_CLICK_LEFT) {
+    observed |= 1;
+    if (event.buttons & 1)
       observed |= 2;
-    } else if (event == GUI_EVENT_MOUSE_CLICK_RIGHT) {
+    if (event.buttons & 2)
       observed |= 4;
-    } else if (wheel == 1) {
+    if (event.wheel > 0)
       observed |= 8;
-    }
   }
   close_window(window);
   logkf("GUIMOUSE %s events=%u\n", observed == 15 ? "PASS" : "FAIL", observed);
   return observed == 15 ? 0 : 41;
+}
+
+static int gui_test_interaction(void) {
+  window_t window = create_window("Capture and resize", 64, 64, 256, 192,
+                                  GUI_CREATE_RESIZABLE);
+  window_t other = NULL;
+  int result = 1;
+#define INTERACTION_CHECK(condition)                                           \
+  do {                                                                         \
+    if (!(condition)) {                                                        \
+      logkf("GUIINTERACT FAIL line=%u\n", __LINE__);                           \
+      goto done;                                                               \
+    }                                                                          \
+  } while (0)
+  INTERACTION_CHECK(window);
+  window_buffer_t buffer;
+  INTERACTION_CHECK(window_get_buffer(window, &buffer) == 0);
+  draw_px(window, 10, 30, 0x123456);
+  INTERACTION_CHECK(window_present(window, (10 << 16) | 30, (11 << 16) | 31) ==
+                    0);
+  INTERACTION_CHECK(window_resize(window, 300, 220) == 0);
+  INTERACTION_CHECK(window_get_buffer(window, &buffer) == 0 &&
+                    buffer.width == 300 && buffer.height == 220 &&
+                    buffer.pitch == 1200 &&
+                    buffer.pixels[30 * 300 + 10] == 0x123456);
+  void *pixels = buffer.pixels;
+  INTERACTION_CHECK(window_resize(window, 0, 220) != 0 &&
+                    window_resize(window, 32767, 32767) != 0 &&
+                    window_get_fb(window) == pixels);
+  for (unsigned y = 24; y < 216; y++)
+    for (unsigned x = 4; x < 296; x++)
+      buffer.pixels[y * 300 + x] = 0x2050a0;
+  INTERACTION_CHECK(
+      window_present_frame(window, (4 << 16) | 24, (296 << 16) | 216) == 0);
+  gui_event_t event;
+  while (window_get_event(window, &event) > 0) {
+  }
+  logkf("GUIINTERACT CAPTURE READY\n");
+  uint64_t deadline = monotonic_ns() + 20000000000ull;
+  unsigned observed = 0;
+  while (monotonic_ns() < deadline && observed != 7) {
+    if (window_get_event(window, &event) <= 0) {
+      sleep(5);
+      continue;
+    }
+    if (event.buttons == 3)
+      observed |= 1;
+    if (event.x >= 300 && event.buttons == 3)
+      observed |= 2;
+    if (event.x >= 300 && event.buttons == 0)
+      observed |= 4;
+  }
+  INTERACTION_CHECK(observed == 7);
+  INTERACTION_CHECK(window_control(window, GUI_WINDOW_MOUSE_MODE,
+                                   GUI_MOUSE_RELATIVE, 0) == 0);
+  gui_window_state_t state;
+  INTERACTION_CHECK(window_get_state(window, &state) == 0 &&
+                    (state.flags & GUI_WINDOW_CAPTURED));
+  logkf("GUIINTERACT RELATIVE READY\n");
+  int dx = 0, dy = 0;
+  deadline = monotonic_ns() + 20000000000ull;
+  while (monotonic_ns() < deadline && (dx != 1400 || dy != -900)) {
+    if (window_get_event(window, &event) <= 0) {
+      sleep(5);
+      continue;
+    }
+    if (event.relative) {
+      dx += event.dx;
+      dy += event.dy;
+    }
+  }
+  INTERACTION_CHECK(dx == 1400 && dy == -900);
+  INTERACTION_CHECK(window_control(window, GUI_WINDOW_MOUSE_MODE, 0, 0) == 0);
+  other = create_window("Focus", 450, 400, 64, 64, GUI_CREATE_HIDDEN);
+  INTERACTION_CHECK(other);
+  INTERACTION_CHECK(
+      window_control(other, GUI_WINDOW_MOUSE_MODE, GUI_MOUSE_CAPTURE, 0) != 0);
+  INTERACTION_CHECK(
+      window_control(window, GUI_WINDOW_MOUSE_MODE, GUI_MOUSE_CAPTURE, 0) == 0);
+  INTERACTION_CHECK(window_control(other, GUI_WINDOW_SHOW, 1, 0) == 0);
+  INTERACTION_CHECK(window_get_state(window, &state) == 0 &&
+                    !(state.flags & GUI_WINDOW_CAPTURED));
+  close_window(other);
+  other = NULL;
+  INTERACTION_CHECK(window_control(window, GUI_WINDOW_FOCUS, 0, 0) == 0);
+  logkf("GUIINTERACT RESIZE READY\n");
+  deadline = monotonic_ns() + 20000000000ull;
+  do {
+    INTERACTION_CHECK(window_get_state(window, &state) == 0);
+    if (state.requested_width == 340 && state.requested_height == 250)
+      break;
+    sleep(5);
+  } while (monotonic_ns() < deadline);
+  INTERACTION_CHECK(state.requested_width == 340 &&
+                    state.requested_height == 250);
+  INTERACTION_CHECK(window_resize(window, 340, 250) == 0);
+  INTERACTION_CHECK(window_get_buffer(window, &buffer) == 0 &&
+                    buffer.pixels[40 * 340 + 20] == 0x2050a0);
+  for (unsigned y = 24; y < 246; y++)
+    for (unsigned x = 4; x < 336; x++)
+      buffer.pixels[y * 340 + x] = 0x30a060;
+  INTERACTION_CHECK(
+      window_present_frame(window, (4 << 16) | 24, (336 << 16) | 246) == 0);
+  window_start_recv_keyboard(window);
+  logkf("GUIINTERACT PIXELS READY\n");
+  deadline = monotonic_ns() + 15000000000ull;
+  while (!window_get_key_press_status(window) && monotonic_ns() < deadline)
+    sleep(5);
+  INTERACTION_CHECK(window_get_key_press_data(window) == 0x39);
+  INTERACTION_CHECK(window_resize(window, 180, 140) == 0);
+  INTERACTION_CHECK(window_get_buffer(window, &buffer) == 0 &&
+                    buffer.width == 180 && buffer.height == 140 &&
+                    buffer.pixels[40 * 180 + 20] == 0x30a060);
+  INTERACTION_CHECK(window_control(window, GUI_WINDOW_MOUSE_MODE,
+                                   GUI_MOUSE_RELATIVE, 0) == 0);
+  INTERACTION_CHECK(window_control(window, GUI_WINDOW_HIDE, 0, 0) == 0);
+  INTERACTION_CHECK(window_get_state(window, &state) == 0 &&
+                    !(state.flags & GUI_WINDOW_CAPTURED));
+  result = 0;
+  logkf("GUIINTERACT PASS capture, relative, focus, resize, buffers\n");
+done:
+  close_window(other);
+  close_window(window);
+  return result;
+#undef INTERACTION_CHECK
 }
 
 static int gui_test_usb_keyboard(void) {
@@ -387,7 +497,8 @@ static int gui_test_basic(void) {
   }
   window_refresh(window, 0, (64 << 16) | 64);
   window_start_recv_keyboard(window);
-  (void)window_get_event(window);
+  gui_event_t event;
+  (void)window_get_event(window, &event);
   if (window_get_key_press_status(window) != 0 ||
       window_get_key_up_status(window) != 0) {
     logkf("GUITEST FAIL shared queues\n");
@@ -926,6 +1037,11 @@ int main(int argc, char **argv) {
     }
   }
 
+  if (argc == 2 && strcmp(argv[1], "mouse") == 0) {
+    result = gui_test_interaction();
+    if (result != 0)
+      return result;
+  }
   if (argc == 2 && strcmp(argv[1], "usb") == 0) {
     result = gui_test_usb_keyboard();
     if (result != 0)

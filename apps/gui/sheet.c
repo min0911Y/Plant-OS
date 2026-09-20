@@ -64,14 +64,6 @@ struct SHEET *sheet_alloc(struct SHTCTL *ctl) {
   return sheet;
 }
 
-void sheet_setbuf(struct SHEET *sheet, vram_t *buffer, int width, int height,
-                  int transparent) {
-  sheet->buf = buffer;
-  sheet->bxsize = width;
-  sheet->bysize = height;
-  sheet->col_inv = transparent;
-}
-
 void sheet_refreshsub(struct SHTCTL *ctl, int x0, int y0, int x1, int y1,
                       int h0, int h1) {
   if (x0 < 0)
@@ -152,6 +144,19 @@ static void sheet_recompose(struct SHTCTL *ctl, int x0, int y0, int x1,
     }
   }
   sheet_refreshsub(ctl, x0, y0, x1, y1, 0, ctl->top);
+}
+
+void sheet_setbuf(struct SHEET *sheet, vram_t *buffer, int width, int height,
+                  int transparent) {
+  int right = sheet->bxsize > width ? sheet->bxsize : width;
+  int bottom = sheet->bysize > height ? sheet->bysize : height;
+  sheet->buf = buffer;
+  sheet->bxsize = width;
+  sheet->bysize = height;
+  sheet->col_inv = transparent;
+  if (sheet->height >= 0)
+    sheet_recompose(sheet->ctl, sheet->vx0, sheet->vy0, sheet->vx0 + right,
+                    sheet->vy0 + bottom);
 }
 
 void sheet_updown(struct SHEET *sheet, int height) {

@@ -177,7 +177,22 @@ int main(int argc, char **argv) {
   SDL_Window *first = create_window_at("SDL surface", 80, 80, 256, 160);
   SDL_Window *second = create_window_at("SDL renderer", 420, 80, 128, 128);
   CHECK(first && second);
-  CHECK(!SDL_SetWindowSize(first, 128, 128));
+  CHECK(SDL_SetWindowResizable(first, true));
+  CHECK(SDL_SetWindowSize(first, 128, 128));
+  SDL_Surface *resized = SDL_GetWindowSurface(first);
+  CHECK(resized && resized->w == 128 && resized->h == 128);
+  CHECK(SDL_FillSurfaceRect(resized, NULL,
+                            SDL_MapSurfaceRGB(resized, 12, 34, 56)));
+  CHECK(SDL_UpdateWindowSurface(first));
+  CHECK(SDL_SetWindowSize(first, 128, 128));
+  CHECK(SDL_GetWindowSurface(first) == resized);
+  CHECK(SDL_UpdateWindowSurface(first));
+  CHECK(SDL_SetWindowSize(first, 256, 160));
+  CHECK(SDL_SetWindowRelativeMouseMode(second, true));
+  CHECK(SDL_GetWindowRelativeMouseMode(second));
+  CHECK(SDL_SetWindowRelativeMouseMode(second, false));
+  CHECK(SDL_CaptureMouse(true));
+  CHECK(SDL_CaptureMouse(false));
   SDL_Surface *surface = SDL_GetWindowSurface(first);
   CHECK(surface && surface->pitch >= surface->w * 4);
   CHECK(SDL_FillSurfaceRect(surface, NULL,

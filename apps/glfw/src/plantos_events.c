@@ -193,6 +193,18 @@ static void pollKeyboard(_GLFWwindow *window) {
   }
 }
 
+static void mouseButtons(_GLFWwindow *window, unsigned buttons) {
+  unsigned changed = buttons ^ window->plantos.button;
+  int mods = modifiers(window, GLFW_KEY_UNKNOWN, GLFW_RELEASE);
+  for (unsigned button = 0; button < 5; button++) {
+    if (changed & (1u << button))
+      _glfwInputMouseClick(window, button,
+                           buttons & (1u << button) ? GLFW_PRESS : GLFW_RELEASE,
+                           mods);
+  }
+  window->plantos.button = buttons;
+}
+
 void _glfwPollEventsPlantOS(void) {
   __atomic_exchange_n(&_glfw.plantos.pending, 0, __ATOMIC_ACQ_REL);
   for (_GLFWwindow *window = _glfw.windowListHead; window;
@@ -200,38 +212,26 @@ void _glfwPollEventsPlantOS(void) {
     if (!window->plantos.native.window)
       continue;
     pollKeyboard(window);
-    int event;
-    while ((event = window_get_event(window->plantos.native.window)) >= 0) {
-      if (event == GUI_EVENT_CLOSE_WINDOW) {
+    gui_event_t event;
+    while (window_get_event(window->plantos.native.window, &event) > 0) {
+      if (event.type == GUI_EVENT_CLOSE_WINDOW) {
         _glfwInputWindowCloseRequest(window);
         continue;
       }
-      int position = window_get_event(window->plantos.native.window);
-      if (position == -1)
-        break;
-      double x = (int16_t)((unsigned)position >> 16) - _GLFW_PLANT_BORDER;
-      double y = (int16_t)position - _GLFW_PLANT_TITLE;
-      _glfwInputCursorPos(window, x, y);
-      if (event == GUI_EVENT_MOUSE_WHEEL) {
-        int wheel = window_get_event(window->plantos.native.window);
-        if (wheel >= 0)
-          _glfwInputScroll(window, 0, wheel == 1 ? 1 : -1);
-        continue;
+      if (event.relative) {
+        if (window->cursorMode == GLFW_CURSOR_DISABLED)
+          _glfwInputCursorPos(window, window->virtualCursorPosX + event.dx,
+                              window->virtualCursorPosY + event.dy);
+      } else if (window->cursorMode != GLFW_CURSOR_DISABLED) {
+        _glfwInputCursorPos(window, event.x - _GLFW_PLANT_BORDER,
+                            event.y - _GLFW_PLANT_TITLE);
       }
-      unsigned button = event == GUI_EVENT_MOUSE_CLICK_LEFT    ? 1
-                        : event == GUI_EVENT_MOUSE_CLICK_RIGHT ? 2
-                                                               : 0;
-      if (button != window->plantos.button) {
-        int mods = modifiers(window, GLFW_KEY_UNKNOWN, GLFW_RELEASE);
-        if (window->plantos.button)
-          _glfwInputMouseClick(window, window->plantos.button - 1, GLFW_RELEASE,
-                               mods);
-        if (button)
-          _glfwInputMouseClick(window, button - 1, GLFW_PRESS, mods);
-        window->plantos.button = button;
-      }
+      if (event.wheel)
+        _glfwInputScroll(window, 0, event.wheel);
+      mouseButtons(window, event.buttons);
     }
     _glfwSyncWindowPlantOS(window);
+    mouseButtons(window, window->plantos.state.buttons);
   }
 }
 
@@ -248,10 +248,17 @@ void _glfwSetCursorPosPlantOS(_GLFWwindow *window, double x, double y) {
   _glfwInputUnsupportedPlantOS("Cursor warping");
 }
 void _glfwSetCursorModePlantOS(_GLFWwindow *window, int mode) {
-  window->cursorMode = GLFW_CURSOR_NORMAL;
-  if (mode != GLFW_CURSOR_NORMAL)
-    _glfwInputUnsupportedPlantOS("Cursor hiding and capture");
+  unsigned flags = mode == GLFW_CURSOR_DISABLED   ? GUI_MOUSE_RELATIVE
+                   : mode == GLFW_CURSOR_HIDDEN   ? GUI_MOUSE_HIDDEN
+                   : mode == GLFW_CURSOR_CAPTURED ? GUI_MOUSE_CONFINED
+                                                  : 0;
+  if (!_glfwWindowFocusedPlantOS(window))
+    return;
+  if (window_control(window->plantos.native.window, GUI_WINDOW_MOUSE_MODE,
+                     flags, 0) != 0)
+    _glfwInputError(GLFW_PLATFORM_ERROR, "Plant OS: Cannot set mouse mode");
 }
+
 void _glfwSetRawMouseMotionPlantOS(_GLFWwindow *window, GLFWbool enabled) {
   window->rawMouseMotion = GLFW_FALSE;
   if (enabled)

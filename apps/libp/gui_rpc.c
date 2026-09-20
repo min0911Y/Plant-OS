@@ -1,5 +1,6 @@
 #include <gui.h>
 #include <gui_rpc.h>
+#include <stdint.h>
 #include <rpc.h>
 #include <stdlib.h>
 #include <string.h>
@@ -159,8 +160,53 @@ window_t create_window(const char *title, int x, int y, int width, int height,
   return NULL;
 }
 
-int window_get_event(window_t window) {
-  return window == NULL ? -1 : gui_event_queue_pop(&window->shared->events);
+int window_get_event(window_t window, gui_event_t *event) {
+  if (!window || !event)
+    return RPC_ERR_INVAL;
+  return gui_pointer_pop(&window->shared->events, event);
+}
+
+int window_resize(window_t window, unsigned width, unsigned height) {
+  uint32_t size;
+  if (!window || window->buffer > 1 || width < 40 || height < 29 ||
+      width > INT16_MAX || height > INT16_MAX ||
+      !gui_window_shared_mapping_size(width, height, &size) ||
+      size > GUI_SHARED_REGION_END - GUI_SHARED_REGION_START)
+    return RPC_ERR_INVAL;
+  if (width == window->width && height == window->height)
+    return RPC_OK;
+  /* Reserve a disjoint destination while other threads may create windows. */
+  struct gui_window reservation = {.mapping_size = size};
+  gui_lock();
+  reservation.mapping = gui_mapping_find(size);
+  if (reservation.mapping)
+    gui_window_insert(&reservation);
+  gui_unlock();
+  if (!reservation.mapping)
+    return RPC_ERR_NOMEM;
+  gui_rpc_resize_request_t request = {window->id, width, height,
+                                      reservation.mapping};
+  int result =
+      gui_call(GUI_RPC_RESIZE_WINDOW, &request, sizeof(request), NULL, 0, NULL);
+  gui_lock();
+  gui_window_remove(&reservation);
+  if (result == RPC_OK) {
+    shared_memory_unmap((void *)window->mapping, window->mapping_size);
+    gui_window_remove(window);
+    window->mapping = reservation.mapping;
+    window->mapping_size = size;
+    window->shared = (gui_window_shared_t *)window->mapping;
+    window->width = width;
+    window->height = height;
+    window->buffer = 0;
+    gui_window_insert(window);
+  } else {
+    shared_memory_unmap((void *)reservation.mapping, size);
+    if (result == RPC_ERR_TRANSPORT || result == RPC_ERR_TIMEOUT)
+      window->buffer = 2;
+  }
+  gui_unlock();
+  return result;
 }
 
 void close_window(window_t window) {
@@ -224,6 +270,13 @@ int window_get_state(window_t window, gui_window_state_t *state) {
     state->cursor_y =
         __atomic_load_n(&shared->state.cursor_y, __ATOMIC_RELAXED);
     state->flags = __atomic_load_n(&shared->state.flags, __ATOMIC_RELAXED);
+    state->width = __atomic_load_n(&shared->state.width, __ATOMIC_RELAXED);
+    state->height = __atomic_load_n(&shared->state.height, __ATOMIC_RELAXED);
+    state->requested_width =
+        __atomic_load_n(&shared->state.requested_width, __ATOMIC_RELAXED);
+    state->requested_height =
+        __atomic_load_n(&shared->state.requested_height, __ATOMIC_RELAXED);
+    state->buttons = __atomic_load_n(&shared->state.buttons, __ATOMIC_RELAXED);
     __atomic_thread_fence(__ATOMIC_ACQUIRE);
     if (__atomic_load_n(&shared->state_sequence, __ATOMIC_RELAXED) == sequence)
       return RPC_OK;

@@ -434,6 +434,8 @@ GLFWbool _glfwInitEGL(void)
         _glfwPlatformGetModuleSymbol(_glfw.egl.handle, "eglSwapBuffers");
     _glfw.egl.SwapInterval = (PFN_eglSwapInterval)
         _glfwPlatformGetModuleSymbol(_glfw.egl.handle, "eglSwapInterval");
+    _glfw.egl.WaitNative = (PFN_eglWaitNative)
+        _glfwPlatformGetModuleSymbol(_glfw.egl.handle, "eglWaitNative");
     _glfw.egl.QueryString = (PFN_eglQueryString)
         _glfwPlatformGetModuleSymbol(_glfw.egl.handle, "eglQueryString");
     _glfw.egl.GetProcAddress = (PFN_eglGetProcAddress)
@@ -453,6 +455,7 @@ GLFWbool _glfwInitEGL(void)
         !_glfw.egl.MakeCurrent ||
         !_glfw.egl.SwapBuffers ||
         !_glfw.egl.SwapInterval ||
+        !_glfw.egl.WaitNative ||
         !_glfw.egl.QueryString ||
         !_glfw.egl.GetProcAddress)
     {

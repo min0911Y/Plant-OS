@@ -23,6 +23,14 @@ void _glfwSyncWindowPlantOS(_GLFWwindow *window) {
   gui_window_state_t state;
   if (!_glfwQueryWindowPlantOS(window, &state))
     return;
+  if (state.requested_width != state.width ||
+      state.requested_height != state.height) {
+    _glfwSetWindowSizePlantOS(
+        window, state.requested_width - 2 * _GLFW_PLANT_BORDER,
+        state.requested_height - _GLFW_PLANT_TITLE - _GLFW_PLANT_BORDER);
+    if (!_glfwQueryWindowPlantOS(window, &state))
+      return;
+  }
   gui_window_state_t previous = window->plantos.state;
   window->plantos.state = state;
   unsigned changed = previous.flags ^ state.flags;
@@ -30,6 +38,8 @@ void _glfwSyncWindowPlantOS(_GLFWwindow *window) {
     window->plantos.prefix[0] = window->plantos.prefix[1] = 0;
     if (!(state.flags & GUI_WINDOW_FOCUSED))
       window->plantos.button = 0;
+    if (state.flags & GUI_WINDOW_FOCUSED)
+      _glfwSetCursorModePlantOS(window, window->cursorMode);
     _glfwInputWindowFocus(window, (state.flags & GUI_WINDOW_FOCUSED) != 0);
   }
   if (changed & GUI_WINDOW_HOVERED)
@@ -102,13 +112,13 @@ GLFWbool _glfwCreateWindowPlantOS(_GLFWwindow *window,
       config->width + 2 * _GLFW_PLANT_BORDER,
       config->height + _GLFW_PLANT_TITLE + _GLFW_PLANT_BORDER,
       (config->visible ? 0 : GUI_CREATE_HIDDEN) |
-          (config->focused ? 0 : GUI_CREATE_UNFOCUSED));
+          (config->focused ? 0 : GUI_CREATE_UNFOCUSED) |
+          (config->resizable ? GUI_CREATE_RESIZABLE : 0));
   if (!window->plantos.native.window) {
     _glfwInputError(GLFW_PLATFORM_ERROR,
                     "Plant OS: Cannot create window; start gui.bin first");
     return GLFW_FALSE;
   }
-  window->resizable = GLFW_FALSE;
   window_start_recv_keyboard(window->plantos.native.window);
   rpc_endpoint_t target = _glfw.plantos.eventTarget;
   if (window_set_event_target(window->plantos.native.window, target.tid,
@@ -229,14 +239,29 @@ GLFWbool _glfwFramebufferTransparentPlantOS(_GLFWwindow *window) {
 float _glfwGetWindowOpacityPlantOS(_GLFWwindow *window) { return 1; }
 
 void _glfwSetWindowSizePlantOS(_GLFWwindow *window, int width, int height) {
-  if (width != window->plantos.native.width ||
-      height != window->plantos.native.height)
-    _glfwInputUnsupportedPlantOS("Window resizing");
+  if (width < 32 || height < 1 || width > INT16_MAX - 2 * _GLFW_PLANT_BORDER ||
+      height > INT16_MAX - _GLFW_PLANT_TITLE - _GLFW_PLANT_BORDER) {
+    _glfwInputError(GLFW_INVALID_VALUE, "Plant OS: Invalid window size");
+    return;
+  }
+  if (window_resize(window->plantos.native.window,
+                    width + 2 * _GLFW_PLANT_BORDER,
+                    height + _GLFW_PLANT_TITLE + _GLFW_PLANT_BORDER) != 0) {
+    _glfwInputError(GLFW_PLATFORM_ERROR, "Plant OS: Cannot resize window");
+    return;
+  }
+  window->plantos.native.width = width;
+  window->plantos.native.height = height;
+  if (_glfwPlatformGetTls(&_glfw.contextSlot) == window &&
+      window->context.client != GLFW_NO_API &&
+      !eglWaitNative(EGL_CORE_NATIVE_ENGINE))
+    _glfwInputError(GLFW_PLATFORM_ERROR, "Plant OS: Cannot resize EGL framebuffer");
+  _glfwInputFramebufferSize(window, width, height);
+  _glfwInputWindowSize(window, width, height);
+  _glfwInputWindowDamage(window);
 }
 void _glfwSetWindowResizablePlantOS(_GLFWwindow *window, GLFWbool enabled) {
-  window->resizable = GLFW_FALSE;
-  if (enabled)
-    _glfwInputUnsupportedPlantOS("Window resizing");
+  controlWindow(window, GUI_WINDOW_SET_RESIZABLE, enabled, 0);
 }
 void _glfwSetWindowDecoratedPlantOS(_GLFWwindow *window, GLFWbool enabled) {
   window->decorated = GLFW_TRUE;

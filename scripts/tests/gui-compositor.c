@@ -79,7 +79,7 @@ static void correctness(void) {
     verify(ctl);
     for (int i = 0; i < 800; i++) {
       struct SHEET *sheet = sheets[random_value() % N];
-      switch (i % 4) {
+      switch (i % 5) {
       case 0:
         sheet_updown(sheet, -1);
         break;
@@ -90,6 +90,20 @@ static void correctness(void) {
         sheet_slide(sheet, (int)(random_value() % (W + 60)) - 30,
                      (int)(random_value() % (H + 60)) - 30);
         break;
+      case 4: {
+        int width = 5 + random_value() % 60;
+        int height = 5 + random_value() % 50;
+        vram_t *old = sheet->buf;
+        vram_t *pixels = malloc((size_t)width * height * sizeof(*pixels));
+        assert(pixels);
+        for (int pixel = 0; pixel < width * height; pixel++)
+          pixels[pixel] = sheet->col_inv != -1 && pixel % 3 == 0
+                              ? sheet->col_inv
+                              : random_value() & 0xffffff;
+        sheet_setbuf(sheet, pixels, width, height, sheet->col_inv);
+        free(old);
+        break;
+      }
       case 3:
         sheet_slide(sheet, sheet->vx0 + (i % 7) - 3, sheet->vy0 + (i % 5) - 2);
         sheet_refresh(sheet, 0, 0, sheet->bxsize, sheet->bysize);

@@ -36,7 +36,8 @@ int main(int argc, char **argv) {
   if (!dm)
     return 1;
 
-  window = SDL_CreateWindow("Lite", dm->w * 0.8, dm->h * 0.8, 0);
+  window =
+      SDL_CreateWindow("Lite", dm->w * 0.8, dm->h * 0.8, SDL_WINDOW_RESIZABLE);
   if (!window) {
     fprintf(stderr, "lite: %s\n", SDL_GetError());
     return 1;

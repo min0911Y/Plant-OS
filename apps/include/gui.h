@@ -17,7 +17,11 @@ typedef struct {
 
 window_t create_window(const char *title, int x, int y, int width, int height,
                        unsigned flags);
-int window_get_event(window_t window);
+/* Returns 1 for an event, 0 when empty, negative for invalid arguments. */
+int window_get_event(window_t window, gui_event_t *event);
+/* Synchronous resize, including decorations. On success reacquire all drawing
+ * pointers. The window owner serializes this with drawing and event reads. */
+int window_resize(window_t window, unsigned width, unsigned height);
 void close_window(window_t window);
 int window_set_title(window_t window, const char *title);
 void draw_px(window_t window, int x, int y, int color);
@@ -32,7 +36,8 @@ int window_present(window_t window, int first, int last);
  * Calls and drawing are serialized by the window owner, including refreshes. */
 int window_present_frame(window_t window, int first, int last);
 void *window_get_fb(window_t window);
-/* ARGB8888 drawing plane, valid until frame exchange or close_window(). */
+/* ARGB8888 drawing plane, valid until resize, frame exchange or close_window().
+ */
 int window_get_buffer(window_t window, window_buffer_t *buffer);
 void window_start_recv_keyboard(window_t window);
 void window_stop_recv_keyboard(window_t window);

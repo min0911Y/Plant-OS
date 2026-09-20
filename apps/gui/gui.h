@@ -1,7 +1,6 @@
 #ifndef __GUI_H__
 #define __GUI_H__
 #include <input_event.h>
-extern mouse_event_t mouse_event;
 #include "sheet.h"
 typedef vram_t color_t;
 #include "list.h"
@@ -75,15 +74,15 @@ struct window {
   char *title;
   gui_window_shared_t *shared;
   bool keyboard_events;
+  bool resizable;
+  unsigned requested_width, requested_height;
+  unsigned pointer_buttons;
   void (*display)(window_t *window, int x, int y);
   void (*hide)(window_t *window);
   void (*draw)(window_t *window, int x, int y, int x1, int y1, color_t color);
   void (*puts)(window_t *window, char *s, int x, int y, color_t color);
   void (*handle_left)(window_t *window, gmouse_t *gmouse);
-  void (*handle_right)(window_t *window, gmouse_t *gmouse);
-  void (*handle_stay)(window_t *window, gmouse_t *gmouse);
-  void (*handle_client_left)(window_t *window, gmouse_t *gmouse);
-  void (*handle_mouse_wheel)(window_t *window, gmouse_t *gmouse,unsigned val);
+
   void (*close)(window_t *window);
 };
 
@@ -114,21 +113,34 @@ struct super_window {
 window_t *create_window(desktop_t *desktop, const char *title, int xsize,
                         int ysize, unsigned tid, gui_window_shared_t *shared);
 void window_focus(window_t *window);
+void window_draw_frame(window_t *window);
+void gui_mouse_release(window_t *window);
+void gui_mouse_sync(gmouse_t *mouse);
 void window_show(window_t *window, bool focused);
 void close_window(window_t *window);
 int window_set_title(window_t *window, const char *title);
 void destroy_window(window_t *window);
 super_window_t *create_super_window(window_t *window);
 
+enum gui_gesture {
+  GUI_GESTURE_NONE,
+  GUI_GESTURE_CLIENT,
+  GUI_GESTURE_MOVE,
+  GUI_GESTURE_RESIZE
+};
+
 struct gmouse {
   struct SHEET *sht;
   unsigned tid;
   desktop_t *desktop;
   int x, y;
-  window_t *click_left;
-  window_t *click_right;
-  window_t *stay;
-  window_t *wheel;
+  window_t *target;
+  enum gui_gesture gesture;
+  window_t *captured;
+  unsigned mode, buttons;
+  int anchor_x, anchor_y;
+  int initial_width, initial_height;
+  unsigned resize_axes;
   button_t *click_button_last;
   textbox_t *click_textbox_last;
 };

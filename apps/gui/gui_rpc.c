@@ -27,6 +27,7 @@ static uint32_t gui_next_window_id = 1;
  * Find the topmost window once; the mouse layer itself is not a window. */
 void gui_update_window_states(desktop_t *desktop) {
   gmouse_t *mouse = desktop->mouse;
+  gui_mouse_sync(mouse);
   window_t *hovered = NULL;
   if (mouse) {
     for (int height = desktop->shtctl->top; height >= 0; height--) {
@@ -48,15 +49,32 @@ void gui_update_window_states(desktop_t *desktop) {
         .y = window->y,
         .cursor_x = mouse ? mouse->x - window->x : 0,
         .cursor_y = mouse ? mouse->y - window->y : 0,
-        .flags = (window->using1 ? GUI_WINDOW_VISIBLE : 0) |
-                 (desktop->focused_window == window ? GUI_WINDOW_FOCUSED : 0) |
-                 (hovered == window ? GUI_WINDOW_HOVERED : 0),
+        .width = window->xsize,
+        .height = window->ysize,
+        .requested_width = window->requested_width,
+        .requested_height = window->requested_height,
+        .buttons = window->pointer_buttons,
+        .flags =
+            (window->resizable ? GUI_WINDOW_RESIZABLE : 0) |
+            (mouse && mouse->captured == window &&
+                     (mouse->mode & (GUI_MOUSE_CAPTURE | GUI_MOUSE_RELATIVE |
+                                     GUI_MOUSE_CONFINED))
+                 ? GUI_WINDOW_CAPTURED
+                 : 0) |
+            (window->using1 ? GUI_WINDOW_VISIBLE : 0) |
+            (desktop->focused_window == window ? GUI_WINDOW_FOCUSED : 0) |
+            (hovered == window ? GUI_WINDOW_HOVERED : 0),
     };
     gui_window_shared_t *shared = window->shared;
     if (!memcmp(&shared->state, &state, sizeof(state)))
       continue;
-    bool changed = shared->state.x != state.x || shared->state.y != state.y ||
-                   shared->state.flags != state.flags;
+    bool notify = state.x != shared->state.x || state.y != shared->state.y ||
+                  state.flags != shared->state.flags ||
+                  state.buttons != shared->state.buttons ||
+                  state.width != shared->state.width ||
+                  state.height != shared->state.height ||
+                  state.requested_width != shared->state.requested_width ||
+                  state.requested_height != shared->state.requested_height;
     uint32_t sequence =
         __atomic_load_n(&shared->state_sequence, __ATOMIC_RELAXED) & ~1u;
     __atomic_store_n(&shared->state_sequence, sequence + 1, __ATOMIC_SEQ_CST);
@@ -65,8 +83,15 @@ void gui_update_window_states(desktop_t *desktop) {
     __atomic_store_n(&shared->state.cursor_x, state.cursor_x, __ATOMIC_RELAXED);
     __atomic_store_n(&shared->state.cursor_y, state.cursor_y, __ATOMIC_RELAXED);
     __atomic_store_n(&shared->state.flags, state.flags, __ATOMIC_RELAXED);
+    __atomic_store_n(&shared->state.width, state.width, __ATOMIC_RELAXED);
+    __atomic_store_n(&shared->state.height, state.height, __ATOMIC_RELAXED);
+    __atomic_store_n(&shared->state.requested_width, state.requested_width,
+                     __ATOMIC_RELAXED);
+    __atomic_store_n(&shared->state.requested_height, state.requested_height,
+                     __ATOMIC_RELAXED);
+    __atomic_store_n(&shared->state.buttons, state.buttons, __ATOMIC_RELAXED);
     __atomic_store_n(&shared->state_sequence, sequence + 2, __ATOMIC_RELEASE);
-    if (changed && remote->event_target.tid)
+    if (notify && remote->event_target.tid)
       rpc_notify(&remote->event_target, GUI_RPC_EVENT_READY, NULL, 0);
   }
 }
@@ -82,54 +107,11 @@ void gui_wake_window(window_t *window) {
   }
 }
 
-static uint32_t gui_pack_xy(int x, int y) {
-  return (uint32_t)(uint16_t)x << 16 | (uint16_t)y;
-}
-
-static void gui_event_stay(window_t *window, gmouse_t *gmouse) {
-  if (window->shared != NULL) {
-    gui_event_queue_push2(&window->shared->events, GUI_EVENT_MOUSE_STAY,
-                          gui_pack_xy(gmouse->x - window->x,
-                                      gmouse->y - window->y));
-    gui_wake_window(window);
-  }
-}
-
-static void gui_event_left(window_t *window, gmouse_t *gmouse) {
-  if (window->shared != NULL) {
-    gui_event_queue_push2(&window->shared->events, GUI_EVENT_MOUSE_CLICK_LEFT,
-                          gui_pack_xy(gmouse->x - window->x,
-                                      gmouse->y - window->y));
-    gui_wake_window(window);
-  }
-}
-
-static void gui_event_right(window_t *window, gmouse_t *gmouse) {
-  if (window->shared != NULL) {
-    gui_event_queue_push2(&window->shared->events,
-                          GUI_EVENT_MOUSE_CLICK_RIGHT,
-                          gui_pack_xy(gmouse->x - window->x,
-                                      gmouse->y - window->y));
-    gui_wake_window(window);
-  }
-}
-
 static void gui_event_close(window_t *window) {
-  if (window->shared != NULL) {
-    gui_event_queue_push(&window->shared->events, GUI_EVENT_CLOSE_WINDOW);
-    gui_wake_window(window);
-  }
-}
-
-static void gui_event_wheel(window_t *window, gmouse_t *gmouse,
-                            unsigned value) {
-  if (window->shared != NULL) {
-    gui_event_queue_push3(&window->shared->events, GUI_EVENT_MOUSE_WHEEL,
-                          gui_pack_xy(gmouse->x - window->x,
-                                      gmouse->y - window->y),
-                          value);
-    gui_wake_window(window);
-  }
+  gui_mouse_release(window);
+  gui_event_t event = {.type = GUI_EVENT_CLOSE_WINDOW};
+  gui_pointer_push(&window->shared->events, &event);
+  gui_wake_window(window);
 }
 
 static gui_remote_window_t *gui_remote_find(const rpc_call_t *call,
@@ -179,14 +161,17 @@ static int gui_create_window(rpc_call_t *call) {
   if (title_length > GUI_TITLE_MAX ||
       title_length != call->arg_len - sizeof(*request) || request->width == 0 ||
       request->height == 0 ||
-      (request->flags & ~(GUI_CREATE_HIDDEN | GUI_CREATE_UNFOCUSED))) {
+      (request->flags &
+       ~(GUI_CREATE_HIDDEN | GUI_CREATE_UNFOCUSED | GUI_CREATE_RESIZABLE))) {
     return RPC_ERR_INVAL;
   }
 
   uint32_t mapping_size;
   if (!gui_window_shared_mapping_size(request->width, request->height,
                                       &mapping_size) ||
-      request->width > INT_MAX || request->height > INT_MAX ||
+      request->width > INT16_MAX || request->height > INT16_MAX ||
+      request->x < INT16_MIN || request->x > INT16_MAX ||
+      request->y < INT16_MIN || request->y > INT16_MAX ||
       request->x > INT_MAX - (int)request->width ||
       request->y > INT_MAX - (int)request->height ||
       mapping_size > GUI_SHARED_REGION_END - GUI_SHARED_REGION_START ||
@@ -221,15 +206,12 @@ static int gui_create_window(rpc_call_t *call) {
 
   memcpy(gui_window_pixels(shared, window->xsize, window->ysize, 0),
          window->vram, (size_t)window->xsize * window->ysize * sizeof(vram_t));
-  gui_event_queue_init(&shared->events);
+  shared->events.read = shared->events.write = 0;
   gui_event_queue_init(&shared->key_press);
   gui_event_queue_init(&shared->key_up);
   gui_damage_init(&shared->damage);
   window->keyboard_events = false;
-  window->handle_stay = gui_event_stay;
-  window->handle_client_left = gui_event_left;
-  window->handle_right = gui_event_right;
-  window->handle_mouse_wheel = gui_event_wheel;
+  window->resizable = (request->flags & GUI_CREATE_RESIZABLE) != 0;
   window->close = gui_event_close;
   window->x = request->x;
   window->y = request->y;
@@ -454,7 +436,7 @@ static int gui_window_control(rpc_call_t *call) {
   if (call->arg_len != sizeof(gui_rpc_window_control_t))
     return RPC_ERR_INVAL;
   const gui_rpc_window_control_t *request = call->arg;
-  if (request->operation > GUI_WINDOW_FOCUS || request->x < INT16_MIN ||
+  if (request->operation > GUI_WINDOW_MOUSE_MODE || request->x < INT16_MIN ||
       request->x > INT16_MAX || request->y < INT16_MIN ||
       request->y > INT16_MAX)
     return RPC_ERR_INVAL;
@@ -482,8 +464,115 @@ static int gui_window_control(rpc_call_t *call) {
   case GUI_WINDOW_FOCUS:
     window_focus(window);
     break;
+  case GUI_WINDOW_SET_RESIZABLE:
+    window->resizable = request->x != 0;
+    if (!window->resizable) {
+      window->requested_width = window->xsize;
+      window->requested_height = window->ysize;
+      if (window->desktop->mouse && window->desktop->mouse->target == window &&
+          window->desktop->mouse->gesture == GUI_GESTURE_RESIZE)
+        gui_mouse_release(window);
+    }
+    gui_update_window_states(window->desktop);
+    break;
+  case GUI_WINDOW_MOUSE_MODE: {
+    gmouse_t *mouse = window->desktop->mouse;
+    if (!mouse ||
+        (request->x & ~(GUI_MOUSE_CAPTURE | GUI_MOUSE_RELATIVE |
+                        GUI_MOUSE_HIDDEN | GUI_MOUSE_CONFINED)) ||
+        (request->x &&
+         (!window->using1 || window->desktop->focused_window != window))) {
+      TaskUnlock();
+      return RPC_ERR_INVAL;
+    }
+    if (mouse->captured == window || request->x) {
+      if (mouse->captured && mouse->captured != window)
+        gui_mouse_release(mouse->captured);
+      if (mouse->target && mouse->target != window)
+        gui_mouse_release(mouse->target);
+      mouse->captured = request->x ? window : NULL;
+      mouse->mode = request->x;
+      mouse->target = mouse->buttons ? window : NULL;
+      mouse->gesture = mouse->buttons ? GUI_GESTURE_CLIENT : GUI_GESTURE_NONE;
+      gui_update_window_states(window->desktop);
+    }
+    break;
+  }
   }
   TaskUnlock();
+  return RPC_OK;
+}
+
+static int gui_resize_window(rpc_call_t *call) {
+  if (call->arg_len != sizeof(gui_rpc_resize_request_t))
+    return RPC_ERR_INVAL;
+  const gui_rpc_resize_request_t *request = call->arg;
+  uint32_t size;
+  if (request->width < 40 || request->height < 29 ||
+      request->width > INT16_MAX || request->height > INT16_MAX ||
+      !gui_window_shared_mapping_size(request->width, request->height, &size) ||
+      size > GUI_SHARED_REGION_END - GUI_SHARED_REGION_START ||
+      request->client_mapping < GUI_SHARED_REGION_START ||
+      request->client_mapping > GUI_SHARED_REGION_END - size ||
+      (request->client_mapping & (VM_PAGE_SIZE - 1)))
+    return RPC_ERR_INVAL;
+  gui_window_shared_t *shared = vm_map(NULL, size);
+  if (!shared)
+    return RPC_ERR_NOMEM;
+  TaskLock();
+  gui_remote_window_t *remote = gui_remote_find(call, request->window_id);
+  if (!remote) {
+    TaskUnlock();
+    vm_unmap(shared, size);
+    return RPC_ERR_INVAL;
+  }
+  window_t *window = remote->window;
+  /* Prepare the complete replacement before publishing any geometry. The
+   * caller is blocked and retains its old mapping until the reply arrives. */
+  window_t replacement = *window;
+  replacement.xsize = request->width;
+  replacement.ysize = request->height;
+  replacement.vram =
+      gui_window_pixels(shared, request->width, request->height, 1);
+  window_draw_frame(&replacement);
+  int width =
+      window->xsize < replacement.xsize ? window->xsize : replacement.xsize;
+  int height =
+      window->ysize < replacement.ysize ? window->ysize : replacement.ysize;
+  for (int y = 24; y < height - 4; y++)
+    memcpy(replacement.vram + (size_t)y * replacement.xsize + 4,
+           window->vram + (size_t)y * window->xsize + 4,
+           (size_t)(width - 8) * sizeof(vram_t));
+  memcpy(gui_window_pixels(shared, request->width, request->height, 0),
+         replacement.vram,
+         (size_t)request->width * request->height * sizeof(vram_t));
+  *shared = *window->shared;
+  gui_damage_init(&shared->damage);
+  if (shared_memory_map_to(call->caller_tid, call->caller_generation, shared,
+                           (void *)request->client_mapping, size) != 0) {
+    TaskUnlock();
+    vm_unmap(shared, size);
+    return RPC_ERR_NOMEM;
+  }
+  gui_window_shared_t *old_shared = window->shared;
+  uint32_t old_size = remote->mapping_size;
+  window->shared = shared;
+  window->vram = replacement.vram;
+  /* A newer drag report may arrive while the client is waiting for this RPC.
+   * Keep that request pending instead of losing the final release position. */
+  if (window->requested_width == (unsigned)window->xsize &&
+      window->requested_height == (unsigned)window->ysize) {
+    window->requested_width = request->width;
+    window->requested_height = request->height;
+  }
+  window->xsize = request->width;
+  window->ysize = request->height;
+  remote->mapping_size = size;
+  remote->front = 1;
+  sheet_setbuf(window->sht, window->vram, window->xsize, window->ysize, -1);
+  gui_update_window_states(window->desktop);
+  TaskUnlock();
+  vm_unmap(old_shared, old_size);
   return RPC_OK;
 }
 
@@ -497,6 +586,7 @@ static const rpc_handler_t gui_handlers[GUI_RPC_COUNT] = {
     [GUI_RPC_SET_TITLE] = gui_set_title,
     [GUI_RPC_EVENT_NOTIFICATIONS] = gui_event_notifications,
     [GUI_RPC_WINDOW_CONTROL] = gui_window_control,
+    [GUI_RPC_RESIZE_WINDOW] = gui_resize_window,
 };
 
 int gui_rpc_service_start(void) {

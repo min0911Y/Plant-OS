@@ -605,6 +605,16 @@ int main(int argc, char **argv) {
       window ? SDL_CreateRenderer(window, nullptr) : nullptr;
   int status = 1;
   if (renderer && !strcmp(SDL_GetRendererName(renderer), "vulkan")) {
+    bool resized = SDL_SetWindowSize(window, 360, 280) && draw(renderer, 0) &&
+                   SDL_SetWindowSize(window, 320, 240) && draw(renderer, 0);
+    if (!resized) {
+      logkf("LVPTEST FAIL resized swapchain: %s\n", SDL_GetError());
+      SDL_DestroyRenderer(renderer);
+      SDL_DestroyWindow(window);
+      SDL_Quit();
+      return 1;
+    }
+    logkf("LVPTEST RESIZE PASS\n");
     unsigned phase = 0;
     while (phase < 2) {
       if (!draw(renderer, phase))

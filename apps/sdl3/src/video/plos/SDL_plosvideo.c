@@ -41,13 +41,56 @@ struct SDL_WindowData {
   int width, height;
   Uint8 prefix[2];
   Uint8 button;
+  unsigned mouse_mode;
 #ifdef SDL_VIDEO_OPENGL_EGL
   struct plant_egl_window egl_window;
   EGLSurface egl_surface;
 #endif
 };
 
+static bool PLOS_MouseMode(SDL_Window *window, unsigned mask, unsigned flags) {
+  if (!window || !window->internal)
+    return true;
+  SDL_WindowData *data = window->internal;
+  unsigned mode = (data->mouse_mode & ~mask) | flags;
+  gui_window_state_t state;
+  if (window_get_state(data->handle, &state) != 0)
+    return SDL_SetError("Cannot query GUI mouse owner");
+  if ((state.flags & GUI_WINDOW_FOCUSED) &&
+      window_control(data->handle, GUI_WINDOW_MOUSE_MODE, mode, 0) != 0)
+    return SDL_SetError("Cannot set GUI mouse mode");
+  data->mouse_mode = mode;
+  return true;
+}
+
+static bool PLOS_CaptureMouse(SDL_Window *window) {
+  for (SDL_Window *entry = SDL_GetVideoDevice()->windows; entry;
+       entry = entry->next) {
+    SDL_WindowData *data = entry->internal;
+    if (!data || (entry != window && !(data->mouse_mode & GUI_MOUSE_CAPTURE)))
+      continue;
+    if (!PLOS_MouseMode(entry, GUI_MOUSE_CAPTURE,
+                        entry == window ? GUI_MOUSE_CAPTURE : 0))
+      return false;
+  }
+  return true;
+}
+
+static bool PLOS_SetRelativeMouseMode(bool enabled) {
+  return PLOS_MouseMode(SDL_GetKeyboardFocus(), GUI_MOUSE_RELATIVE,
+                        enabled ? GUI_MOUSE_RELATIVE : 0);
+}
+
+static bool PLOS_SetWindowMouseGrab(SDL_VideoDevice *_this, SDL_Window *window,
+                                    bool grabbed) {
+  return PLOS_MouseMode(window, GUI_MOUSE_CONFINED,
+                        grabbed ? GUI_MOUSE_CONFINED : 0);
+}
+
 static bool PLOS_VideoInit(SDL_VideoDevice *_this) {
+  SDL_Mouse *mouse = SDL_GetMouse();
+  mouse->CaptureMouse = PLOS_CaptureMouse;
+  mouse->SetRelativeMouseMode = PLOS_SetRelativeMouseMode;
   /* CPU window surfaces already have a direct GUI mapping. */
   SDL_SetHintWithPriority(SDL_HINT_FRAMEBUFFER_ACCELERATION, "0",
                           SDL_HINT_DEFAULT);
@@ -88,19 +131,18 @@ static bool PLOS_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window,
   if (window->flags & SDL_WINDOW_VULKAN)
     return SDL_SetError("Vulkan requires the x86_64 backend");
 #endif
-  if (window->flags & SDL_WINDOW_RESIZABLE)
-    return SDL_SetError("Plant OS windows have a fixed size");
-  if (window->w > UINT16_MAX - 2 * BORDER ||
-      window->h > UINT16_MAX - TITLE - BORDER)
+  if (window->w > INT16_MAX - 2 * BORDER ||
+      window->h > INT16_MAX - TITLE - BORDER)
     return SDL_SetError("Window dimensions exceed the GUI protocol range");
   SDL_WindowData *data = SDL_calloc(1, sizeof(*data));
   if (!data)
     return SDL_OutOfMemory();
   data->width = window->w;
   data->height = window->h;
-  data->handle = create_window(window->title ? window->title : "SDL3",
-                               window->x, window->y, window->w + 2 * BORDER,
-                               window->h + TITLE + BORDER, 0);
+  data->handle = create_window(
+      window->title ? window->title : "SDL3", window->x, window->y,
+      window->w + 2 * BORDER, window->h + TITLE + BORDER,
+      (window->flags & SDL_WINDOW_RESIZABLE) ? GUI_CREATE_RESIZABLE : 0);
   if (!data->handle) {
     SDL_free(data);
     return SDL_SetError("Cannot create a GUI window; start gui.bin first");
@@ -168,6 +210,39 @@ static void PLOS_SetWindowTitle(SDL_VideoDevice *_this, SDL_Window *window) {
   SDL_WindowData *data = window->internal;
   if (window_set_title(data->handle, window->title ? window->title : "") != 0)
     SDL_SetError("Cannot update the GUI window title");
+}
+
+static bool PLOS_ResizeWindow(SDL_VideoDevice *_this, SDL_Window *window,
+                              int width, int height) {
+  SDL_WindowData *data = window->internal;
+  if (width < 32 || height < 1 || width > INT16_MAX - 2 * BORDER ||
+      height > INT16_MAX - TITLE - BORDER ||
+      window_resize(data->handle, width + 2 * BORDER,
+                    height + TITLE + BORDER) != 0)
+    return SDL_SetError("Cannot resize the GUI window");
+  data->width = width;
+  data->height = height;
+#ifdef SDL_VIDEO_OPENGL_EGL
+  data->egl_window.width = width;
+  data->egl_window.height = height;
+  if ((window->flags & SDL_WINDOW_OPENGL) &&
+      SDL_GL_GetCurrentWindow() == window)
+    _this->egl_data->eglWaitNative(EGL_CORE_NATIVE_ENGINE);
+#endif
+  SDL_SendWindowEvent(window, SDL_EVENT_WINDOW_RESIZED, width, height);
+  SDL_SendWindowEvent(window, SDL_EVENT_WINDOW_EXPOSED, 0, 0);
+  return true;
+}
+
+static void PLOS_SetWindowSize(SDL_VideoDevice *_this, SDL_Window *window) {
+  PLOS_ResizeWindow(_this, window, window->pending.w, window->pending.h);
+}
+
+static void PLOS_SetWindowResizable(SDL_VideoDevice *_this, SDL_Window *window,
+                                    bool enabled) {
+  SDL_WindowData *data = window->internal;
+  if (window_control(data->handle, GUI_WINDOW_SET_RESIZABLE, enabled, 0) != 0)
+    SDL_SetError("Cannot change GUI window resizing");
 }
 
 static void PLOS_DestroyWindow(SDL_VideoDevice *_this, SDL_Window *window) {
@@ -285,6 +360,18 @@ static const SDL_Scancode scancodes[256] = {
     [0xb8] = SDL_SCANCODE_RALT,
 };
 
+static void PLOS_MouseButtons(SDL_Window *window, unsigned state) {
+  SDL_WindowData *data = window->internal;
+  const Uint8 buttons[] = {SDL_BUTTON_LEFT, SDL_BUTTON_RIGHT, SDL_BUTTON_MIDDLE,
+                           SDL_BUTTON_X1, SDL_BUTTON_X2};
+  for (unsigned button = 0; button < SDL_arraysize(buttons); button++) {
+    if ((state ^ data->button) & (1u << button))
+      SDL_SendMouseButton(SDL_GetTicksNS(), window, 0, buttons[button],
+                          (state & (1u << button)) != 0);
+  }
+  data->button = state;
+}
+
 static void PLOS_PumpEvents(SDL_VideoDevice *_this) {
   for (SDL_Window *window = _this->windows; window; window = window->next) {
     SDL_WindowData *data = window->internal;
@@ -316,33 +403,36 @@ static void PLOS_PumpEvents(SDL_VideoDevice *_this) {
         }
       }
     }
-    int event;
-    while ((event = window_get_event(data->handle)) >= 0) {
-      if (event == GUI_EVENT_CLOSE_WINDOW) {
+    gui_event_t event;
+    while (window_get_event(data->handle, &event) > 0) {
+      if (event.type == GUI_EVENT_CLOSE_WINDOW) {
         SDL_SendWindowEvent(window, SDL_EVENT_WINDOW_CLOSE_REQUESTED, 0, 0);
         continue;
       }
-      unsigned position = window_get_event(data->handle);
-      SDL_SendMouseMotion(SDL_GetTicksNS(), window, 0, false,
-                          (int)(position >> 16) - BORDER,
-                          (int)(position & 0xffff) - TITLE);
-      if (event == GUI_EVENT_MOUSE_WHEEL) {
-        int direction = window_get_event(data->handle);
-        SDL_SendMouseWheel(SDL_GetTicksNS(), window, 0, 0,
-                           direction == 1 ? 1 : -1, SDL_MOUSEWHEEL_NORMAL);
-        continue;
-      }
-      Uint8 button = event == GUI_EVENT_MOUSE_CLICK_LEFT    ? SDL_BUTTON_LEFT
-                     : event == GUI_EVENT_MOUSE_CLICK_RIGHT ? SDL_BUTTON_RIGHT
-                                                            : 0;
-      if (button == data->button)
-        continue;
-      if (data->button)
-        SDL_SendMouseButton(SDL_GetTicksNS(), window, 0, data->button, false);
-      if (button)
-        SDL_SendMouseButton(SDL_GetTicksNS(), window, 0, button, true);
-      data->button = button;
+      SDL_SendMouseMotion(SDL_GetTicksNS(), window, 0, event.relative,
+                          event.relative ? event.dx : event.x - BORDER,
+                          event.relative ? event.dy : event.y - TITLE);
+      if (event.wheel)
+        SDL_SendMouseWheel(SDL_GetTicksNS(), window, 0, 0, event.wheel,
+                           SDL_MOUSEWHEEL_NORMAL);
+      PLOS_MouseButtons(window, event.buttons);
     }
+    gui_window_state_t state;
+    if (window_get_state(data->handle, &state) != 0)
+      continue;
+    PLOS_MouseButtons(window, state.buttons);
+    if (state.flags & GUI_WINDOW_FOCUSED) {
+      if (SDL_GetKeyboardFocus() != window) {
+        SDL_SetKeyboardFocus(window);
+        PLOS_MouseMode(window, 0, 0);
+      }
+    } else if (SDL_GetKeyboardFocus() == window) {
+      SDL_SetKeyboardFocus(NULL);
+    }
+    if (state.requested_width != state.width ||
+        state.requested_height != state.height)
+      PLOS_ResizeWindow(_this, window, state.requested_width - 2 * BORDER,
+                        state.requested_height - TITLE - BORDER);
   }
 }
 
@@ -464,6 +554,9 @@ SDL_EGL_CreateContext_impl(PLOS) SDL_EGL_MakeCurrent_impl(PLOS)
   device->CreateWindowFramebuffer = PLOS_CreateWindowFramebuffer;
   device->UpdateWindowFramebuffer = PLOS_UpdateWindowFramebuffer;
   device->SetWindowTitle = PLOS_SetWindowTitle;
+  device->SetWindowSize = PLOS_SetWindowSize;
+  device->SetWindowResizable = PLOS_SetWindowResizable;
+  device->SetWindowMouseGrab = PLOS_SetWindowMouseGrab;
   device->DestroyWindow = PLOS_DestroyWindow;
   device->PumpEvents = PLOS_PumpEvents;
 #ifdef SDL_VIDEO_OPENGL_EGL

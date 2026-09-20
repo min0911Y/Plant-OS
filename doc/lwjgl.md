@@ -77,7 +77,7 @@ LWJGL 的 `PLANTOS` 平台通过现有 ELF `dlopen/dlsym/dlclose` 装载库和�
 | 模块 | 已构建和接入 | 本次冒烟已验证 | 明确边界 |
 | --- | --- | --- | --- |
 | core | Java core、JNI、MemoryUtil、MemoryStack、libffi callback 路径 | 真实 JNI native 装载、`memAlloc/realloc/free`、数据保持、嵌套 `MemoryStack` | 未宣称上游所有 core 专项测试和所有 ABI 签名均已覆盖 |
-| GLFW | Java GLFW 绑定、原生 `libglfw.so`、Plant GUI/EGL 后端 | 初始化、固定尺寸实际窗口、GLFW error/key callback、事件等待/唤醒、正常 terminate | 不支持调整大小、全屏、最大化、光标捕获/warp/raw motion、剪贴板、IME、GLFW Vulkan WSI；完整边界见 [GLFW](glfw.md) |
+| GLFW | Java GLFW 绑定、原生 `libglfw.so`、Plant GUI/EGL 后端 | 初始化、实际窗口、GLFW error/key callback、事件等待/唤醒、正常 terminate | 不支持全屏、最大化、warp/raw motion、剪贴板、IME、GLFW Vulkan WSI；完整边界见 [GLFW](glfw.md) |
 | OpenGL | OpenGL 绑定和 `liblwjgl_opengl.so`，经 GLFW 使用 Mesa llvmpipe | OpenGL 3.3 core context、GLSL shader、VBO/VAO、uniform、绘制、`glReadPixels`；QEMU 实际客户区红/绿帧 | 只验证软件渲染链路，不代表硬件驱动、GLX、OpenGL ES 或 CTS 一致性 |
 | STB | STB image、image_write、truetype 绑定和 `liblwjgl_stb.so` | PNG callback 编码、内存解码、像素/尺寸断言、truetype 初始化、缩放和字形度量 | 本次没有有效 vorbis fixture；不宣称 STB 全部生成接口都已回归 |
 
