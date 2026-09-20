@@ -2,7 +2,7 @@
 
 Plant OS x86_64 提供 GLFW 3.4 的 `libglfw.so` 和 `glfwtest.bin`。
 上游版本、校验和及修改清单见 [UPSTREAM.md](../apps/glfw/UPSTREAM.md)。
-本阶段建立原生 GLFW 窗口与 OpenGL 路径，并作为 [LWJGL 3](lwjgl.md) 的窗口后端；Minecraft 仍不在交付范围内。
+本阶段建立原生 GLFW 窗口与 OpenGL 路径，并作为 [LWJGL 3](lwjgl.md) 的窗口后端；客户端集成见 [Minecraft](minecraft-client.md)。
 
 ## 构建与运行
 
@@ -42,13 +42,13 @@ i386 不构建 GLFW，显式请求 `glfw` 或 `glfwtest` 会报不支持架构�
 - `glfwSwapInterval(0)` 可用；其他值报功能不可用，没有伪造垂直同步。
 
 `libglfw.so` 的 `DT_NEEDED` 显式包含原生 `libp.so`、`libEGL.so` 和 `libGL.so`。
-GLFW 的 Plant module hooks 按 `/lib/libEGL.so`、`/lib/libGL.so` 取得真实模块句柄
+GLFW 的 Plant module hooks 按 SONAME `libEGL.so`、`libGL.so` 取得真实模块句柄
 和符号作用域，入口来自现有 ELF 解释器的 `dlopen/dlsym`；不装载 Linux 库。
 LWJGL 的 Java 平台适配、JNI native 库和联合回归见 [LWJGL 3](lwjgl.md)。
 
 ## 窗口和输入
 
-支持多个可调整大小的有装饰窗口、标题、位置、显隐、聚焦、关闭请求、客户区及
+支持多个可调整大小的有装饰窗口、标题与图标、位置、显隐、聚焦、关闭请求、客户区及
 framebuffer 尺寸查询。隐藏窗口在创建时不显示、不获取焦点；可见但不聚焦的
 窗口使用 `GLFW_FOCUSED = GLFW_FALSE`。`GLFW_RESIZABLE` 控制边框拖拽，
 `glfwSetWindowSize` 同步更新客户区及 framebuffer 尺寸。
@@ -84,11 +84,15 @@ US 键盘布局，没有 IME。鼠标通过完整事件记录传递位置、五�
 尚未实现。当前缺少：
 
 - 窗口尺寸约束、全屏、最大化、独立的最小化状态、无装饰或置顶窗口。
-- raw motion、warp、自定义光标及系统剪贴板。
+- raw motion、自定义光标及系统剪贴板。
 - 游戏手柄、拖放、IME、多显示器模式切换与硬件 gamma。
 - OpenGL ES、OSMesa 和 GLFW 的 Vulkan WSI。
 
-箭头光标可用。`glfwRawMouseMotionSupported()` 返回 false；
+箭头光标可用。`glfwSetCursorPos` 经 GUI 统一鼠标分派更新位置、光标和事件，
+仅聚焦的可见窗口可请求；禁用光标模式仍由 GLFW 更新虚拟坐标。
+窗口图标选择最接近 GUI 16×16 标题图标的图像，缩放后以 RGBA 转 ARGB，
+服务端按 alpha 合成，并在标题更新和尺寸变化后保留。
+`glfwRawMouseMotionSupported()` 返回 false；
 `GLFW_CURSOR_DISABLED` 使用原生相对捕获，失焦时释放，重新聚焦时恢复。
 GUI 标题栏的原有隐藏按钮表现为窗口隐藏，不宣称独立的最小化状态。
 

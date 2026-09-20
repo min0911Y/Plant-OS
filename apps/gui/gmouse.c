@@ -137,6 +137,20 @@ static void gui_mouse_dispatch(gmouse_t *mouse, const mouse_event_t *input) {
   gui_update_window_states(mouse->desktop);
 }
 
+int gui_mouse_warp(window_t *window, int x, int y) {
+  gmouse_t *mouse = window->desktop->mouse;
+  if (!mouse || !window->using1 || window->desktop->focused_window != window ||
+      (mouse->captured && (mouse->mode & GUI_MOUSE_RELATIVE)))
+    return -1;
+  mouse_event_t event = {
+      .x = window->x + x - mouse->x,
+      .y = window->y + y - mouse->y,
+      .buttons = mouse->buttons,
+  };
+  gui_mouse_dispatch(mouse, &event);
+  return 0;
+}
+
 void gmouse(gmouse_t *gmouse) {
   if (start_keyboard_message() != 0 || mouse_enable() != 0 ||
       use_keyboard() != 0) {

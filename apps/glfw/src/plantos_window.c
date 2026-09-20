@@ -314,7 +314,34 @@ void _glfwRequestWindowAttentionPlantOS(_GLFWwindow *window) {
 }
 void _glfwSetWindowIconPlantOS(_GLFWwindow *window, int count,
                                const GLFWimage *images) {
-  _glfwInputUnsupportedPlantOS("Window icons");
+  uint32_t pixels[GUI_ICON_SIZE * GUI_ICON_SIZE];
+  if (count) {
+    const GLFWimage *image = images;
+    uint64_t closest = UINT64_MAX;
+    for (int i = 0; i < count; i++) {
+      int64_t dx = (int64_t)images[i].width - GUI_ICON_SIZE;
+      int64_t dy = (int64_t)images[i].height - GUI_ICON_SIZE;
+      uint64_t distance = dx * dx + dy * dy;
+      if (distance < closest) {
+        image = &images[i];
+        closest = distance;
+      }
+    }
+    for (unsigned y = 0; y < GUI_ICON_SIZE; y++) {
+      for (unsigned x = 0; x < GUI_ICON_SIZE; x++) {
+        size_t sx = (uint64_t)x * image->width / GUI_ICON_SIZE;
+        size_t sy = (uint64_t)y * image->height / GUI_ICON_SIZE;
+        const unsigned char *rgba =
+            image->pixels + 4 * (sy * image->width + sx);
+        pixels[y * GUI_ICON_SIZE + x] = (uint32_t)rgba[3] << 24 |
+                                        (uint32_t)rgba[0] << 16 |
+                                        (uint32_t)rgba[1] << 8 | rgba[2];
+      }
+    }
+  }
+  if (window_set_icon(window->plantos.native.window, count ? pixels : NULL) !=
+      0)
+    _glfwInputError(GLFW_PLATFORM_ERROR, "Plant OS: Cannot set window icon");
 }
 
 EGLenum _glfwGetEGLPlatformPlantOS(EGLint **attribs) { return 0; }

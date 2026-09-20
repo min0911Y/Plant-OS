@@ -1,0 +1,5 @@
+--- a/modules/lwjgl/stb/src/generated/c/org_lwjgl_stb_STBDXT.c
++++ b/modules/lwjgl/stb/src/generated/c/org_lwjgl_stb_STBDXT.c
+@@ -6,1 +6,2 @@
+ #include "common_tools.h"
++#include <string.h>

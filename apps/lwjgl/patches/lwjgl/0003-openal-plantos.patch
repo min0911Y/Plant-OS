@@ -1,0 +1,11 @@
+diff --git a/modules/lwjgl/openal/src/main/java/org/lwjgl/openal/ALC.java b/modules/lwjgl/openal/src/main/java/org/lwjgl/openal/ALC.java
+--- a/modules/lwjgl/openal/src/main/java/org/lwjgl/openal/ALC.java
++++ b/modules/lwjgl/openal/src/main/java/org/lwjgl/openal/ALC.java
+@@ -61,6 +61,7 @@
+         switch (Platform.get()) {
+             case FREEBSD:
+             case LINUX:
++            case PLANTOS:
+             case MACOSX:
+                 libName = "openal";
+                 break;

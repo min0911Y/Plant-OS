@@ -239,6 +239,18 @@ int window_set_title(window_t window, const char *title) {
                   NULL, 0, NULL);
 }
 
+int window_set_icon(window_t window, const uint32_t *pixels) {
+  if (!window)
+    return RPC_ERR_INVAL;
+  uint32_t request[1 + GUI_ICON_SIZE * GUI_ICON_SIZE] = {window->id};
+  size_t size = sizeof(request[0]);
+  if (pixels) {
+    memcpy(request + 1, pixels, sizeof(request) - size);
+    size = sizeof(request);
+  }
+  return gui_call(GUI_RPC_SET_ICON, request, size, NULL, 0, NULL);
+}
+
 int window_set_event_notifications(window_t window, bool enabled) {
   return window_set_event_target(window, enabled ? NowTaskID() : 0,
                                  enabled ? ipc_generation() : 0);

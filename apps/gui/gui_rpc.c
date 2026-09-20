@@ -377,18 +377,28 @@ static int gui_stop_keyboard(rpc_call_t *call) {
   return gui_keyboard_set(call, 0);
 }
 
-static int gui_set_title(rpc_call_t *call) {
-  if (call->arg_len <= sizeof(gui_rpc_window_request_t) ||
-      call->arg_len > sizeof(gui_rpc_window_request_t) + GUI_TITLE_MAX + 1)
+static int gui_set_decoration(rpc_call_t *call) {
+  if (call->arg_len < sizeof(gui_rpc_window_request_t))
     return RPC_ERR_INVAL;
   const gui_rpc_window_request_t *request = call->arg;
-  const char *title = (const char *)call->arg + sizeof(*request);
+  const void *data = (const char *)call->arg + sizeof(*request);
   size_t length = call->arg_len - sizeof(*request);
-  if (title[length - 1] != 0 || strlen(title) != length - 1)
-    return RPC_ERR_INVAL;
+  bool icon = call->opcode == GUI_RPC_SET_ICON;
+  if (icon) {
+    if (length && length != GUI_ICON_SIZE * GUI_ICON_SIZE * sizeof(uint32_t))
+      return RPC_ERR_INVAL;
+  } else {
+    const char *title = data;
+    if (!length || length > GUI_TITLE_MAX + 1 || title[length - 1] ||
+        strlen(title) != length - 1)
+      return RPC_ERR_INVAL;
+  }
   TaskLock();
   gui_remote_window_t *remote = gui_remote_find(call, request->window_id);
-  int result = remote ? window_set_title(remote->window, title) : -1;
+  int result = -1;
+  if (remote)
+    result = icon ? window_set_icon(remote->window, length ? data : NULL)
+                  : window_set_title(remote->window, data);
   if (result == 0) {
     window_t *window = remote->window;
     size_t rows = window->ysize < 20 ? window->ysize : 20;
@@ -436,7 +446,7 @@ static int gui_window_control(rpc_call_t *call) {
   if (call->arg_len != sizeof(gui_rpc_window_control_t))
     return RPC_ERR_INVAL;
   const gui_rpc_window_control_t *request = call->arg;
-  if (request->operation > GUI_WINDOW_MOUSE_MODE || request->x < INT16_MIN ||
+  if (request->operation > GUI_WINDOW_WARP_POINTER || request->x < INT16_MIN ||
       request->x > INT16_MAX || request->y < INT16_MIN ||
       request->y > INT16_MAX)
     return RPC_ERR_INVAL;
@@ -448,6 +458,11 @@ static int gui_window_control(rpc_call_t *call) {
   }
   window_t *window = remote->window;
   switch (request->operation) {
+  case GUI_WINDOW_WARP_POINTER: {
+    int result = gui_mouse_warp(window, request->x, request->y);
+    TaskUnlock();
+    return result == 0 ? RPC_OK : RPC_ERR_INVAL;
+  }
   case GUI_WINDOW_MOVE:
     window->x = request->x;
     window->y = request->y;
@@ -583,7 +598,8 @@ static const rpc_handler_t gui_handlers[GUI_RPC_COUNT] = {
     [GUI_RPC_PRESENT_FRAME] = gui_refresh_window,
     [GUI_RPC_START_KEYBOARD] = gui_start_keyboard,
     [GUI_RPC_STOP_KEYBOARD] = gui_stop_keyboard,
-    [GUI_RPC_SET_TITLE] = gui_set_title,
+    [GUI_RPC_SET_TITLE] = gui_set_decoration,
+    [GUI_RPC_SET_ICON] = gui_set_decoration,
     [GUI_RPC_EVENT_NOTIFICATIONS] = gui_event_notifications,
     [GUI_RPC_WINDOW_CONTROL] = gui_window_control,
     [GUI_RPC_RESIZE_WINDOW] = gui_resize_window,

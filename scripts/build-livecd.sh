@@ -56,6 +56,7 @@ if [ -n "$lwjgl_dir" ]; then
       classes/LwjglSmoke.class run-lwjgl.lua \
       jar/lwjgl-3.3.6.jar jar/lwjgl-glfw-3.3.6.jar \
       jar/lwjgl-opengl-3.3.6.jar jar/lwjgl-stb-3.3.6.jar \
+      jar/lwjgl-openal-3.3.6.jar \
       jar/jspecify-1.0.0.jar native/liblwjgl.so \
       native/liblwjgl_opengl.so native/liblwjgl_stb.so; do
     if [ ! -f "$lwjgl_dir/$artifact" ]; then
@@ -63,6 +64,10 @@ if [ -n "$lwjgl_dir" ]; then
       exit 1
     fi
   done
+  if [ ! -f "$apps_out_dir/lib/libopenal.so" ]; then
+    echo "build-livecd: missing native OpenAL library" >&2
+    exit 1
+  fi
 fi
 
 fat_short_path() {

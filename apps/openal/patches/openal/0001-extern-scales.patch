@@ -1,0 +1,9 @@
+--- a/Alc/bformatdec.h
++++ b/Alc/bformatdec.h
+@@ -27,3 +27,3 @@
+-const ALfloat N3D2N3DScale[MAX_AMBI_COEFFS];
+-const ALfloat SN3D2N3DScale[MAX_AMBI_COEFFS];
+-const ALfloat FuMa2N3DScale[MAX_AMBI_COEFFS];
++extern const ALfloat N3D2N3DScale[MAX_AMBI_COEFFS];
++extern const ALfloat SN3D2N3DScale[MAX_AMBI_COEFFS];
++extern const ALfloat FuMa2N3DScale[MAX_AMBI_COEFFS];

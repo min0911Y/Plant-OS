@@ -72,6 +72,7 @@ struct window {
   unsigned tid;
   int xsize, ysize, x, y;
   char *title;
+  uint32_t *icon;
   gui_window_shared_t *shared;
   bool keyboard_events;
   bool resizable;
@@ -116,9 +117,11 @@ void window_focus(window_t *window);
 void window_draw_frame(window_t *window);
 void gui_mouse_release(window_t *window);
 void gui_mouse_sync(gmouse_t *mouse);
+int gui_mouse_warp(window_t *window, int x, int y);
 void window_show(window_t *window, bool focused);
 void close_window(window_t *window);
 int window_set_title(window_t *window, const char *title);
+int window_set_icon(window_t *window, const uint32_t *pixels);
 void destroy_window(window_t *window);
 super_window_t *create_super_window(window_t *window);
 

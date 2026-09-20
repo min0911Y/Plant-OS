@@ -14,6 +14,7 @@
 #endif
 static inline float eval_as_float(float value) { return value; }
 double __expo2(double value, double sign) __attribute__((visibility("hidden")));
+float __expo2f(float value, float sign) __attribute__((visibility("hidden")));
 int __rem_pio2(double value, double *remainder);
 double __sin(double value, double tail, int nonzero_tail);
 double __cos(double value, double tail);

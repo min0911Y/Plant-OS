@@ -5,7 +5,7 @@
 需要 GNU make、GCC/G++、binutils、NASM、mtools 和 QEMU；i386 工具链须支持 `-m32`/`elf_i386`。LiveCD 另需 `curl`、`tar`、`gzip` 和 `xorriso` 或 `genisoimage`。
 原生 C++ 运行库还需 Clang、CMake 和 Ninja；x86_64 默认包含 Mesa lavapipe/llvmpipe，另需 Meson、llvm-ar、匹配 LLVM 源码的宿主 TableGen、glslangValidator、bison、flex、m4 和 Python 生成器模块。版本、缓存与构建说明见 [lavapipe](lavapipe.md)。
 
-根目录 `./init.py` 下载并校验 LLVM、Mesa、OpenJDK、LWJGL、终端库及原版
+根目录 `./init.py` 下载并校验 LLVM、Mesa、OpenJDK、LWJGL、OpenAL、终端库及原版
 Minecraft 的固定依赖；也可指定分组，如 `./init.py mesa openjdk`。
 版本与 SHA-256 维护在各模块的 `sources.json`，源码缓存统一放在
 `apps/out/sources/`，补丁随仓库维护。重复初始化复用缓存，不能把缓存中的
@@ -55,3 +55,7 @@ ISO 自动启动服务端，IMG 保存 JDK、原版 JAR、配置和世界；默�
 `MINECRAFT_DISK` 与 `MINECRAFT_ISO`，或明确删除不再需要的旧磁盘。
 `MINECRAFT_DISK_MIB`（默认 1536）、`MINECRAFT_MEMORY`、`MINECRAFT_PORT`、
 `MINECRAFT_ACCEL` 和 `MINECRAFT_CPU` 可覆盖容量及运行参数。
+
+Minecraft Java 1.20.1 客户端使用独立的 `minecraft-client-image` /
+`minecraft-client-run` 目标；输入 ZIP、私有 STB 原生库、持久磁盘和支持边界
+见 [客户端构建](minecraft-client.md)。

@@ -26,6 +26,14 @@
 GLFW 支持 NORMAL、HIDDEN、DISABLED、CAPTURED；SDL 支持自动/显式捕获、
 相对模式和鼠标限制。相对模式不等同于 raw motion 能力声明。
 
+`GUI_WINDOW_WARP_POINTER` 接受包含装饰的窗口坐标，仅允许聚焦且可见的
+窗口在非相对模式下调用。它复用鼠标事件分派，保留按键状态、裁剪与限制，
+同步更新真实光标和共享状态，不在 GLFW 内伪造位置。
+
+`window_set_icon` 接收 `GUI_ICON_SIZE`（16）平方个 ARGB8888 像素，NULL 清除。
+图标通过带 owner 校验的 RPC 复制到服务端，透明度与标题背景合成；修改同步
+更新两块绘图平面的装饰，缩放保留图标，关闭释放存储。
+
 ## 游戏鼠标视角测试
 
 在 x86_64 GUI 的终端执行 `glfwtest.bin --capture`。鼠标进入客户区自动隐藏并

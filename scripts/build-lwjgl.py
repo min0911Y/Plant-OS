@@ -104,7 +104,7 @@ def compile_smoke(output, jar_dir):
     classes.mkdir(parents=True)
     jars = [jar_dir / name for name in (
         "lwjgl-3.3.6.jar", "lwjgl-glfw-3.3.6.jar", "lwjgl-opengl-3.3.6.jar",
-        "lwjgl-stb-3.3.6.jar", "jspecify-1.0.0.jar")]
+        "lwjgl-stb-3.3.6.jar", "lwjgl-openal-3.3.6.jar", "jspecify-1.0.0.jar")]
     subprocess.run([
         javac_tool(), "-source", "8", "-target", "8", "-Xlint:-options",
         "-cp", os.pathsep.join(map(str, jars)), "-d", str(classes),
@@ -162,6 +162,33 @@ def link_shared(output, name, objects, runtime):
     return destination
 
 
+def build_stb_native(source, output):
+    """Build an application's pinned STB JNI against the shared Plant core ABI."""
+    dependencies = Sources(PORT)
+    core = dependencies["lwjgl"].prepare()
+    ffi = dependencies["libffi"].prepare()
+    jni = target_jni_include()
+    runtime = APPS / "out/x86_64"
+    state = json.dumps({
+        "source": digest(source / ".plant-source-sha256"),
+        "core": digest(core / ".plant-source-sha256"),
+        "script": digest(Path(__file__)),
+        "config": digest(PORT / "include/PlantOSConfig.h"),
+        "runtime": digest(runtime / "lib/libp.so"),
+        "jni": [digest(jni[0] / "jni.h"), digest(jni[-1] / "jni_md.h")],
+    }, sort_keys=True) + "\n"
+    stamp = output / ".plant-build"
+    library = output / "native/liblwjgl_stb.so"
+    if stamp.exists() and stamp.read_text() == state and library.exists():
+        return library
+    sources = sorted((source / "modules/lwjgl/stb/src/generated/c").glob("*.c"))
+    objects = compile_native(core, ffi, jni, output, "stb", sources,
+                             [source / "modules/lwjgl/stb/src/main/c"])
+    link_shared(output, "liblwjgl_stb.so", objects, runtime)
+    publish(stamp, state)
+    return library
+
+
 def build(arch, output, jobs):
     if arch != "x86_64":
         raise RuntimeError("LWJGL currently supports x86_64 only")
@@ -182,12 +209,14 @@ def build(arch, output, jobs):
     artifact_paths = [
         "jar/lwjgl-3.3.6.jar", "jar/lwjgl-glfw-3.3.6.jar",
         "jar/lwjgl-opengl-3.3.6.jar", "jar/lwjgl-stb-3.3.6.jar",
+        "jar/lwjgl-openal-3.3.6.jar",
         "jar/jspecify-1.0.0.jar", "native/liblwjgl.so",
         "native/liblwjgl_opengl.so", "native/liblwjgl_stb.so",
         "classes/LwjglSmoke.class", "run-lwjgl.lua",
     ]
     state = {
         "arch": arch,
+        "script": digest(Path(__file__)),
         "lwjgl": (lwjgl / ".plant-source-sha256").read_text(),
         "libffi": digest(ffi / ".plant-source-sha256"),
         "jspecify": digest(jspecify),
@@ -224,12 +253,15 @@ def build(arch, output, jobs):
                         exclude=("GLFWNativeEGL.java", "GLFWVulkan.java"))
     stb_classes = java_build / "stb"
     compile_java_module(lwjgl, "stb", stb_classes, [str(jspecify), str(core_classes)])
+    openal_classes = java_build / "openal"
+    compile_java_module(lwjgl, "openal", openal_classes, [str(jspecify), str(core_classes)])
 
     jar_dir = output / "jar"
     make_jar(jar_dir / "lwjgl-3.3.6.jar", core_classes)
     make_jar(jar_dir / "lwjgl-glfw-3.3.6.jar", glfw_classes)
     make_jar(jar_dir / "lwjgl-opengl-3.3.6.jar", opengl_classes)
     make_jar(jar_dir / "lwjgl-stb-3.3.6.jar", stb_classes)
+    make_jar(jar_dir / "lwjgl-openal-3.3.6.jar", openal_classes)
     shutil.copyfile(jspecify, jar_dir / "jspecify-1.0.0.jar")
     compile_smoke(output, jar_dir)
     shutil.copyfile(PORT / "run-lwjgl.lua", output / "run-lwjgl.lua")

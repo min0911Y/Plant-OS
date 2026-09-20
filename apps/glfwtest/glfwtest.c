@@ -452,6 +452,12 @@ int main(int argc, char **argv) {
   window = glfwCreateWindow(320, 200, "Plant OS GLFW 3.4", NULL, NULL);
   CHECK(window);
   CHECK(contexts(window));
+  unsigned char icon_pixels[] = {255, 0, 0, 255, 0, 255, 0, 255};
+  GLFWimage icon = {2, 1, icon_pixels};
+  glfwSetWindowIcon(window, 1, &icon);
+  CHECK(glfwGetError(NULL) == GLFW_NO_ERROR);
+  glfwSetWindowIcon(window, 0, NULL);
+  CHECK(glfwGetError(NULL) == GLFW_NO_ERROR);
   glfwSetKeyCallback(window, key);
   glfwSetCharCallback(window, character);
   glfwSetCursorPosCallback(window, cursor);
@@ -463,6 +469,15 @@ int main(int argc, char **argv) {
   CHECK(glfwGetError(NULL) == GLFW_NO_ERROR);
   CHECK(glfwGetInputMode(window, GLFW_CURSOR) == GLFW_CURSOR_DISABLED);
   glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+  CHECK(glfwGetError(NULL) == GLFW_NO_ERROR);
+  double cursor_x, cursor_y;
+  glfwGetCursorPos(window, &cursor_x, &cursor_y);
+  glfwSetCursorPos(window, 20, 30);
+  CHECK(glfwGetError(NULL) == GLFW_NO_ERROR);
+  double warped_x, warped_y;
+  glfwGetCursorPos(window, &warped_x, &warped_y);
+  CHECK(warped_x == 20 && warped_y == 30);
+  glfwSetCursorPos(window, cursor_x, cursor_y);
   CHECK(glfwGetError(NULL) == GLFW_NO_ERROR);
   glfwSetWindowSize(window, 360, 240);
   int resized_width, resized_height;

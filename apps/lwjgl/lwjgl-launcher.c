@@ -1,39 +1,22 @@
 // SPDX-License-Identifier: MIT
 #include <stdlib.h>
-#include <stdint.h>
 #include <string.h>
 
 #include <rpc.h>
+#include <runtime_args.h>
 #include <syscall.h>
 #include <unistd.h>
 
-static char *build_command(int argc, char **argv) {
-  size_t length = 1;
-  for (int index = 1; index < argc; index++) {
-    size_t part_length = strlen(argv[index]);
-    size_t separator = index == 1 ? 0 : 1;
-    if (length > SIZE_MAX - separator ||
-        part_length > SIZE_MAX - length - separator)
-      return NULL;
-    length += part_length + separator;
-  }
-
-  char *command = malloc(length);
-  if (!command)
-    return NULL;
-  char *cursor = command;
-  for (int index = 1; index < argc; index++) {
-    if (index != 1)
-      *cursor++ = ' ';
-    size_t part_length = strlen(argv[index]);
-    memcpy(cursor, argv[index], part_length);
-    cursor += part_length;
-  }
-  *cursor = '\0';
-  return command;
-}
-
 int main(int argc, char **argv) {
+  const char *directory = NULL;
+  while (argc > 2) {
+    if (!strcmp(argv[1], "--directory"))
+      directory = argv[2];
+    else
+      break;
+    argc -= 2;
+    argv += 2;
+  }
   if (argc < 2)
     return 2;
 
@@ -48,8 +31,12 @@ int main(int argc, char **argv) {
       return 1;
   }
 
-  char *command = build_command(argc, argv);
-  if (!command)
+  if (directory && chdir(directory) != 0)
+    return 1;
+
+  char *command;
+  size_t length;
+  if (runtime_command_line_build(argc - 1, argv + 1, &command, &length) != 0)
     return 1;
   int status = exec(argv[1], command);
   free(command);

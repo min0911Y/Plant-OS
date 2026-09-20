@@ -17,7 +17,7 @@ $(LWJGL_STAMP): $(LWJGL_INPUTS) $(DYN_LIB)/libp.so \
 	  --jobs $(if $(MESA_JOBS),$(MESA_JOBS),2)
 
 .PHONY: lwjgl
-lwjgl: $(LWJGL_STAMP) $(BUILD)/applications.list
+lwjgl: $(LWJGL_STAMP) $(OPENAL_LIBRARY) $(BUILD)/applications.list
 else
 .PHONY: lwjgl
 lwjgl:

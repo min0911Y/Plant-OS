@@ -11,6 +11,7 @@
 | [用户异常与信号](signals.md) | 可恢复异常、信号、备用栈与线程上下文 |
 | [并发与资源生命周期](concurrency.md) | 锁、线程、调度、时钟、TLB 与 DMA |
 | [子系统边界](subsystems.md) | Shell、输入、GUI、文件系统、设备、网络与计时 |
+| [Minecraft 客户端](minecraft-client.md) | 原版 1.20.1 客户端的打包、运行、依赖与验收 |
 | [LWJGL 3 原生移植](lwjgl.md) | x86_64 Java core、GLFW、OpenGL、STB 的构建、部署与回归 |
 | [验证与交付](testing.md) | 构建验证、QEMU 回归及交付检查 |
 

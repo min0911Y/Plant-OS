@@ -1,0 +1,35 @@
+#pragma once
+#define AL_API __attribute__((visibility("default")))
+#define ALC_API AL_API
+#define ALIGN(x) __attribute__((aligned(x)))
+#define ASSUME_ALIGNED(x, y) __builtin_assume_aligned(x, y)
+#define SIZEOF_LONG 8
+#define SIZEOF_LONG_LONG 8
+#define HAVE_SYSCONF 1
+#define HAVE_POSIX_MEMALIGN 1
+#define HAVE_SSE 1
+#define HAVE_SSE2 1
+#define HAVE_STAT 1
+#define HAVE_LRINTF 1
+#define HAVE_MODFF 1
+#define HAVE_LOG2F 1
+#define HAVE_CBRTF 1
+#define HAVE_COPYSIGNF 1
+#define HAVE_STRTOF 1
+#define HAVE_STRNLEN 1
+#define HAVE_C99_BOOL 1
+#define HAVE_C11_STATIC_ASSERT 1
+#define HAVE_C11_ALIGNAS 1
+#define HAVE_C11_ATOMIC 1
+#define HAVE_GCC_DESTRUCTOR 1
+#define HAVE_GCC_FORMAT 1
+#define HAVE_STDINT_H 1
+#define HAVE_STDBOOL_H 1
+#define HAVE_STDALIGN_H 1
+#define HAVE_DLFCN_H 1
+#define HAVE_DIRENT_H 1
+#define HAVE_STRINGS_H 1
+#define HAVE_CPUID_H 1
+#define HAVE_FLOAT_H 1
+#define HAVE_FENV_H 1
+#define HAVE_GCC_GET_CPUID 1

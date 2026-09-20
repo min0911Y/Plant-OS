@@ -299,6 +299,16 @@ static int gui_test_interaction(void) {
     }                                                                          \
   } while (0)
   INTERACTION_CHECK(window);
+  gui_window_state_t initial_pointer, warped_pointer;
+  INTERACTION_CHECK(window_get_state(window, &initial_pointer) == 0);
+  INTERACTION_CHECK(window_control(window, GUI_WINDOW_WARP_POINTER, 20, 40) ==
+                    0);
+  INTERACTION_CHECK(window_get_state(window, &warped_pointer) == 0 &&
+                    warped_pointer.cursor_x == 20 &&
+                    warped_pointer.cursor_y == 40);
+  INTERACTION_CHECK(window_control(window, GUI_WINDOW_WARP_POINTER,
+                                   initial_pointer.cursor_x,
+                                   initial_pointer.cursor_y) == 0);
   window_buffer_t buffer;
   INTERACTION_CHECK(window_get_buffer(window, &buffer) == 0);
   draw_px(window, 10, 30, 0x123456);
@@ -483,6 +493,22 @@ static int gui_test_basic(void) {
     logkf("GUITEST FAIL framebuffer\n");
     close_window(window);
     return 4;
+  }
+
+  uint32_t icon[GUI_ICON_SIZE * GUI_ICON_SIZE] = {0};
+  uint32_t background = framebuffer[4 * 64 + 4];
+  icon[0] = 0xffff0000;
+  icon[1] = 0xff00ff00;
+  if (window_set_icon(window, icon) != 0 ||
+      framebuffer[4 * 64 + 4] != 0xff0000 ||
+      framebuffer[4 * 64 + 5] != 0x00ff00 ||
+      window_set_title(window, "Icon test") != 0 ||
+      framebuffer[4 * 64 + 4] != 0xff0000 ||
+      window_set_icon(window, NULL) != 0 ||
+      framebuffer[4 * 64 + 4] != background) {
+    logkf("GUITEST FAIL title icon\n");
+    close_window(window);
+    return 5;
   }
 
   draw_px(window, 3, 5, 0x00ff00ff);

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Zlib
 #include "internal.h"
+#include <limits.h>
 #include <string.h>
 
 // GUI uses the shared x86 logical scan codes for both PS/2 and USB keyboards.
@@ -245,7 +246,16 @@ void _glfwGetCursorPosPlantOS(_GLFWwindow *window, double *x, double *y) {
     *y = state.cursor_y;
 }
 void _glfwSetCursorPosPlantOS(_GLFWwindow *window, double x, double y) {
-  _glfwInputUnsupportedPlantOS("Cursor warping");
+  x += _GLFW_PLANT_BORDER;
+  y += _GLFW_PLANT_TITLE;
+  if (x < INT16_MIN || x > INT16_MAX || y < INT16_MIN || y > INT16_MAX) {
+    _glfwInputError(GLFW_INVALID_VALUE,
+                    "Plant OS: Cursor position exceeds GUI range");
+    return;
+  }
+  if (window_control(window->plantos.native.window, GUI_WINDOW_WARP_POINTER,
+                     (int)x, (int)y) != 0)
+    _glfwInputError(GLFW_PLATFORM_ERROR, "Plant OS: Cannot move cursor");
 }
 void _glfwSetCursorModePlantOS(_GLFWwindow *window, int mode) {
   unsigned flags = mode == GLFW_CURSOR_DISABLED   ? GUI_MOUSE_RELATIVE

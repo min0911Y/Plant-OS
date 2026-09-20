@@ -24,6 +24,8 @@ int window_get_event(window_t window, gui_event_t *event);
 int window_resize(window_t window, unsigned width, unsigned height);
 void close_window(window_t window);
 int window_set_title(window_t window, const char *title);
+/* GUI_ICON_SIZE squared ARGB8888 pixels, or NULL to clear the title icon. */
+int window_set_icon(window_t window, const uint32_t *pixels);
 void draw_px(window_t window, int x, int y, int color);
 /* Queue damage; the render buffer remains shared until it is consumed. */
 void window_refresh(window_t window, int first, int last);

@@ -24,12 +24,13 @@ python3 scripts/test-x86_64.py --arch i386 --dynamic --memory 512
 | 用户态线程、TLS、运行库 | `--threads`、`--futex`，覆盖同步、分配、C/C++、stdio、浮点环境和动态链接/VM |
 | LLVM、Vulkan 与 WSI | x86_64 `--llvm`、`--lavapipe --memory 3072 --timeout 600` 验证着色器、窗口像素与输入；`--compute-bench` 比较多个 worker 数并逐块核验结果，性能数据须固定宿主与 QEMU 配置 |
 | OpenGL、EGL 与 llvmpipe | x86_64 `--opengl --memory 3072 --timeout 600`，覆盖离屏、GLSL、上下文共享、并发场景及 glxgears 两帧像素和键盘事件；`--gears-workers N` 选择光栅线程，性能另用 `--gears-bench`，固定宿主与 QEMU 配置 |
-| LWJGL 3 core、GLFW、OpenGL、STB | 自动回归使用 x86_64 `python3 scripts/test-lwjgl.py --jdk <Plant-JDK> --firmware bios --accel tcg`；手动窗口调试使用 `make -C kernel ARCH=x86_64 lwjgl-run`，进入 `psh` 后执行 `lua.bin C:/java/lwjgl/run-lwjgl.lua`；见 [LWJGL](lwjgl.md) |
+| LWJGL 3 core、GLFW、OpenGL、STB、OpenAL | 自动回归使用 x86_64 `python3 scripts/test-lwjgl.py --jdk <Plant-JDK> --firmware bios --accel tcg`；手动窗口调试使用 `make -C kernel ARCH=x86_64 lwjgl-run`，进入 `psh` 后执行 `lua.bin C:/java/lwjgl/run-lwjgl.lua`；见 [LWJGL](lwjgl.md) |
 | GUI、输入、SDL、工具 | `--mouse`、`--console`、`--editor`、`--sdl`、x86_64 `--glfw`、`--terminal-load COUNT`、`--desktop-app`（`lite` 或 `nk`）、`--tools` |
 | 动态链接与全部应用装载 | `--dynamic`、`--all-apps`，见 [动态链接验证](dynamic-linking.md#验证) |
 | 管道与事件等待 | 两架构 `--dynamic` 中的 `IOPOLL PASS`，见 [管道与事件等待](io-poll.md) |
 | OpenJDK 启动与运行库 | x86_64 附加 JDK 磁盘，`test-openjdk.py` 验证源码启动、客户机 javac/class、路径、NIO、异常、反射、线程与 GC，见 [OpenJDK](openjdk.md) |
 | OpenJDK JIT | `test-openjdk.py --jit c1` / `--jit c2` 核验计算、nmethod 和入口失效；`--accel tcg --repeat 4` 覆盖多线程 TCG 热修补，见 [JIT 验收](openjdk.md#x86_64-server-vm-与-jit-验收) |
+| Minecraft 客户端 | 构建与主菜单、普通世界、键鼠、保存及冷启动重进验收见 [客户端](minecraft-client.md)；游戏 JAR 保持原样 |
 | Minecraft 服务端 | `test-minecraft-server.py --jdk <Plant-Server-JDK> --server <server.jar> --out <空目录> --accel kvm` 验证原版 1.20.1 默认新世界、网络查询、保存、JFR 和正常停服；默认启用 C1/C2，`--jvm-mode c2` 单独覆盖 C2；见 [OpenJDK](openjdk.md#原版-minecraft-服务端) |
 | USB、PCI、AHCI | `--usb`、`--usb-hubs`、`--usb-irq`、`--usb-root-bus`、`--ahci --machine q35`；故障与模式组合见对应专题文档 |
 | APIC、SIMD 与 TLB 后端 | `--apic`、`--cpu`、`--simd`、`--tlb`，见 [多架构说明](multiarch.md) |

@@ -440,6 +440,12 @@ static void math_environment(void) {
         "integer rounding NaN");
   check(feclearexcept(FE_ALL_EXCEPT) == 0 && fesetround(FE_TONEAREST) == 0,
         "restore integer rounding environment");
+  check(cbrtf(-27.0f) == -3.0f && cbrtf(0x1p-144f) == 0x1p-48f &&
+            signbit(cbrtf(-0.0f)) && isinf(cbrtf(INFINITY)) &&
+            isnan(cbrtf(NAN)) && signbit(sinhf(-0.0f)) &&
+            fabsf(sinhf(1.0f) - 1.1752012f) < 0.000001f &&
+            isinf(sinhf(100.0f)) && expm1f(0x1p-25f) == 0x1p-25f,
+        "audio scalar math, subnormal, signed zero and overflow");
   check(fma(0x1.0000000000001p0, 0x1.ffffffffffffep-1, -1.0) == -0x1p-104 &&
             fmaf(0x1.000002p0f, 0x1.fffffcp-1f, -1.0f) == -0x1p-46f,
         "fused multiply-add single rounding");

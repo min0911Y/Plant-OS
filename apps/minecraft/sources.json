@@ -1,4 +1,11 @@
 {
+  "stb": {
+    "version": "3.3.1",
+    "url": "https://github.com/LWJGL/lwjgl3/archive/refs/tags/3.3.1.tar.gz",
+    "filename": "lwjgl3-3.3.1.tar.gz",
+    "sha256": "bcb4da2014cee86b3cb24fde3fcf3fcc600957bac62ed0d12ba997050e0e34b9",
+    "directory": "lwjgl3-3.3.1"
+  },
   "server": {
     "version": "1.20.1",
     "url": "https://piston-data.mojang.com/v1/objects/84194a2f286ef7c14ed7ce0090dba59902951553/server.jar",

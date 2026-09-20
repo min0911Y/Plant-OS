@@ -19,7 +19,7 @@ also retain their upstream MIT, Sun or BSD notices.
   indexes it with the project's errno constants.
 - `math/*.c` and data declarations come from `src/math/`. The explicit source
   list in `apps/dynamic.mk` is the build authority. The routines cover the
-  additional scalar math used by LLVM and Mesa, including software FMA.
+  additional scalar math used by LLVM and Mesa, including software FMA and OpenAL float sinh/cube-root/expm1.
 - `math/libm.h` is a native adapter to existing bit helpers. It selects x87
   evaluation precision on i386. `rint.c`, `rintf.c`, `logb.c`, and `fma.c` include
   this adapter; `fma.c` uses the compiler's CLZ intrinsic instead of musl's

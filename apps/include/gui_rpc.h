@@ -5,6 +5,7 @@
 
 #define GUI_SERVICE_NAME "gui"
 #define GUI_TITLE_MAX 255u
+#define GUI_ICON_SIZE 16u
 
 /* This range is reserved for client-side GUI shared mappings. */
 #if defined(PLANT_ARCH_X86_64)
@@ -220,6 +221,7 @@ enum gui_rpc_opcode {
   GUI_RPC_PRESENT_FRAME,
   GUI_RPC_WINDOW_CONTROL,
   GUI_RPC_RESIZE_WINDOW,
+  GUI_RPC_SET_ICON,
   GUI_RPC_COUNT,
 };
 
@@ -308,6 +310,7 @@ enum gui_window_control {
   GUI_WINDOW_FOCUS,
   GUI_WINDOW_SET_RESIZABLE,
   GUI_WINDOW_MOUSE_MODE,
+  GUI_WINDOW_WARP_POINTER,
 };
 
 enum gui_mouse_mode {

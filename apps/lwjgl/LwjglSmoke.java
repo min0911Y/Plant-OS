@@ -8,6 +8,8 @@ import org.lwjgl.stb.STBImageWrite;
 import org.lwjgl.stb.STBTTFontinfo;
 import org.lwjgl.stb.STBTruetype;
 import org.lwjgl.system.MemoryStack;
+import org.lwjgl.openal.AL;
+import org.lwjgl.openal.ALC;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -17,6 +19,7 @@ import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.nio.LongBuffer;
+import java.nio.ShortBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -29,6 +32,9 @@ import static org.lwjgl.opengl.GL15C.*;
 import static org.lwjgl.opengl.GL20C.*;
 import static org.lwjgl.opengl.GL30C.*;
 import static org.lwjgl.stb.STBImage.*;
+import static org.lwjgl.openal.AL10.*;
+import static org.lwjgl.openal.ALC10.*;
+import static org.lwjgl.openal.SOFTLoopback.*;
 
 import static org.lwjgl.system.MemoryStack.*;
 import static org.lwjgl.system.MemoryUtil.*;
@@ -165,6 +171,49 @@ public final class LwjglSmoke {
         System.out.println("LWJGL STB PASS");
     }
 
+    private static void openalTest() {
+        long device = alcLoopbackOpenDeviceSOFT((ByteBuffer)null);
+        require(device != NULL, "OpenAL loopback device");
+        long context = NULL;
+        try (MemoryStack stack = stackPush()) {
+            org.lwjgl.openal.ALCCapabilities caps = ALC.createCapabilities(device);
+            context = alcCreateContext(device, stack.ints(ALC_FREQUENCY, 48000,
+                ALC_FORMAT_CHANNELS_SOFT, ALC_STEREO_SOFT,
+                ALC_FORMAT_TYPE_SOFT, ALC_SHORT_SOFT, 0));
+            require(context != NULL && alcMakeContextCurrent(context), "OpenAL context");
+            AL.createCapabilities(caps);
+            ShortBuffer samples = stack.mallocShort(1024);
+            for (int i = 0; i < samples.capacity(); i++) {
+                samples.put(i, (short)(Math.sin(i * Math.PI / 32) * 16000));
+            }
+            int buffer = alGenBuffers();
+            int source = alGenSources();
+            try {
+                alBufferData(buffer, AL_FORMAT_MONO16, samples, 48000);
+                alSourcei(source, AL_BUFFER, buffer);
+                alSourcei(source, AL_LOOPING, AL_TRUE);
+                alSourcePlay(source);
+                ShortBuffer output = stack.mallocShort(4096);
+                alcRenderSamplesSOFT(device, output, 2048);
+                long energy = 0;
+                for (int i = 0; i < output.capacity(); i++) {
+                    energy += Math.abs((int)output.get(i));
+                }
+                require(energy > 1000000 && alGetError() == AL_NO_ERROR &&
+                        alcGetError(device) == ALC_NO_ERROR, "OpenAL actual PCM mixing");
+            } finally {
+                alDeleteSources(source);
+                alDeleteBuffers(buffer);
+            }
+        } finally {
+            alcMakeContextCurrent(NULL);
+            if (context != NULL) alcDestroyContext(context);
+            alcCloseDevice(device);
+            AL.setCurrentThread(null);
+        }
+        mark("OPENAL");
+    }
+
     private static int shader(int type, String source) {
         int shader = glCreateShader(type);
         glShaderSource(shader, source);
@@ -239,7 +288,7 @@ public final class LwjglSmoke {
             glfwWindowHint(GLFW_VISIBLE, GLFW_TRUE);
             window = glfwCreateWindow(WIDTH, HEIGHT, "Plant LWJGL 3", NULL, NULL);
             require(window != NULL, "glfwCreateWindow: " + lastError.get());
-            glfwSetWindowSize(window, WIDTH + 1, HEIGHT);
+            glfwSetWindowSize(window, 0, HEIGHT);
             keys = GLFWKeyCallback.create((handle, key, scancode, action, mods) -> {
                 if (key == GLFW_KEY_A && action == GLFW_PRESS) {
                     keySeen.set(true);
@@ -326,9 +375,10 @@ public final class LwjglSmoke {
         try {
             coreTest();
             stbTest();
+            openalTest();
             glfwOpenGLTest();
             writeResult();
-            System.out.println("LWJGL JNI CORE CALLBACK GLFW OPENGL STB PASS");
+            System.out.println("LWJGL JNI CORE CALLBACK GLFW OPENGL STB OPENAL PASS");
         } catch (Throwable failure) {
             StringWriter trace = new StringWriter();
             failure.printStackTrace(new PrintWriter(trace));

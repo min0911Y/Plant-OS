@@ -1,6 +1,6 @@
 # LWJGL 3.3.6 source and port
 
-This directory builds the core, GLFW, OpenGL and STB modules from the
+This directory builds the core, GLFW, OpenGL, STB and OpenAL modules from the
 upstream LWJGL 3.3.6 source archive.  The archive URL and SHA-256 are in
 `sources.json`; the build cache is `apps/out/sources/` and is never copied to
 the target image.
@@ -28,3 +28,8 @@ Plant OS changes are kept as patches applied to the source cache:
 Only x86_64 is supported.  The target library directory contains the three
 LWJGL JNI libraries; the existing system `libglfw.so`, `libEGL.so` and
 `libGL.so` remain the single shared graphics implementation.
+
+OpenAL uses core JNI function pointers and the native system `libopenal.so`.
+Minecraft 1.20.1 separately pins STB 3.3.1 in `apps/minecraft/sources.json`;
+its application-private JNI is built against the same Plant core headers and
+allocator ABI, without changing the system STB 3.3.6 API.

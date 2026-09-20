@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the LWJGL core/GLFW/OpenGL/STB client regression in Plant OS."""
+"""Run the LWJGL core/GLFW/OpenGL/STB/OpenAL client regression in Plant OS."""
 import argparse
 import importlib
 import json
@@ -156,7 +156,7 @@ def run_guest(iso, disk, output, args):
     copy_guest_file(disk, "::/java/lwjgl/hs_err.log", output / "lwjgl-hs_err.log")
     result = copy_guest_file(disk, RESULT_GUEST, output / "lwjgl-result.txt")
     stages = set(result.splitlines()) if result is not None else set()
-    missing = [stage for stage in ("JNI", "CORE", "CALLBACK", "GLFW", "OPENGL", "STB")
+    missing = [stage for stage in ("JNI", "CORE", "CALLBACK", "GLFW", "OPENGL", "STB", "OPENAL")
                if stage not in stages]
     if (missing or not checked_initial or not checked_final or
             "acpi: entering S5" not in text or
@@ -165,7 +165,7 @@ def run_guest(iso, disk, output, args):
                            f"stages={sorted(stages)}; see {serial}")
     if (output / "lwjgl-frame-0.rgb").read_bytes() == (output / "lwjgl-frame-1.rgb").read_bytes():
         raise RuntimeError("LWJGL frame did not change after the A key callback")
-    print(f"LWJGL JNI/CORE/CALLBACK/GLFW/OPENGL/STB PASS: {output}")
+    print(f"LWJGL JNI/CORE/CALLBACK/GLFW/OPENGL/STB/OPENAL PASS: {output}")
 
 
 def main():

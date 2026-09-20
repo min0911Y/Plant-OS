@@ -1,0 +1,8 @@
+{
+  "openal": {
+    "version": "1.19.1",
+    "url": "https://openal-soft.org/openal-releases/openal-soft-1.19.1.tar.bz2",
+    "sha256": "5c2f87ff5188b95e0dc4769719a9d89ce435b8322b4478b95dd4b427fe84b2e9",
+    "directory": "openal-soft-1.19.1"
+  }
+}

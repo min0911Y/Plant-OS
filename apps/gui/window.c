@@ -147,6 +147,24 @@ static void window_draw_title(window_t *window) {
     }
   }
 
+  if (window->icon && xsize >= 60) {
+    for (unsigned y = 0; y < GUI_ICON_SIZE; y++) {
+      for (unsigned x = 0; x < GUI_ICON_SIZE; x++) {
+        uint32_t source = window->icon[y * GUI_ICON_SIZE + x];
+        uint32_t *target = &window->vram[(y + 4) * xsize + x + 4];
+        unsigned alpha = source >> 24;
+        uint32_t color = 0;
+        for (unsigned shift = 0; shift < 24; shift += 8) {
+          unsigned foreground = (source >> shift) & 255;
+          unsigned background = (*target >> shift) & 255;
+          color |=
+              ((foreground * alpha + background * (255 - alpha) + 127) / 255)
+              << shift;
+        }
+        *target = color;
+      }
+    }
+  }
   size_t visible = xsize > 62 ? (xsize - 62) / 8 : 0;
   size_t length = strlen(window->title);
   if (visible > length)
@@ -185,6 +203,22 @@ static void window_draw_title(window_t *window) {
       window->vram[(5 + y) * xsize + (xsize - 37 + x)] = c;
     }
   }
+}
+
+int window_set_icon(window_t *window, const uint32_t *pixels) {
+  uint32_t *copy = NULL;
+  if (pixels) {
+    size_t size = GUI_ICON_SIZE * GUI_ICON_SIZE * sizeof(*pixels);
+    copy = malloc(size);
+    if (!copy)
+      return -1;
+    memcpy(copy, pixels, size);
+  }
+  free(window->icon);
+  window->icon = copy;
+  window_draw_title(window);
+  sheet_refresh(window->sht, 3, 3, window->xsize - 4, 20);
+  return 0;
 }
 
 int window_set_title(window_t *window, const char *title) {
@@ -309,5 +343,6 @@ void destroy_window(window_t *window) {
   if (!window->shared)
     vm_unmap(window->vram, bytes);
   free(window->title);
+  free(window->icon);
   free(window);
 }

@@ -125,4 +125,25 @@ minecraft-run:
 		-drive file=$(abspath $(MINECRAFT_DISK)),format=raw,if=ide,index=0 \
 		-netdev user,id=mc,hostfwd=tcp:127.0.0.1:$(MINECRAFT_PORT)-:25565 -device pcnet,netdev=mc
 
+MINECRAFT_CLIENT_ARCHIVE ?=
+MINECRAFT_CLIENT_ISO ?= plant-os-x86_64-minecraft-client.iso
+MINECRAFT_CLIENT_DISK ?= plant-os-x86_64-minecraft-client.img
+MINECRAFT_CLIENT_DISK_MIB ?= 3072
+.PHONY: minecraft-client-image minecraft-client-run
+minecraft-client-image: full
+	@test -f "$(MINECRAFT_CLIENT_ARCHIVE)" || { echo "Set MINECRAFT_CLIENT_ARCHIVE to the 1.20.1 mc.zip" >&2; exit 1; }
+	$(MAKE) ARCH=x86_64 openjdk
+	$(MAKE) -C ../apps ARCH=x86_64 lwjgl
+	python3 ../scripts/build-minecraft-client.py --archive "$(abspath $(MINECRAFT_CLIENT_ARCHIVE))" \
+		--jdk "$(abspath $(PLANT_OPENJDK_DIR))" --lwjgl "$(abspath $(PLANT_LWJGL_DIR))" \
+		--iso "$(abspath $(MINECRAFT_CLIENT_ISO))" --disk "$(abspath $(MINECRAFT_CLIENT_DISK))" \
+		--disk-mib $(MINECRAFT_CLIENT_DISK_MIB)
+
+minecraft-client-run:
+	qemu-system-x86_64 -accel $(MINECRAFT_ACCEL) -cpu $(MINECRAFT_CPU) \
+		-smp $(QEMU_CPUS) -m $(MINECRAFT_MEMORY) -display gtk -serial stdio \
+		-cdrom "$(abspath $(MINECRAFT_CLIENT_ISO))" -boot d \
+		-drive file=$(abspath $(MINECRAFT_CLIENT_DISK)),format=raw,if=ide,index=0 \
+		-netdev user,id=mc -device pcnet,netdev=mc
+
 -include $(patsubst %.o,%.d,$(filter %.o,$(OBJECTS)))

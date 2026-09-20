@@ -39,7 +39,8 @@ DYN_SOURCES := $(filter-out libp/entry.c libp/dso.c libp/tinyalloc.c,$(wildcard 
   $(addprefix third_party/musl/math/,cosh.c sinh.c tanh.c erf.c log1p.c log2f.c \
     log2f_data.c logb.c rint.c round.c expm1.c ilogb.c __expo2.c exp2f.c \
     fma.c fmaf.c fmax.c fmaxf.c fmin.c fminf.c frexpf.c ldexpf.c llrint.c \
-    lrint.c lrintf.c nextafterf.c rintf.c trunc.c truncf.c sin.c cos.c)
+    lrint.c lrintf.c nextafterf.c rintf.c trunc.c truncf.c sin.c cos.c \
+    cbrtf.c sinhf.c expm1f.c __expo2f.c)
 DYN_ZLIB_SOURCES := $(addprefix zlib/,adler32.c compress.c crc32.c deflate.c \
   gzclose.c gzlib.c gzread.c gzwrite.c infback.c inffast.c inflate.c \
   inftrees.c trees.c uncompr.c zutil.c)

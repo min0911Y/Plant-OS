@@ -11,7 +11,7 @@ from sources import Sources
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    ports = ("mesa", "openjdk", "minecraft", "lwjgl", "term")
+    ports = ("mesa", "openjdk", "minecraft", "lwjgl", "openal", "term")
     parser.add_argument("components", nargs="*", choices=ports, default=list(ports),
                         help="dependency groups (default: all)")
     args = parser.parse_args()

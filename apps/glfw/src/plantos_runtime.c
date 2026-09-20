@@ -3,7 +3,6 @@
 #include <dlfcn.h>
 #include <futex.h>
 #include <ipc.h>
-#include <limits.h>
 #include <string.h>
 #include <syscall.h>
 #include <time.h>
@@ -14,15 +13,7 @@
 void *_glfwPlatformLoadModule(const char *path) {
   if (strcmp(path, "libEGL.so") && strcmp(path, "libGL.so"))
     return NULL;
-  const char prefix[] = "/lib/";
-  size_t prefix_length = sizeof(prefix) - 1;
-  size_t path_length = strlen(path);
-  if (path_length >= PATH_MAX - prefix_length)
-    return NULL;
-  char module_path[PATH_MAX];
-  memcpy(module_path, prefix, prefix_length);
-  memcpy(module_path + prefix_length, path, path_length + 1);
-  return dlopen(module_path, RTLD_NOW | RTLD_GLOBAL);
+  return dlopen(path, RTLD_NOW | RTLD_GLOBAL);
 }
 
 void _glfwPlatformFreeModule(void *module) { dlclose(module); }
