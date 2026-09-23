@@ -1,6 +1,7 @@
 #ifndef _DRIVERS_H
 #define _DRIVERS_H
 #include <define.h>
+#include "../../apps/include/disk_info.h"
 #include <mouse.h>
 #include <module.h>
 // acpi.c
@@ -114,6 +115,9 @@ int logout_vdisk(char drive);
 int rw_vdisk(char drive, unsigned int lba, unsigned char *buffer,
              unsigned int number, int read);
 bool have_vdisk(char drive);
+bool disk_describe(char drive, disk_info_t *info);
+void disk_report_error(char drive, const char *format, ...)
+    __attribute__((format(printf, 2, 3)));
 bool disk_sync(char drive);
 bool disk_writable(char drive);
 vdisk_type_t vdisk_type(char drive);

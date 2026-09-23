@@ -16,7 +16,7 @@ from sources import ROOT, Sources
 LWJGL_BUILD = importlib.import_module('build-lwjgl')
 
 
-def prepare(archive, payload, lwjgl):
+def prepare(archive, payload, lwjgl, game_dir='C:/java/mc', lwjgl_dir='C:/java/lwjgl'):
     prefix = '.minecraft/'
     version = json.loads(archive.read(prefix + 'versions/1.20.1/1.20.1.json'))
     if version['id'] != '1.20.1' or version['mainClass'] != 'net.minecraft.client.main.Main':
@@ -34,12 +34,12 @@ def prepare(archive, payload, lwjgl):
         target.write_bytes(data)
 
     extract('versions/1.20.1/1.20.1.jar', 'client.jar', version['downloads']['client']['sha1'])
-    classpath = ['C:/java/mc/client.jar']
+    classpath = [game_dir + '/client.jar']
     classes = payload / 'classes'
     classes.mkdir()
     subprocess.run([LWJGL_BUILD.javac_tool(), '--release', '17',
                     '-d', str(classes), str(ROOT / 'apps/minecraft/ClientLauncher.java')], check=True)
-    classpath.append('C:/java/mc/classes')
+    classpath.append(game_dir + '/classes')
     for library in version['libraries']:
         allowed = not library.get('rules')
         for rule in library.get('rules', []):
@@ -57,8 +57,8 @@ def prepare(archive, payload, lwjgl):
             continue
         relative = Path('libraries') / Path(artifact['path']).name
         extract('libraries/' + artifact['path'], relative, artifact['sha1'])
-        classpath.append('C:/java/mc/' + relative.as_posix())
-    classpath.extend('C:/java/lwjgl/jar/' + path.name for path in sorted((lwjgl / 'jar').glob('*.jar'))
+        classpath.append(game_dir + '/' + relative.as_posix())
+    classpath.extend(lwjgl_dir + '/jar/' + path.name for path in sorted((lwjgl / 'jar').glob('*.jar'))
                      if not path.name.startswith('lwjgl-stb-'))
     index = version['assetIndex']
     extract('assets/indexes/' + index['id'] + '.json', 'assets/indexes/' + index['id'] + '.json', index['sha1'])
@@ -72,23 +72,20 @@ def prepare(archive, payload, lwjgl):
         'graphicsMode:0\nclouds:false\nparticles:2\nmipmapLevels:0\n'
         'autoJump:false\nonboardAccessibility:false\n')
     arguments = [
-        '-Xms256m', '-Xmx1536m', '-XX:ErrorFile=C:/java/mc/hs_err.log',
-        '-Dorg.lwjgl.librarypath=C:/java/mc/native;C:/java/lwjgl/native',
-        '-Djava.library.path=C:/java/mc/native;C:/java/lwjgl/native',
+        '-Xms256m', '-Xmx1536m', '-XX:ErrorFile=' + game_dir + '/hs_err.log',
+        '-Dorg.lwjgl.librarypath=' + game_dir + '/native;' + lwjgl_dir + '/native',
+        '-Djava.library.path=' + game_dir + '/native;' + lwjgl_dir + '/native',
         '-Dorg.lwjgl.glfw.libname=libglfw.so',
         '-Dorg.lwjgl.opengl.libname=libGL.so',
         '-Dorg.lwjgl.system.allocator=system',
         '-cp', ';'.join(classpath), 'org.plantos.launcher.ClientLauncher', version['mainClass'],
         '--username', 'PlantPlayer', '--version', '1.20.1',
-        '--gameDir', 'C:/java/mc', '--assetsDir', 'C:/java/mc/assets',
+        '--gameDir', game_dir, '--assetsDir', game_dir + '/assets',
         '--assetIndex', index['id'], '--uuid', '4b9e6e842f823a7b8aefbd09e529a1f6',
         '--accessToken', '0', '--userType', 'legacy', '--versionType', 'release',
         '--width', '640', '--height', '480',
     ]
     (payload / 'client.args').write_text('\n'.join(arguments) + '\n')
-    (payload / 'run-client.lua').write_text(
-        'assert(os.execute("lwjgl-launcher.bin --directory C:/java/mc '
-        'C:/java/bin/java @C:/java/mc/client.args"))\n')
 
 
 def main():
@@ -119,6 +116,9 @@ def main():
         shutil.copyfile(stb, payload / 'native/liblwjgl_stb.so')
         with zipfile.ZipFile(args.archive) as archive:
             prepare(archive, payload, args.lwjgl)
+        (payload / 'run-client.lua').write_text(
+            'assert(os.execute("lwjgl-launcher.bin --directory C:/java/mc '
+            'C:/java/bin/java @C:/java/mc/client.args"))\n')
         init = Path(temporary) / 'init.mst'
         init.write_text('"todo" = [\n{"action" = "run" "command_line" = "lua.bin C:/java/mc/run-client.lua"},\n'
                         '{"action" = "run" "command_line" = "psh.bin"}\n]\n')

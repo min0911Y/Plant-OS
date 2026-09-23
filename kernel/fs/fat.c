@@ -189,7 +189,7 @@ void file_saveinfo(struct FAT_FILEINFO *directory, vfs_t *vfs) {
         return;
       }
       disk_write((get_dm(vfs).FileDataAddress +
-                  (cluster - 2) * get_dm(vfs).ClustnoBytes) /
+                  (uint64_t)(cluster - 2) * get_dm(vfs).ClustnoBytes) /
                      get_dm(vfs).SectorBytes,
                  get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes,
                  (char *)directory + i * get_dm(vfs).ClustnoBytes,
@@ -212,7 +212,7 @@ void file_saveinfo(struct FAT_FILEINFO *directory, vfs_t *vfs) {
             return;
           }
           disk_write((get_dm(vfs).FileDataAddress +
-                      (j - 2) * get_dm(vfs).ClustnoBytes) /
+                      (uint64_t)(j - 2) * get_dm(vfs).ClustnoBytes) /
                          get_dm(vfs).SectorBytes,
                      get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes,
                      (char *)directory + l * get_dm(vfs).ClustnoBytes,
@@ -845,7 +845,10 @@ bool fat_init_fs(vfs_t *vfs, uint8_t disk_number) {
     goto fail;
   }
   unsigned char *boot = boot_sector;
-  disk_read(0, 1, boot_sector, disk_number);
+  if (!disk_read(0, 1, boot_sector, disk_number)) {
+    logk("fat-mount: drive=%c boot sector read failed\n", disk_number);
+    goto fail;
+  }
 
   if (memcmp(boot + BS_FileSysType, "FAT12   ", 8) == 0) {
     get_dm(vfs).type = 12;
@@ -903,18 +906,26 @@ bool fat_init_fs(vfs_t *vfs, uint8_t disk_number) {
   uint64_t root_address = root_sector * sector_bytes;
   uint64_t image_size = total_sectors * sector_bytes;
   uint64_t fat_terms = fat_sectors * sector_bytes * 8 / get_dm(vfs).type;
-  uint64_t cache_size_64 = root_address + root_entries * 32;
+  /* FAT32 directories are read through their cluster chains, not a prefix
+   * cache extending to the root cluster (which may be anywhere on the disk). */
+  uint64_t cache_size_64 = get_dm(vfs).type == 32
+                               ? file_data_address
+                               : root_address + root_entries * 32;
   uint64_t cache_sectors =
       (cache_size_64 + sector_bytes - 1) / sector_bytes;
   uint64_t cache_allocation_size = cache_sectors * sector_bytes;
+  if (image_size > disk_Size(disk_number)) {
+    logk("fat-mount: drive=%c volume exceeds device capacity\n", disk_number);
+    goto fail;
+  }
   if (root_sector >= total_sectors ||
       (get_dm(vfs).type == 32 &&
        root_sector + sectors_per_cluster > total_sectors) ||
       root_entries == 0 ||
       root_entries > USHRT_MAX ||
       fat1_address > UINT_MAX || fat2_address > UINT_MAX ||
-      file_data_address > UINT_MAX || root_address > UINT_MAX ||
-      image_size > UINT_MAX || fat_terms == 0 ||
+      file_data_address > UINT_MAX ||
+      fat_terms == 0 ||
       fat_terms > INT_MAX / (int)sizeof(int) ||
       cache_allocation_size > INT_MAX) {
     goto fail;
@@ -927,8 +938,8 @@ bool fat_init_fs(vfs_t *vfs, uint8_t disk_number) {
   get_dm(vfs).Fat1Address = (unsigned int)fat1_address;
   get_dm(vfs).Fat2Address = (unsigned int)fat2_address;
   get_dm(vfs).FileDataAddress = (unsigned int)file_data_address;
-  get_dm(vfs).RootDictAddress = (unsigned int)root_address;
-  get_dm(vfs).imgTotalSize = (unsigned int)image_size;
+  get_dm(vfs).RootDictAddress = root_address;
+  get_dm(vfs).imgTotalSize = image_size;
   get_dm(vfs).FatMaxTerms = (int)fat_terms;
 
   uint32_t sec = (uint32_t)cache_sectors;
@@ -938,7 +949,10 @@ bool fat_init_fs(vfs_t *vfs, uint8_t disk_number) {
     goto fail;
   }
 
-  disk_read(0, sec, (void *)(uintptr_t)get_dm(vfs).ADR_DISKIMG, disk_number);
+  if (!disk_read(0, sec, (void *)(uintptr_t)get_dm(vfs).ADR_DISKIMG,
+                 disk_number)) {
+    goto fail;
+  }
 
   get_dm(vfs).fat = malloc(get_dm(vfs).FatMaxTerms * sizeof(int));
   get_dm(vfs).FatClustnoFlags = malloc(get_dm(vfs).FatMaxTerms * sizeof(char));
@@ -977,7 +991,8 @@ bool fat_init_fs(vfs_t *vfs, uint8_t disk_number) {
     }
   } else {
     memcpy(get_dm(vfs).root_directory,
-           (void *)(get_dm(vfs).ADR_DISKIMG + get_dm(vfs).RootDictAddress),
+           (void *)(get_dm(vfs).ADR_DISKIMG +
+                    (uintptr_t)get_dm(vfs).RootDictAddress),
            get_dm(vfs).RootMaxFiles * 32);
   }
   get_dm(vfs).directory_list = (struct List *)NewList();
@@ -1017,7 +1032,8 @@ bool fat_init_fs(vfs_t *vfs, uint8_t disk_number) {
           goto fail;
         }
         uint32_t sec1 =
-            (get_dm(vfs).FileDataAddress + (j - 2) * get_dm(vfs).ClustnoBytes) /
+            (get_dm(vfs).FileDataAddress +
+             (uint64_t)(j - 2) * get_dm(vfs).ClustnoBytes) /
             get_dm(vfs).SectorBytes;
         disk_read(sec1, get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes,
                   (char *)directory_alloc + l * get_dm(vfs).ClustnoBytes,
@@ -1075,7 +1091,7 @@ bool fat_init_fs(vfs_t *vfs, uint8_t disk_number) {
             goto fail;
           }
           uint32_t sec1 = (get_dm(vfs).FileDataAddress +
-                           (m - 2) * get_dm(vfs).ClustnoBytes) /
+                           (uint64_t)(m - 2) * get_dm(vfs).ClustnoBytes) /
                           get_dm(vfs).SectorBytes;
           disk_read(sec1, get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes,
                     (char *)directory_alloc + l * get_dm(vfs).ClustnoBytes,
@@ -1265,7 +1281,7 @@ static bool fat_cluster_at(vfs_t *vfs, int start, uint32_t index,
 
 static void fat_write_cluster(vfs_t *vfs, int cluster, const void *buffer) {
   disk_write((get_dm(vfs).FileDataAddress +
-              (cluster - 2) * get_dm(vfs).ClustnoBytes) /
+              (uint64_t)(cluster - 2) * get_dm(vfs).ClustnoBytes) /
                  get_dm(vfs).SectorBytes,
              get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes,
              (void *)buffer, vfs_mount_disk_number(vfs));
@@ -1273,7 +1289,7 @@ static void fat_write_cluster(vfs_t *vfs, int cluster, const void *buffer) {
 
 static void fat_read_cluster(vfs_t *vfs, int cluster, void *buffer) {
   disk_read((get_dm(vfs).FileDataAddress +
-             (cluster - 2) * get_dm(vfs).ClustnoBytes) /
+             (uint64_t)(cluster - 2) * get_dm(vfs).ClustnoBytes) /
                 get_dm(vfs).SectorBytes,
             get_dm(vfs).ClustnoBytes / get_dm(vfs).SectorBytes, buffer,
             vfs_mount_disk_number(vfs));
@@ -1384,7 +1400,7 @@ static bool fat_transfer(vfs_t *vfs, int start, uint32_t offset, void *buffer,
         run++;
       }
       uint32_t sector =
-          (disk->FileDataAddress + (cluster - 2) * cluster_size) /
+          (disk->FileDataAddress + (uint64_t)(cluster - 2) * cluster_size) /
           disk->SectorBytes;
       uint32_t sectors = run * cluster_size / disk->SectorBytes;
       if (write) {
@@ -1835,8 +1851,11 @@ bool fat_check(uint8_t disk_number) {
   if (boot_sec == NULL) {
     return false;
   }
-  disk_read(0, 1, boot_sec, disk_number);
-  logk("disk number = %02x\n", disk_number);
+  if (!disk_read(0, 1, boot_sec, disk_number)) {
+    logk("fat-check: drive=%c boot sector read failed\n", disk_number);
+    free(boot_sec);
+    return false;
+  }
   if (fat_read_u16(boot_sec + BPB_BytsPerSec) == 512 &&
       (memcmp(boot_sec + BS_FileSysType, "FAT12   ", 8) == 0 ||
       memcmp(boot_sec + BS_FileSysType, "FAT16   ", 8) == 0 ||

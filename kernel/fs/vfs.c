@@ -1413,6 +1413,30 @@ bool vfs_check_mount(uint8_t drive) {
   return mounted;
 }
 
+int vfs_list_disks(disk_info_t *entries, uint32_t capacity) {
+  irq_state_t state = irq_save();
+  unsigned count = 0;
+  for (char disk = first_vdisk(); disk; disk = next_vdisk(disk)) {
+    if (count < capacity) {
+      disk_info_t *info = &entries[count];
+      disk_describe(disk, info);
+      for (unsigned i = 0; i < VFS_MAX_MOUNTS; i++) {
+        const struct vfs_mount *mount = vfs_mounts[i];
+        if (!mount || mount->disk_number != disk ||
+            mount->state != VFS_MOUNT_ACTIVE)
+          continue;
+        info->mount_drive = mount->drive;
+        strncpy(info->filesystem, mount->filesystem->name,
+                sizeof(info->filesystem) - 1);
+        break;
+      }
+    }
+    count++;
+  }
+  irq_restore(state);
+  return count;
+}
+
 int vfs_format(uint8_t disk_number, const char *filesystem_name) {
   uint8_t normalized;
   if (!vfs_normalize_drive(disk_number, &normalized) ||

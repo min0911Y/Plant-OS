@@ -234,6 +234,12 @@ typedef struct socket_syscall_request {
   uint32_t flags;
 } socket_syscall_request_t;
 
+/* Kernel timeout ABI: independent of the public timeval's long width. */
+typedef struct socket_syscall_timeval {
+  int64_t seconds;
+  int64_t microseconds;
+} socket_syscall_timeval_t;
+
 socket_t socket(int domain, int type, int protocol);
 int socket_close(socket_t socket);
 int bind(socket_t socket, const struct sockaddr *address, socklen_t length);

@@ -210,16 +210,19 @@ static char *task_read_executable(int descriptor, int *size) {
 
 void task_to_user_mode_elf(char *filename) {
   mtask *task = current_task();
+  const char *stage = "open executable";
   int descriptor = vfs_fd_open(task->fs_context, filename, VFS_OPEN_READ);
   int executable_size = 0;
   char *p = NULL;
   char *interpreter = NULL;
   if (descriptor < 0)
     goto failed;
+  stage = "read native ELF header/interpreter";
   if (!executable_interpreter(descriptor, &interpreter))
     goto failed;
   bool dynamic = interpreter != NULL;
   int image_fd = descriptor;
+  stage = "read executable/interpreter image";
   if (dynamic) {
     image_fd = vfs_fd_open(task->fs_context, interpreter, VFS_OPEN_READ);
   }
@@ -233,6 +236,7 @@ void task_to_user_mode_elf(char *filename) {
     goto failed;
   uintptr_t user_eip;
   uintptr_t image_end;
+  stage = "validate executable/interpreter";
   if (!arch_executable_validate(p, executable_size, &user_eip, &image_end) ||
       image_end > (uintptr_t)-1 - (PAGE_SIZE_BYTES - 1)) {
     goto failed;
@@ -241,17 +245,20 @@ void task_to_user_mode_elf(char *filename) {
       (image_end + PAGE_SIZE_BYTES - 1) & ~(uintptr_t)(PAGE_SIZE_BYTES - 1);
   size_t pg = size_div_round_up(*(task->alloc_size), PAGE_SIZE_BYTES);
   struct user_runtime_layout layout;
+  stage = "allocate user memory";
   if (!user_runtime_layout_calculate(alloc_addr, pg, USER_STACK_PAGES, user_eip,
                                      &layout) ||
       !task_map_user_pages(alloc_addr, layout.total_pages)) {
     goto failed;
   }
   task->alloc_addr = layout.allocation_base;
+  stage = "map executable/interpreter";
   if (!arch_executable_load(p, executable_size, &user_eip)) {
     goto failed;
   }
   page_free(p, executable_size);
   p = NULL;
+  stage = "prepare entry arguments";
   uintptr_t argument = 0;
   if (dynamic) {
     size_t path_size = strlen(filename) + 1;
@@ -284,6 +291,8 @@ void task_to_user_mode_elf(char *filename) {
   kernel_lock_leave();
   arch_task_enter_user(user_eip, layout.stack_top, argument);
 failed:
+  printk("exec: %s failed at %s\n", filename, stage);
+  logk("exec: %s failed at %s\n", filename, stage);
   if (interpreter)
     page_free(interpreter, strlen(interpreter) + 1);
   if (p)

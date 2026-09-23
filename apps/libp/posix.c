@@ -767,6 +767,13 @@ int vfs_check_mount(uint8_t drive) {
   return vfs_invoke(VFS_SYSCALL_MOUNT_CHECK, &request) > 0;
 }
 
+int disk_list(disk_info_t *entries, uint32_t capacity) {
+  vfs_syscall_request_t request = {0};
+  request.arguments.cwd.buffer = (uintptr_t)entries;
+  request.arguments.cwd.capacity = capacity;
+  return vfs_result(vfs_invoke(VFS_SYSCALL_DISKS, &request));
+}
+
 int vfs_mount(uint8_t disk, uint8_t drive) {
   vfs_syscall_request_t request = {0};
   request.arguments.mount.disk = disk;

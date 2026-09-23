@@ -14,6 +14,53 @@ import tempfile
 import time
 
 
+def prepare_large_fat(disk, first):
+    """Exercise a FAT32 root and existing file above the 32-bit byte boundary."""
+    base = first * 512
+    with disk.open('r+b') as stream:
+        stream.seek(base)
+        boot = bytearray(stream.read(512))
+        reserved = struct.unpack_from('<H', boot, 14)[0]
+        fat_sectors = struct.unpack_from('<I', boot, 36)[0]
+        old_root = struct.unpack_from('<I', boot, 44)[0]
+        cluster_bytes = boot[13] * 512
+        data = (reserved + boot[16] * fat_sectors) * 512
+        root = (5 * 1024**3 - data) // cluster_bytes + 2
+        file_cluster = root + 1
+        count = (128 * 1024 + cluster_bytes - 1) // cluster_bytes
+        def address(cluster):
+            return base + data + (cluster - 2) * cluster_bytes
+        stream.seek(address(old_root))
+        directory = bytearray(stream.read(cluster_bytes))
+        slot = next(i for i in range(0, cluster_bytes, 32) if directory[i] == 0)
+        directory[slot:slot + 11] = b'USBHIGH BIN'
+        directory[slot + 11] = 0x20
+        struct.pack_into('<H', directory, slot + 20, file_cluster >> 16)
+        struct.pack_into('<H', directory, slot + 26, file_cluster & 65535)
+        struct.pack_into('<I', directory, slot + 28, 128 * 1024)
+        stream.seek(address(root))
+        stream.write(directory)
+        for copy in range(boot[16]):
+            fat = base + (reserved + copy * fat_sectors) * 512
+            stream.seek(fat + old_root * 4)
+            stream.write(struct.pack('<I', 0))
+            stream.seek(fat + root * 4)
+            stream.write(struct.pack('<I', 0x0fffffff))
+            for i in range(count):
+                stream.seek(fat + (file_cluster + i) * 4)
+                stream.write(struct.pack('<I', file_cluster + i + 1 if i + 1 < count else 0x0fffffff))
+        struct.pack_into('<I', boot, 44, root)
+        stream.seek(base)
+        stream.write(boot)
+        backup = struct.unpack_from('<H', boot, 50)[0]
+        if backup:
+            stream.seek(base + backup * 512)
+            stream.write(boot)
+        stream.seek(address(file_cluster))
+        stream.write(b'large-fat-probe!\n')
+        assert address(root) - base > 2**32
+
+
 def corrupt_lfn_fixture(path):
     """Damage a checksum in the real mtools directory, leaving its SFN intact."""
     with path.open("r+b") as image:
@@ -623,6 +670,8 @@ def main():
                         help="require x86_64 TLB capabilities and verify the selected backend")
     parser.add_argument("--usb-debug", action="store_true",
                         help="build USB screen diagnostics and bounded HID report traces")
+    parser.add_argument("--usb-sync-error", action="store_true",
+                        help="inject a USB flush error and verify persistent disk diagnostics")
     parser.add_argument("--usb-irq", choices=("auto", "msix", "msi", "intx"), default="auto",
                         help="select the QEMU xHCI interrupt capabilities and verify the chosen mode")
     parser.add_argument("--usb-no-intx", action="store_true",
@@ -686,7 +735,7 @@ def main():
         parser.error("the i386 LiveCD uses BIOS")
     if args.arch == "i386" and args.tlb:
         parser.error("--tlb requires x86_64 paging")
-    if (args.usb_no_intx or args.usb_irq != "auto" or args.usb_root_bus or args.usb_hubs) and not args.usb:
+    if (args.usb_no_intx or args.usb_irq != "auto" or args.usb_root_bus or args.usb_hubs or args.usb_sync_error) and not args.usb:
         parser.error("USB fixture options require --usb")
     if args.usb_no_intx and args.usb_irq == "intx":
         parser.error("--usb-no-intx requires MSI or MSI-X")
@@ -883,8 +932,11 @@ def main():
                          "tcc.bin /ccprobe.c -o /ccprobe.bin", "/ccprobe.bin",
                          "lua.bin -e os.remove([[/ccprobe.c]]);os.remove([[/ccprobe.bin]])"]
     if args.usb:
-        commands = ["nettest.bin", "usbtest.bin", "guitest.bin usb"]
-        expected = ["USBSTORAGE PASS", "USBKEY PASS", "GUIMOUSE PASS events=15", "GUITEST PASS"]
+        commands = ["nettest.bin", "usbtest.bin", "disks.bin", "guitest.bin usb"]
+        expected = ["USBSTORAGE PASS", "DISKS PASS", "USBKEY PASS", "GUIMOUSE PASS events=15", "GUITEST PASS"]
+        if args.usb_sync_error:
+            commands = ["usbtest.bin sync-error", "disks.bin"]
+            expected = ["USBSTORAGE ERROR PASS"]
     if args.ahci:
         if args.machine != "q35" or args.usb:
             parser.error("--ahci requires --machine q35 and is run separately from --usb")
@@ -1065,7 +1117,7 @@ def main():
                             ("native4k", "usb3.0", 2, 0, 4096))
                 for name, bus, port, first, block_size in fixtures:
                     disk = Path(temporary) / f"usb-{name}.img"
-                    sectors = 131072
+                    sectors = 121075712 + first if first else 131072
                     with disk.open("wb") as stream:
                         stream.truncate(sectors * 512)
                         if first:
@@ -1081,9 +1133,16 @@ def main():
                     tag = Path(temporary) / "usbtag.txt"
                     tag.write_text(name)
                     subprocess.run(["mcopy", "-i", image, str(tag), "::/usbtag.txt"], check=True)
+                    if first:
+                        prepare_large_fat(disk, first)
                     usb_images.append((name, image))
+                    backend = {"driver": "file", "filename": str(disk)}
+                    if args.usb_sync_error and name == "high":
+                        backend = {"driver": "blkdebug", "image": backend,
+                                   "inject-error": [{"event": "flush_to_disk", "errno": 5,
+                                                     "once": True, "immediately": True}]}
                     command += ["-blockdev", json.dumps({"driver": "raw", "node-name": f"usb-{name}",
-                                "file": {"driver": "file", "filename": str(disk)}}),
+                                "file": backend}),
                                 "-device", f"usb-storage,id=device-{name},bus={bus},port={port},"
                                            f"drive=usb-{name},logical_block_size={block_size},physical_block_size={block_size}"]
             if args.firmware == "uefi":
@@ -1666,6 +1725,14 @@ def main():
                                 if positions != sorted(positions) or any(text.count(marker) != 1 for marker in markers):
                                     raise RuntimeError(f"dynamic initialization/finalization order mismatch; see {serial}")
                             if args.usb:
+                                if args.usb_sync_error:
+                                    qmp = QMP(qmp_path)
+                                    try:
+                                        qmp.screenshot(output / "disk-error.ppm")
+                                    finally:
+                                        qmp.close()
+                                    print(f"{args.arch} USB sync error PASS; {serial}", flush=True)
+                                    return
                                 modes = re.findall(r"^xhci: (\S+) .* transport=(\w+) ready$", text, re.M)
                                 expected_mode = "msix" if args.usb_irq == "auto" else args.usb_irq
                                 if len(modes) != 2 or any(mode != expected_mode for _, mode in modes):
@@ -1695,6 +1762,11 @@ def main():
                                     expected_bytes[513:516] = b"USB"
                                     if destination.read_bytes() != expected_bytes:
                                         raise RuntimeError(f"USB persistent write mismatch: {name}")
+                                    if name == "high":
+                                        subprocess.run(["mcopy", "-o", "-i", image, "::/usbhigh.bin",
+                                                        str(destination)], check=True)
+                                        if destination.read_bytes() != expected_bytes:
+                                            raise RuntimeError("FAT32 write above 4 GiB mismatch")
                                 print("USB persistence PASS: host verified all three backing images", flush=True)
                             if args.ahci and not args.ahci_no_irq:
                                 if "sectors=335544320 lba=48 ready" not in text:

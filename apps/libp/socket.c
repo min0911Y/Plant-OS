@@ -373,6 +373,19 @@ int setsockopt(socket_t socket, int level, int option, const void *value,
   request.type = option;
   request.buffer = (uintptr_t)value;
   request.length = length;
+  socket_syscall_timeval_t timeout;
+  if (level == SOL_SOCKET && (option == SO_RCVTIMEO || option == SO_SNDTIMEO)) {
+    if (length != sizeof(struct timeval)) {
+      errno = EINVAL;
+      return -1;
+    }
+    struct timeval time;
+    memcpy(&time, value, sizeof(time));
+    timeout.seconds = time.tv_sec;
+    timeout.microseconds = time.tv_usec;
+    request.buffer = (uintptr_t)&timeout;
+    request.length = sizeof(timeout);
+  }
   int result = socket_call(SOCKET_SYSCALL_SET_OPTION, &request);
   if (result < 0) {
     errno = socket_error_number(result);
@@ -394,10 +407,27 @@ int getsockopt(socket_t socket, int level, int option, void *value,
   request.type = option;
   request.buffer = (uintptr_t)value;
   request.length = *length;
+  bool is_timeout =
+      level == SOL_SOCKET && (option == SO_RCVTIMEO || option == SO_SNDTIMEO);
+  socket_syscall_timeval_t timeout;
+  if (is_timeout) {
+    if (*length < sizeof(struct timeval)) {
+      errno = EINVAL;
+      return -1;
+    }
+    request.buffer = (uintptr_t)&timeout;
+    request.length = sizeof(timeout);
+  }
   int result = socket_call(SOCKET_SYSCALL_GET_OPTION, &request);
   if (result < 0) {
     errno = socket_error_number(result);
     return -1;
+  }
+  if (is_timeout) {
+    struct timeval time = {.tv_sec = timeout.seconds,
+                           .tv_usec = timeout.microseconds};
+    memcpy(value, &time, sizeof(time));
+    request.length = sizeof(time);
   }
   *length = request.length;
   return 0;

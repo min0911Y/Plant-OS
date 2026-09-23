@@ -252,6 +252,7 @@ Mimg : make_dir $(OUTPATH)kernel.bin $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $
 		mcopy -i boot.img $(APPSOUTPATH)ping.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)curl.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)dktest.bin ::
+		mcopy -i boot.img $(APPSOUTPATH)disks.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)rpctest.bin ::
 		mcopy -i boot.img $(APPSOUTPATH)dynmain.bin $(APPSOUTPATH)dyncopy.bin $(APPSOUTPATH)dynbad.bin $(APPSOUTPATH)dynempty.bin $(APPSOUTPATH)dyntest.bin ::
 		mcopy -s -i boot.img $(APPSOUTPATH)lib ::/

@@ -255,9 +255,9 @@ struct FAT_CACHE {
   int FatMaxTerms;
   unsigned int ClustnoBytes;
   unsigned int RootMaxFiles;
-  unsigned int RootDictAddress;
+  uint64_t RootDictAddress;
   unsigned int FileDataAddress;
-  unsigned int imgTotalSize;
+  uint64_t imgTotalSize;
   unsigned short SectorBytes;
   unsigned int Fat1Address, Fat2Address;
   unsigned char *FatClustnoFlags;

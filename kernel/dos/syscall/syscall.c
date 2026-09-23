@@ -699,6 +699,28 @@ static int vfs_syscall_current_drive(const vfs_syscall_request_t *request) {
   return vfs_context_drive(current_task()->fs_context);
 }
 
+static int vfs_syscall_disks(const vfs_syscall_request_t *request) {
+  uint32_t capacity = request->arguments.cwd.capacity;
+  uintptr_t buffer = request->arguments.cwd.buffer;
+  if (capacity > INT_MAX / sizeof(disk_info_t) ||
+      (capacity && !user_range_ok(buffer, capacity * sizeof(disk_info_t))))
+    return VFS_ERROR_INVALID;
+  int count = vfs_list_disks(NULL, 0);
+  if (!capacity || (unsigned)count > capacity || !count)
+    return count;
+  disk_info_t *entries = malloc(count * sizeof(*entries));
+  if (!entries)
+    return VFS_ERROR_NO_MEMORY;
+  int actual = vfs_list_disks(entries, count);
+  if (actual <= count &&
+      !user_vm_copy_to(buffer, entries, actual * sizeof(*entries)))
+    actual = VM_ERROR_FAULT;
+  else if (actual > count)
+    actual = VFS_ERROR_AGAIN;
+  free(entries);
+  return actual;
+}
+
 static int vfs_syscall_mount_check(const vfs_syscall_request_t *request) {
   return vfs_check_mount(request->arguments.mount.drive);
 }
@@ -784,6 +806,7 @@ static const vfs_syscall_handler_t vfs_syscall_handlers[VFS_SYSCALL_COUNT] = {
     [VFS_SYSCALL_PIPE] = vfs_syscall_pipe,
     [VFS_SYSCALL_POLL] = vfs_syscall_poll,
     [VFS_SYSCALL_AVAILABLE] = vfs_syscall_available,
+    [VFS_SYSCALL_DISKS] = vfs_syscall_disks,
     [VFS_SYSCALL_OPEN] = vfs_syscall_open,
     [VFS_SYSCALL_CLOSE] = vfs_syscall_close,
     [VFS_SYSCALL_FCNTL] = vfs_syscall_fcntl,

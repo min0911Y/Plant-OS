@@ -10,6 +10,7 @@ extern "C" {
 #include <input_event.h>
 #include <key_input.h>
 #include <vfs_stat.h>
+#include <disk_info.h>
 enum { SYSCALL_SIGNAL_RETURN = 0x65 };
 #define T_DrawBox(x, y, w, h, c) Text_Draw_Box((y), (x), (h) + y, (w) + x, (c))
 typedef enum { FLE, FILE_DIRECTORY, RDO, HID, SYS } ftype;
@@ -63,6 +64,7 @@ enum vfs_syscall_operation {
   VFS_SYSCALL_PIPE,
   VFS_SYSCALL_POLL,
   VFS_SYSCALL_AVAILABLE,
+  VFS_SYSCALL_DISKS,
   VFS_SYSCALL_COUNT,
 };
 
@@ -238,6 +240,8 @@ int api_current_drive();
 int exec(char *filename, char *cmdline);
 void clear();
 int vfs_check_mount(uint8_t drive);
+/* NULL/0 queries count; retry on EAGAIN or a count exceeding capacity. */
+int disk_list(disk_info_t *entries, uint32_t capacity);
 int vfs_mount(uint8_t disk_number,uint8_t drive);
 int vfs_change_disk(uint8_t drive);
 size_t mem_used(void);

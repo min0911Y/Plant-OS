@@ -23,6 +23,25 @@ exFAT/NTFS。没有对应文件系统的介质会注册为未格式化的数据�
 自动格式化。`enumerated` 表示描述符读取完成，`usb-hid: ... active` 和
 `usb-storage: ... mounted` 才表示相应功能已接入。
 
+## 查看磁盘
+
+在终端执行 `disks.bin`。它列出内核已注册的所有磁盘/卷，包括未挂载的卷，
+显示编号、类型、读写属性、容量（可读单位及精确字节数）、实际挂载点、
+文件系统和设备名称。`unmounted` 表示未挂载，文件系统列为 `-`；
+设备未报告容量或虚拟设备没有容量时显示 `unknown / n/a`。
+磁盘编号不等于挂载点：例如磁盘 E 可以挂载到 Z:/。MBR 分区分别列为卷，
+容量为各分区可用的设备字节数，不是文件系统剩余空间。
+
+发生 I/O 错误后，读写属性显示 `failed`，表格下保留该磁盘的首次错误。
+USB 错误包含操作、卷内扇区、设备块地址，以及 BOT 传输阶段或 SCSI
+sense/ASC/ASCQ；后续访问失败不会覆盖它。挂载点仍存在不代表介质可用。
+游戏退出且 U 盘无法访问时，可从系统盘运行 `R:/disks.bin` 查看这些信息，
+无需开启 `USB_DEBUG`。拔出设备会移除记录，因此应在拔插前查看。
+
+`disk_list` 使用同一份固定宽度 ABI，并以数量查询和容量参数取得磁盘快照。
+查询不读取介质、不尝试挂载，也不改变当前盘符。USB 插拔期间数量可能变化，
+调用方按返回数量或 EAGAIN 重试；已拔出的磁盘不再出现在新快照中。
+
 ## 真机与 PCIe
 
 xHCI 能管理连接到自身端口的 USB 1.x、2.0 和 3.x 设备；只有
@@ -97,7 +116,15 @@ context、ring 和描述符；不能确认控制器 halt 时关闭 bus master
 磁盘请求拥有自己的缓冲和引用，等待者退出会清理请求。USB 自己串行化
 BOT，通用磁盘层不再给它叠加同一个等待队列。底层失败会传递到 VFS，
 失效设备不再返回缓存数据；有旧挂载引用的盘符不能立即复用，重新插入的
-介质不会被旧文件句柄访问。文件同步操作继续下传 SCSI SYNCHRONIZE CACHE。
+介质不会被旧文件句柄访问。
+
+绑定 LUN 时通过 MODE SENSE(6)，必要时回退 MODE SENSE(10)，查询当前
+Caching Mode Page 的 WCE 位，同时读取写保护状态。明确关闭写缓存的设备
+按直写处理，文件同步无需再发送 SYNCHRONIZE CACHE。未提供缓存页的设备
+仍先尝试同步；仅在收到 `ILLEGAL REQUEST / INVALID COMMAND OPERATION
+CODE`（`05/20/00`）时，将该 LUN 按直写设备处理，并停止发送不支持的命令。
+缓存查询的传输错误、截断或畸形响应不会被当作“无缓存页”；已启用 WCE、
+无效命令字段、其他 sense 和真实传输/介质失败继续报错，不能伪造同步成功。
 
 ## 无串口的屏幕诊断
 
@@ -113,6 +140,9 @@ make -C kernel ARCH=x86_64 USB_DEBUG=1 livecd
 写入串口与屏幕，进入 shell 前保留启动画面。诊断包含 PCI segment/BDF、设备 ID、
 IRQ、BAR、固件所有权、Supported Protocol、连接端口、失败阶段和 HID 绑定。
 `IRQ ... command self-test passed` 表示控制器的命令完成确实经中断返回。
+FAT 卷容量与簇的字节地址使用 64 位计算，支持超过 4 GiB 的 FAT32 卷；
+磁盘接口仍使用 512-byte 扇区编号。FAT32 根目录按簇链读取，元数据缓存
+不随根目录在盘上的位置增长。单个文件仍受 FAT32 的 32 位文件长度限制。
 超时输出 `cmd/sts/iman/event/cycle`，用于区分控制器没有执行和完成事件
 没有送达 IRQ；不会轮询消费事件来掩盖中断问题。
 
@@ -153,7 +183,9 @@ python3 scripts/test-x86_64.py --usb --machine q35 --usb-root-bus 0x80 --usb-no-
 
 脚本禁用 QEMU 的 i8042，确保输入来自 USB。两个 xHCI 连接 USB 键鼠、
 用于 EP0 回归的音频设备，以及三个临时 FAT 盘：MBR、无分区和 4 KiB
-原生块。`--usb-irq intx` 的完整网络测试覆盖网卡与 USB 共用 INTx。
+原生块。MBR FAT32 卷为约 57 GiB 的稀疏镜像，根目录与已有测试文件
+位于 5 GiB 附近，覆盖 64 位字节地址、文件覆盖写、目录更新和拔插后
+重读；宿主 mtools 独立校验高地址文件的内容。`--usb-irq intx` 的完整网络测试覆盖网卡与 USB 共用 INTx。
 
 `--usb-irq` 通过 QEMU 的 MSI/MSI-X capability 开关选择待验证路径，并核对
 内核实际采用的模式。`--usb-no-intx` 使用 QEMU 自带的 GDB/qtest 接口，
@@ -175,6 +207,14 @@ USB 2.0/3.x 端口。除原有输入、存储和连续拔插测试外，还整�
 
 `usbtest.bin` 写入并读回数据，检查非对齐写入、fsync、拔出后的错误和旧
 句柄隔离；QEMU 退出后，宿主用 mtools 独立核对三份实际磁盘文件。
+`--usb --usb-sync-error` 在 QEMU 磁盘后端注入一次 flush 错误，检查首次
+SCSI 同步错误被保留、失效卷拒绝后续访问、其他卷仍可读写，并保存
+`disks.bin` 的屏幕截图 `disk-error.ppm`。故障只注入临时测试镜像，内核
+不包含故障开关，也不会把失败的同步当成成功。
+宿主测试 `scripts/tests/usb-storage.c` 直接编译生产驱动，模拟 BOT 设备，
+覆盖 WCE 开关、缺少缓存页、MODE SENSE(10) 回退、块描述符/子页跳过、
+畸形响应、两种 sense 格式及 `05/20/00` 兼容；同时检查兼容后的写入错误
+与真实同步错误继续上报。文件头包含 ASan/UBSan 编译及运行命令。
 `guitest.bin usb` 校验精确鼠标坐标、左右键、滚轮、键盘修饰键和方向键、
 重复输入及拔出释放。随后验证 GUI shell 回显、退格、滚屏，以及 100 次
 键盘拔插和环回绕。

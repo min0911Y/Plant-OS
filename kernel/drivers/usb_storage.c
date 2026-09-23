@@ -7,7 +7,16 @@ enum {
   USB_BOT_CBW_SIGNATURE = 0x43425355,
   USB_BOT_CSW_SIGNATURE = 0x53425355,
   USB_STORAGE_TRANSFER_SECTORS = 128,
+  STORAGE_INVALID_OPCODE = -4,
+  STORAGE_INVALID_FIELD = -5,
 };
+
+typedef enum {
+  STORAGE_CACHE_UNKNOWN,
+  STORAGE_CACHE_UNREPORTED,
+  STORAGE_CACHE_WRITE_THROUGH,
+  STORAGE_CACHE_WRITE_BACK,
+} storage_cache_t;
 
 typedef struct __attribute__((packed)) {
   uint32_t signature, tag, length;
@@ -28,6 +37,7 @@ typedef struct usb_storage_unit {
   usb_storage_t *storage;
   uint64_t sectors;
   uint32_t block_size;
+  storage_cache_t cache;
   uint8_t lun;
   bool read_only;
 } usb_storage_unit_t;
@@ -56,6 +66,7 @@ typedef struct {
   unsigned blocks, offset, length;
   enum { STORAGE_READ, STORAGE_WRITE, STORAGE_SYNC } operation;
   bool success;
+  char error[DISK_INFO_ERROR_SIZE];
   uint8_t bytes[];
 } usb_storage_work_t;
 
@@ -98,10 +109,14 @@ static bool storage_reset(usb_storage_t *storage) {
  */
 static int storage_command(usb_storage_unit_t *unit, const uint8_t *command,
                            unsigned command_length, void *buffer,
-                           unsigned length, bool input, unsigned *actual) {
+                           unsigned length, bool input, unsigned *actual,
+                           char *error) {
   usb_storage_t *storage = unit->storage;
   usb_device_t *device = storage->device;
   if (!storage->online || !usb_connected(device)) {
+    if (error)
+      snprintf(error, DISK_INFO_ERROR_SIZE, "USB cmd=%02x disconnected",
+               command[0]);
     return USB_ERROR_DISCONNECTED;
   }
   usb_cbw_t cbw = {.signature = USB_BOT_CBW_SIGNATURE,
@@ -111,8 +126,11 @@ static int storage_command(usb_storage_unit_t *unit, const uint8_t *command,
                    .lun = unit->lun,
                    .command_length = command_length};
   memcpy(cbw.command, command, command_length);
-  if (device->ops->transfer(device, storage->out, &cbw, sizeof(cbw)) !=
-      sizeof(cbw)) {
+  int received = device->ops->transfer(device, storage->out, &cbw, sizeof(cbw));
+  if (received != sizeof(cbw)) {
+    if (error)
+      snprintf(error, DISK_INFO_ERROR_SIZE, "USB cmd=%02x CBW result=%d",
+               command[0], received);
     storage_reset(storage);
     return USB_ERROR_IO;
   }
@@ -122,16 +140,23 @@ static int storage_command(usb_storage_unit_t *unit, const uint8_t *command,
     if (chunk > 65536)
       chunk = 65536;
     uint8_t endpoint = input ? storage->in : storage->out;
-    int received = device->ops->transfer(device, endpoint,
-                                         (uint8_t *)buffer + completed, chunk);
+    received = device->ops->transfer(device, endpoint,
+                                     (uint8_t *)buffer + completed, chunk);
     if (received == USB_ERROR_STALL) {
       if (!device->ops->clear_halt(device, endpoint)) {
+        if (error)
+          snprintf(error, DISK_INFO_ERROR_SIZE,
+                   "USB cmd=%02x data STALL recovery failed", command[0]);
         storage_reset(storage);
         return USB_ERROR_IO;
       }
       break;
     }
     if (received < 0 || (unsigned)received > chunk) {
+      if (error)
+        snprintf(error, DISK_INFO_ERROR_SIZE,
+                 "USB cmd=%02x data result=%d bytes=%u/%u", command[0],
+                 received, completed, length);
       storage_reset(storage);
       return USB_ERROR_IO;
     }
@@ -139,8 +164,8 @@ static int storage_command(usb_storage_unit_t *unit, const uint8_t *command,
     if ((unsigned)received < chunk)
       break;
   }
-  usb_csw_t csw;
-  int received = device->ops->transfer(device, storage->in, &csw, sizeof(csw));
+  usb_csw_t csw = {0};
+  received = device->ops->transfer(device, storage->in, &csw, sizeof(csw));
   if (received == USB_ERROR_STALL &&
       device->ops->clear_halt(device, storage->in)) {
     received = device->ops->transfer(device, storage->in, &csw, sizeof(csw));
@@ -148,6 +173,12 @@ static int storage_command(usb_storage_unit_t *unit, const uint8_t *command,
   if (received != sizeof(csw) || csw.signature != USB_BOT_CSW_SIGNATURE ||
       csw.tag != cbw.tag || csw.residue > length || csw.status > 1 ||
       (csw.status == 0 && completed + csw.residue != length)) {
+    if (error)
+      snprintf(error, DISK_INFO_ERROR_SIZE,
+               "USB cmd=%02x CSW result=%d sig=%08x tag=%u/%u status=%u "
+               "residue=%u data=%u/%u",
+               command[0], received, csw.signature, csw.tag, cbw.tag,
+               csw.status, csw.residue, completed, length);
     storage_reset(storage);
     return USB_ERROR_IO;
   }
@@ -157,43 +188,116 @@ static int storage_command(usb_storage_unit_t *unit, const uint8_t *command,
 
 static int storage_scsi(usb_storage_unit_t *unit, const uint8_t *command,
                         unsigned command_length, void *buffer, unsigned length,
-                        bool input) {
+                        bool input, char *error) {
   uint64_t deadline = monotonic_time_ns() + 3000000000ull;
   for (;;) {
     unsigned actual = 0;
     int status = storage_command(unit, command, command_length, buffer, length,
-                                 input, &actual);
+                                 input, &actual, error);
     if (status == 0)
       return actual;
     if (status < 0)
       return status;
     uint8_t sense[18] = {0};
     uint8_t request[6] = {3, 0, 0, 0, sizeof(sense), 0};
-    if (storage_command(unit, request, sizeof(request), sense, sizeof(sense),
-                        true, &actual) != 0 ||
-        actual < 4) {
+    status = storage_command(unit, request, sizeof(request), sense,
+                             sizeof(sense), true, &actual, error);
+    if (status != 0 || actual < 4) {
+      if (error && !error[0])
+        snprintf(error, DISK_INFO_ERROR_SIZE,
+                 "SCSI cmd=%02x REQUEST SENSE failed: status=%d bytes=%u",
+                 command[0], status, actual);
       return USB_ERROR_IO;
     }
     unsigned format = sense[0] & 0x7f;
     bool descriptor = format == 0x72 || format == 0x73;
     if ((!descriptor && format != 0x70 && format != 0x71) ||
-        (!descriptor && actual < 14))
+        (!descriptor && actual < 14)) {
+      if (error)
+        snprintf(error, DISK_INFO_ERROR_SIZE,
+                 "SCSI cmd=%02x invalid sense: format=%02x bytes=%u",
+                 command[0], format, actual);
       return USB_ERROR_IO;
+    }
     unsigned key = descriptor ? sense[1] & 15 : sense[2] & 15;
     unsigned asc = descriptor ? sense[2] : sense[12];
     unsigned ascq = descriptor ? sense[3] : sense[13];
     if (monotonic_time_ns() >= deadline ||
         (key != 6 && !(key == 2 && asc == 4))) {
+      if (error)
+        snprintf(error, DISK_INFO_ERROR_SIZE,
+                 "SCSI cmd=%02x sense=%x asc=%02x/%02x", command[0], key, asc,
+                 ascq);
       usb_log("usb-storage: SCSI %02x sense=%x asc=%02x/%02x\n", command[0],
               key, asc, ascq);
+      if (key == 5 && ascq == 0) {
+        if (asc == 0x20)
+          return STORAGE_INVALID_OPCODE;
+        if (asc == 0x24)
+          return STORAGE_INVALID_FIELD;
+      }
       return USB_ERROR_IO;
     }
     sleep(100);
   }
 }
 
+/* MODE SENSE reports the current caching policy, not whether a flush command
+ * happens to be implemented. Keep malformed/transport failures distinct from
+ * a device that simply has no caching mode page. */
+static void storage_cache_probe(usb_storage_unit_t *unit) {
+  uint8_t response[255];
+  uint8_t command[10] = {0x1a, 0, 0x3f, 0, sizeof(response), 0};
+  int length =
+      storage_scsi(unit, command, 6, response, sizeof(response), true, NULL);
+  unsigned header = 4;
+  if (length == STORAGE_INVALID_OPCODE || length == STORAGE_INVALID_FIELD) {
+    memset(command, 0, sizeof(command));
+    command[0] = 0x5a;
+    command[2] = 0x3f;
+    command[8] = sizeof(response);
+    length =
+        storage_scsi(unit, command, 10, response, sizeof(response), true, NULL);
+    header = 8;
+  }
+  if (length == STORAGE_INVALID_OPCODE || length == STORAGE_INVALID_FIELD) {
+    unit->cache = STORAGE_CACHE_UNREPORTED;
+    return;
+  }
+  if (length < (int)header)
+    return;
+  unit->read_only = (response[header == 4 ? 2 : 3] & 0x80) != 0;
+  unsigned total = header == 4 ? response[0] + 1u : scsi_number(response, 2) + 2;
+  unsigned offset =
+      header + (header == 4 ? response[3] : scsi_number(response + 6, 2));
+  if (total > (unsigned)length || offset > total)
+    return;
+  while (offset < total) {
+    const uint8_t *page = response + offset;
+    if (total - offset < 2)
+      return;
+    bool subpage = (page[0] & 0x40) != 0;
+    unsigned page_header = subpage ? 4 : 2;
+    if (total - offset < page_header)
+      return;
+    unsigned size =
+        page_header + (subpage ? scsi_number(page + 2, 2) : page[1]);
+    if (size > total - offset)
+      return;
+    if (!subpage && (page[0] & 0x3f) == 8) {
+      if (size >= 20)
+        unit->cache = (page[2] & 4) ? STORAGE_CACHE_WRITE_BACK
+                                    : STORAGE_CACHE_WRITE_THROUGH;
+      return;
+    }
+    offset += size;
+  }
+  unit->cache = STORAGE_CACHE_UNREPORTED;
+}
+
 static bool storage_blocks(usb_storage_unit_t *unit, uint64_t block,
-                           unsigned blocks, void *bytes, bool read) {
+                           unsigned blocks, void *bytes, bool read,
+                           char *error) {
   uint8_t command[16] = {0};
   unsigned command_length;
   if (block <= UINT_MAX && blocks <= 65535 && blocks - 1 <= UINT_MAX - block) {
@@ -208,8 +312,13 @@ static bool storage_blocks(usb_storage_unit_t *unit, uint64_t block,
     command_length = 16;
   }
   unsigned length = blocks * unit->block_size;
-  return storage_scsi(unit, command, command_length, bytes, length, read) ==
-         (int)length;
+  int result =
+      storage_scsi(unit, command, command_length, bytes, length, read, error);
+  if (result >= 0 && (unsigned)result != length && error)
+    snprintf(error, DISK_INFO_ERROR_SIZE,
+             "SCSI cmd=%02x short transfer bytes=%d/%u", command[0], result,
+             length);
+  return result == (int)length;
 }
 
 static void storage_release(usb_storage_t *storage) {
@@ -241,14 +350,31 @@ static void storage_work_execute(usb_work_t *base) {
   if (!unit->storage->online || !usb_connected(unit->storage->device))
     return;
   if (work->operation == STORAGE_SYNC) {
+    if (unit->cache == STORAGE_CACHE_WRITE_THROUGH) {
+      work->success = true;
+      return;
+    }
     uint8_t command[10] = {0x35};
-    work->success =
-        storage_scsi(unit, command, sizeof(command), NULL, 0, false) == 0;
+    int result = storage_scsi(unit, command, sizeof(command), NULL, 0, false,
+                              work->error);
+    /* Assume write-through only when both the caching page and SYNCHRONIZE
+     * CACHE are unavailable. Never apply this fallback to WCE, failed cache
+     * discovery, invalid CDB fields, or real transport/media errors. */
+    if (result == STORAGE_INVALID_OPCODE &&
+        unit->cache == STORAGE_CACHE_UNREPORTED) {
+      unit->cache = STORAGE_CACHE_WRITE_THROUGH;
+      work->error[0] = 0;
+      usb_log("usb-storage: lun=%u no caching page or sync command; using "
+              "write-through\n",
+              unit->lun);
+      result = 0;
+    }
+    work->success = result == 0;
     return;
   }
   if (work->operation == STORAGE_READ) {
-    work->success =
-        storage_blocks(unit, work->block, work->blocks, work->bytes, true);
+    work->success = storage_blocks(unit, work->block, work->blocks, work->bytes,
+                                   true, work->error);
     return;
   }
   /* The public disk API uses 512-byte sectors. Preserve neighboring bytes on
@@ -256,11 +382,12 @@ static void storage_work_execute(usb_work_t *base) {
   unsigned span = work->blocks * unit->block_size;
   uint8_t *original = work->bytes + span;
   if ((work->offset != 0 || work->length != span) &&
-      !storage_blocks(unit, work->block, work->blocks, work->bytes, true))
+      !storage_blocks(unit, work->block, work->blocks, work->bytes, true,
+                      work->error))
     return;
   memcpy(work->bytes + work->offset, original, work->length);
-  work->success =
-      storage_blocks(unit, work->block, work->blocks, work->bytes, false);
+  work->success = storage_blocks(unit, work->block, work->blocks, work->bytes,
+                                 false, work->error);
 }
 
 static bool storage_io(char drive, uint8_t *buffer, unsigned number,
@@ -278,8 +405,11 @@ static bool storage_io(char drive, uint8_t *buffer, unsigned number,
   unsigned blocks = (offset + length + unit->block_size - 1) / unit->block_size;
   unsigned span = blocks * unit->block_size;
   usb_storage_work_t *work = malloc(sizeof(*work) + span + length);
-  if (work == NULL)
+  if (work == NULL) {
+    disk_report_error(drive, "USB request allocation failed: bytes=%u",
+                      span + length);
     return false;
+  }
   memset(work, 0, sizeof(*work));
   work->work.execute = storage_work_execute;
   work->work.destroy = storage_work_destroy;
@@ -296,6 +426,14 @@ static bool storage_io(char drive, uint8_t *buffer, unsigned number,
   bool success = work->success;
   if (success && operation == STORAGE_READ)
     memcpy(buffer, work->bytes + offset, length);
+  if (!success)
+    disk_report_error(drive, "%s LBA=%u sectors=%u device-LBA=%llu: %s",
+                      operation == STORAGE_READ    ? "READ"
+                      : operation == STORAGE_WRITE ? "WRITE"
+                                                   : "SYNC",
+                      lba, number, (unsigned long long)work->block,
+                      work->error[0] ? work->error
+                                     : "USB request failed/cancelled");
   usb_work_release(&work->work);
   return success;
 }
@@ -341,7 +479,7 @@ static bool storage_volume(usb_storage_unit_t *unit, uint64_t first,
     bool mounted = vfs_mount_disk(drive, drive);
     usb_log("usb-storage: lun=%u drive=%c sectors=%llu block=%u %s\n",
             unit->lun, drive, (unsigned long long)sectors, unit->block_size,
-            mounted ? "mounted" : "unformatted");
+            mounted ? "mounted" : "unmounted");
     return true;
   }
   free(volume);
@@ -352,7 +490,8 @@ static bool storage_partitions(usb_storage_unit_t *unit) {
   uint8_t *sector = malloc(unit->block_size);
   if (sector == NULL)
     return false;
-  if (!storage_blocks(unit, 0, 1, sector, true)) {
+  if (!storage_blocks(unit, 0, 1, sector, true, NULL)) {
+    usb_log("usb-storage: lun=%u LBA0 read failed\n", unit->lun);
     free(sector);
     return false;
   }
@@ -447,18 +586,18 @@ bool usb_storage_bind(usb_interface_t *interface) {
       break;
     *unit = (usb_storage_unit_t){.storage = storage, .lun = lun};
     uint8_t command[16] = {0x12, 0, 0, 0, 36, 0}, response[36];
-    if (storage_scsi(unit, command, 6, response, 36, true) < 36 ||
+    if (storage_scsi(unit, command, 6, response, 36, true, NULL) < 36 ||
         (response[0] & 31) != 0) {
       free(unit);
       continue;
     }
     memset(command, 0, sizeof(command));
-    if (storage_scsi(unit, command, 6, NULL, 0, false) < 0) {
+    if (storage_scsi(unit, command, 6, NULL, 0, false, NULL) < 0) {
       free(unit);
       continue;
     }
     command[0] = 0x25;
-    int length = storage_scsi(unit, command, 10, response, 8, true);
+    int length = storage_scsi(unit, command, 10, response, 8, true, NULL);
     bool capacity_valid = length == 8;
     uint64_t last = scsi_number(response, 4);
     unsigned block_size = scsi_number(response + 4, 4);
@@ -467,7 +606,7 @@ bool usb_storage_bind(usb_interface_t *interface) {
       command[0] = 0x9e;
       command[1] = 0x10;
       command[13] = 32;
-      length = storage_scsi(unit, command, 16, response, 32, true);
+      length = storage_scsi(unit, command, 16, response, 32, true, NULL);
       capacity_valid = length == 32;
       last = scsi_number(response, 8);
       block_size = scsi_number(response + 8, 4);
@@ -480,10 +619,7 @@ bool usb_storage_bind(usb_interface_t *interface) {
     }
     unit->block_size = block_size;
     unit->sectors = (last + 1) * (block_size / 512);
-    uint8_t mode[6] = {0x1a, 0, 0x3f, 0, 4, 0};
-    if (storage_scsi(unit, mode, sizeof(mode), response, 4, true) == 4) {
-      unit->read_only = (response[2] & 0x80) != 0;
-    }
+    storage_cache_probe(unit);
     unit->next = storage->units;
     storage->units = unit;
     active |= storage_partitions(unit);

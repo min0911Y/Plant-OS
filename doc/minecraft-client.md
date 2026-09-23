@@ -29,6 +29,26 @@ make -C kernel ARCH=x86_64 minecraft-client-run
 传入 `--archive`、`--iso`、`--disk`；`--jdk`、`--lwjgl` 可覆盖依赖目录。
 宿主编译器沿用 LWJGL 的 `JAVAC` 选择，必须能编译 Java 17。
 
+## U 盘文件包
+
+构建最新 x86_64 LiveCD、Server JDK 和 LWJGL 后，可以生成可搬移的目录：
+
+```sh
+python3 scripts/package-minecraft-usb.py --archive /mnt/e/1.20.1/mc.zip \
+  --output /mnt/e/plmc
+```
+
+该目录包含 Java、游戏与资源、LWJGL、启动器、说明、校验清单及配套系统 ISO。
+复制整个 `plmc` 文件夹到 FAT32 U 盘，进入配套的 x86_64 Plant OS 后，
+用 `disks.bin` 查询挂载点。例如挂载在 E:/ 时，在默认终端执行
+`lua.bin E:/plmc/run.lua`。启动脚本从自己的绝对路径定位目录，游戏参数相对于
+工作目录解析，不绑定 C:。存档和日志写到 U 盘的 `plmc/java/mc/`。
+目录打包同样拒绝覆盖已有输出，不携带测试存档或账户凭据。
+
+配套 `system/plant-os-x86_64.iso` 提供系统 Mesa/GLFW/OpenAL/libp；文件包不能
+在 i386 或缺少这些运行库的旧系统上运行。复制数据文件不等于制作启动 U 盘。
+USB 控制器、分区和文件系统支持范围见 [USB](usb.md)。
+
 ## 部署与依赖
 
 客户机目录是 `C:/java/mc/`，包括 `client.args`、`run-client.lua`、`client.jar`、
@@ -78,6 +98,5 @@ Realms 报错不代表本地世界失败。tinyfd 的原生错误弹窗未移植
 `test-x86_64.py --glfw` 的窗口图标、鼠标定位与真实相对输入，以及两种架构
 的 `--mouse`，覆盖 GUI 装饰、像素、缩放、输入和新增数学函数。
 
-当前 x86_64 BIOS/KVM 的 LWJGL、GLFW 和 `--mouse` 回归均通过。
-i386 的 GUI 像素、拖动、缩放及 libc 检查通过，但完整 `--mouse` 套件两次在
-`nettest.bin loopback` 返回状态 2，尚未定位；不能据此宣称 i386 全套回归通过。
+当前 x86_64 BIOS/KVM 的 LWJGL、GLFW 回归，以及 i386 和 x86_64 的完整
+`--mouse` 套件均通过，包括 GUI、libc 和网络回环检查。

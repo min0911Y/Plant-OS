@@ -3,7 +3,7 @@
 #include <limits.h>
 int getReadyDisk(); // init.c
 vdisk vdisk_ctl[26];
-static bool disk_failed[26];
+static char disk_errors[26][DISK_INFO_ERROR_SIZE];
 static unsigned char *drive_name[16] = {NULL, NULL, NULL, NULL, NULL, NULL,
                                         NULL, NULL, NULL, NULL, NULL, NULL,
                                         NULL, NULL, NULL, NULL};
@@ -116,7 +116,7 @@ int register_vdisk_at(char drive, vdisk vd) {
     return 0;
   }
   vdisk_ctl[index] = vd;
-  disk_failed[index] = false;
+  memset(disk_errors[index], 0, sizeof(disk_errors[index]));
   if (vd.DriveName[0] != 0 && !vd.owns_serialization) {
     SetDrive((unsigned char *)vdisk_ctl[index].DriveName);
   }
@@ -148,7 +148,7 @@ int logout_vdisk(char drive) {
 int rw_vdisk(char drive, unsigned int lba, unsigned char *buffer,
              unsigned int number, int read) {
   unsigned index = (unsigned)(drive - 'A');
-  if (index >= 26 || !vdisk_ctl[index].flag || disk_failed[index]) {
+  if (index >= 26 || !vdisk_ctl[index].flag || disk_errors[index][0]) {
     return false;
   }
   vdisk *disk = &vdisk_ctl[index];
@@ -158,12 +158,15 @@ int rw_vdisk(char drive, unsigned int lba, unsigned char *buffer,
   if (operation == NULL || number > UINT_MAX / unit ||
       (disk->flag == VDISK_TYPE_BLOCK &&
        (uint64_t)lba + number > disk->size / unit)) {
-    disk_failed[index] = true;
+    disk_report_error(drive, "%s rejected: LBA=%u sectors=%u capacity=%llu",
+                      read ? "READ" : "WRITE", lba, number,
+                      (unsigned long long)(disk->size / unit));
     return false;
   }
   bool success = operation(drive, buffer, number, lba);
   if (!success) {
-    disk_failed[index] = true;
+    disk_report_error(drive, "%s failed: LBA=%u sectors=%u",
+                      read ? "READ" : "WRITE", lba, number);
   }
   return success;
 }
@@ -182,6 +185,31 @@ bool have_vdisk(char drive) {
 vdisk_type_t vdisk_type(char drive) {
   int index = drive - 'A';
   return index >= 0 && index < 26 ? vdisk_ctl[index].flag : VDISK_TYPE_NONE;
+}
+void disk_report_error(char drive, const char *format, ...) {
+  if (!have_vdisk(drive) || disk_errors[drive - 'A'][0])
+    return;
+  char *error = disk_errors[drive - 'A'];
+  va_list arguments;
+  va_start(arguments, format);
+  vsnprintf(error, DISK_INFO_ERROR_SIZE, format, arguments);
+  va_end(arguments);
+  logk("disk %c: %s\n", drive, error);
+}
+
+bool disk_describe(char drive, disk_info_t *info) {
+  if (!have_vdisk(drive))
+    return false;
+  const vdisk *disk = &vdisk_ctl[drive - 'A'];
+  memset(info, 0, sizeof(*info));
+  info->disk = drive;
+  info->type =
+      disk->flag == VDISK_TYPE_OPTICAL ? DISK_INFO_OPTICAL : DISK_INFO_BLOCK;
+  info->capacity_bytes = disk->size;
+  info->writable = disk_writable(drive);
+  memcpy(info->name, disk->DriveName, sizeof(disk->DriveName));
+  memcpy(info->error, disk_errors[drive - 'A'], sizeof(info->error));
+  return true;
 }
 char first_vdisk(void) {
   for (int i = 0; i < 26; i++) {
@@ -330,7 +358,7 @@ uint64_t disk_Size(char drive) {
   return 0;
 }
 bool DiskReady(char drive) {
-  return have_vdisk(drive) && !disk_failed[drive - 'A'];
+  return have_vdisk(drive) && !disk_errors[drive - 'A'][0];
 }
 int getReadyDisk() { return 0; }
 bool disk_write(unsigned lba, unsigned number, void *buffer, char drive) {
@@ -357,7 +385,8 @@ bool disk_sync(char drive) {
   }
   bool success = disk->Sync(drive);
   DriveSemaphoreGive(code);
-  disk_failed[drive - 'A'] |= !success;
+  if (!success)
+    disk_report_error(drive, "SYNC failed");
   return success;
 }
 

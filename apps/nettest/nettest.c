@@ -300,16 +300,83 @@ static int nettest_monotonic_clock(void) {
   return -1;
 }
 
+static int nettest_timeout_options(void) {
+  socket_t socket_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+  if (socket_fd < 0)
+    return -1;
+  int result = -1;
+  const int options[] = {SO_RCVTIMEO, SO_SNDTIMEO};
+  for (unsigned i = 0; i < sizeof(options) / sizeof(options[0]); i++) {
+    struct timeval value = {.tv_sec = 1, .tv_usec = 230000};
+    struct {
+      struct timeval time;
+      uint32_t guard;
+    } output = {.guard = 0x12345678};
+    socklen_t length = sizeof(output.time);
+    if (setsockopt(socket_fd, SOL_SOCKET, options[i], &value, sizeof(value)) ||
+        getsockopt(socket_fd, SOL_SOCKET, options[i], &output.time, &length) ||
+        length != sizeof(output.time) || output.time.tv_sec != value.tv_sec ||
+        output.time.tv_usec != value.tv_usec || output.guard != 0x12345678)
+      goto done;
+    if (setsockopt(socket_fd, SOL_SOCKET, options[i], &value,
+                   sizeof(value) - 1) != -1 ||
+        errno != EINVAL)
+      goto done;
+    length = sizeof(output.time) - 1;
+    if (getsockopt(socket_fd, SOL_SOCKET, options[i], &output.time, &length) !=
+            -1 ||
+        errno != EINVAL)
+      goto done;
+    value.tv_usec = 1000000;
+    if (setsockopt(socket_fd, SOL_SOCKET, options[i], &value, sizeof(value)) !=
+            -1 ||
+        errno != EINVAL)
+      goto done;
+  }
+  struct sockaddr_in endpoint;
+  nettest_loopback_address(&endpoint);
+  struct timeval timeout = {.tv_sec = 0, .tv_usec = 20000};
+  if (bind(socket_fd, (const struct sockaddr *)&endpoint, sizeof(endpoint)) ||
+      setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)))
+    goto done;
+  char byte;
+  result = recv(socket_fd, &byte, sizeof(byte), 0) == -1 && errno == ETIMEDOUT
+               ? 0
+               : -1;
+done:
+  socket_close(socket_fd);
+  return result;
+}
+
 static int nettest_loopback(void) {
+  const struct {
+    const char *name;
+    int (*run)(void);
+  } tests[] = {{"clock", nettest_monotonic_clock},
+               {"timeouts", nettest_timeout_options},
+               {"UDP", nettest_loopback_udp},
+               {"TCP", nettest_loopback_stream}};
+  for (unsigned i = 0; i < sizeof(tests) / sizeof(tests[0]); i++) {
+    if (tests[i].run() != 0) {
+      logkf("NETTEST FAIL %s errno=%d\n", tests[i].name, errno);
+      return -1;
+    }
+  }
   struct sockaddr_in target;
   nettest_loopback_address(&target);
   uint64_t elapsed_ns = 0;
-  return nettest_monotonic_clock() == 0 && nettest_loopback_udp() == 0 &&
-                 nettest_loopback_stream() == 0 &&
-                 nettest_ping(&target, &elapsed_ns) == 0 &&
-                 elapsed_ns < 10000000ull
-             ? 0
-             : -1;
+  if (nettest_ping(&target, &elapsed_ns) != 0) {
+    logkf("NETTEST FAIL ICMP errno=%d\n", errno);
+    return -1;
+  }
+  if (elapsed_ns >= 10000000ull) {
+    logkf("NETTEST FAIL ICMP latency=%llu ns\n",
+          (unsigned long long)elapsed_ns);
+    return -1;
+  }
+  logkf("NETTEST LOOPBACK PASS latency=%llu ns\n",
+        (unsigned long long)elapsed_ns);
+  return 0;
 }
 
 static int nettest_udp(const struct sockaddr_in *target) {

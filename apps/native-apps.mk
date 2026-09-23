@@ -38,7 +38,7 @@ $(foreach app,$(SDL_PROGRAMS),$(eval $(call application,$(app),$(LIBS)/sdl3.a,$(
 $(foreach app,$(SDL_PROGRAMS),$(eval $(BUILD)/$(app)/%.o: CFLAGS += $(SDL_CFLAGS) -I$(app)))
 
 SIMPLE_PROGRAMS := bainian aigobang randnum cal pfn sort pwsh snake cgobang edit \
-                   basic Maze image bim2hrb lox doomcpy mmake ttf chat paint netgobang usbtest
+                   basic Maze image bim2hrb lox doomcpy mmake ttf chat paint netgobang usbtest disks
 $(foreach app,$(SIMPLE_PROGRAMS),$(eval $(call application,$(app))))
 $(eval $(call application,bf,,brainfuck/bf.c))
 $(eval $(call application,c4,,c4/c4.c))

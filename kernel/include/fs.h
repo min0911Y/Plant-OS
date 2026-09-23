@@ -2,6 +2,7 @@
 #define _FS_H
 
 #include "../../apps/include/vfs_stat.h"
+#include "../../apps/include/disk_info.h"
 #include <define.h>
 #include <io_poll.h>
 
@@ -93,6 +94,7 @@ enum vfs_syscall_operation {
   VFS_SYSCALL_PIPE,
   VFS_SYSCALL_POLL,
   VFS_SYSCALL_AVAILABLE,
+  VFS_SYSCALL_DISKS,
   VFS_SYSCALL_COUNT,
 };
 
@@ -188,6 +190,7 @@ bool vfs_unmount_disk(uint8_t drive);
 bool vfs_disk_reusable(uint8_t disk);
 void vfs_disk_removed(uint8_t disk);
 bool vfs_check_mount(uint8_t drive);
+int vfs_list_disks(disk_info_t *entries, uint32_t capacity);
 int vfs_format(uint8_t disk_number, const char *filesystem_name);
 void *vfs_mount_data(struct vfs_mount *mount);
 void vfs_mount_set_data(struct vfs_mount *mount, void *data);

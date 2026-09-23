@@ -38,6 +38,7 @@
 
 - 网络协议唯一实现为 `kernel/net/third_party/lwip`，使用 `NO_SYS=1` raw API；`net_stack.c` 管链路/异步 DHCP，`socket.c` 管用户端点，网卡驱动只管帧、DMA 和 IRQ。普通路径以 IRQ 临界区串行 raw API，回环 drain 不在 output callback 中重入协议栈。
 - `lo` 独立于网卡和 DHCP；socket 句柄按 task group 所有，阻塞由 `WAIT_REASON_SOCKET` 与 callback/timeout 唤醒。用户网络统一经 `SYSCALL_SOCKET`，不向用户暴露内核指针或增加第二套协议实现。
+- socket 收发超时的 syscall ABI 为两个有符号 64 位字段；libp 在 `setsockopt` / `getsockopt` 边界与公共 `struct timeval` 相互转换，不能直接传递 i386 的 12 字节结构。`nettest.bin loopback` 覆盖两种超时选项的读写、长度与值校验、接收超时和 UDP/TCP/ICMP，并在串口报告失败阶段。
 - `clock()` 保持毫秒 ABI，高分辨率计时使用 `monotonic_ns()`；调度后的 sleep 使用阻塞 timer。RTC 提供 UTC，`localtime`/`mktime` 当前为 UTC+08:00。
 - `time_t` 在两个架构均为有符号 64 位秒；标准 timespec/clock_gettime/nanosleep 由原生包装提供。标量数学与 `fenv` 保留舍入及异常标志语义，i386 不执行 SSE；不能以简化公式替代 FMA 等要求单次舍入的操作。
 - 正常热路径不输出逐次分配、裸地址或输入报告。性能采样 IRQ 仅写固定聚合表，格式与控制 ABI 同宿主解析器同步；采集和火焰图说明见 [性能分析](performance.md)。
