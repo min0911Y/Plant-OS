@@ -1,112 +1,69 @@
+[English](../README.md) | 中文
 
-[English](../README.md) \| 中文
+# Plant OS
 
-# 关于 Plant OS
+Plant OS 是面向 i386 和 x86_64 PC 的教学用独立操作系统，拥有自己的内核、用户态 ABI、运行库与应用；它不是 Linux 发行版，也不适合作为日常工作系统。项目于 2020 年以 Powerint 起步，2021 年更名为 Plant OS。
 
-- Plant OS 是一个仅用于学习目的的操作系统。
-- 最初，操作系统是 16 位实模式，但现在是 32 位保护模式（386 版本）。
-- 由于 COVID-19，Zhou Zhihao待在家里，并于 2020 年 12 月启动了该项目。
-- 该项目是关于操作系统的，Zhou Zhihao将其命名为“Powerint”，意思是我们可以使用的强大中断。经过大约一年的编码，操作系统具有与 MS-DOS 类似的正常功能，但它仍处于 16 位实模式。
-- 2021 年 12 月，Simple OS 的作者Qiu Chenjun与Zhou Zhihao合作。他们帮助 Plant OS 过渡到一个新世界，32 位保护模式，并将其更名为 Plant OS。
-- 经过一年多的编码，Plant OS 在不断改进。
-**无论如何，你应该知道 Plant OS 是为学习计算机工作原理而制作的，它不能成为你日常工作的操作系统。而且 Plant OS 仍有许多错误，如果您愿意并且能够，您可以修复这些错误并发出拉取请求，我们会合并。顺便说一句，操作系统可能永远处于保护模式，因为我们仍然是学生，我们没有足够的时间来改进操作系统，请原谅我们。另外，如果你发现一些错误，你可以提出问题，我们会尽快修复它（如果我们有足够的能力修复）**
+## 当前支持的功能
 
-## 构建
+- **启动与进程：**i386 通过 DOSLDR 从磁盘启动，i386 Limine LiveCD，以及 x86_64 BIOS/UEFI Limine LiveCD；多任务、虚拟内存、线程、信号、系统调用与原生 ELF PIE/动态链接。
+- **存储与 I/O：**FAT12/16/32（含长文件名）、PFS、可写的内存 FAT initramfs、VFS、管道与 poll；PCI、USB HID/存储和 PC 存储控制器。设备支持范围见 [USB](usb.md) 和 [AHCI](ahci.md)。
+- **网络与桌面：**基于 lwIP 的 TCP/IP 与 socket 接口；Shell、Lua、图形桌面和终端、键鼠输入、SDL3 与原生应用。
+- **x86_64 图形与 Java：**Mesa 软件 Vulkan（lavapipe）、OpenGL/EGL（llvmpipe）、GLFW、支持 JIT 的 OpenJDK 17，以及原生 LWJGL 3 绑定。可选镜像运行原版 Minecraft 1.20.1 服务端或本地窗口客户端；客户端的 OpenAL 后端目前**没有扬声器输出**。
 
-**注意：在构建之前，你可能需要安装 nasm、gcc、g++、mtools 和 qemu**
+以上是项目已实现的能力，不代表完整硬件、POSIX 或应用兼容性；配置与限制见[开发指南](development.md)、[架构](architecture.md)和[子系统说明](subsystems.md)。
 
-首先，你必须克隆 repo，如下所示：
+## 从源码编译
 
-```cmd
-git clone https://github.com/min0911Y/Plant-OS.git
+宿主环境为 Linux，需 Python 3、GNU make、GCC/G++、binutils、NASM、mtools、QEMU、curl、tar、gzip，以及 `xorriso` 或 `genisoimage`。i386 工具链须支持 `-m32` 与 `elf_i386`。原生 C++ 运行库还需 Clang、CMake、Ninja；默认的 x86_64 Mesa 构建还需 Meson、`llvm-ar`、匹配 LLVM 的 TableGen 工具、`glslangValidator`、bison、flex、m4 和 Python 生成模块。终端库还需 Rust nightly 和 `rust-src`；LWJGL 还需宿主 JDK 17 的 `javac`/`jar`。详细要求见[构建指南](build.md)及[图形依赖](lavapipe.md)。
+
+在仓库根目录准备经校验的上游源码（缓存于 `apps/out/sources/`）：
+
+```sh
+git clone -b ai-slop https://github.com/min0911Y/Plant-OS.git
+cd Plant-OS
+./init.py
 ```
 
-其次，转到 apps 文件夹：
+`./init.py` 默认下载全部可选依赖组，包括 Java、图形和 Minecraft；也可仅准备指定组，例如 `./init.py mesa openjdk`。重复执行会复用已校验的缓存。编译这些移植库需要较多磁盘空间和时间。
 
-```cmd
-cd apps
+**i386（应用 → DOSLDR → 内核/磁盘 → LiveCD）：**
+
+```sh
+make -C apps ARCH=i386
+make -C loader
+make -C kernel ARCH=i386
+make -C kernel ARCH=i386 livecd
 ```
 
-然后，使用 `make` 编译应用程序：
+磁盘启动镜像为 `kernel/boot.img`，ISO 为 `kernel/plant-os-livecd.iso`。磁盘启动冒烟测试用 `make -C kernel ARCH=i386 img_run`（当前 Makefile 要求 KVM）。旧 `run`、`full_run` 依赖过时软盘路径，不能作为主要启动方法。
 
-```cmd
-make
+**x86_64（内核 → 应用 → BIOS/UEFI LiveCD）：**
+
+```sh
+make -C kernel ARCH=x86_64 livecd
+make -C kernel ARCH=x86_64 livecd_run
 ```
 
-如果你没有看到错误消息，则转到 `Loader` 文件夹，然后在 cmd 提示符中输入 `make`：
+ISO 为 `kernel/plant-os-x86_64.iso`。`livecd` 会自动构建内核及该架构的应用，不依赖 i386 DOSLDR，也不携带 JDK；`livecd_run` 默认以 BIOS 配置启动 QEMU。固件及镜像布局见 [LiveCD](livecd.md)。
 
-```cmd
-cd ..
-cd Loader
-make
+**可选的 x86_64 Java 和 Minecraft 镜像：**
+
+```sh
+make -C kernel ARCH=x86_64 openjdk
+make -C kernel ARCH=x86_64 lwjgl-livecd
+make -C kernel ARCH=x86_64 minecraft-image
+make -C kernel ARCH=x86_64 minecraft-client-image MINECRAFT_CLIENT_ARCHIVE=/path/to/mc.zip
 ```
 
-如果你没有看到错误消息，则您可以运行以下命令进入 `kernel` 文件夹并构建内核：
+LWJGL 镜像使用独立 JDK 磁盘；Minecraft 服务端与客户端使用持久磁盘。服务端镜像写入 `eula=true`，仅在接受 Minecraft EULA 后构建。客户端需要自备包含 1.20.1 版本、依赖库及资源的 ZIP。部署、QEMU 运行目标及附加依赖见 [OpenJDK](openjdk.md)、[LWJGL](lwjgl.md)、[服务端镜像](build.md#minecraft-与-jdk-镜像)和[客户端镜像](minecraft-client.md)。
 
-```cmd
-cd ..
-cd kernel
-make
-```
+对象、下载的源码与镜像位于已忽略的输出目录，不应提交到仓库。回归命令与交付检查见[验证指南](testing.md)。
 
-或者您可以添加 `run` 以便在编译后启动调试：
+## 贡献者
 
-```cmd
-make run
-```
+- Zhou Zhihao（[ZhouZhihaos](https://github.com/ZhouZhihaos)）
+- Qiu Chenjun（Simple OS；早期 32 位迁移）
+- min0911_（[min0911Y](https://github.com/min0911Y)）
 
-您将看到 Powerint DOS 在 kernel/img 文件夹中分成四个图像。
-
-**完成！您现在可以使用 qemu 或任何其他您喜欢的虚拟化软件尝试 Powerint DOS！**
-
-## 启动
-
-在 `kernel` 目录中：
-
-```cmd
-make full_run
-```
-
-您还可以使用 `make run` 或 `make img_run`，它们有所不同。
-
-## Doom 游戏
-
-如果您想运行 Doom，在构建后：
-
-1. 您可以二进制连接 `kernel/img/doom1.img` 和 `kernel/img/doom2.img`。之后，在 `kernel` 目录下运行：
-
-<!-- 过时内容（2026-06-09：kernel64 已删除 AHCI/IDE 旧驱动路径，现代块设备测试请使用 NVMe）：
-```cmd
-qemu-system-i386 -net nic,model=pcnet -net user -serial stdio -device floppy -fda ./img/Powerint_DOS_386.img -drive id=disk,file=disk.img,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -hdb <YOUR-DOOM-HARD-DISK-FILE-NAME> -boot a -m 512 -enable-kvm
-```
--->
-```cmd
-truncate -s 64M /tmp/kernel64-nvme-test.img
-cp /usr/share/edk2/x64/OVMF_VARS.4m.fd kernel64/build/OVMF_VARS.fd
-qemu-system-x86_64 -machine q35 -accel kvm -m 1024M -smp 4 -cpu host,x2apic=on,tsc-deadline=on -serial stdio -display none -nodefaults -no-reboot -drive if=pflash,format=raw,readonly=on,file=/usr/share/edk2/x64/OVMF_CODE.4m.fd -drive if=pflash,format=raw,file=kernel64/build/OVMF_VARS.fd -drive id=boot0,if=none,format=raw,file=kernel64/build/kernel64-uefi.img -device virtio-blk-pci,drive=boot0 -drive id=nvme0,if=none,format=raw,file=/tmp/kernel64-nvme-test.img -device nvme,drive=nvme0,serial=plosnvme0
-```
-
-2. 你也可以使用 PlantOS 提供的 `doomcpy`，参见 [doomcpy.c](apps/doomcpy/doomcpy.c)。
-
-## 开发者
-
-- zhouzhihao <https://github.com/ZhouZhihaos>
-
-- min0911_ <https://github.com/min0911Y>
-
-## 谢谢
-
-- TheFlySong
-- yywd_123
-- Oildum-was-ejected
-- wenxuanjun
-- duoduo70(time.c)
-- ...
-
-## 关于问题
-
-很高兴看到您想通过问题报告错误。但无论如何，您应该遵循一些规则，以帮助我们快速修复错误。
-
-这就是 [规则](issue_rules.md)
-
-如果您同意遵守规则，请随时发送问题，无论问题有多严重。
+感谢 TheFlySong、yywd_123、Oildum-was-ejected、wenxuanjun 和 duoduo70。

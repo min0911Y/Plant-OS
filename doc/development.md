@@ -19,7 +19,7 @@
 
 ## 开发原则
 
-- 以当前 Makefile、源码及调用链为准。两个架构都在 `kernel/`，没有 `kernel64/`；历史 README、迁移记录及 `scripts/build_rootfs.sh` 不能作为当前构建依据。
+- 以当前 Makefile、源码及调用链为准。两个架构都在 `kernel/`，没有 `kernel64/`；README 提供入门流程，详细构建约束见 `doc/build.md`，历史迁移记录及 `scripts/build_rootfs.sh` 不能作为当前构建依据。
 - 项目自有 C/C++ 遵循根目录 `.clang-format`：2 空格缩进、不使用 Tab、左大括号同行、指针星号靠变量。只格式化本次触及的代码，不机械重写第三方目录。
 - 使用项目现有类型、分配器、锁和日志接口；地址使用 `uintptr_t` 等原生宽度类型，检查溢出、范围、对齐和分配失败。构造失败要完整回滚，不发布半初始化对象。
 - 不随意执行全量 `clean`，不提交 `apps/out/`、`apps/libs/`、`loader/out/`、`kernel/obj/`、`kernel/img/` 及生成的镜像、日志；明确要求交付的产物除外。
