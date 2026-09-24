@@ -3,7 +3,7 @@
 [开发指南](development.md)
 
 需要 GNU make、GCC/G++、binutils、NASM、mtools 和 QEMU；i386 工具链须支持 `-m32`/`elf_i386`。LiveCD 另需 `curl`、`tar`、`gzip` 和 `xorriso` 或 `genisoimage`。
-原生 C++ 运行库还需 Clang 19 或更新版本、CMake 和 Ninja；x86_64 默认包含 Mesa lavapipe/llvmpipe，另需 Meson、llvm-ar、匹配 LLVM 源码的宿主 TableGen、glslangValidator、bison、flex、m4 和 Python 生成器模块。CI 使用与源码版本匹配的 Clang/LLVM 21.1.8；i386 只从该源码包构建 libc++/libc++abi，不构建 LLVM 后端或 OpenJDK。版本、缓存与构建说明见 [lavapipe](lavapipe.md)。
+原生 C++ 运行库及应用统一使用 Clang 19 或更新版本编译，还需 CMake 和 Ninja；C 应用继续使用 GCC。C++ 应用使用 `-fhosted` 保持标准 `main` 入口，但仍使用 Plant OS 头文件、ABI 和运行库，不链接宿主库。x86_64 默认包含 Mesa lavapipe/llvmpipe，另需 Meson、llvm-ar、匹配 LLVM 源码的宿主 TableGen、glslangValidator、bison、flex、m4 和 Python 生成器模块。CI 使用与源码版本匹配的 Clang/LLVM 21.1.8；i386 只从该源码包构建 libc++/libc++abi，不构建 LLVM 后端或 OpenJDK。版本、缓存与构建说明见 [lavapipe](lavapipe.md)。
 
 根目录 `./init.py` 下载并校验 LLVM、Mesa、OpenJDK、LWJGL、OpenAL、终端库及原版
 Minecraft 的固定依赖；也可指定分组，如 `./init.py mesa openjdk`。

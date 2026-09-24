@@ -5,7 +5,7 @@ LLVM_SOURCE := out/sources/$(shell python3 -c 'import json; print(json.load(open
 $(LLVM_ARCHIVE): FORCE_LLVM $(DYN_LIB)/libcpp.so
 	python3 ../scripts/build-mesa.py --arch $(ARCH) --component llvm --jobs $(MESA_JOBS)
 
-$(BUILD)/llvmtest/%.o: CFLAGS += -I$(LLVM_SOURCE)/include -I$(LLVM_BUILD)/include
+$(BUILD)/llvmtest/%.o: CXXFLAGS += -I$(LLVM_SOURCE)/include -I$(LLVM_BUILD)/include
 $(BUILD)/llvmtest/llvmtest.o: $(LLVM_ARCHIVE)
 $(eval $(call application,llvmtest,$(LLVM_ARCHIVE),llvmtest/llvmtest.cpp))
 
@@ -25,12 +25,12 @@ $(eval $(call application,glxgears,$(LIBS)/sdl3.a $(DYN_LIB)/libGL.so,glxgears/g
 
 $(BUILD)/lvptest/%_comp_spv.h: lvptest/%.comp ../scripts/build-mesa.py
 	python3 ../scripts/build-mesa.py --arch $(ARCH) --component shaders --shader $<
-$(BUILD)/lvptest/%.o: CFLAGS += $(SDL_CFLAGS) -Imesa/include -Isdl3/src/video/khronos -I$(BUILD)/lvptest
+$(BUILD)/lvptest/%.o: CXXFLAGS += $(SDL_CFLAGS) -Imesa/include -Isdl3/src/video/khronos -I$(BUILD)/lvptest
 $(BUILD)/lvptest/lvptest.o: $(BUILD)/lvptest/compute_comp_spv.h $(BUILD)/lvptest/tea_comp_spv.h
 $(eval $(call application,lvptest,$(LIBS)/sdl3.a,lvptest/lvptest.cpp))
 
 $(BUILD)/vkcube/cube_%_spv.h: vkcube/cube.% ../scripts/build-mesa.py
 	python3 ../scripts/build-mesa.py --arch $(ARCH) --component shaders --shader $<
-$(BUILD)/vkcube/%.o: CFLAGS += $(SDL_CFLAGS) -Imesa/include -Isdl3/src/video/khronos -I$(BUILD)/vkcube
+$(BUILD)/vkcube/%.o: CXXFLAGS += $(SDL_CFLAGS) -Imesa/include -Isdl3/src/video/khronos -I$(BUILD)/vkcube
 $(BUILD)/vkcube/vkcube.o: $(BUILD)/vkcube/cube_vert_spv.h $(BUILD)/vkcube/cube_frag_spv.h
 $(eval $(call application,vkcube,$(LIBS)/sdl3.a,vkcube/vkcube.cpp))

@@ -6,6 +6,8 @@ LIBS := libs$(if $(filter x86_64,$(ARCH)),/x86_64)
 CC := gcc
 CFLAGS := $(DYN_CFLAGS) -Ilibutf/include -Ithird_party/pl_readline/include \
   -DPL_ENABLE_HISTORY_FILE=0
+CXXFLAGS := $(DYN_CXXFLAGS) -Ilibutf/include -Ithird_party/pl_readline/include \
+  -DPL_ENABLE_HISTORY_FILE=0
 ifeq ($(ARCH),i386)
 CFLAGS += -finput-charset=UTF-8 -fexec-charset=GB2312
 endif
@@ -30,8 +32,7 @@ $(BUILD)/%.o: %.c build.mk native-apps.mk dynamic.mk
 	$(CC) $(CFLAGS) -c $< -o $@
 $(BUILD)/%.o: %.cpp build.mk native-apps.mk dynamic.mk $(CXX_CONFIG)
 	@mkdir -p $(dir $@)
-	g++ -nostdinc++ -I$(CXX_HEADERS) $(filter-out -std=gnu17 -Werror=implicit-function-declaration,$(CFLAGS)) \
-	  -std=gnu++17 -fno-exceptions -fno-rtti -fno-use-cxa-atexit -c $< -o $@
+	$(CXX) $(CXXFLAGS) -c $< -o $@
 $(BUILD)/%.obj: %.asm
 	@mkdir -p $(dir $@)
 	nasm -I$(dir $<) -f $(DYN_FORMAT) $< -o $@
@@ -86,6 +87,7 @@ $(eval $(call application,fputest,$(BUILD)/fputest/arch/i386/fputest.obj))
 # The guest compiler SDK and the kernel's compiler helpers are archives, not
 # shipped executables. They remain explicit products of the common source graph.
 SDK_CFLAGS := $(filter-out -fPIC,$(DYN_CFLAGS)) -fno-pic -fno-pie
+SDK_CXXFLAGS := $(filter-out -fPIC,$(DYN_CXXFLAGS)) -fno-pic -fno-pie
 SDK_LIBP := $(patsubst %.c,$(BUILD)/sdk/%.o,$(filter-out libp/abi.c,$(DYN_SOURCES)) libp/entry.c) \
   $(DYN_BUILD)/libp/arch/$(ARCH)/syscall.obj $(BUILD)/sdk/libp/dso.o
 $(BUILD)/sdk/%.o: %.c build.mk dynamic.mk
@@ -93,8 +95,7 @@ $(BUILD)/sdk/%.o: %.c build.mk dynamic.mk
 	$(CC) $(SDK_CFLAGS) -c $< -o $@
 $(BUILD)/sdk/%.o: %.cpp build.mk dynamic.mk
 	@mkdir -p $(dir $@)
-	g++ $(filter-out -std=gnu17 -Werror=implicit-function-declaration,$(SDK_CFLAGS)) \
-	  -std=gnu++17 -fno-exceptions -fno-rtti -fno-use-cxa-atexit -c $< -o $@
+	$(CXX) $(SDK_CXXFLAGS) -c $< -o $@
 $(LIBS)/libp.a: $(SDK_LIBP)
 	@mkdir -p $(dir $@)
 	rm -f $@

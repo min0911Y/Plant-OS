@@ -21,12 +21,14 @@ DYN_BASE := 0x100000000
 else
 $(error unsupported dynamic linker architecture '$(ARCH)')
 endif
-DYN_FREESTANDING := -nostdlib -ffreestanding -fno-builtin -fno-stack-protector -fPIC \
+DYN_ABI_FLAGS := -nostdlib -fno-builtin -fno-stack-protector -fPIC \
   -fno-asynchronous-unwind-tables -ffunction-sections -fdata-sections \
   -U__linux__ -U__linux -Ulinux -U__unix__ -U__unix -Uunix -D__plantos__
-DYN_CFLAGS := $(DYN_ARCH) -std=gnu17 -Iinclude -nostdinc -isystem $(shell gcc -print-file-name=include) \
-  $(DYN_FREESTANDING) -MMD -MP \
-  -O2 -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare -Werror=implicit-function-declaration
+DYN_FREESTANDING := -ffreestanding $(DYN_ABI_FLAGS)
+DYN_COMMON_FLAGS := $(DYN_ARCH) -Iinclude -nostdinc $(DYN_ABI_FLAGS) -MMD -MP \
+  -O2 -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare
+DYN_CFLAGS := $(DYN_COMMON_FLAGS) -ffreestanding -std=gnu17 -isystem $(shell gcc -print-file-name=include) \
+  -Werror=implicit-function-declaration
 DYN_LDFLAGS := -m $(DYN_EMULATION) -z max-page-size=4096 -z noexecstack -z relro -z now -z text
 .PHONY: print-runtime-flags print-link-flags
 print-runtime-flags:
@@ -53,6 +55,10 @@ CXX_BUILD := $(DYN_OUT)/mesa/libcxx
 CXX_HEADERS := $(CXX_BUILD)/include/c++/v1
 CXX_ARCHIVE := $(CXX_BUILD)/lib/libc++.a
 CXX_CONFIG := $(DYN_OUT)/mesa/libcxx.stamp
+CXX := clang++
+DYN_CXXFLAGS := -I$(CXX_HEADERS) $(DYN_COMMON_FLAGS) --target=$(ARCH)-unknown-none-elf -fhosted -std=gnu++17 \
+  -isystem $(shell $(CXX) -print-resource-dir)/include -nostdinc++ \
+  -fno-exceptions -fno-rtti -fno-use-cxa-atexit
 
 .PHONY: FORCE_CXX
 $(CXX_CONFIG): FORCE_CXX $(DYN_LIB)/libp.so
@@ -74,8 +80,7 @@ $(DYN_BUILD)/%.obj: %.asm dynamic.mk
 	nasm -I$(dir $<) -f $(DYN_FORMAT) $< -o $@
 $(DYN_BUILD)/%.o: %.cpp dynamic.mk $(CXX_CONFIG)
 	@mkdir -p $(dir $@)
-	g++ -nostdinc++ -I$(CXX_HEADERS) $(filter-out -std=gnu17 -Werror=implicit-function-declaration,$(DYN_CFLAGS)) \
-	  -std=gnu++17 -fno-exceptions -fno-rtti -fno-use-cxa-atexit -c $< -o $@
+	$(CXX) $(DYN_CXXFLAGS) -c $< -o $@
 $(DYN_BUILD)/libp.a: $(DYN_OBJECTS)
 	rm -f $@
 	ar rcs $@ $^
