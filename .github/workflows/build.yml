@@ -75,11 +75,8 @@ jobs:
           test -f apps/out/x86_64/openjdk/images/jdk/lib/server/libjvm.so
           mkdir -p "$RUNNER_TEMP/plant-jdk"
           cp -a apps/out/x86_64/openjdk/images/jdk "$RUNNER_TEMP/plant-jdk/jdk"
-          printf '/lib/ld.so\0' > "$RUNNER_TEMP/plant-jdk/interp"
           for launcher in "$RUNNER_TEMP"/plant-jdk/jdk/bin/*; do
-            if [ -f "$launcher" ]; then
-              objcopy --update-section ".interp=$RUNNER_TEMP/plant-jdk/interp" "$launcher"
-            fi
+            readelf -l "$launcher" | grep -F '[Requesting program interpreter: /lib/ld.so]' >/dev/null
           done
           cd "$RUNNER_TEMP/plant-jdk"
           zip -qr "$GITHUB_WORKSPACE/plant-os-jdk-x86_64.zip" jdk

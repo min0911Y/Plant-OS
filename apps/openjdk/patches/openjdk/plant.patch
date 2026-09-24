@@ -209,6 +209,16 @@
    if (error_report == NULL) {
      error_report = "dlerror returned no error description";
    }
+@@ -1128,7 +1132,7 @@
+   typedef struct {
+     Elf32_Half  code;         // Actual value as defined in elf.h
+     Elf32_Half  compat_class; // Compatibility of archs at VM's sense
+-    char        elf_class;    // 32 or 64 bit
+-    char        endianess;    // MSB or LSB
++    unsigned char elf_class;  // 32 or 64 bit
++    unsigned char endianess;  // MSB or LSB
+     char*       name;         // String representation
+   } arch_t;
 @@ -1173,9 +1177,9 @@
      {EM_68K,         EM_68K,     ELFCLASS32, ELFDATA2MSB, (char*)"M68k"}
    };

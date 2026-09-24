@@ -70,7 +70,7 @@ runner 分别构建两种架构的 LiveCD；x86_64 作业另构建 Plant OS 原�
 将 `apps/out/x86_64/openjdk/images/jdk/` 打包为 `plant-os-jdk-x86_64.zip`。
 从 Actions 运行页下载 `plant-os-i386-livecd`、`plant-os-x86_64-livecd`
 和 `plant-os-jdk-x86_64` 三个 artifact；前两者分别含对应 ISO，后者含 JDK ZIP。
-打包时会将 JDK 启动器的 ELF interpreter 修正为 `/lib/ld.so`。JDK 里的 `java`
+JDK 启动器构建时直接使用 `/lib/ld.so`，打包前逐个校验 ELF interpreter。JDK 里的 `java`
 是 Plant OS 用户程序，不能在宿主 Linux 上运行；应与同一次
 构建的 x86_64 LiveCD 及其运行库配套使用。工作流不生成或上传软盘镜像，
 也不打包 Minecraft 客户端：当前客户端打包入口要求用户自备完整的 1.20.1

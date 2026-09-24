@@ -43,8 +43,10 @@ make -C kernel ARCH=x86_64 openjdk OPENJDK_JOBS=2
 构建目录为 `apps/out/x86_64/openjdk/`，唯一运行镜像为该目录的
 `images/jdk/`。构建脚本自动生成配置、构建原生运行库和宿主构建工具，
 不依赖历史 probe 目录或已有 JDK 目标镜像。宿主 Boot JDK 仅供构建工具使用，
-不打包进客户机。需要 GNU make、GCC/G++、autoconf、zip、unzip，
-以及 [构建指南](build.md) 中的原生 C++ 工具链。
+不打包进客户机。需要 GNU make、autoconf、zip、unzip，
+以及 [构建指南](build.md) 中的 Clang 原生 C++ 工具链。目标 JDK 的 C/C++ 使用
+Clang 编译并与 libc++ 头文件配套，启动器直接链接 Plant `/lib/ld.so`；
+宿主构建工具也使用 Clang，但链接宿主运行库。
 
 通过 `PLANT_OPENJDK_DIR` 向 LiveCD 打包脚本提供这一目录后，JDK 位于附加
 FAT32 磁盘，以 `C:/java/bin/java` 访问。JDK 盘不携带 `libp.so`、`libcpp.so`、

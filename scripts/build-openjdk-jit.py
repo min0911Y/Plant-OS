@@ -5,6 +5,7 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 from sources import ROOT, Sources, digest, publish
 
@@ -34,25 +35,35 @@ def main():
         flags = subprocess.check_output(["make", "-s", "--no-print-directory", "-f", "dynamic.mk",
                                          "ARCH=x86_64", "print-runtime-flags"], cwd=apps, env=environment,
                                         text=True).strip()
-        include = subprocess.check_output(["gcc", "-print-file-name=include"], text=True).strip()
-        flags += f" -nostdinc -I{apps / 'include'} -isystem {include}"
+        clang = shutil.which("clang")
+        clangxx = shutil.which("clang++")
+        if not clang or not clangxx:
+            raise RuntimeError("OpenJDK target build requires Clang and Clang++")
+        resource = subprocess.check_output([clang, "-print-resource-dir"], text=True).strip()
+        flags += (f" --target=x86_64-unknown-none-elf -fhosted -nostdinc"
+                  f" -I{apps / 'include'} -isystem {resource}/include")
         cxx = f"-nostdinc++ -I{runtime / 'mesa/libcxx/include/c++/v1'} " + flags + " -fno-exceptions -fno-rtti"
         options = [
             "--openjdk-target=x86_64-unknown-plantos", f"--with-boot-jdk={boot}",
+            "--with-toolchain-type=clang", f"CC={clang}", f"CXX={clangxx}",
+            f"BUILD_CC={clang}", f"BUILD_CXX={clangxx}",
             "--with-jvm-variants=server",
             "--with-jvm-features=compiler1,compiler2,serialgc,management,nmt,jfr,services,jvmti,"
             "-cds,-epsilongc,-g1gc,-jni-check,-jvmci,-parallelgc,-shenandoahgc,-vm-structs",
             "--enable-headless-only", "--with-freetype=bundled", "--disable-precompiled-headers",
             "--with-native-debug-symbols=none", "--disable-warnings-as-errors",
             f"--with-extra-cflags={flags}", f"--with-extra-cxxflags={cxx}",
-            f"--with-extra-ldflags=-nostdlib -L{runtime / 'lib'} -Wl,-rpath-link,{runtime / 'lib'} "
+            f"--with-extra-ldflags=-nostdlib -Wl,--dynamic-linker=/lib/ld.so "
+            f"-L{runtime / 'lib'} -Wl,-rpath-link,{runtime / 'lib'} "
             "-Wl,--no-as-needed -lp -lcpp",
         ]
         state = json.dumps({"options": options, "source": digest(source / ".plant-source-sha256"),
-                            "gcc": subprocess.check_output(["gcc", "--version"], text=True),
+                            "clang": subprocess.check_output([clang, "--version"], text=True),
+                            "clangxx": subprocess.check_output([clangxx, "--version"], text=True),
                             "script": digest(Path(__file__))}, sort_keys=True)
         if not (build / "spec.gmk").exists() or not (build / ".plant-config").exists() or (build / ".plant-config").read_text() != state:
-            subprocess.run(["bash", str(source / "configure"), *options], cwd=build, env=environment, check=True)
+            subprocess.run(["bash", str(source / "configure"), *options], cwd=build,
+                           env=environment, check=True)
             publish(build / ".plant-config", state)
         subprocess.run(["make", "-C", str(build), "jdk-image", f"JOBS={args.jobs}"], env=environment, check=True)
         image = build / "images/jdk"
