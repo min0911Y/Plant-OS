@@ -15,12 +15,15 @@ foreach(library c m pthread rt dl)
   file(WRITE "${PLOS_OUTPUT}/mesa/sysroot/lib/lib${library}.so"
     "INPUT ( \"${PLOS_OUTPUT}/lib/libp.so\" )\n")
 endforeach()
-execute_process(COMMAND make --no-print-directory -s -C "${PLOS_APPS}"
-  -f dynamic.mk "ARCH=${PLOS_ARCH}" print-runtime-flags
+set(PLOS_MAKE_FLAGS_COMMAND ${CMAKE_COMMAND} -E env --unset=MAKEFLAGS --unset=MFLAGS
+  --unset=GNUMAKEFLAGS --unset=MAKEOVERRIDES --unset=MAKELEVEL
+  make --no-print-directory -s -f dynamic.mk "ARCH=${PLOS_ARCH}")
+execute_process(COMMAND ${PLOS_MAKE_FLAGS_COMMAND} print-runtime-flags
+  WORKING_DIRECTORY "${PLOS_APPS}"
   OUTPUT_VARIABLE PLOS_COMPILE_FLAGS OUTPUT_STRIP_TRAILING_WHITESPACE
   COMMAND_ERROR_IS_FATAL ANY)
-execute_process(COMMAND make --no-print-directory -s -C "${PLOS_APPS}"
-  -f dynamic.mk "ARCH=${PLOS_ARCH}" print-link-flags
+execute_process(COMMAND ${PLOS_MAKE_FLAGS_COMMAND} print-link-flags
+  WORKING_DIRECTORY "${PLOS_APPS}"
   OUTPUT_VARIABLE PLOS_LINK_FLAGS OUTPUT_STRIP_TRAILING_WHITESPACE
   COMMAND_ERROR_IS_FATAL ANY)
 set(CMAKE_C_COMPILER clang)

@@ -157,12 +157,14 @@ def configure_mesa(arch, output):
     build = output / "mesa/driver"
     sysroot = output / "mesa/sysroot"
     (sysroot / "lib/pkgconfig").mkdir(parents=True, exist_ok=True)
+    make_environment = os.environ.copy()
+    for name in ("MAKEFLAGS", "MFLAGS", "GNUMAKEFLAGS", "MAKEOVERRIDES", "MAKELEVEL"):
+        make_environment.pop(name, None)
+    make_command = ["make", "-s", "--no-print-directory", "-f", "dynamic.mk", f"ARCH={arch}"]
     flags = shlex.split(subprocess.check_output(
-        ["make", "--no-print-directory", "-s", "-C", APPS, "-f", "dynamic.mk",
-         f"ARCH={arch}", "print-runtime-flags"], text=True))
+        [*make_command, "print-runtime-flags"], cwd=APPS, env=make_environment, text=True))
     linker_flags = shlex.split(subprocess.check_output(
-        ["make", "--no-print-directory", "-s", "-C", APPS, "-f", "dynamic.mk",
-         f"ARCH={arch}", "print-link-flags"], text=True))
+        [*make_command, "print-link-flags"], cwd=APPS, env=make_environment, text=True))
     resource = subprocess.check_output(["clang", "-print-resource-dir"], text=True).strip()
     flags += ["-nostdlibinc", "-resource-dir=" + resource, "-I" + str(APPS / "include"),
               "-I" + str(PORT / "include")]
@@ -207,7 +209,7 @@ def configure_mesa(arch, output):
         "-Dxmlconfig=disabled", "-Dzlib=disabled", "-Dvideo-codecs=[]", "-Dbuild-tests=false",
         "-Dtools=[]", "-Dplantos-port=" + str(PORT / "mesa"),
     ]
-    environment = os.environ.copy()
+    environment = make_environment.copy()
     environment["PATH"] = str(Path(host_tool("ninja")).parent) + os.pathsep + environment["PATH"]
     environment["PATH"] = str(Path(host_tool("glslangValidator")).parent) + os.pathsep + environment["PATH"]
     for generator in ("bison", "flex", "m4"):

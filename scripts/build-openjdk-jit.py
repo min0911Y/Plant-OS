@@ -25,10 +25,15 @@ def main():
     build.mkdir(parents=True, exist_ok=True)
     with (build / ".build-lock").open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        subprocess.run(["make", "-C", str(apps), "-f", "dynamic.mk", "ARCH=x86_64",
-                        f"MESA_JOBS={args.jobs}", "dynamic", f"-j{args.jobs}"], check=True)
-        flags = subprocess.check_output(["make", "-s", "--no-print-directory", "-C", str(apps),
-                                         "-f", "dynamic.mk", "ARCH=x86_64", "print-runtime-flags"], text=True).strip()
+        environment = dict(os.environ, PLANT_OPENJDK_BUILD_OS="linux")
+        for variable in ("MAKEFLAGS", "MFLAGS", "GNUMAKEFLAGS", "MAKEOVERRIDES", "MAKELEVEL"):
+            environment.pop(variable, None)
+        subprocess.run(["make", "-f", "dynamic.mk", "ARCH=x86_64",
+                        f"MESA_JOBS={args.jobs}", "dynamic", f"-j{args.jobs}"],
+                       cwd=apps, env=environment, check=True)
+        flags = subprocess.check_output(["make", "-s", "--no-print-directory", "-f", "dynamic.mk",
+                                         "ARCH=x86_64", "print-runtime-flags"], cwd=apps, env=environment,
+                                        text=True).strip()
         include = subprocess.check_output(["gcc", "-print-file-name=include"], text=True).strip()
         flags += f" -nostdinc -I{apps / 'include'} -isystem {include}"
         cxx = f"-nostdinc++ -I{runtime / 'mesa/libcxx/include/c++/v1'} " + flags + " -fno-exceptions -fno-rtti"
@@ -46,10 +51,6 @@ def main():
         state = json.dumps({"options": options, "source": digest(source / ".plant-source-sha256"),
                             "gcc": subprocess.check_output(["gcc", "--version"], text=True),
                             "script": digest(Path(__file__))}, sort_keys=True)
-        environment = dict(os.environ, PLANT_OPENJDK_BUILD_OS="linux")
-        # OpenJDK manages its own jobserver via JOBS, not inherited make -j.
-        for variable in ("MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES"):
-            environment.pop(variable, None)
         if not (build / "spec.gmk").exists() or not (build / ".plant-config").exists() or (build / ".plant-config").read_text() != state:
             subprocess.run(["bash", str(source / "configure"), *options], cwd=build, env=environment, check=True)
             publish(build / ".plant-config", state)
