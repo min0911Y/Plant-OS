@@ -30,15 +30,25 @@ jobs:
       - name: Install host tools
         run: |
           sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ca-certificates curl gnupg
+          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key |
+            sudo gpg --dearmor --yes -o /usr/share/keyrings/llvm-snapshot.gpg
+          echo 'deb [signed-by=/usr/share/keyrings/llvm-snapshot.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-21 main' |
+            sudo tee /etc/apt/sources.list.d/llvm-21.list
+          sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            binutils bison clang cmake curl flex g++ g++-multilib gcc \
-            gcc-multilib glslang-tools gzip libclang-dev libgmp-dev \
-            libmpc-dev libmpfr-dev llvm m4 make meson mtools nasm \
+            binutils bison clang-21 cmake flex g++ g++-multilib gcc \
+            gcc-multilib glslang-tools gzip libgmp-dev \
+            libmpc-dev libmpfr-dev m4 make meson mtools nasm \
             ninja-build patch pkg-config python3 python3-venv tar unzip \
             xorriso xz-utils zip
+          if [ "${{ matrix.arch }}" = x86_64 ]; then
+            sudo apt-get install -y --no-install-recommends llvm-21
+          fi
           rustup toolchain install nightly --profile minimal --component rust-src
           python3 -m venv .venv
           .venv/bin/pip install cmake ninja meson mako PyYAML packaging
+          echo /usr/lib/llvm-21/bin >> "$GITHUB_PATH"
           echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
       - name: Prepare sources
         run: |

@@ -97,7 +97,7 @@ $(DYN_LIB)/libm.so.6: $(DYN_BUILD)/libp.a $(DYN_BUILTINS) $(DYN_DSO)
 	  --whole-archive $(DYN_BUILD)/libp.a --no-whole-archive $(DYN_BUILTINS) $(DYN_DSO)
 $(DYN_LIB)/ld.so: $(DYN_BUILD)/ldso/object.o $(DYN_BUILD)/ldso/link.o $(DYN_BUILD)/libp.a ldso/static.ld $(DYN_BUILTINS) $(DYN_DSO)
 	@mkdir -p $(dir $@)
-	ld $(DYN_LDFLAGS) -static --gc-sections --defsym=USER_BASE=$(DYN_BASE) -T ldso/static.ld -o $@ \
+	ld $(DYN_LDFLAGS) -static --no-relax --gc-sections --defsym=USER_BASE=$(DYN_BASE) -T ldso/static.ld -o $@ \
 	  $(filter %.o,$^) --start-group $(DYN_BUILD)/libp.a $(DYN_BUILTINS) --end-group
 
 $(DYN_LIB)/libbase.so: $(DYN_BUILD)/dyntest/base.o $(DYN_LIB)/libp.so
