@@ -27,16 +27,15 @@ cd Plant-OS
 
 `./init.py` downloads all optional dependency groups too, including Java, graphics and Minecraft. To prepare only selected groups, use e.g. `./init.py mesa openjdk`; repeat runs reuse the verified cache. Building these ports can require substantial disk space and time.
 
-**i386 (applications → DOSLDR → kernel/disk → LiveCD):**
+**i386 (applications → DOSLDR → LiveCD, without disk images):**
 
 ```sh
 make -C apps ARCH=i386
 make -C loader
-make -C kernel ARCH=i386
 make -C kernel ARCH=i386 livecd
 ```
 
-The disk boot image is `kernel/boot.img`; the ISO is `kernel/plant-os-livecd.iso`. For the disk boot smoke test, use `make -C kernel ARCH=i386 img_run` (requires KVM as written in the Makefile). The older `run` and `full_run` targets use obsolete floppy-image paths; do not use them as the main boot instructions.
+The ISO is `kernel/plant-os-livecd.iso`. For the optional legacy disk image (`kernel/boot.img`), run `make -C kernel ARCH=i386` separately; it is not needed for the LiveCD. The disk boot smoke test uses `make -C kernel ARCH=i386 img_run` (requires KVM as written in the Makefile). The older `run` and `full_run` targets use obsolete floppy-image paths; do not use them as the main boot instructions.
 
 **x86_64 (kernel → applications → BIOS/UEFI LiveCD):**
 
@@ -59,6 +58,8 @@ make -C kernel ARCH=x86_64 minecraft-client-image MINECRAFT_CLIENT_ARCHIVE=/path
 The LWJGL image uses a separate JDK disk; Minecraft server/client images use persistent disks. The server image includes `eula=true`: build it only if you accept the Minecraft EULA. The client requires your own 1.20.1 ZIP containing the version, libraries and assets. See [OpenJDK](doc/openjdk.md), [LWJGL](doc/lwjgl.md), [server image](doc/build.md#minecraft-与-jdk-镜像) and [client image](doc/minecraft-client.md) for deployment, QEMU run targets and prerequisites.
 
 Generated objects, downloaded sources and images live in ignored output directories; they are not part of the source tree to commit. For regression commands and delivery checks, see [testing](doc/testing.md).
+
+GitHub Actions builds both LiveCD ISOs and a ZIP of the native x86_64 JDK on the `ai-slop` branch. See [build artifacts](doc/build.md#github-actions-构建产物); the client archive must still be supplied separately for a Minecraft client image.
 
 ## Contributors
 

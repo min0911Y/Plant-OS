@@ -77,7 +77,11 @@ OBJS_BOOTPACK = $(OUTPATH)boot_entry.obj $(OUTPATH)boot.o \
 				$(OUTPATH)user_return.obj
 
 # 默认动作
-default : make_dir
+default : kernel-core
+	$(MAKE) Mimg
+
+.PHONY: kernel-core
+kernel-core: make_dir
 	$(MAKE) -C $(ARCHPATH) ARCH=$(ARCH)
 	$(MAKE) -C $(DOSPATH)
 	$(MAKE) -C $(IOPATH)
@@ -89,11 +93,11 @@ default : make_dir
 	$(MAKE) -C $(NETPATH)
 	$(MAKE) -C $(MSTPATH)
 	$(MAKE) -C modules
-	$(MAKE) Mimg
+	$(MAKE) $(OUTPATH)kernel.bin
 
 .PHONY: livecd livecd_run
 
-livecd: default
+livecd: kernel-core $(OUTPATH)boot.bin $(OUTPATH)boot_pfs.bin $(OUTPATH)boot32.bin
 	../scripts/build-livecd.sh $(LIVECD_ISO)
 
 livecd_run: livecd
@@ -103,11 +107,11 @@ livecd_run: livecd
 		-cdrom ./$(LIVECD_ISO) -boot d -m 4096
 
 # 镜像文件生成
-$(OUTPATH)boot.bin : $(BOOTPATH)boot.asm Makefile
+$(OUTPATH)boot.bin : $(BOOTPATH)boot.asm Makefile | make_dir
 	$(NASM) $(BOOTPATH)boot.asm -o $(OUTPATH)boot.bin
-$(OUTPATH)boot_pfs.bin : $(BOOTPATH)boot_pfs.asm Makefile
+$(OUTPATH)boot_pfs.bin : $(BOOTPATH)boot_pfs.asm Makefile | make_dir
 	$(NASM) $(BOOTPATH)boot_pfs.asm -o $(OUTPATH)boot_pfs.bin
-$(OUTPATH)boot32.bin : $(BOOTPATH)boot32.asm Makefile
+$(OUTPATH)boot32.bin : $(BOOTPATH)boot32.asm Makefile | make_dir
 	$(NASM) $(BOOTPATH)boot32.asm -o $(OUTPATH)boot32.bin
 
 $(LIBALLOC_KERNEL) : $(LIBALLOC_RELEASE) Makefile

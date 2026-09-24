@@ -1,0 +1,88 @@
+name: Build LiveCDs and JDK
+
+on:
+  push:
+    branches: [ai-slop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.arch }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: i386
+            iso: kernel/plant-os-livecd.iso
+          - arch: x86_64
+            iso: kernel/plant-os-x86_64.iso
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
+        with:
+          tool-cache: false
+          swap-storage: false
+      - name: Install host tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            binutils bison clang cmake curl flex g++ g++-multilib gcc \
+            gcc-multilib glslang-tools gzip libclang-dev libgmp-dev \
+            libmpc-dev libmpfr-dev llvm m4 make meson mtools nasm \
+            ninja-build patch pkg-config python3 python3-venv tar unzip \
+            xorriso xz-utils zip
+          rustup toolchain install nightly --profile minimal --component rust-src
+          python3 -m venv .venv
+          .venv/bin/pip install cmake ninja meson mako PyYAML packaging
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
+      - name: Prepare sources
+        run: |
+          if [ "${{ matrix.arch }}" = i386 ]; then
+            ./init.py term
+          else
+            ./init.py mesa openjdk term
+          fi
+      - name: Build LiveCD
+        run: |
+          if [ "${{ matrix.arch }}" = i386 ]; then
+            make -C apps ARCH=i386 -j2 MESA_JOBS=2
+            make -C loader -j2
+            make -C kernel ARCH=i386 livecd -j2
+          else
+            make -C kernel ARCH=x86_64 livecd -j2 MESA_JOBS=2
+          fi
+          test -s '${{ matrix.iso }}'
+      - name: Build Plant JDK ZIP
+        if: matrix.arch == 'x86_64'
+        run: |
+          make -C kernel ARCH=x86_64 openjdk OPENJDK_JOBS=2
+          test -x apps/out/x86_64/openjdk/images/jdk/bin/java
+          test -f apps/out/x86_64/openjdk/images/jdk/lib/server/libjvm.so
+          mkdir -p "$RUNNER_TEMP/plant-jdk"
+          cp -a apps/out/x86_64/openjdk/images/jdk "$RUNNER_TEMP/plant-jdk/jdk"
+          printf '/lib/ld.so\0' > "$RUNNER_TEMP/plant-jdk/interp"
+          for launcher in "$RUNNER_TEMP"/plant-jdk/jdk/bin/*; do
+            if [ -f "$launcher" ]; then
+              objcopy --update-section ".interp=$RUNNER_TEMP/plant-jdk/interp" "$launcher"
+            fi
+          done
+          cd "$RUNNER_TEMP/plant-jdk"
+          zip -qr "$GITHUB_WORKSPACE/plant-os-jdk-x86_64.zip" jdk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plant-os-${{ matrix.arch }}-livecd
+          path: ${{ matrix.iso }}
+          if-no-files-found: error
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        if: matrix.arch == 'x86_64'
+        with:
+          name: plant-os-jdk-x86_64
+          path: plant-os-jdk-x86_64.zip
+          if-no-files-found: error
+          compression-level: 0

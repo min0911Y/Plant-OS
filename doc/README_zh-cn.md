@@ -27,16 +27,15 @@ cd Plant-OS
 
 `./init.py` 默认下载全部可选依赖组，包括 Java、图形和 Minecraft；也可仅准备指定组，例如 `./init.py mesa openjdk`。重复执行会复用已校验的缓存。编译这些移植库需要较多磁盘空间和时间。
 
-**i386（应用 → DOSLDR → 内核/磁盘 → LiveCD）：**
+**i386（应用 → DOSLDR → LiveCD，不生成磁盘镜像）：**
 
 ```sh
 make -C apps ARCH=i386
 make -C loader
-make -C kernel ARCH=i386
 make -C kernel ARCH=i386 livecd
 ```
 
-磁盘启动镜像为 `kernel/boot.img`，ISO 为 `kernel/plant-os-livecd.iso`。磁盘启动冒烟测试用 `make -C kernel ARCH=i386 img_run`（当前 Makefile 要求 KVM）。旧 `run`、`full_run` 依赖过时软盘路径，不能作为主要启动方法。
+ISO 为 `kernel/plant-os-livecd.iso`。如需旧磁盘启动镜像 `kernel/boot.img`，再单独运行 `make -C kernel ARCH=i386`；LiveCD 不依赖它。磁盘启动冒烟测试用 `make -C kernel ARCH=i386 img_run`（当前 Makefile 要求 KVM）。旧 `run`、`full_run` 依赖过时软盘路径，不能作为主要启动方法。
 
 **x86_64（内核 → 应用 → BIOS/UEFI LiveCD）：**
 
@@ -59,6 +58,8 @@ make -C kernel ARCH=x86_64 minecraft-client-image MINECRAFT_CLIENT_ARCHIVE=/path
 LWJGL 镜像使用独立 JDK 磁盘；Minecraft 服务端与客户端使用持久磁盘。服务端镜像写入 `eula=true`，仅在接受 Minecraft EULA 后构建。客户端需要自备包含 1.20.1 版本、依赖库及资源的 ZIP。部署、QEMU 运行目标及附加依赖见 [OpenJDK](openjdk.md)、[LWJGL](lwjgl.md)、[服务端镜像](build.md#minecraft-与-jdk-镜像)和[客户端镜像](minecraft-client.md)。
 
 对象、下载的源码与镜像位于已忽略的输出目录，不应提交到仓库。回归命令与交付检查见[验证指南](testing.md)。
+
+GitHub Actions 在 `ai-slop` 分支构建两种架构的 LiveCD ISO 和原生 x86_64 JDK ZIP，下载方式见[构建产物](build.md#github-actions-构建产物)；Minecraft 客户端镜像仍需自行提供完整客户端 ZIP。
 
 ## 贡献者
 

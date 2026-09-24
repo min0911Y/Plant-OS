@@ -14,15 +14,18 @@ LLVM TableGen 可使用匹配的系统版本，否则构建脚本从同一份 LL
 宿主工具到 `apps/out/host/llvm/`。
 
 ```sh
-# i386：按顺序构建应用、DOSLDR、内核与磁盘镜像
+# i386：构建应用、DOSLDR 与 LiveCD，不生成磁盘或软盘镜像
 make -C apps ARCH=i386
 make -C loader
-make -C kernel ARCH=i386
 make -C kernel ARCH=i386 livecd
 
 # x86_64：独立生成 BIOS/UEFI LiveCD，不依赖 DOSLDR 或 boot.img
 make -C kernel ARCH=x86_64 livecd
 ```
+
+i386 的 `livecd` 直接从构建产物填充 initramfs；需要旧磁盘启动镜像时再单独运行
+`make -C kernel ARCH=i386`。该默认目标仍生成 `boot.img` 和历史软盘镜像，
+不属于 LiveCD 的依赖。
 
 - 支持 `ARCH=i386|x86_64`、`PLATFORM=pc`；未支持的架构、配置和功能必须明确报错。i386 ISO 为 `kernel/plant-os-livecd.iso`，x86_64 为 `kernel/plant-os-x86_64.iso`；后者的对象、应用和库分别位于 `kernel/obj/x86_64/`、`apps/out/x86_64/`、`apps/libs/x86_64/`，不得混用架构产物。
 - 局部构建可用 `make -C apps/gui ARCH=x86_64` 或 `make -C kernel/dos/task ARCH=i386`；首次先完成对应架构构建，交付前按改动范围运行上层链接与打包。`make -C kernel full` 不能替代 i386 干净构建顺序。
@@ -59,3 +62,16 @@ ISO 自动启动服务端，IMG 保存 JDK、原版 JAR、配置和世界；默�
 Minecraft Java 1.20.1 客户端使用独立的 `minecraft-client-image` /
 `minecraft-client-run` 目标；输入 ZIP、私有 STB 原生库、持久磁盘和支持边界
 见 [客户端构建](minecraft-client.md)。
+
+## GitHub Actions 构建产物
+
+`.github/workflows/build.yml` 在 `ai-slop` 分支推送和手动触发时使用托管 Ubuntu
+runner 分别构建两种架构的 LiveCD；x86_64 作业另构建 Plant OS 原生 JDK，
+将 `apps/out/x86_64/openjdk/images/jdk/` 打包为 `plant-os-jdk-x86_64.zip`。
+从 Actions 运行页下载 `plant-os-i386-livecd`、`plant-os-x86_64-livecd`
+和 `plant-os-jdk-x86_64` 三个 artifact；前两者分别含对应 ISO，后者含 JDK ZIP。
+打包时会将 JDK 启动器的 ELF interpreter 修正为 `/lib/ld.so`。JDK 里的 `java`
+是 Plant OS 用户程序，不能在宿主 Linux 上运行；应与同一次
+构建的 x86_64 LiveCD 及其运行库配套使用。工作流不生成或上传软盘镜像，
+也不打包 Minecraft 客户端：当前客户端打包入口要求用户自备完整的 1.20.1
+`.minecraft` ZIP，`./init.py` 仅自动获取服务端 JAR 和客户端原生依赖源码。

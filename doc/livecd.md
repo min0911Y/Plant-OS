@@ -6,7 +6,7 @@ LiveCD 使用 Limine 加载 `kernel.bin`：i386 使用 Multiboot2，x86_64 使�
 module 交给内核。内核在分页与堆初始化前保留该物理内存，随后把它
 注册为 `R:` 启动盘；运行期间的写入只保存在内存中，重启后丢失。
 
-先按仓库标准顺序完成构建，再生成 ISO：
+按以下顺序生成 i386 ISO，无需先生成磁盘或软盘镜像：
 
 ```sh
 make -C apps
@@ -23,7 +23,7 @@ make -C kernel livecd_run
 ```
 
 Limine 菜单的默认项直接启动 `kernel.bin + initramfs`。第二项会 chainload 第一块硬盘，
-用于启动仍由 `Mimg` 生成的 `boot.img` 和现有 DOSLDR 链；LiveCD 默认启动路径不经过
+仅在另行生成 `boot.img` 时可用于现有 DOSLDR 磁盘链；LiveCD 默认启动路径不经过
 DOSLDR。原有 `make -C kernel img_run` 也保持不变。
 
 initramfs 按对应架构构建图生成的 `applications.list` 收录应用；应用注册后自动进入镜像。除 `doom.bin` 与配套的 `doom1.wad` 放在 `/games` 外，应用默认位于根目录。

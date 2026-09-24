@@ -117,7 +117,9 @@ else
 fi
 
 if [ "$architecture" = i386 ]; then
-for artifact in "$kernel_dir/boot.img" "$object_dir/kernel.bin" \
+for artifact in "$object_dir/kernel.bin" "$object_dir/hello.mod" \
+                "$object_dir/boot.bin" "$object_dir/boot32.bin" \
+                "$object_dir/boot_pfs.bin" "$repo_dir/loader/out/dosldr.bin" \
                 "$apps_out_dir/crti.obj" "$apps_out_dir/doom.bin" \
                 "$apps_lib_dir/libtcc1.a" "$apps_out_dir/sdk-libraries.list" \
                 "$apps_dir/tcc/tcc/crti.c" "$kernel_dir/res/doom1.wad"; do
@@ -158,16 +160,20 @@ make -C "$limine_dir"
 rm -rf "$work_dir"
 mkdir -p "$payload_dir" "$iso_root/boot/limine"
 if [ "$architecture" = i386 ]; then
-  mcopy -s -i "$kernel_dir/boot.img" '::/*' "$payload_dir"
-  for resource in boot.bin boot32.bin boot_pfs.bin dosldr.bin; do
-    if [ ! -f "$payload_dir/$resource" ]; then
-      echo "build-livecd: missing formatting resource: $resource" >&2
-      exit 1
-    fi
-  done
-  rm -f "$payload_dir/kernel.bin" "$payload_dir/setup.mst"
-  mv "$payload_dir/dosldr.bin" "$payload_dir/DOSLDR.bin"
-  cp "$object_dir/kernel.bin" "$payload_dir/kernel.bin"
+  cp "$object_dir/kernel.bin" "$object_dir/hello.mod" \
+     "$object_dir/boot.bin" "$object_dir/boot32.bin" \
+     "$object_dir/boot_pfs.bin" "$payload_dir/"
+  cp "$repo_dir/loader/out/dosldr.bin" "$payload_dir/DOSLDR.bin"
+  cp "$kernel_dir/res/autoexec.bat" "$kernel_dir/res/init.mst" \
+     "$kernel_dir/res/env.cfg" "$kernel_dir/res/sys.cfg" \
+     "$kernel_dir/res/font.ttf" "$kernel_dir/res/123.png" \
+     "$kernel_dir/res/g.nes" "$repo_dir/font/font.bin" \
+     "$repo_dir/font/HZK16" "$apps_dir/build_tools_in_pdos/nasm.zip" \
+     "$payload_dir/"
+  mkdir -p "$payload_dir/other"
+  cp "$repo_dir/font/font.bin" "$repo_dir/font/HZK16" \
+     "$apps_out_dir/copy.bin" "$apps_out_dir/uname.bin" \
+     "$kernel_dir/res/coin.wav" "$payload_dir/other/"
 else
   cp "$object_dir"/*.mod "$payload_dir/"
   cp "${PLANT_INIT_SCRIPT:-$kernel_dir/res/init.mst}" "$payload_dir/init.mst"
