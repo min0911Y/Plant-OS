@@ -210,10 +210,6 @@ def configure_mesa(arch, output):
         "-Dtools=[]", "-Dplantos-port=" + str(PORT / "mesa"),
     ]
     environment = make_environment.copy()
-    environment["PATH"] = str(Path(host_tool("ninja")).parent) + os.pathsep + environment["PATH"]
-    environment["PATH"] = str(Path(host_tool("glslangValidator")).parent) + os.pathsep + environment["PATH"]
-    for generator in ("bison", "flex", "m4"):
-        environment["PATH"] = str(Path(host_tool(generator)).parent) + os.pathsep + environment["PATH"]
     environment["M4"] = host_tool("m4")
     bison_data = Path(host_tool("bison")).parent.parent / "share/bison"
     if bison_data.is_dir():
