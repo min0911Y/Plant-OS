@@ -1,5 +1,4 @@
 # 客户端
-from audioop import add
 from glob import glob
 import socket
 import threading
